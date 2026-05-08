@@ -1,0 +1,1465 @@
+// Bilingual support zh-Hans / en-US
+
+import { testFlowConnection, invokeFlowForLLM } from '@/services/power-automate-service';
+
+export type Locale = 'zh-Hans' | 'en-US';
+
+export type VoiceId = string;
+
+export interface VoiceOption {
+  id: VoiceId;
+  name: string;
+  tier: 'natural' | 'premium';
+  locale: Locale;
+  gender: 'male' | 'female';
+}
+
+// Fetch available models from OpenAI-compatible provider
+export interface FetchModelsResult {
+  success: boolean;
+  models?: string[];
+  error?: string;
+}
+
+export async function fetchAvailableModels(config: LLMConfig): Promise<FetchModelsResult> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort('timeout'), 5000); // 5 second timeout
+  
+  try {
+    if (!config.endpoint) {
+      return { success: false, error: 'Endpoint is required' };
+    }
+
+    // Normalize endpoint - remove trailing slash
+    const baseEndpoint = config.endpoint.replace(/\/+$/, '');
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+
+    if (config.provider === 'ollama') {
+      // Ollama: /api/tags endpoint
+      const url = `${baseEndpoint}/api/tags`;
+      console.log('[Fetch Models] Ollama URL:', url);
+      
+      const response = await fetch(url, { method: 'GET', headers, mode: 'cors', signal: controller.signal });
+      
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => response.statusText);
+        throw new Error(`HTTP ${response.status}: ${errorText.slice(0, 200)}`);
+      }
+      
+      let data: Record<string, unknown>;
+      try {
+        data = await response.json();
+      } catch (jsonError) {
+        console.error('[Fetch Models] Ollama JSON parse error:', jsonError);
+        return { success: false, error: 'Invalid JSON response from Ollama. Ensure the server is running correctly.' };
+      }
+      const models = ((data.models || []) as Array<{ name?: string }>).map((m) => m.name).filter(Boolean) as string[];
+      return { success: true, models };
+    } else if (config.provider === 'azure-openai') {
+      // Azure OpenAI doesn't have a list models endpoint in the same way
+      // Return a message indicating manual entry is needed
+      return { success: false, error: 'Azure OpenAI requires manual deployment name entry' };
+    } else {
+      // OpenAI Compatible: /v1/models
+      if (!config.apiKey) {
+        return { success: false, error: 'API Key is required' };
+      }
+      
+      let url = baseEndpoint;
+      if (!url.includes('/v1')) {
+        url = `${baseEndpoint}/v1/models`;
+      } else if (!url.endsWith('/models')) {
+        url = `${baseEndpoint}/models`;
+      }
+      console.log('[Fetch Models] OpenAI Compatible URL:', url);
+      
+      headers['Authorization'] = `Bearer ${config.apiKey}`;
+      
+      const response = await fetch(url, { method: 'GET', headers, mode: 'cors', signal: controller.signal });
+      
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => response.statusText);
+        throw new Error(`HTTP ${response.status}: ${errorText.slice(0, 200)}`);
+      }
+      
+      let data: Record<string, unknown>;
+      try {
+        data = await response.json();
+      } catch (jsonError) {
+        console.error('[Fetch Models] OpenAI Compatible JSON parse error:', jsonError);
+        return { success: false, error: 'Invalid JSON response from API endpoint. Check endpoint URL and model configuration.' };
+      }
+      const models = ((data.data || []) as Array<{ id?: string }>).map((m) => m.id).filter(Boolean) as string[];
+      return { success: true, models };
+    }
+  } catch (error: unknown) {
+    console.error('[Fetch Models] Error:', error);
+    
+    // Check if this is a local/private network server
+    const isLocalServer = config.endpoint && (
+      config.endpoint.includes('localhost') ||
+      config.endpoint.includes('127.') ||
+      config.endpoint.includes('192.168.') ||
+      config.endpoint.includes('10.') ||
+      config.endpoint.includes('172.')
+    );
+    
+    // Check if trying to use HTTP from HTTPS page (mixed content)
+    const isHttpEndpoint = config.endpoint?.startsWith('http://');
+    const isHttpsPage = typeof window !== 'undefined' && window.location.protocol === 'https:';
+    const isMixedContent = isHttpEndpoint && isHttpsPage;
+    
+    if (error instanceof Error && error.name === 'AbortError') {
+      // Timeout - often caused by mixed content blocking
+      if (isMixedContent && isLocalServer) {
+        return { 
+          success: false, 
+          error: 'Mixed content blocked: Cannot fetch from HTTP endpoint while on HTTPS page. Browser security prevents this. Please enter the model name manually (e.g., llama3, qwen2.5-coder, mistral).'
+        };
+      }
+      return { success: false, error: 'Request timed out. Check if the endpoint is reachable.' };
+    }
+    
+    if (error instanceof TypeError && error.message === 'Failed to fetch') {
+      // CORS or network error - provide helpful guidance
+      if (isMixedContent) {
+        return { 
+          success: false, 
+          error: 'Mixed content blocked: Cannot fetch from HTTP endpoint while on HTTPS page. Use HTTPS for your LLM server, or enter the model name manually.'
+        };
+      }
+      if (config.provider === 'ollama') {
+        return { 
+          success: false, 
+          error: 'Cannot connect to Ollama server. Please ensure: (1) Ollama is running, (2) CORS enabled: OLLAMA_ORIGINS=* ollama serve'
+        };
+      } else if (isLocalServer) {
+        return { 
+          success: false, 
+          error: 'Cannot connect to local LLM server. Please ensure: (1) Server is running, (2) CORS is enabled, (3) Use HTTPS or enter model name manually'
+        };
+      } else {
+        // Cloud API (OpenAI, NVIDIA, Groq, etc.) - CORS blocks browser requests
+        const isNvidia = config.endpoint?.includes('nvidia.com');
+        const isOpenAI = config.endpoint?.includes('openai.com');
+        const isGroq = config.endpoint?.includes('groq.com');
+        const isAnthropic = config.endpoint?.includes('anthropic.com');
+        
+        let providerHint = '';
+        if (isNvidia) {
+          providerHint = 'NVIDIA NIM API does not support browser requests (CORS). ';
+        } else if (isOpenAI) {
+          providerHint = 'OpenAI API does not support browser requests (CORS). ';
+        } else if (isGroq) {
+          providerHint = 'Groq API does not support browser requests (CORS). ';
+        } else if (isAnthropic) {
+          providerHint = 'Anthropic API does not support browser requests (CORS). ';
+        }
+        
+        return { 
+          success: false, 
+          error: `${providerHint}Please enter the model name manually. For NVIDIA: meta/llama-3.1-70b-instruct, nvidia/llama-3.1-nemotron-70b-instruct. For OpenAI: gpt-4o, gpt-4-turbo.`
+        };
+      }
+    }
+    
+    // Categorize errors with user-friendly messages
+    if (error instanceof Error) {
+      const msg = error.message.toLowerCase();
+      
+      // Network/connectivity issues
+      if (msg.includes('network') || msg.includes('internet') || msg.includes('offline')) {
+        return { success: false, error: 'Unable to connect. Please check your internet connection and try again.' };
+      }
+      
+      // DNS/hostname issues
+      if (msg.includes('dns') || msg.includes('hostname') || msg.includes('not found') || msg.includes('getaddrinfo')) {
+        return { success: false, error: 'Could not find the server. Please verify the endpoint URL is correct.' };
+      }
+      
+      // SSL/TLS certificate issues
+      if (msg.includes('ssl') || msg.includes('certificate') || msg.includes('cert')) {
+        return { success: false, error: 'Secure connection failed. The server may have an invalid certificate.' };
+      }
+      
+      // Timeout
+      if (msg.includes('timeout') || msg.includes('timed out')) {
+        return { success: false, error: 'The server took too long to respond. Please try again or check if the service is running.' };
+      }
+      
+      // Authentication errors
+      if (msg.includes('401') || msg.includes('unauthorized') || msg.includes('authentication')) {
+        return { success: false, error: 'Authentication failed. Please check your API key is correct.' };
+      }
+      
+      // Permission/access errors
+      if (msg.includes('403') || msg.includes('forbidden') || msg.includes('access denied')) {
+        return { success: false, error: 'Access denied. Your API key may not have permission for this operation.' };
+      }
+      
+      // Rate limiting
+      if (msg.includes('429') || msg.includes('rate limit') || msg.includes('too many')) {
+        return { success: false, error: 'Too many requests. Please wait a moment and try again.' };
+      }
+      
+      // Server errors
+      if (msg.includes('500') || msg.includes('502') || msg.includes('503') || msg.includes('504')) {
+        return { success: false, error: 'The server encountered an error. Please try again later.' };
+      }
+      
+      // Return the actual error message if it's descriptive enough
+      if (error.message.length > 10 && !msg.includes('error')) {
+        return { success: false, error: error.message };
+      }
+    }
+    
+    return { success: false, error: 'Connection failed. Please verify your settings and try again.' };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+// Font size options
+export type FontSizeOption = 'small' | 'medium' | 'large';
+
+// Color theme options
+export type ColorTheme = 'sunset' | 'ocean' | 'forest' | 'berry' | 'mono';
+
+// Thinking dot style options
+export type ThinkingDotStyle = 'bounce' | 'pulse' | 'wave' | 'fade' | 'orbit';
+
+// BYOM (Bring Your Own Model) types
+export type LLMProvider = 'openai' | 'azure-openai' | 'ollama' | 'power-automate';
+
+// Azure AD authentication type
+export type AzureAuthType = 'api-key' | 'service-principal';
+
+// Agent Framework type - which AI backend to use
+export type AgentFramework = 'copilot-studio' | 'local-agent';
+
+export const agentFrameworkLabels: Record<AgentFramework, { zh: string; en: string; description: { zh: string; en: string } }> = {
+  'copilot-studio': {
+    zh: 'Copilot Studio',
+    en: 'Copilot Studio',
+    description: { zh: '使用 Microsoft Copilot Studio 作为智能助手', en: 'Use Microsoft Copilot Studio as the AI assistant' }
+  },
+  'local-agent': {
+    zh: '前端轻量级框架',
+    en: 'Local Lightweight Agent',
+    description: { zh: '使用 BYOM 配置的 LLM 进行本地 Function Calling', en: 'Use BYOM-configured LLM for local Function Calling' }
+  },
+};
+
+
+export interface LLMConfig {
+  provider: LLMProvider;
+  apiKey?: string;
+  endpoint?: string;
+  deploymentName?: string; // For Azure OpenAI
+  model?: string;
+  enabled: boolean;
+  // Azure AD Service Principal authentication
+  azureAuthType?: AzureAuthType;
+  azureTenantId?: string;
+  azureClientId?: string;
+  azureClientSecret?: string;
+}
+
+// Cached Azure AD token
+interface CachedAzureToken {
+  accessToken: string;
+  expiresAt: number; // Unix timestamp in ms
+}
+
+let cachedAzureToken: CachedAzureToken | null = null;
+
+/**
+ * Get Azure AD access token using client credentials flow
+ * Caches token until 5 minutes before expiry
+ */
+export async function getAzureADToken(config: LLMConfig): Promise<string> {
+  // Check if we have a valid cached token
+  if (cachedAzureToken && cachedAzureToken.expiresAt > Date.now() + 5 * 60 * 1000) {
+    console.log('[Azure AD] Using cached token');
+    return cachedAzureToken.accessToken;
+  }
+
+  if (!config.azureTenantId || !config.azureClientId || !config.azureClientSecret) {
+    throw new Error('Azure AD credentials not configured');
+  }
+
+  console.log('[Azure AD] Fetching new token...');
+  
+  const tokenUrl = `https://login.microsoftonline.com/${config.azureTenantId}/oauth2/v2.0/token`;
+  
+  const body = new URLSearchParams({
+    grant_type: 'client_credentials',
+    client_id: config.azureClientId,
+    client_secret: config.azureClientSecret,
+    scope: 'https://cognitiveservices.azure.com/.default',
+  });
+
+  let response: Response;
+  try {
+    response = await fetch(tokenUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: body.toString(),
+    });
+  } catch (fetchError) {
+    // CORS error - Azure AD token endpoint doesn't allow browser requests
+    console.error('[Azure AD] Fetch error (likely CORS):', fetchError);
+    throw new Error(
+      'Azure AD Service Principal authentication cannot be used directly from a browser due to CORS restrictions. ' +
+      'The Azure AD token endpoint (login.microsoftonline.com) does not allow cross-origin requests. ' +
+      'Please use API Key authentication instead, or deploy a backend proxy to handle the token exchange.'
+    );
+  }
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => response.statusText);
+    throw new Error(`Azure AD token request failed: ${response.status} - ${errorText.slice(0, 200)}`);
+  }
+
+  const data = await response.json() as { access_token: string; expires_in: number };
+  
+  // Cache the token
+  cachedAzureToken = {
+    accessToken: data.access_token,
+    expiresAt: Date.now() + data.expires_in * 1000,
+  };
+
+  console.log('[Azure AD] Token acquired, expires in', data.expires_in, 'seconds');
+  return data.access_token;
+}
+
+/**
+ * Clear the cached Azure AD token
+ */
+export function clearAzureADTokenCache(): void {
+  cachedAzureToken = null;
+}
+
+export interface FontSizeConfig {
+  chat: FontSizeOption;
+  ui: FontSizeOption;
+}
+
+const fontSizeClasses = {
+  small: {
+    chat: 'text-sm',
+    ui: 'text-xs',
+  },
+  medium: {
+    chat: 'text-base',
+    ui: 'text-sm',
+  },
+  large: {
+    chat: 'text-lg',
+    ui: 'text-base',
+  },
+} as const;
+
+export function getFontSizeConfig(): FontSizeConfig {
+  const saved = localStorage.getItem('fontSizeConfig');
+  if (saved) {
+    try {
+      return JSON.parse(saved);
+    } catch {
+      // Invalid JSON, use defaults
+    }
+  }
+  return { chat: 'small', ui: 'medium' };
+}
+
+export function setFontSizeConfig(config: FontSizeConfig): void {
+  localStorage.setItem('fontSizeConfig', JSON.stringify(config));
+  window.dispatchEvent(new CustomEvent('fontsize-changed', { detail: config }));
+}
+
+export function getChatFontClass(): string {
+  const config = getFontSizeConfig();
+  return fontSizeClasses[config.chat].chat;
+}
+
+export function getUIFontClass(): string {
+  const config = getFontSizeConfig();
+  return fontSizeClasses[config.ui].ui;
+}
+
+// Color theme management
+export function getColorTheme(): ColorTheme {
+  const saved = localStorage.getItem('colorTheme');
+  if (saved && ['sunset', 'ocean', 'forest', 'berry', 'mono'].includes(saved)) {
+    return saved as ColorTheme;
+  }
+  return 'mono';
+}
+
+export function setColorTheme(theme: ColorTheme): void {
+  localStorage.setItem('colorTheme', theme);
+  document.documentElement.setAttribute('data-theme', theme);
+  window.dispatchEvent(new CustomEvent('colortheme-changed', { detail: theme }));
+}
+
+export function initColorTheme(): void {
+  const theme = getColorTheme();
+  document.documentElement.setAttribute('data-theme', theme);
+}
+
+// Thinking dot style management
+export function getThinkingDotStyle(): ThinkingDotStyle {
+  const saved = localStorage.getItem('thinkingDotStyle');
+  if (saved && ['bounce', 'pulse', 'wave', 'fade', 'orbit'].includes(saved)) {
+    return saved as ThinkingDotStyle;
+  }
+  return 'pulse';
+}
+
+export function setThinkingDotStyle(style: ThinkingDotStyle): void {
+  localStorage.setItem('thinkingDotStyle', style);
+  window.dispatchEvent(new CustomEvent('thinkingdotstyle-changed', { detail: style }));
+}
+
+export const thinkingDotStyleLabels: Record<ThinkingDotStyle, { zh: string; en: string }> = {
+  bounce: { zh: '弹跳', en: 'Bounce' },
+  pulse: { zh: '脉冲', en: 'Pulse' },
+  wave: { zh: '波浪', en: 'Wave' },
+  fade: { zh: '渐隐', en: 'Fade' },
+  orbit: { zh: '环绕', en: 'Orbit' },
+};
+
+export const colorThemeLabels: Record<ColorTheme, { zh: string; en: string; colors: [string, string] }> = {
+  sunset: { zh: '日落橙', en: 'Sunset', colors: ['#FF7A00', '#0D8F8C'] },
+  ocean: { zh: '海洋蓝', en: 'Ocean', colors: ['#0EA5E9', '#8B5CF6'] },
+  forest: { zh: '森林绿', en: 'Forest', colors: ['#22C55E', '#F97316'] },
+  berry: { zh: '浆果粉', en: 'Berry', colors: ['#EC4899', '#6366F1'] },
+  mono: { zh: '极简灰', en: 'Monochrome', colors: ['#71717A', '#18181B'] },
+};
+
+// Voice options per locale
+export const voiceOptions: VoiceOption[] = [
+  // Chinese voices
+  { id: 'zh-CN-XiaoxiaoNeural', name: '晓晓', tier: 'natural', locale: 'zh-Hans', gender: 'female' },
+  { id: 'zh-CN-YunxiNeural', name: '云希', tier: 'natural', locale: 'zh-Hans', gender: 'male' },
+  { id: 'zh-CN-XiaoyiNeural', name: '晓伊', tier: 'premium', locale: 'zh-Hans', gender: 'female' },
+  { id: 'zh-CN-YunjianNeural', name: '云健', tier: 'premium', locale: 'zh-Hans', gender: 'male' },
+  // English voices
+  { id: 'en-US-JennyNeural', name: 'Jenny', tier: 'natural', locale: 'en-US', gender: 'female' },
+  { id: 'en-US-GuyNeural', name: 'Guy', tier: 'natural', locale: 'en-US', gender: 'male' },
+  { id: 'en-US-AriaNeural', name: 'Aria', tier: 'premium', locale: 'en-US', gender: 'female' },
+  { id: 'en-US-DavisNeural', name: 'Davis', tier: 'premium', locale: 'en-US', gender: 'male' },
+];
+
+export function getVoicesForLocale(locale: Locale): VoiceOption[] {
+  return voiceOptions.filter((v: VoiceOption) => v.locale === locale);
+}
+
+// Get selected system voice name (stores actual system voice name, not Azure ID)
+export function getSelectedSystemVoiceName(): string | null {
+  return localStorage.getItem('systemVoiceName');
+}
+
+export function setSelectedSystemVoiceName(voiceName: string): void {
+  localStorage.setItem('systemVoiceName', voiceName);
+  window.dispatchEvent(new CustomEvent('systemvoice-changed', { detail: voiceName }));
+}
+
+export function getSelectedVoice(): VoiceId {
+  return localStorage.getItem('voice') || 'zh-CN-XiaoxiaoNeural';
+}
+
+export function setSelectedVoice(voiceId: VoiceId): void {
+  localStorage.setItem('voice', voiceId);
+  window.dispatchEvent(new CustomEvent('voice-changed', { detail: voiceId }));
+}
+
+// Extract voice name from voice ID for matching with system voices
+// e.g., 'zh-CN-XiaoxiaoNeural' -> 'Xiaoxiao'
+export function extractVoiceName(voiceId: VoiceId): string {
+  return voiceId.replace(/.*-([A-Za-z]+)Neural$/, '$1');
+}
+
+// Get voice option by ID
+export function getVoiceOption(voiceId: VoiceId): VoiceOption | undefined {
+  return voiceOptions.find((v: VoiceOption) => v.id === voiceId);
+}
+
+// Get system voice by name - returns exact match
+export function getSystemVoiceByName(voiceName: string): SpeechSynthesisVoice | null {
+  const voices = window.speechSynthesis.getVoices();
+  return voices.find((v: SpeechSynthesisVoice) => v.name === voiceName) || null;
+}
+
+// Get available system voices for a locale
+export function getSystemVoicesForLocale(locale: Locale): SpeechSynthesisVoice[] {
+  const voices = window.speechSynthesis.getVoices();
+  const langPrefix = locale === 'zh-Hans' ? 'zh' : 'en';
+  return voices.filter((v: SpeechSynthesisVoice) => 
+    v.lang.toLowerCase().startsWith(langPrefix)
+  );
+}
+
+// Find matching system voice based on selected voice ID and locale
+// Priority: 1. Saved system voice name, 2. Azure name match, 3. Pattern mapping, 4. Gender match, 5. First voice
+export function findMatchingSystemVoice(voiceId: VoiceId, locale: Locale): SpeechSynthesisVoice | null {
+  const voices = window.speechSynthesis.getVoices();
+  if (voices.length === 0) return null;
+
+  const langPrefix = locale === 'zh-Hans' ? 'zh' : 'en';
+  
+  // Filter voices by language first
+  const langVoices = voices.filter((v: SpeechSynthesisVoice) => 
+    v.lang.toLowerCase().startsWith(langPrefix)
+  );
+  
+  if (langVoices.length === 0) {
+    console.log('[Voice Match] No voices for this language, using first available');
+    return voices[0] || null;
+  }
+
+  // Priority 0: Check if user has saved a specific system voice name
+  const savedSystemVoiceName = getSelectedSystemVoiceName();
+  if (savedSystemVoiceName) {
+    const savedVoice = langVoices.find((v: SpeechSynthesisVoice) => v.name === savedSystemVoiceName);
+    if (savedVoice) {
+      console.log(`[Voice Match] Using saved system voice: ${savedVoice.name}`);
+      return savedVoice;
+    }
+  }
+
+  const voiceName = extractVoiceName(voiceId);
+  const voiceOption = getVoiceOption(voiceId);
+  const targetGender = voiceOption?.gender;
+  
+  // Debug: Log all available voices for this language
+  console.log(`[Voice Match] Looking for voice: ${voiceId} (name: ${voiceName}, gender: ${targetGender})`);
+  console.log(`[Voice Match] Available ${langPrefix} voices:`, langVoices.map((v: SpeechSynthesisVoice) => `${v.name} (${v.lang})`));
+
+  // Priority 1: Try exact name match (Edge/Windows uses 'Microsoft Xiaoxiao Online' format)
+  let matchingVoice = langVoices.find((v: SpeechSynthesisVoice) => 
+    v.name.toLowerCase().includes(voiceName.toLowerCase())
+  );
+  
+  if (matchingVoice) {
+    console.log(`[Voice Match] Found exact match: ${matchingVoice.name}`);
+    return matchingVoice;
+  }
+  
+  // Priority 2: Map Azure voice names to common browser voice patterns
+  // Azure voices may not exist in browser, but we can find similar voices
+  const voiceMapping: Record<string, string[]> = {
+    // Chinese female voices
+    'Xiaoxiao': ['xiaoxiao', 'huihui', 'yaoyao', 'kangkang', 'female', 'woman'],
+    'Xiaoyi': ['xiaoyi', 'huihui', 'yaoyao', 'female', 'woman'],
+    // Chinese male voices
+    'Yunxi': ['yunxi', 'kangkang', 'male', 'man'],
+    'Yunjian': ['yunjian', 'kangkang', 'male', 'man'],
+    // English female voices
+    'Jenny': ['jenny', 'zira', 'hazel', 'susan', 'samantha', 'female', 'woman'],
+    'Aria': ['aria', 'zira', 'hazel', 'female', 'woman'],
+    // English male voices
+    'Guy': ['guy', 'david', 'mark', 'male', 'man'],
+    'Davis': ['davis', 'david', 'mark', 'male', 'man'],
+  };
+  
+  const mappingPatterns = voiceMapping[voiceName] || [];
+  for (const pattern of mappingPatterns) {
+    matchingVoice = langVoices.find((v: SpeechSynthesisVoice) => 
+      v.name.toLowerCase().includes(pattern)
+    );
+    if (matchingVoice) {
+      console.log(`[Voice Match] Found mapping match '${pattern}': ${matchingVoice.name}`);
+      return matchingVoice;
+    }
+  }
+  
+  // Priority 3: Try to match by gender if we know the target gender
+  if (targetGender) {
+    const femalePatterns = ['female', 'woman', 'huihui', 'yaoyao', 'lili', 'zira', 'hazel', 'susan', 'samantha', 'ting-ting', 'mei-jia', 'sin-ji'];
+    const malePatterns = ['male', 'man', 'kangkang', 'david', 'mark', 'alex', 'daniel'];
+    
+    matchingVoice = langVoices.find((v: SpeechSynthesisVoice) => {
+      const nameLower = v.name.toLowerCase();
+      const isFemaleVoice = femalePatterns.some((p: string) => nameLower.includes(p));
+      const isMaleVoice = malePatterns.some((p: string) => nameLower.includes(p));
+      
+      if (targetGender === 'female' && isFemaleVoice) return true;
+      if (targetGender === 'male' && isMaleVoice) return true;
+      return false;
+    });
+    
+    if (matchingVoice) {
+      console.log(`[Voice Match] Found gender match (${targetGender}): ${matchingVoice.name}`);
+      return matchingVoice;
+    }
+  }
+  
+  // Priority 4: Return first voice for the locale
+  console.log(`[Voice Match] No specific match found, using first ${langPrefix} voice: ${langVoices[0]?.name}`);
+  return langVoices[0] || null;
+}
+
+// Auto-play agent response setting
+export function getAutoPlayAgentResponse(): boolean {
+  return localStorage.getItem('autoPlayAgentResponse') === 'true';
+}
+
+export function setAutoPlayAgentResponse(enabled: boolean): void {
+  localStorage.setItem('autoPlayAgentResponse', String(enabled));
+  window.dispatchEvent(new CustomEvent('autoplay-changed', { detail: enabled }));
+}
+
+// Information structure settings
+export function getOrganizeInStructureCard(): boolean {
+  return localStorage.getItem('organizeInStructureCard') !== 'false'; // default true
+}
+
+export function setOrganizeInStructureCard(enabled: boolean): void {
+  localStorage.setItem('organizeInStructureCard', String(enabled));
+  window.dispatchEvent(new CustomEvent('structurecard-changed', { detail: enabled }));
+}
+
+// BYOM (Bring Your Own Model) settings
+export function getLLMConfig(): LLMConfig | null {
+  const saved = localStorage.getItem('llmConfig');
+  if (saved) {
+    try {
+      return JSON.parse(saved);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+export function setLLMConfig(config: LLMConfig | null): void {
+  if (config) {
+    localStorage.setItem('llmConfig', JSON.stringify(config));
+  } else {
+    localStorage.removeItem('llmConfig');
+  }
+  window.dispatchEvent(new CustomEvent('llmconfig-changed', { detail: config }));
+}
+
+// Agent framework settings
+export function getAgentFramework(): AgentFramework {
+  const saved = localStorage.getItem('agentFramework');
+  if (saved && ['copilot-studio', 'local-agent'].includes(saved)) {
+    return saved as AgentFramework;
+  }
+  // Default to local-agent if BYOM is configured, otherwise copilot-studio
+  const llmConfig = getLLMConfig();
+  if (llmConfig?.enabled && llmConfig?.endpoint) {
+    return 'local-agent';
+  }
+  return 'copilot-studio';
+}
+
+export function setAgentFramework(framework: AgentFramework): void {
+  localStorage.setItem('agentFramework', framework);
+  window.dispatchEvent(new CustomEvent('agentframework-changed', { detail: framework }));
+}
+
+export const llmProviderLabels: Record<LLMProvider, { zh: string; en: string; description: { zh: string; en: string } }> = {
+  'openai': { 
+    zh: 'OpenAI 兼容', 
+    en: 'OpenAI Compatible',
+    description: { zh: '支持 OpenAI API 格式的服务', en: 'Services compatible with OpenAI API format' }
+  },
+  'azure-openai': { 
+    zh: 'Azure OpenAI', 
+    en: 'Azure OpenAI',
+    description: { zh: 'Microsoft Azure 托管的 OpenAI 服务', en: 'OpenAI service hosted on Microsoft Azure' }
+  },
+  'ollama': { 
+    zh: 'Ollama', 
+    en: 'Ollama',
+    description: { zh: '本地运行的开源模型', en: 'Locally running open source models' }
+  },
+  'power-automate': { 
+    zh: 'Power Automate Flow', 
+    en: 'Power Automate Flow',
+    description: { zh: '通过 Power Automate 流调用 Azure OpenAI（推荐）', en: 'Invoke Azure OpenAI via Power Automate flow (Recommended)' }
+  },
+};
+
+// Test BYOM connection
+export interface BYOMTestResult {
+  success: boolean;
+  error?: string;
+  latencyMs?: number;
+  modelInfo?: string;
+}
+
+export async function testBYOMConnection(config: LLMConfig): Promise<BYOMTestResult> {
+  const startTime = Date.now();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort('timeout'), 8000); // 8 second timeout
+  
+  try {
+    if (!config.endpoint) {
+      return { success: false, error: 'Endpoint is required' };
+    }
+
+    // Normalize endpoint - remove trailing slash
+    const baseEndpoint = config.endpoint.replace(/\/+$/, '');
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+
+    if (config.provider === 'ollama') {
+      // Ollama: Test with /api/tags endpoint to list models
+      const url = `${baseEndpoint}/api/tags`;
+      console.log('[BYOM Test] Ollama URL:', url);
+      
+      const response = await fetch(url, { 
+        method: 'GET', 
+        headers,
+        mode: 'cors',
+        signal: controller.signal
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => response.statusText);
+        throw new Error(`HTTP ${response.status}: ${errorText.slice(0, 200)}`);
+      }
+      
+      let data: Record<string, unknown>;
+      try {
+        data = await response.json();
+      } catch (jsonError) {
+        console.error('[BYOM Test] Ollama JSON parse error:', jsonError);
+        return { success: false, error: 'Invalid JSON response from Ollama. Ensure the server is running correctly.' };
+      }
+      const latencyMs = Date.now() - startTime;
+      const modelsArray = data.models as Array<unknown> | undefined;
+      const modelCount = modelsArray?.length || 0;
+      
+      return { success: true, latencyMs, modelInfo: `${modelCount} model(s) available` };
+    } else if (config.provider === 'azure-openai') {
+      if (!config.deploymentName) return { success: false, error: 'Deployment name is required' };
+      
+      // Determine authentication method
+      const useServicePrincipal = config.azureAuthType === 'service-principal';
+      
+      if (useServicePrincipal) {
+        // Service Principal authentication
+        if (!config.azureTenantId) return { success: false, error: 'Tenant ID is required for Service Principal auth' };
+        if (!config.azureClientId) return { success: false, error: 'Client ID is required for Service Principal auth' };
+        if (!config.azureClientSecret) return { success: false, error: 'Client Secret is required for Service Principal auth' };
+        
+        // Get Azure AD token
+        console.log('[BYOM Test] Using Service Principal authentication');
+        const accessToken = await getAzureADToken(config);
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      } else {
+        // API Key authentication
+        if (!config.apiKey) return { success: false, error: 'API Key is required' };
+        headers['api-key'] = config.apiKey;
+      }
+      
+      // Azure OpenAI: /openai/deployments/{deployment}/chat/completions
+      const url = `${baseEndpoint}/openai/deployments/${config.deploymentName}/chat/completions?api-version=2024-12-01-preview`;
+      console.log('[BYOM Test] Azure OpenAI URL:', url);
+      
+      const body = JSON.stringify({ 
+        messages: [{ role: 'user', content: 'Hi' }]
+      });
+      
+      const response = await fetch(url, { method: 'POST', headers, body, signal: controller.signal });
+      
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => response.statusText);
+        throw new Error(`HTTP ${response.status}: ${errorText.slice(0, 200)}`);
+      }
+      
+      return { success: true, latencyMs: Date.now() - startTime, modelInfo: config.deploymentName };
+    } else if (config.provider === 'power-automate') {
+      // Power Automate Flow: invoke the flow directly
+      console.log('[BYOM Test] Power Automate Flow URL:', config.endpoint);
+      
+      const result = await testFlowConnection(config.endpoint);
+      
+      if (result.success) {
+        return { 
+          success: true, 
+          latencyMs: result.latencyMs, 
+          modelInfo: 'Power Automate Flow' 
+        };
+      } else {
+        return { 
+          success: false, 
+          error: result.error || 'Flow test failed', 
+          latencyMs: result.latencyMs 
+        };
+      }
+    } else if (config.provider === 'openai') {
+      // OpenAI Compatible: /v1/chat/completions or /chat/completions
+      if (!config.apiKey) return { success: false, error: 'API Key is required' };
+      
+      // Auto-detect endpoint format - add /v1 if it looks like OpenAI base URL
+      let url = baseEndpoint;
+      if (!url.includes('/v1') && !url.endsWith('/chat/completions')) {
+        url = `${baseEndpoint}/v1/chat/completions`;
+      } else if (!url.endsWith('/chat/completions')) {
+        url = `${baseEndpoint}/chat/completions`;
+      }
+      console.log('[BYOM Test] OpenAI Compatible URL:', url);
+      
+      headers['Authorization'] = `Bearer ${config.apiKey}`;
+      const body = JSON.stringify({ 
+        model: config.model || 'gpt-3.5-turbo', 
+        messages: [{ role: 'user', content: 'Hi' }]
+      });
+      
+      const response = await fetch(url, { method: 'POST', headers, body, signal: controller.signal });
+      
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => response.statusText);
+        throw new Error(`HTTP ${response.status}: ${errorText.slice(0, 200)}`);
+      }
+      
+      let data: Record<string, unknown>;
+      try {
+        data = await response.json();
+      } catch (jsonError) {
+        console.error('[BYOM Test] OpenAI Compatible JSON parse error:', jsonError);
+        return { success: false, error: 'Invalid JSON response from API endpoint. Check endpoint URL and model configuration.' };
+      }
+      return { success: true, latencyMs: Date.now() - startTime, modelInfo: (data.model as string) || config.model };
+    } else {
+      return { success: false, error: `Unknown provider: ${config.provider}` };
+    }
+  } catch (error: unknown) {
+    console.error('[BYOM Test] Error:', error);
+    
+    if (error instanceof Error && error.name === 'AbortError') {
+      return { success: false, error: 'Request timed out. Check if the endpoint is reachable.' };
+    }
+    
+    // Provide more helpful error messages
+    if (error instanceof TypeError && error.message === 'Failed to fetch') {
+      const provider = config.provider;
+      let hint = '';
+      
+      if (provider === 'ollama') {
+        hint = '\n\nFor local LLM servers (Ollama, MLX, oMLX, LM Studio): Ensure CORS is enabled. For Ollama: OLLAMA_ORIGINS=* ollama serve. For MLX/oMLX: use --cors flag. For LM Studio: enable CORS in settings.';
+      } else if (provider === 'openai') {
+        hint = '\n\nOpenAI API cannot be called directly from the browser due to CORS. Please enter your model name manually.';
+      } else if (provider === 'azure-openai') {
+        hint = '\n\nCheck that your Azure OpenAI resource has CORS enabled for this domain.';
+      }
+      
+      return { 
+        success: false, 
+        error: `Connection failed. The endpoint may be unreachable, blocked by CORS, or the URL is incorrect.${hint}` 
+      };
+    }
+    
+    // Categorize errors with user-friendly messages
+    if (error instanceof Error) {
+      const msg = error.message.toLowerCase();
+      
+      // Timeout
+      if (msg.includes('timeout') || msg.includes('timed out')) {
+        return { success: false, error: 'The server took too long to respond. Please try again.' };
+      }
+      
+      // Authentication errors
+      if (msg.includes('401') || msg.includes('unauthorized')) {
+        return { success: false, error: 'Authentication failed. Please check your API key.' };
+      }
+      
+      // Server errors
+      if (msg.includes('500') || msg.includes('502') || msg.includes('503')) {
+        return { success: false, error: 'The server is temporarily unavailable. Please try again later.' };
+      }
+      
+      // If message is descriptive, use it
+      if (error.message.length > 10) {
+        return { success: false, error: error.message };
+      }
+    }
+    
+    return { success: false, error: 'Unable to generate summary. Please check your LLM settings and try again.' };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+// Generate voice summary using BYOM LLM
+export interface VoiceSummaryResult {
+  success: boolean;
+  summary?: string;
+  error?: string;
+}
+
+export async function generateVoiceSummary(
+  content: string, 
+  locale: Locale, 
+  customSystemPrompt?: string,
+  llmConfigOverride?: LLMConfig,
+
+  timeoutMs?: number
+): Promise<VoiceSummaryResult> {
+  const config = llmConfigOverride || getLLMConfig();
+  
+  if (!config || !config.enabled) {
+    return { success: false, error: 'LLM not configured or disabled' };
+  }
+  
+  if (!config.endpoint) {
+    return { success: false, error: 'Endpoint not configured' };
+  }
+  
+  // Normalize endpoint - remove trailing slash
+  const baseEndpoint = config.endpoint.replace(/\/+$/, '');
+  
+  const systemPrompt = customSystemPrompt || (locale === 'zh-Hans'
+    ? '你是一个助手，负责将内容总结为简短的语音播报。请用简洁自然的中文口语风格，概括主要信息，不超过3句话。'
+    : 'You are an assistant that summarizes content into brief voice announcements. Use concise, natural spoken language, summarizing key information in no more than 3 sentences.');
+  
+  const userPrompt = locale === 'zh-Hans'
+    ? `请将以下内容总结为简短的语音播报：\n\n${content}`
+    : `Please summarize the following content into a brief voice announcement:\n\n${content}`;
+  
+  try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    
+    let url: string;
+    let body: string;
+    
+    if (config.provider === 'ollama') {
+      // Ollama: /api/chat
+      url = `${baseEndpoint}/api/chat`;
+      body = JSON.stringify({
+        model: config.model || 'llama2',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        stream: false,
+        options: {
+        }
+      });
+    } else if (config.provider === 'azure-openai') {
+      if (!config.deploymentName) {
+        return { success: false, error: 'Azure OpenAI requires deployment name' };
+      }
+      
+      // Determine authentication method
+      const useServicePrincipal = config.azureAuthType === 'service-principal';
+      
+      if (useServicePrincipal) {
+        // Service Principal authentication
+        if (!config.azureTenantId || !config.azureClientId || !config.azureClientSecret) {
+          return { success: false, error: 'Azure AD credentials (Tenant ID, Client ID, Client Secret) are required' };
+        }
+        const accessToken = await getAzureADToken(config);
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      } else {
+        // API Key authentication
+        if (!config.apiKey) {
+          return { success: false, error: 'API key is required' };
+        }
+        headers['api-key'] = config.apiKey;
+      }
+      
+      // Azure OpenAI: /openai/deployments/{deployment}/chat/completions
+      url = `${baseEndpoint}/openai/deployments/${config.deploymentName}/chat/completions?api-version=2024-12-01-preview`;
+      body = JSON.stringify({
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ]
+      });
+    } else if (config.provider === 'power-automate') {
+      // Power Automate Flow: invoke the flow directly
+      console.log('[Voice Summary] Using Power Automate Flow');
+      
+      const result = await invokeFlowForLLM(config.endpoint, {
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        model: config.model,
+        deploymentName: config.deploymentName,
+      });
+      
+      if (result.success && result.content) {
+        console.log('[Voice Summary] Generated via Power Automate:', result.content.trim());
+        return { success: true, summary: result.content.trim() };
+      } else {
+        return { success: false, error: result.error || 'No content in flow response' };
+      }
+    } else {
+      // OpenAI compatible
+      if (!config.apiKey) {
+        return { success: false, error: 'API key is required' };
+      }
+      // Auto-detect endpoint format - add /v1 if it looks like OpenAI base URL
+      url = baseEndpoint;
+      if (!url.includes('/v1') && !url.endsWith('/chat/completions')) {
+        url = `${baseEndpoint}/v1/chat/completions`;
+      } else if (!url.endsWith('/chat/completions')) {
+        url = `${baseEndpoint}/chat/completions`;
+      }
+      
+      headers['Authorization'] = `Bearer ${config.apiKey}`;
+      body = JSON.stringify({
+        model: config.model || 'gpt-3.5-turbo',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ]
+      });
+    }
+    
+    console.log('[Voice Summary] Calling LLM:', url);
+    
+    let response: Response;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs || 60000);
+    
+    try {
+      response = await fetch(url, { method: 'POST', headers, body, signal: controller.signal });
+    } catch (fetchError) {
+      clearTimeout(timeout);
+      if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+        console.error('[Voice Summary] Request timed out');
+        return { success: false, error: 'Request timed out - LLM endpoint took too long to respond' };
+      }
+      console.error('[Voice Summary] Fetch error:', fetchError);
+      return { success: false, error: 'Network error - LLM endpoint unreachable or blocked by CORS' };
+    }
+    
+    clearTimeout(timeout);
+    
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => response.statusText);
+      return { success: false, error: `HTTP ${response.status}: ${errorText.slice(0, 100)}` };
+    }
+    
+    // Parse JSON response with error handling
+    let data: Record<string, unknown>;
+    try {
+      data = await response.json();
+    } catch (jsonError) {
+      console.error('[Voice Summary] JSON parse error:', jsonError);
+      // Try to get raw text for debugging
+      let rawText = '';
+      try {
+        // Clone response since json() already consumed it - just log the error
+        rawText = 'Response was not valid JSON';
+      } catch {
+        rawText = 'Could not read response';
+      }
+      console.error('[Voice Summary] Raw response issue:', rawText);
+      return { success: false, error: 'Invalid JSON response from LLM endpoint. Check model configuration.' };
+    }
+    
+    // Extract summary from response
+    let summary: string;
+    if (config.provider === 'ollama') {
+      const message = data.message as Record<string, unknown> | undefined;
+      summary = (message?.content as string) || '';
+    } else {
+      const choices = data.choices as Array<{ message?: { content?: string } }> | undefined;
+      summary = choices?.[0]?.message?.content || '';
+    }
+    
+    if (!summary.trim()) {
+      return { success: false, error: 'Empty response from LLM' };
+    }
+    
+    console.log('[Voice Summary] Generated:', summary.trim());
+    return { success: true, summary: summary.trim() };
+  } catch (error: unknown) {
+    console.error('[Voice Summary] Error:', error);
+    
+    if (error instanceof TypeError && error.message === 'Failed to fetch') {
+      return { success: false, error: 'Network error - LLM endpoint unreachable or blocked by CORS' };
+    }
+    
+    // Provide user-friendly error message
+    if (error instanceof Error) {
+      const msg = error.message.toLowerCase();
+      
+      if (msg.includes('timeout')) {
+        return { success: false, error: 'Request timed out. Please try again.' };
+      }
+      if (msg.includes('401') || msg.includes('unauthorized')) {
+        return { success: false, error: 'Authentication failed. Please check your API key.' };
+      }
+      if (error.message.length > 10) {
+        return { success: false, error: error.message };
+      }
+    }
+    return { success: false, error: 'Unable to generate summary. Please check your settings and try again.' };
+  }
+}
+
+export function getVoiceSummaryEnabled(): boolean {
+  return localStorage.getItem('voiceSummaryEnabled') !== 'false'; // default true
+}
+
+export function setVoiceSummaryEnabled(enabled: boolean): void {
+  localStorage.setItem('voiceSummaryEnabled', String(enabled));
+  window.dispatchEvent(new CustomEvent('voicesummary-changed', { detail: enabled }));
+}
+
+// Copilot in all screens setting
+export function getCopilotInAllScreens(): boolean {
+  return localStorage.getItem('copilotInAllScreens') === 'true'; // default false
+}
+
+export function setCopilotInAllScreens(enabled: boolean): void {
+  localStorage.setItem('copilotInAllScreens', String(enabled));
+  window.dispatchEvent(new CustomEvent('copilotinallscreens-changed', { detail: enabled }));
+}
+
+// Simulate streaming response setting
+export function getSimulateStreaming(): boolean {
+  return localStorage.getItem('simulateStreaming') === 'true';
+}
+
+export function setSimulateStreaming(enabled: boolean): void {
+  localStorage.setItem('simulateStreaming', String(enabled));
+  window.dispatchEvent(new CustomEvent('simulatestreaming-changed', { detail: enabled }));
+}
+
+export const translations = {
+  'zh-Hans': {
+    // Greetings
+    morning: '早上好',
+    afternoon: '下午好',
+    evening: '晚上好',
+    
+    // Page titles
+    home: '主页',
+    settings: '设置',
+    accounts: '客户',
+    opportunities: '商机',
+    activities: '活动',
+    contacts: '联系人',
+    
+    // KPI cards
+    todayVisits: '今日拜访',
+    confirmedPending: '{confirmed} 已确认 · {pending} 待出发',
+    activeOpportunities: '活跃商机',
+    atRiskNeedAttention: '{risk} 风险 · 需关注',
+    monthlyPerformance: '本月业绩',
+    vsLastMonth: '{direction} {percent}% vs 上月',
+    pendingFollowUp: '待回访客户',
+    sortByDistance: '按距离排序',
+    
+    // Daily briefing
+    dailyBriefing: '我的商机洞察',
+    refreshingInsight: '正在刷新洞察...',
+    insightRefreshed: '洞察已刷新',
+    insightRefreshFailed: '刷新失败，请稍后重试',
+    chapters: '章节',
+    minutes: '分',
+    seconds: '秒',
+    swipeToSwitch: '左右滑动 · 切换章节',
+    holdToAsk: '按住对这条提问',
+    transcript: '转写',
+    playbackSpeed: '播放速度',
+    offlineNoAsk: '离线无法提问',
+    showingYesterday: '离线 · 显示昨日播报',
+    chapterOf: '{current} / {total}',
+    timeRange: '{start}–{end}',
+    generatingBriefing: '正在生成今日播报...',
+    resumeReading: '已恢复跟读',
+    pausedFollowAlong: '已暂停跟读 30 秒',
+    recordingRelease: '录音中，松开发送',
+    releaseCancel: '松开取消',
+    
+    // Quick actions
+    newVisit: '新拜访',
+    askCopilot: '提问 Copilot',
+    viewOpportunities: '看商机',
+    briefMe: '今日简报',
+    comingSoon: '功能即将上线',
+    send: '发送',
+    
+    // Summary
+    todaySummary: '今天有 {followups} 个回访，{closingOpps} 个商机本周收尾',
+    
+    // Offline
+    offline: '离线 · 显示最近一次缓存',
+    
+    // Empty states
+    noData: '—',
+    
+    // Voice / ActivityCapture
+    holdToRecord: '按住录音',
+    recording: '正在录音...',
+    releaseToCancel: '松开取消',
+    swipeUpToCancel: '上滑取消',
+    pressToStartRecord: '按住下方按钮开始录音',
+    processingVoice: '正在处理语音...',
+    voiceBubbleRecording: '正在录音 {time}',
+    maxRecordingWarning: '即将达到最长录音时间',
+    aiDraft: 'AI 草稿',
+    account: '客户',
+    contact: '联系人',
+    visitDate: '拜访日期',
+    result: '结果',
+    nextStep: '下一步',
+    opportunityIntent: '商机意向',
+    abandon: '放弃',
+    reRecord: '重录',
+    confirm: '确认',
+    newVisitTitle: '新拜访',
+    offlineRecordingHint: '离线 · 录音将在恢复网络后上传',
+    thinkingDotStyle: '思考动画',
+    activityDiscarded: '活动已放弃',
+    activityConfirmed: '活动已确认',
+    pollTimeout: 'AI 处理超时，请重试',
+    confidenceHigh: '高置信度',
+    confidenceMedium: '中置信度',
+    confidenceLow: '低置信度',
+    
+    // BYOM settings
+    byomTitle: '自带模型 (BYOM)',
+    byomDescription: '配置你自己的 LLM 模型',
+    llmProvider: 'LLM 提供商',
+    selectProvider: '选择提供商',
+    apiKey: 'API 密钥',
+    apiKeyPlaceholder: '输入 API 密钥',
+    endpoint: '服务端点',
+    endpointPlaceholder: '输入端点 URL',
+    deploymentName: '部署名称',
+    deploymentNamePlaceholder: '输入 Azure 部署名称',
+    modelName: '模型名称',
+    modelNamePlaceholder: '输入模型名称 (如 gpt-4)',
+    enableByom: '启用自定义模型',
+    byomConfigured: '已配置',
+    byomNotConfigured: '未配置',
+    testConnection: '测试连接',
+    testingByom: '测试中...',
+    byomTestSuccess: '连接成功',
+    byomTestFailed: '连接失败',
+    byomLatency: '延迟: {ms}ms',
+    fetchModels: '获取模型列表',
+    fetchingModels: '正在获取...',
+    noModelsFound: '未找到可用模型',
+    selectModel: '选择模型',
+
+    // Information structure settings
+    infoStructure: '信息结构',
+    organizeInStructureCard: '以卡片方式呈现数据',
+    voiceSummary: '用语音播报摘要',
+
+    // Font size settings
+    chatFontSize: '聊天字体大小',
+    uiFontSize: '界面字体大小',
+    fontSizeSmall: '小',
+    fontSizeMedium: '中',
+    fontSizeLarge: '大',
+    
+    // Color theme settings
+    colorTheme: '主题配色',
+    
+    // In-memory banner
+    inMemoryBanner: '本应用使用草稿表进行测试，输入的数据不会保存。请联系应用所有者启用存储。',
+    
+    // Voice settings
+    voiceSetting: '音色',
+    voiceNatural: '自然',
+    voicePremium: '高级',
+    autoPlayAgentResponse: '自动朗读回复',
+  },
+  'en-US': {
+    // Greetings
+    morning: 'Good morning',
+    afternoon: 'Good afternoon',
+    evening: 'Good evening',
+    
+    // Page titles
+    home: 'Home',
+    settings: 'Settings',
+    accounts: 'Accounts',
+    opportunities: 'Opportunities',
+    activities: 'Activities',
+    contacts: 'Contacts',
+    
+    // KPI cards
+    todayVisits: 'Today\'s Visits',
+    confirmedPending: '{confirmed} confirmed · {pending} pending',
+    activeOpportunities: 'Active Opportunities',
+    atRiskNeedAttention: '{risk} at risk · needs attention',
+    monthlyPerformance: 'Monthly Performance',
+    vsLastMonth: '{direction} {percent}% vs last month',
+    pendingFollowUp: 'Pending Follow-up',
+    sortByDistance: 'Sort by distance',
+    
+    // Daily briefing
+    dailyBriefing: 'My Business Insight',
+    refreshingInsight: 'Refreshing insight...',
+    insightRefreshed: 'Insight refreshed',
+    insightRefreshFailed: 'Refresh failed, please try again',
+    chapters: 'chapters',
+    minutes: 'min',
+    seconds: 'sec',
+    swipeToSwitch: 'Swipe left/right to switch chapters',
+    holdToAsk: 'Hold to ask about this',
+    transcript: 'Transcript',
+    playbackSpeed: 'Playback speed',
+    offlineNoAsk: 'Cannot ask while offline',
+    showingYesterday: 'Offline · showing yesterday\'s briefing',
+    chapterOf: '{current} / {total}',
+    timeRange: '{start}–{end}',
+    generatingBriefing: 'Generating today\'s briefing...',
+    resumeReading: 'Resumed follow-along',
+    pausedFollowAlong: 'Paused follow-along for 30s',
+    recordingRelease: 'Recording, release to send',
+    releaseCancel: 'Release to cancel',
+    // Quick actions
+    newVisit: 'New Visit',
+    askCopilot: 'Ask Copilot',
+    viewOpportunities: 'View Opps',
+    briefMe: 'Brief Me',
+    comingSoon: 'Coming soon',
+    send: 'Send',
+    
+    // Summary
+    todaySummary: '{followups} follow-ups today, {closingOpps} opps closing this week',
+    
+    // Offline
+    offline: 'Offline · showing cached data',
+    
+    // Empty states
+    noData: '—',
+    
+    // Voice / ActivityCapture
+    holdToRecord: 'Hold to record',
+    recording: 'Recording...',
+    releaseToCancel: 'Release to cancel',
+    swipeUpToCancel: 'Swipe up to cancel',
+    pressToStartRecord: 'Hold the button below to start recording',
+    processingVoice: 'Processing voice...',
+    voiceBubbleRecording: 'Recording {time}',
+    maxRecordingWarning: 'Approaching max recording time',
+    aiDraft: 'AI Draft',
+    account: 'Account',
+    contact: 'Contact',
+    visitDate: 'Visit Date',
+    result: 'Result',
+    nextStep: 'Next Step',
+    opportunityIntent: 'Opportunity Intent',
+    abandon: 'Abandon',
+    reRecord: 'Re-record',
+    confirm: 'Confirm',
+    newVisitTitle: 'New Visit',
+    thinkingDotStyle: 'Thinking Animation',
+    offlineRecordingHint: 'Offline · Recording will upload when online',
+    activityDiscarded: 'Activity discarded',
+    
+    // BYOM settings
+    byomTitle: 'Bring Your Own Model',
+    byomDescription: 'Configure your own LLM model',
+    llmProvider: 'LLM Provider',
+    selectProvider: 'Select provider',
+    apiKey: 'API Key',
+    apiKeyPlaceholder: 'Enter API key',
+    endpoint: 'Endpoint',
+    endpointPlaceholder: 'Enter endpoint URL',
+    deploymentName: 'Deployment Name',
+    deploymentNamePlaceholder: 'Enter Azure deployment name',
+    modelName: 'Model Name',
+    modelNamePlaceholder: 'Enter model name (e.g., gpt-4)',
+    enableByom: 'Enable Custom Model',
+    byomConfigured: 'Configured',
+    byomNotConfigured: 'Not configured',
+    testConnection: 'Test Connection',
+    testingByom: 'Testing...',
+    byomTestSuccess: 'Connection successful',
+    byomTestFailed: 'Connection failed',
+    byomLatency: 'Latency: {ms}ms',
+    fetchModels: 'Fetch Models',
+    fetchingModels: 'Fetching...',
+    noModelsFound: 'No models found',
+    selectModel: 'Select model',
+
+    // Information structure settings
+    infoStructure: 'Information Structure',
+    organizeInStructureCard: 'Organize Data in Cards',
+    voiceSummary: 'Voice Summary for Response',
+    activityConfirmed: 'Activity confirmed',
+    pollTimeout: 'AI processing timed out, please retry',
+    confidenceHigh: 'High confidence',
+    confidenceMedium: 'Medium confidence',
+    confidenceLow: 'Low confidence',
+    
+    // Font size settings
+    chatFontSize: 'Chat Font Size',
+    uiFontSize: 'UI Font Size',
+    fontSizeSmall: 'Small',
+    fontSizeMedium: 'Medium',
+    fontSizeLarge: 'Large',
+    
+    // Color theme settings
+    colorTheme: 'Color Theme',
+    
+    // In-memory banner
+    inMemoryBanner: 'This app uses draft tables for testing. Data entered won\'t be saved. Contact the app owner to enable storage.',
+    
+    // Voice settings
+    voiceSetting: 'Voice',
+    voiceNatural: 'Natural',
+    autoPlayAgentResponse: 'Auto-play Agent Response',
+    voicePremium: 'Premium',
+  },
+} as const;
+
+export type TranslationKey = keyof typeof translations['zh-Hans'];
+
+// Get/set locale from localStorage
+export function getLocale(): Locale {
+  const saved = localStorage.getItem('locale');
+  if (saved === 'en-US' || saved === 'zh-Hans') return saved;
+  // Default based on browser language
+  const browserLang = navigator.language;
+  if (browserLang.startsWith('zh')) return 'zh-Hans';
+  return 'en-US';
+}
+
+export function setLocale(locale: Locale): void {
+  localStorage.setItem('locale', locale);
+  // Dispatch event so components can react
+  window.dispatchEvent(new CustomEvent('locale-changed', { detail: locale }));
+}
+
+export function t<K extends TranslationKey>(
+  key: K,
+  locale: Locale = 'zh-Hans',
+  params?: Record<string, string | number>
+): string {
+  let text: string = translations[locale][key] ?? translations['zh-Hans'][key] ?? key;
+  
+  if (params) {
+    Object.entries(params).forEach(([k, v]: [string, string | number]) => {
+      text = text.replace(`{${k}}`, String(v));
+    });
+  }
+  
+  return text;
+}
+
+export function getGreeting(locale: Locale = 'zh-Hans'): string {
+  const hour = new Date().getHours();
+  if (hour >= 5 && hour < 12) return t('morning', locale);
+  if (hour >= 12 && hour < 18) return t('afternoon', locale);
+  return t('evening', locale);
+}
