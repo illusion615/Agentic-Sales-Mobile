@@ -9,6 +9,7 @@ import { DynamicDataRenderer, tryParseJson } from '@/components/dynamic-data-ren
 import { FormCard } from '@/components/form-card';
 import { BatchFormCard } from '@/components/batch-form-card';
 import { MatchSelectionCard } from '@/components/match-selection-card';
+import { ClarificationCard } from '@/components/clarification-card';
 import { MarkdownContent } from '@/components/markdown-content';
 import { RecordListCard } from '@/components/record-list-card';
 import { AdditionalIntentsCard } from '@/components/additional-intents-card';
@@ -384,8 +385,41 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
                 </div>
               )}
 
-              {/* Agent Message */}
-              {message.type === 'agent' && (() => {
+              {/* Awaiting-clarification: render as ClarificationCard with action buttons (Create / Search other / Skip) */}
+              {message.type === 'awaiting-clarification' && message.awaitingClarification && !message.isThinking && !message.isStreaming && (() => {
+                const pr = message.awaitingClarification.pendingResolutions[0];
+                if (!pr) return null;
+                return (
+                  <div className="max-w-full">
+                    {message.thinkingSteps && message.thinkingSteps.length > 0 && (
+                      <details className="mb-2 text-xs" open>
+                        <summary className="cursor-pointer text-muted-foreground hover:text-foreground flex items-center gap-1">
+                          <span>🧠</span>
+                          <span>{locale === 'zh-Hans' ? '思考过程' : 'Thinking process'}</span>
+                        </summary>
+                        <div className="mt-1.5 pl-4 space-y-1 text-muted-foreground">
+                          {message.thinkingSteps.map((step, idx) => (
+                            <div key={idx} className="flex items-center gap-2">
+                              <span className="text-primary">✓</span>
+                              <span>{step.label}</span>
+                              {step.detail && <span>· {step.detail}</span>}
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
+                    <ClarificationCard
+                      messageId={message.id}
+                      pendingKind={pr.kind}
+                      queryName={pr.query}
+                      resolved={message.resolutionState === 'resolved'}
+                    />
+                  </div>
+                );
+              })()}
+
+              {/* Agent Message (also renders awaiting-clarification thinking/streaming as generic text) */}
+              {(message.type === 'agent' || (message.type === 'awaiting-clarification' && (message.isThinking || message.isStreaming || !message.awaitingClarification))) && (() => {
                 // Thinking state - show progress steps
                 if (message.isThinking && message.thinkingSteps) {
                   return (

@@ -680,3 +680,36 @@ export function cancelDebouncedRequest(): void {
     pendingResolve = null;
   }
 }
+
+// ========== Awaiting Clarification Contract (I-2 Stage 1) ==========
+
+export const ResolutionStatusSchema = z.enum(['pending', 'resolved', 'skipped']);
+export type ResolutionStatus = z.infer<typeof ResolutionStatusSchema>;
+
+export const ResolutionCandidateSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  score: z.number(),
+  subtitle: z.string().optional(),
+});
+export type ResolutionCandidate = z.infer<typeof ResolutionCandidateSchema>;
+
+export const PendingResolutionSchema = z.object({
+  id: z.string(),
+  kind: z.enum(['contact', 'account', 'opportunity']),
+  query: z.string(),
+  candidates: z.array(ResolutionCandidateSchema),
+  status: ResolutionStatusSchema,
+});
+export type PendingResolution = z.infer<typeof PendingResolutionSchema>;
+
+export const AwaitingClarificationSchema = z.object({
+  kind: z.literal('awaiting-clarification'),
+  pendingResolutions: z.array(PendingResolutionSchema).min(1),
+  originalIntent: z.object({
+    function: z.string(),
+    arguments: z.record(z.string(), z.unknown()),
+  }),
+});
+export type AwaitingClarification = z.infer<typeof AwaitingClarificationSchema>;
+

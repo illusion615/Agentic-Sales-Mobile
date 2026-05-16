@@ -25,6 +25,9 @@ import {
   recordMetrics,
   type ValidatedIntentResult,
   type SingleIntent,
+  type AwaitingClarification,
+  type PendingResolution,
+  type ResolutionCandidate,
 } from './agent-utils';
 
 // Greeting pattern for detecting simple greetings that don't need Copilot Studio
@@ -90,6 +93,8 @@ export interface AgentResponse {
     totalIntents: number;
     summary: string;
   };
+  // I-2 Stage 1: awaiting-clarification blocking state
+  awaitingClarification?: AwaitingClarification;
 }
 
 // IntentResult is now imported from agent-utils as ValidatedIntentResult
@@ -1197,6 +1202,48 @@ User: "Contact: Dr. Priya Sharma, Chief Medical Officer at Royal London Hospital
             };
           }
         } else {
+          const isDraftFn = typeof intent.function === 'string' && intent.function.startsWith('draft');
+          if (isDraftFn) {
+            const topCandidates: ResolutionCandidate[] = matchData.matches.slice(0, 3).map((m: { id: string; name: string; score: number; accountName?: string }) => ({
+              id: m.id,
+              name: m.name,
+              score: m.score,
+              subtitle: m.accountName,
+            }));
+            const pendingKind: 'contact' | 'account' | 'opportunity' =
+              entityType === 'activity' ? 'opportunity' : (entityType as 'contact' | 'account' | 'opportunity');
+            const pending: PendingResolution = {
+              id: 'pr-' + Date.now(),
+              kind: pendingKind,
+              query,
+              candidates: topCandidates,
+              status: 'pending',
+            };
+            const kindZh = pendingKind === 'contact' ? '联系人' : pendingKind === 'account' ? '客户' : '商机';
+            const fallback = isZh
+              ? `未找到与 "${query}" 匹配的${kindZh}。回复"新建"以新建，或回复其他名称重新搜索，或回复"跳过"以不关联。`
+              : `No ${pendingKind} matches "${query}". Reply "create", or reply with another name, or "skip".`;
+            console.log('[CopilotAgent] I-2 awaiting-clarification:', pendingKind, query);
+            return {
+              success: true,
+              content: fallback,
+              functionCalled: matchFunctionName,
+              functionDisplayName: isZh ? '需要澄清' : 'Needs clarification',
+              awaitingClarification: {
+                kind: 'awaiting-clarification',
+                pendingResolutions: [pending],
+                originalIntent: {
+                  function: intent.function as string,
+                  arguments: (intent.arguments || {}) as Record<string, unknown>,
+                },
+              },
+              latencyMs: Date.now() - startTime,
+              thinkingSteps: [
+                { stage: 'intent', status: 'completed', label: isZh ? `意图识别：${intentLabel}` : `Intent: ${intentLabel}` },
+                { stage: 'matching', status: 'completed', label: isZh ? `未找到 ${kindZh} 匹配，等待用户决断` : `No ${pendingKind} match, awaiting user` },
+              ],
+            };
+          }
           // No high-confidence matches, proceed with creating new record
           console.log('[CopilotAgent] No high-confidence matches, proceeding with function execution');
         }

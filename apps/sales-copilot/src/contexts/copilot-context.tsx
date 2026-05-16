@@ -15,6 +15,7 @@ import {
 import { getLocale, getLLMConfig, getSimulateStreaming, type Locale } from '@/lib/i18n';
 import { toast } from 'sonner';
 import { processMessage, type ThinkingProgress } from '@/lib/copilot-agent';
+import type { AwaitingClarification } from '@/lib/agent-utils';
 import { extractVisitDataFromText, type ExtractedVisitData } from '@/lib/visit-extraction';
 
 // Re-export ExtractedVisitData for consumers that import from context
@@ -29,7 +30,7 @@ export interface ThinkingStep {
 
 export interface ChatMessage {
   id: string;
-  type: 'user' | 'agent' | 'stage-card' | 'form-card' | 'batch-form-card' | 'match-selection' | 'clarification';
+  type: 'user' | 'agent' | 'stage-card' | 'form-card' | 'batch-form-card' | 'match-selection' | 'clarification' | 'awaiting-clarification';
   role?: 'user' | 'assistant';
   content: string;
   audioUrl?: string;
@@ -130,6 +131,10 @@ export interface ChatMessage {
     }>;
     title?: string;
   };
+
+  // I-2 Stage 1: awaiting-clarification blocking state
+  awaitingClarification?: AwaitingClarification;
+  resolutionState?: 'blocked' | 'resolving' | 'resolved';
 }
 
 // Form fill callback type
@@ -234,6 +239,9 @@ interface CopilotContextValue {
   
   // Rollback conversation to a specific message (removes that message and all after it)
   rollbackToMessage: (messageId: string) => void;
+
+  // I-2 Round 3: resume a parked intent after the user finishes creating a new contact via the inline draft form.
+  completeParkedIntentWithNewContact: (contactId: string, contactName: string, accountId?: string, accountName?: string) => Promise<void>;
 }
 
 export interface PageContext {
@@ -270,6 +278,19 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
   });
   const [isSending, setIsSending] = useState(false);
   const [inputValue, setInputValue] = useState('');
+
+  // I-2 Stage 1: ref tracking latest messages (used by sendMessage to detect blocked state without stale closure)
+  const messagesRef = useRef<ChatMessage[]>(messages);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
+
+  // I-2 Round 3: parked intent — set when user replies 'create' to a contact awaiting-clarification.
+  // The parked function is resumed by completeParkedIntentWithNewContact after the new contact is saved.
+  const parkedIntentRef = useRef<{
+    function: string;
+    arguments: Record<string, unknown>;
+    pendingKind: 'contact' | 'account' | 'opportunity';
+    blockedMsgId: string;
+  } | null>(null);
 
   // Persist messages to sessionStorage - only when all streaming/thinking is complete
   // Use a ref to track the last persisted snapshot and avoid redundant writes
@@ -367,6 +388,69 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       return prev.slice(0, targetIndex);
     });
   }, []);
+
+  // I-2 Round 3: resume a parked intent after the user finishes creating a new contact via the inline draft form.
+  // Also propagates the new contact's account back into the parked args so the resumed form (e.g. Activity)
+  // gets the correct account pre-filled — fixes the case where the agent only resolved the contact gap and
+  // never resolved the account on its own.
+  const completeParkedIntentWithNewContact = useCallback(async (contactId: string, contactName: string, accountId?: string, accountName?: string) => {
+    const parked = parkedIntentRef.current;
+    if (!parked || parked.pendingKind !== 'contact') return;
+    parkedIntentRef.current = null;
+
+    const newArgs: Record<string, unknown> = { ...parked.arguments, contactId, contactName };
+    // Inject the contact's account only when the parked intent didn't already resolve one.
+    if (accountId && !newArgs.accountId) newArgs.accountId = accountId;
+    if (accountName && !newArgs.accountName) newArgs.accountName = accountName;
+
+    setIsSending(true);
+    try {
+      const { executeFunction } = await import('@/lib/function-executor');
+      const { getDisplayName } = await import('@/lib/function-registry');
+      const fnResult = await executeFunction(
+        parked.function,
+        newArgs,
+        { userId: user?.objectId, userEmail: user?.userPrincipalName },
+      );
+      const fnDisplay = getDisplayName(parked.function, locale === 'zh-Hans' ? 'zh-Hans' : 'en-US');
+
+      if (fnResult.success && fnResult.data) {
+        const formData = fnResult.data as { type: string; isNew: boolean; data: Record<string, unknown> };
+        setMessages((prev) => [...prev, {
+          id: `msg-${Date.now()}-resumed-form`,
+          type: 'form-card',
+          role: 'assistant',
+          content: locale === 'zh-Hans'
+            ? '联系人已新建，请确认以下信息'
+            : 'Contact created. Please confirm the following information',
+          functionCalled: parked.function,
+          functionDisplayName: fnDisplay,
+          timestamp: new Date().toISOString(),
+          formCard: {
+            type: formData.type as 'activity' | 'opportunity' | 'account' | 'contact',
+            isNew: formData.isNew,
+            data: formData.data,
+            status: 'pending',
+          },
+        }]);
+      } else {
+        setMessages((prev) => [...prev, {
+          id: `msg-${Date.now()}-resume-err`,
+          type: 'agent',
+          role: 'assistant',
+          content: locale === 'zh-Hans'
+            ? `❌ 新建联系人后恢复活动创建失败: ${fnResult.error}`
+            : `❌ Failed to resume activity after contact create: ${fnResult.error}`,
+          agentName: 'System',
+          timestamp: new Date().toISOString(),
+        }]);
+      }
+    } catch (err) {
+      console.error('[CopilotContext] I-2 resume after contact create error:', err);
+    } finally {
+      setIsSending(false);
+    }
+  }, [user, locale]);
   const pageContext = pageContextState;
   const pageContextRef = useRef<PageContext | null>(null);
   
@@ -889,7 +973,152 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
 
   const sendMessage = useCallback(async (text: string) => {
     if (!text.trim()) return;
-    
+
+    // ===== I-2 Stage 1: Awaiting-clarification gate =====
+    // If the last assistant message is blocked on user clarification, intercept this reply
+    // and route it as a resolution decision instead of running through the LLM intent pipeline.
+    const lastForGate = messagesRef.current[messagesRef.current.length - 1];
+    if (
+      lastForGate &&
+      lastForGate.resolutionState === 'blocked' &&
+      lastForGate.type === 'awaiting-clarification' &&
+      lastForGate.awaitingClarification
+    ) {
+      const trimmed = text.trim();
+      const isCreate = /^(\u65b0\u5efa|create|\u521b\u5efa)/i.test(trimmed);
+      const isSkip = /^(\u8df3\u8fc7|skip)/i.test(trimmed);
+
+      if (isCreate || isSkip) {
+        // Echo the user's reply
+        const userReplyMsg: ChatMessage = {
+          id: `msg-${Date.now()}-user`,
+          type: 'user',
+          role: 'user',
+          content: trimmed,
+          timestamp: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, userReplyMsg]);
+        setInputValue('');
+
+        // Mark the blocked message as resolved
+        const blockedId = lastForGate.id;
+        setMessages((prev) => prev.map((m) => m.id === blockedId ? { ...m, resolutionState: 'resolved' as const } : m));
+
+        const { function: fn, arguments: args } = lastForGate.awaitingClarification.originalIntent;
+        const pendingResolution = lastForGate.awaitingClarification.pendingResolutions[0];
+        const pendingKind = pendingResolution.kind;
+        const queryName = pendingResolution.query;
+
+        // I-2 Round 3: differentiate 'create' from 'skip'
+        if (isCreate && pendingKind === 'contact') {
+          // Park the original intent; spawn a contact draft form. After save, the parked intent resumes with the new contactId.
+          parkedIntentRef.current = {
+            function: fn,
+            arguments: args,
+            pendingKind: 'contact',
+            blockedMsgId: blockedId,
+          };
+          const contactDraftMsg: ChatMessage = {
+            id: `msg-${Date.now()}-contact-draft`,
+            type: 'form-card',
+            role: 'assistant',
+            content: locale === 'zh-Hans'
+              ? '新建联系人，保存后将自动关联到本次活动'
+              : 'Create a new contact — it will be linked to this activity automatically after save',
+            functionCalled: 'createContact',
+            functionDisplayName: locale === 'zh-Hans' ? '新建联系人' : 'New Contact',
+            timestamp: new Date().toISOString(),
+            formCard: {
+              type: 'contact',
+              isNew: true,
+              data: {
+                fullName: queryName,
+                accountName: (args.accountName as string | undefined) ?? '',
+              },
+              status: 'pending',
+            },
+          };
+          setMessages((prev) => [...prev, contactDraftMsg]);
+          return;
+        }
+
+        if (isCreate && (pendingKind === 'account' || pendingKind === 'opportunity')) {
+          // Stage 5 stub: notify, then fall through to skip-style execution.
+          const kindZh = pendingKind === 'account' ? '客户' : '商机';
+          setMessages((prev) => [...prev, {
+            id: `msg-${Date.now()}-stage5`,
+            type: 'agent',
+            role: 'assistant',
+            content: locale === 'zh-Hans'
+              ? `ℹ️ 新建${kindZh}功能即将开放（Stage 5），本次先跳过${kindZh}关联。`
+              : `ℹ️ Creating new ${pendingKind} is coming soon (Stage 5). Skipping ${pendingKind} link for now.`,
+            agentName: 'System',
+            timestamp: new Date().toISOString(),
+          }]);
+          // Fall through to skip-style execution below.
+        }
+
+        // Skip (or Stage 5 fall-through): strip the unresolved entity and execute the original function directly.
+        const strippedArgs: Record<string, unknown> = { ...args };
+        if (pendingKind === 'contact') { delete strippedArgs.contactId; delete strippedArgs.contactName; }
+        else if (pendingKind === 'account') { delete strippedArgs.accountId; delete strippedArgs.accountName; }
+        else if (pendingKind === 'opportunity') { delete strippedArgs.opportunityId; delete strippedArgs.opportunityName; }
+
+        setIsSending(true);
+        try {
+          const { executeFunction } = await import('@/lib/function-executor');
+          const { getDisplayName } = await import('@/lib/function-registry');
+          const fnResult = await executeFunction(
+            fn,
+            strippedArgs,
+            { userId: user?.objectId, userEmail: user?.userPrincipalName },
+          );
+          const fnDisplay = getDisplayName(fn, locale === 'zh-Hans' ? 'zh-Hans' : 'en-US');
+
+          if (fnResult.success && fnResult.data) {
+            const formData = fnResult.data as { type: string; isNew: boolean; data: Record<string, unknown> };
+            const replyMsg: ChatMessage = {
+              id: `msg-${Date.now()}-form`,
+              type: 'form-card',
+              role: 'assistant',
+              content: locale === 'zh-Hans' ? '\u8bf7\u786e\u8ba4\u4ee5\u4e0b\u4fe1\u606f' : 'Please confirm the following information',
+              functionCalled: fn,
+              functionDisplayName: fnDisplay,
+              timestamp: new Date().toISOString(),
+              formCard: {
+                type: formData.type as 'activity' | 'opportunity' | 'account' | 'contact',
+                isNew: formData.isNew,
+                data: formData.data,
+                status: 'pending',
+              },
+            };
+            setMessages((prev) => [...prev, replyMsg]);
+          } else {
+            setMessages((prev) => [...prev, {
+              id: `msg-${Date.now()}-err`,
+              type: 'agent',
+              role: 'assistant',
+              content: locale === 'zh-Hans'
+                ? `\u274c \u64cd\u4f5c\u5931\u8d25: ${fnResult.error}`
+                : `\u274c Error: ${fnResult.error}`,
+              agentName: 'System',
+              timestamp: new Date().toISOString(),
+            }]);
+          }
+        } catch (err) {
+          console.error('[CopilotContext] I-2 resolve error:', err);
+        } finally {
+          setIsSending(false);
+        }
+        return;
+      }
+
+      // Free-text reply: treat as a brand-new request. Mark blocked message resolved and fall through.
+      const blockedId2 = lastForGate.id;
+      setMessages((prev) => prev.map((m) => m.id === blockedId2 ? { ...m, resolutionState: 'resolved' as const } : m));
+      // Fall through to normal flow below (which adds the user message and calls processMessage).
+    }
+
     // Add user message immediately
     const userMessage: ChatMessage = {
       id: `msg-${Date.now()}-user`,
@@ -1008,7 +1237,32 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           
           // Clarification is now handled naturally by the LLM as a regular response
           // No special clarificationQuestions handling needed - LLM will ask for more info naturally
-          
+
+          // ===== I-2 Stage 1: Handle awaiting-clarification response =====
+          if (response.awaitingClarification) {
+            setIsSending(false);
+            setMessages((prev) => prev.map((msg) => {
+              if (msg.id !== thinkingMsgId) return msg;
+              return {
+                ...msg,
+                type: 'awaiting-clarification' as const,
+                content: response.content || '',
+                functionCalled: response.functionCalled,
+                functionDisplayName: response.functionDisplayName,
+                isThinking: false,
+                thinkingSteps: response.thinkingSteps?.map((s) => ({
+                  stage: s.stage,
+                  status: 'completed' as const,
+                  label: s.label,
+                  detail: s.detail,
+                })),
+                awaitingClarification: response.awaitingClarification,
+                resolutionState: 'blocked' as const,
+              };
+            }));
+            return;
+          }
+
           // ===== Handle additional intents (multi-intent support) =====
           if (response.additionalIntents && response.additionalIntents.items.length > 0) {
             // If primary action succeeded AND there are additional intents, show them
@@ -1870,6 +2124,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     setClarificationSuggestions,
     clearClarificationSuggestions,
     executeClarificationAction,
+    completeParkedIntentWithNewContact,
   }), [
     isOpen,
     isFullScreen,
@@ -1899,6 +2154,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     setClarificationSuggestions,
     clearClarificationSuggestions,
     executeClarificationAction,
+    completeParkedIntentWithNewContact,
   ]);
 
   return (

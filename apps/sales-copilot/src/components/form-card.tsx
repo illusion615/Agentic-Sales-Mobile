@@ -79,7 +79,7 @@ function EditableField({
         <span className="text-xs text-muted-foreground">{label}</span>
         {type === 'select' && options ? (
           <Select value={String(value || '')} onValueChange={onChange}>
-            <SelectTrigger className="h-8 text-sm mt-0.5">
+            <SelectTrigger className="h-8 text-sm mt-0.5 w-full min-w-0">
               <SelectValue placeholder={placeholder || label} />
             </SelectTrigger>
             <SelectContent>
@@ -173,7 +173,7 @@ function AccountSelector({
             }
           }}
         >
-          <SelectTrigger className="h-8 text-sm mt-0.5">
+          <SelectTrigger className="h-8 text-sm mt-0.5 w-full min-w-0">
             <SelectValue placeholder={locale === 'zh-Hans' ? '选择客户' : 'Select account'} />
           </SelectTrigger>
           <SelectContent>
@@ -228,7 +228,7 @@ function OpportunitySelector({
             }
           }}
         >
-          <SelectTrigger className="h-8 text-sm mt-0.5">
+          <SelectTrigger className="h-8 text-sm mt-0.5 w-full min-w-0">
             <SelectValue placeholder={locale === 'zh-Hans' ? '选择商机（可选）' : 'Select opportunity (optional)'} />
           </SelectTrigger>
           <SelectContent>
@@ -286,7 +286,7 @@ function ContactSelector({
             }
           }}
         >
-          <SelectTrigger className="h-8 text-sm mt-0.5">
+          <SelectTrigger className="h-8 text-sm mt-0.5 w-full min-w-0">
             <SelectValue placeholder={locale === 'zh-Hans' ? '选择联系人（可选）' : 'Select contact (optional)'} />
           </SelectTrigger>
           <SelectContent>
@@ -1063,6 +1063,16 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
         createdRecordIdRef.current = createdContact.id;
         copilot.updateFormCardStatus(messageId, 'confirmed', undefined, createdContact.id);
         toast.success(locale === 'zh-Hans' ? '联系人已创建' : 'Contact created');
+
+        // I-2 Round 3: if this contact was created via awaiting-clarification flow,
+        // resume the parked intent (e.g., the original activity creation) with the new contactId.
+        // Also forward the resolved account so the resumed Activity form pre-fills it correctly.
+        copilot.completeParkedIntentWithNewContact(
+          createdContact.id,
+          formData.fullName as string || '',
+          targetAccount.id,
+          targetAccount.name1 || '',
+        );
       }
 
       setStatus('confirmed');
