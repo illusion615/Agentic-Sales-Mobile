@@ -32,6 +32,7 @@ export function useBusinessInsight(id: string) {
 
 /**
  * Create a new BusinessInsight record.
+ * @remarks Form validation: use CreateBusinessInsightSchema with zodResolver for type-safe create forms
  */
 export function useCreateBusinessInsight() {
   const client = useQueryClient();
@@ -45,6 +46,7 @@ export function useCreateBusinessInsight() {
 
 /**
  * Update an existing BusinessInsight record.
+ * @remarks Form validation: use UpdateBusinessInsightSchema.partial().omit({ id: true }) with zodResolver for edit forms (matches changedFields input)
  */
 export function useUpdateBusinessInsight() {
   const client = useQueryClient();
@@ -79,3 +81,6 @@ export function useDeleteBusinessInsight() {
 
 /** Data source type for this table — drives InMemoryDataBanner visibility. */
 export const BusinessInsight_DATA_SOURCE_TYPE = 'Dataverse' as const;
+
+export { BusinessInsightSchema, CreateBusinessInsightSchema, UpdateBusinessInsightSchema } from "../validators/business-insight-validator";
+export type { BusinessInsightInput, CreateBusinessInsightInput, UpdateBusinessInsightInput } from "../validators/business-insight-validator";

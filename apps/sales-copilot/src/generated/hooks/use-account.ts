@@ -32,6 +32,7 @@ export function useAccount(id: string) {
 
 /**
  * Create a new Account record.
+ * @remarks Form validation: use CreateAccountSchema with zodResolver for type-safe create forms
  */
 export function useCreateAccount() {
   const client = useQueryClient();
@@ -45,6 +46,7 @@ export function useCreateAccount() {
 
 /**
  * Update an existing Account record.
+ * @remarks Form validation: use UpdateAccountSchema.partial().omit({ id: true }) with zodResolver for edit forms (matches changedFields input)
  */
 export function useUpdateAccount() {
   const client = useQueryClient();
@@ -79,3 +81,6 @@ export function useDeleteAccount() {
 
 /** Data source type for this table — drives InMemoryDataBanner visibility. */
 export const Account_DATA_SOURCE_TYPE = 'Dataverse' as const;
+
+export { AccountSchema, CreateAccountSchema, UpdateAccountSchema } from "../validators/account-validator";
+export type { AccountInput, CreateAccountInput, UpdateAccountInput } from "../validators/account-validator";

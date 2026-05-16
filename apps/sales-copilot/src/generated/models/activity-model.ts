@@ -1,31 +1,32 @@
 import type { Account } from './account-model';
+import type { Contact } from './contact-model';
 import type { Opportunity } from './opportunity-model';
 
-export const ActivityDraftstatuskeyToLabel = {
-  'Draftstatuskey0': 'draft',
-  'Draftstatuskey1': 'confirmed',
-  'Draftstatuskey2': 'completed',
-  'Draftstatuskey3': 'cancelled'
+export const ActivityDraftstatusKeyToLabel = {
+  'DraftstatusKey0': 'draft',
+  'DraftstatusKey1': 'confirmed',
+  'DraftstatusKey2': 'completed',
+  'DraftstatusKey3': 'cancelled'
 } as const;
-export type ActivityDraftstatuskey = keyof typeof ActivityDraftstatuskeyToLabel;
+export type ActivityDraftstatusKey = keyof typeof ActivityDraftstatusKeyToLabel;
 
-export const ActivityOutcomekeyToLabel = {
-  'Outcomekey0': '成功',
-  'Outcomekey1': '拖延',
-  'Outcomekey2': '人员变动',
-  'Outcomekey3': '承诺后推迟',
-  'Outcomekey4': '无结果'
+export const ActivityOutcomeKeyToLabel = {
+  'OutcomeKey0': '成功',
+  'OutcomeKey1': '拖延',
+  'OutcomeKey2': '人员变动',
+  'OutcomeKey3': '承诺后推迟',
+  'OutcomeKey4': '无结果'
 } as const;
-export type ActivityOutcomekey = keyof typeof ActivityOutcomekeyToLabel;
+export type ActivityOutcomeKey = keyof typeof ActivityOutcomeKeyToLabel;
 
-export const ActivityTypekeyToLabel = {
-  'Typekey0': 'visit',
-  'Typekey1': 'call',
-  'Typekey2': 'meeting',
-  'Typekey3': 'email',
-  'Typekey4': 'other'
+export const ActivityTypeKeyToLabel = {
+  'TypeKey0': 'visit',
+  'TypeKey1': 'call',
+  'TypeKey2': 'meeting',
+  'TypeKey3': 'email',
+  'TypeKey4': 'other'
 } as const;
-export type ActivityTypekey = keyof typeof ActivityTypekeyToLabel;
+export type ActivityTypeKey = keyof typeof ActivityTypeKeyToLabel;
 
 export interface Activity {
   /**
@@ -45,6 +46,10 @@ export interface Activity {
    */
   account?: Pick<Account, 'id' | 'name1'>;
   /**
+   * @displayName Contact
+   */
+  contact?: Pick<Contact, 'id' | 'fullname'>;
+  /**
    * @displayName Created On
    */
   createdon?: string;
@@ -52,7 +57,7 @@ export interface Activity {
    * @displayName Draft Status
    * @validationRule Required for create/update operations
    */
-  draftstatusKey: ActivityDraftstatuskey;
+  draftstatusKey: ActivityDraftstatusKey;
   /**
    * @displayName Notes
    */
@@ -64,7 +69,7 @@ export interface Activity {
   /**
    * @displayName Outcome
    */
-  outcomeKey?: ActivityOutcomekey;
+  outcomeKey?: ActivityOutcomeKey;
   /**
    * @displayName Owner ID
    * @validationRule Required for create/update operations
@@ -79,7 +84,7 @@ export interface Activity {
    * @displayName Type
    * @validationRule Required for create/update operations
    */
-  typeKey: ActivityTypekey;
+  typeKey: ActivityTypeKey;
 }
 
 export const _Activity = 'Activity' as const;

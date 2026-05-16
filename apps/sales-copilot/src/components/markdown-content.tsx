@@ -154,6 +154,47 @@ export function MarkdownContent({ content }: { content: string }) {
       continue; 
     }
     
+    // Horizontal rule (--- or *** or ___)
+    if (/^([-*_]){3,}\s*$/.test(line.trim())) {
+      elements.push(<hr key={`hr-${i}`} className="my-4 border-border" />);
+      i++;
+      continue;
+    }
+    
+    // Headings (# ## ###)
+    const h3Match = line.match(/^###\s+(.*)$/);
+    if (h3Match) {
+      elements.push(
+        <h3 key={`h3-${i}`} className="font-semibold text-foreground mt-3 mb-2">
+          {renderInline(h3Match[1])}
+        </h3>
+      );
+      i++;
+      continue;
+    }
+    
+    const h2Match = line.match(/^##\s+(.*)$/);
+    if (h2Match) {
+      elements.push(
+        <h2 key={`h2-${i}`} className="font-semibold text-foreground text-base mt-4 mb-2">
+          {renderInline(h2Match[1])}
+        </h2>
+      );
+      i++;
+      continue;
+    }
+    
+    const h1Match = line.match(/^#\s+(.*)$/);
+    if (h1Match) {
+      elements.push(
+        <h1 key={`h1-${i}`} className="font-bold text-foreground text-lg mt-4 mb-2">
+          {renderInline(h1Match[1])}
+        </h1>
+      );
+      i++;
+      continue;
+    }
+    
     // Check if this is a bullet list item (- or * followed by space)
     const bulletMatch = line.match(/^(\s*)([-*])\s+(.*)$/);
     if (bulletMatch) {

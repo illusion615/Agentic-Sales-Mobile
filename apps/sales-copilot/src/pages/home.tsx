@@ -1,41 +1,40 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence, useDragControls, type PanInfo } from 'motion/react';
-import { Settings, Sparkles, Plus, Eye, Radio, Mic, WifiOff, ArrowUp, SquarePen, Maximize2, X, Square, Copy, Forward, ThumbsDown, ChevronRight, ChevronDown, Play, Pause, Loader2, Volume2, VolumeX, Bell, RefreshCw, SkipForward, SkipBack } from 'lucide-react';
+import { Settings, Sparkles, Plus, Eye, Radio, Mic, WifiOff, ArrowUp, SquarePen, Maximize2, X, Square, Copy, Forward, ThumbsDown, ChevronRight, ChevronDown, Play, Pause, Loader2, Volume2, VolumeX, Bell, RefreshCw, SkipForward, SkipBack, BookOpen } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { useUser } from '@/hooks/use-user';
-import { useActivityList } from '@/generated/hooks/use-activity';
+import { useActivityList, useUpdateActivity } from '@/generated/hooks/use-activity';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useAccountList } from '@/generated/hooks/use-account';
+
 import { useCopilotConversationList, useUpdateCopilotConversation, useCreateCopilotConversation } from '@/generated/hooks/use-copilot-conversation';
 import { useCreateBusinessInsight, useBusinessInsightList, useDeleteBusinessInsight } from '@/generated/hooks/use-business-insight';
-import type { BusinessInsightTypekey, BusinessInsightReferencetypekey } from '@/generated/models/business-insight-model';
-import { InMemoryDataBanner } from '@/generated/components/in-memory-data-banner';
-import { HAS_IN_MEMORY_TABLES } from '@/generated/hooks';
-import { getLocale, t, getGreeting, getChatFontClass, getThinkingDotStyle, getAutoPlayAgentResponse, getSelectedVoice, findMatchingSystemVoice, getVoiceSummaryEnabled, getLLMConfig, generateVoiceSummary, getAgentFramework, type Locale, type ThinkingDotStyle } from '@/lib/i18n';
+import type { BusinessInsightTypeKey, BusinessInsightReferencetypeKey } from '@/generated/models/business-insight-model';
+
+
+import { useLocale } from '@/lib/i18n';
+import { t, getGreeting, getChatFontClass, getThinkingDotStyle, getAutoPlayAgentResponse, getSelectedVoice, findMatchingSystemVoice, getVoiceSummaryEnabled, getLLMConfig, generateVoiceSummary, getAgentFramework, getHomeHeaderWidget, type Locale, type ThinkingDotStyle, type HomeHeaderWidget } from '@/lib/i18n';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
+import { formatCurrencyCompact, formatCurrencyFull } from '@/lib/format-currency';
 
 import { SettingsPanel } from '@/components/settings-panel';
 import type { Activity } from '@/generated/models/activity-model';
-import type { Opportunity, OpportunityStagekey } from '@/generated/models/opportunity-model';
+import type { Opportunity, OpportunityStageKey } from '@/generated/models/opportunity-model';
 import type { Account } from '@/generated/models/account-model';
 import type { CopilotConversation } from '@/generated/models/copilot-conversation-model';
-import { OpportunityStagekeyToLabel, ActivityDraftstatuskeyToLabel, ActivityTypekeyToLabel } from '@/generated/models';
+import { OpportunityStageKeyToLabel, ActivityDraftstatusKeyToLabel, ActivityTypeKeyToLabel } from '@/generated/models';
 import {
   getCopilotConfig,
-  getOrCreateConversation,
-  sendUserContext,
-  sendMessage as sendCopilotMessage,
-  pollMessages,
-  clearConversation as clearCopilotSession,
-  type ConversationInfo,
 } from '@/services/copilot-service';
 import { DynamicDataRenderer, tryParseJson } from '@/components/dynamic-data-renderer';
 import { FormCard } from '@/components/form-card';
 import { RecordListCard } from '@/components/record-list-card';
-import { InsightCarousel } from '@/components/insight-carousel';
-import { KPICards, type KPIData, type AgendaItem, type HotOpportunity, type AtRiskClient } from '@/components/kpi-card';
+import { InsightCarousel, isActivityRelatedInsightUtil } from '@/components/insight-carousel';
+import { KPICards, type KPIData, type AgendaItem, type AtRiskClient } from '@/components/kpi-card';
+import { MarkdownRenderer } from '@/components/markdown-renderer';
+import type { BusinessInsight } from '@/generated/models/business-insight-model';
 import { useCopilot, type ChatMessage } from '@/contexts/copilot-context';
 
 
@@ -46,6 +45,161 @@ interface QuickActionProps {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
   onClick: () => void;
+}
+
+// Live Date & Time Clock component
+function DateTimeClock({ locale }: { locale: Locale }) {
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const formatDate = (date: Date) => {
+    if (locale === 'zh-Hans') {
+      const weekdays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+      const month = date.getMonth() + 1;
+      const day = date.getDate();
+      const weekday = weekdays[date.getDay()];
+      return `${month}月${day}日 ${weekday}`;
+    } else {
+      return date.toLocaleDateString('en-US', {
+        weekday: 'long',
+        month: 'short',
+        day: 'numeric',
+      });
+    }
+  };
+
+  const formatTime = (date: Date) => {
+    return date.toLocaleTimeString(locale === 'zh-Hans' ? 'zh-CN' : 'en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: locale !== 'zh-Hans',
+    });
+  };
+
+  return (
+    <div>
+      <p className="text-sm text-muted-foreground leading-none">{formatDate(currentTime)}</p>
+      <p className="text-2xl font-bold text-foreground leading-tight mt-0.5 tabular-nums">{formatTime(currentTime)}</p>
+    </div>
+  );
+}
+
+// Home Header Widget - displays selected metric in top-left
+function HomeHeaderWidgetDisplay({ 
+  locale, 
+  widget,
+  kpiData
+}: { 
+  locale: Locale; 
+  widget: HomeHeaderWidget;
+  kpiData: {
+    agendaCompleted: number;
+    agendaItems: { id: string }[];
+    quarterlyWonAmount: number;
+    quarterlyTarget: number;
+    activitiesThisWeek: number;
+    weeklyTarget: number;
+  };
+}) {
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  useEffect(() => {
+    // Only update time if date-time widget is selected
+    if (widget !== 'date-time') return;
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [widget]);
+
+  const formatDate = (date: Date) => {
+    if (locale === 'zh-Hans') {
+      const weekdays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+      const month = date.getMonth() + 1;
+      const day = date.getDate();
+      const weekday = weekdays[date.getDay()];
+      return `${month}月${day}日 ${weekday}`;
+    } else {
+      return date.toLocaleDateString('en-US', {
+        weekday: 'long',
+        month: 'short',
+        day: 'numeric',
+      });
+    }
+  };
+
+  const formatTime = (date: Date) => {
+    return date.toLocaleTimeString(locale === 'zh-Hans' ? 'zh-CN' : 'en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: locale !== 'zh-Hans',
+    });
+  };
+
+  // Calculate task completion rate
+  const taskCompletionRate = kpiData.agendaItems.length > 0 
+    ? Math.round((kpiData.agendaCompleted / kpiData.agendaItems.length) * 100) 
+    : 0;
+
+  // Calculate quarterly forecast using quarterly performance data
+  const quarterlyForecast = kpiData.quarterlyWonAmount;
+  const quarterlyTargetValue = kpiData.quarterlyTarget;
+  const quarterlyProgress = quarterlyTargetValue > 0 ? Math.round((quarterlyForecast / quarterlyTargetValue) * 100) : 0;
+
+  // Calculate performance percentage
+  const performancePercent = kpiData.weeklyTarget > 0 
+    ? Math.round((kpiData.activitiesThisWeek / kpiData.weeklyTarget) * 100) 
+    : 0;
+
+  switch (widget) {
+    case 'date-time':
+      return (
+        <div>
+          <p className="text-sm text-muted-foreground leading-none">{formatDate(currentTime)}</p>
+          <p className="text-2xl font-bold text-foreground leading-tight mt-0.5 tabular-nums">{formatTime(currentTime)}</p>
+        </div>
+      );
+    case 'performance':
+      return (
+        <div>
+          <p className="text-sm text-muted-foreground leading-none">{locale === 'zh-Hans' ? '我的业绩' : 'My Performance'}</p>
+          <p className="text-2xl font-bold text-foreground leading-tight mt-0.5 tabular-nums">{performancePercent}%</p>
+        </div>
+      );
+    case 'task-completion':
+      return (
+        <div>
+          <p className="text-sm text-muted-foreground leading-none">{locale === 'zh-Hans' ? '今日任务完成率' : "Today's Task Completion"}</p>
+          <p className="text-2xl font-bold text-foreground leading-tight mt-0.5 tabular-nums">
+            {taskCompletionRate}% 
+            <span className="text-sm font-normal text-muted-foreground">
+              ({kpiData.agendaCompleted}/{kpiData.agendaItems.length})
+            </span>
+          </p>
+        </div>
+      );
+    case 'pipeline-forecast':
+    default:
+      return (
+        <div>
+          <p className="text-sm text-muted-foreground leading-none">{locale === 'zh-Hans' ? '本季度业绩完成率' : 'Quarterly Goal Progress'}</p>
+          <p className="text-2xl font-bold text-foreground leading-tight mt-0.5 tabular-nums">
+            {quarterlyProgress}%
+            <span className="text-sm font-normal text-muted-foreground ml-1.5">
+              ({formatCurrencyCompact(quarterlyForecast)} / {formatCurrencyCompact(quarterlyTargetValue)})
+            </span>
+          </p>
+        </div>
+      );
+  }
 }
 
 // Animation variants
@@ -83,81 +237,16 @@ function QuickActionChip({ icon: Icon, label, onClick }: QuickActionProps) {
 }
 
 // Helper to check if stage is won or lost
-function isClosedStage(stageKey: OpportunityStagekey): boolean {
-  const label = OpportunityStagekeyToLabel[stageKey];
+function isClosedStage(stageKey: OpportunityStageKey): boolean {
+  const label = OpportunityStageKeyToLabel[stageKey];
   return label === 'won' || label === 'lost';
 }
 
-function isWonStage(stageKey: OpportunityStagekey): boolean {
-  return OpportunityStagekeyToLabel[stageKey] === 'won';
+function isWonStage(stageKey: OpportunityStageKey): boolean {
+  return OpportunityStageKeyToLabel[stageKey] === 'won';
 }
 
-// Markdown content renderer (simplified version for chat)
-function MarkdownContent({ content }: { content: string }) {
-  if (!content) return null;
-
-  const renderInline = (text: string): React.ReactNode => {
-    const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
-    const parts: React.ReactNode[] = [];
-    let lastIndex = 0;
-    let match: RegExpExecArray | null;
-    let keyIdx = 0;
-
-    while ((match = linkRegex.exec(text)) !== null) {
-      if (match.index > lastIndex) {
-        parts.push(text.slice(lastIndex, match.index));
-      }
-      parts.push(
-        <a
-          key={`link-${keyIdx++}`}
-          href={match[2]}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-primary underline underline-offset-2 hover:text-primary/80 transition-colors cursor-pointer"
-          onClick={(e: React.MouseEvent<HTMLAnchorElement>) => {
-            e.preventDefault();
-            e.stopPropagation();
-            window.open(match![2], '_blank', 'noopener,noreferrer');
-          }}
-        >
-          {match[1]}
-        </a>
-      );
-      lastIndex = match.index + match[0].length;
-    }
-    if (lastIndex < text.length) {
-      parts.push(text.slice(lastIndex));
-    }
-
-    // Process bold
-    return parts.map((part: React.ReactNode, idx: number) => {
-      if (typeof part !== 'string') return part;
-      const boldParts = part.split(/(\*\*[^*]+\*\*)/g);
-      if (boldParts.length > 1) {
-        return boldParts.map((bp: string, bpIdx: number) => {
-          if (bp.startsWith('**') && bp.endsWith('**')) {
-            return <strong key={`bold-${idx}-${bpIdx}`} className="font-semibold">{bp.slice(2, -2)}</strong>;
-          }
-          return bp;
-        });
-      }
-      return part;
-    });
-  };
-
-  const lines = content.split('\n');
-  const elements: React.ReactNode[] = [];
-  let i = 0;
-
-  while (i < lines.length) {
-    const line = lines[i];
-    if (!line.trim()) { i++; continue; }
-    elements.push(<p key={`p-${i}`} className="mb-1 last:mb-0">{renderInline(line)}</p>);
-    i++;
-  }
-
-  return <div className="markdown-content">{elements}</div>;
-}
+// MarkdownContent removed - now using shared MarkdownRenderer component
 
 // Stage Progress Component for Opportunity Cards
 const stages = ['Qualify', 'Develop', 'Propose', 'Close'];
@@ -257,7 +346,7 @@ export default function HomeDashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const recordTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [showInMemoryBanner, setShowInMemoryBanner] = useState<boolean>(HAS_IN_MEMORY_TABLES);
+
   // Use shared copilot context instead of local state
   const inputRef = useRef<HTMLInputElement>(null);
   
@@ -271,10 +360,14 @@ export default function HomeDashboard() {
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [playingInlineId, setPlayingInlineId] = useState<string | null>(null);
   const [isCreatingConversation, setIsCreatingConversation] = useState(false);
-  const [isInitializingCopilot, setIsInitializingCopilot] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [isRefreshingInsight, setIsRefreshingInsight] = useState(false);
   const [insightRefreshStatus, setInsightRefreshStatus] = useState<string>('');
+  // Pull-to-refresh state
+  const [isPullRefreshing, setIsPullRefreshing] = useState(false);
+  const [pullDistance, setPullDistance] = useState(0);
+  const pullStartYRef = useRef<number | null>(null);
+  const mainContentRef = useRef<HTMLDivElement>(null);
   const [customInsightText, setCustomInsightText] = useState<string[] | null>(null);
   const [briefTranscripts, setBriefTranscripts] = useState<string[]>(() => {
     // Load saved transcripts from localStorage
@@ -289,6 +382,16 @@ export default function HomeDashboard() {
     return [];
   });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [homeHeaderWidget, setHomeHeaderWidgetState] = useState<HomeHeaderWidget>(() => getHomeHeaderWidget());
+
+  // Listen for home header widget changes from settings
+  useEffect(() => {
+    const handleWidgetChange = (e: CustomEvent<HomeHeaderWidget>) => {
+      setHomeHeaderWidgetState(e.detail);
+    };
+    window.addEventListener('homeheaderwidget-changed', handleWidgetChange as EventListener);
+    return () => window.removeEventListener('homeheaderwidget-changed', handleWidgetChange as EventListener);
+  }, []);
   
   // Brief Me audio player state
   const [briefMeExpanded, setBriefMeExpanded] = useState(false);
@@ -301,12 +404,7 @@ export default function HomeDashboard() {
   const briefMeStartTimeRef = useRef<number>(0);
   const briefMeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  
-  const copilotConversationRef = useRef<ConversationInfo | null>(null);
-  const watermarkRef = useRef<string | undefined>(undefined);
-  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const userContextSentRef = useRef(false);
-  const isReconnectingRef = useRef(false);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatPanelRef = useRef<HTMLDivElement>(null);
   const dragControls = useDragControls();
@@ -319,7 +417,7 @@ export default function HomeDashboard() {
 
   // User data
   const { data: user } = useUser();
-  const locale: Locale = getLocale();
+  const locale: Locale = useLocale();
   
   // Check if copilot is configured (either Copilot Studio or BYOM)
   const copilotStudioConfig = getCopilotConfig();
@@ -329,6 +427,7 @@ export default function HomeDashboard() {
 
   // Shared copilot context - use context's messages and sendMessage
   const copilot = useCopilot();
+  const isInitializingCopilot = copilot.isConnecting;
   
   // Derive chat state from context for unified experience across all pages
   const chatMessages = copilot.messages;
@@ -338,24 +437,27 @@ export default function HomeDashboard() {
   const isSending = copilot.isSending;
   const setIsSending = copilot.setIsSending;
   const copilotConnected = copilot.isConnected;
-  // setCopilotConnected is a noop since connection is managed by context
-  const setCopilotConnected = useCallback((_value: boolean) => {
-    // Connection state is managed by copilot context
-  }, []);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
 
   // Data queries
   const { data: activities = [], refetch: refetchActivities } = useActivityList();
   const { data: opportunities = [], refetch: refetchOpportunities } = useOpportunityList();
   const { data: accounts = [], refetch: refetchAccounts } = useAccountList();
+
   const { data: conversations = [], isLoading: isLoadingConversations } = useCopilotConversationList();
   const updateConversation = useUpdateCopilotConversation();
   const createConversation = useCreateCopilotConversation();
   const { data: businessInsights = [], refetch: refetchBusinessInsights, isLoading: isLoadingBusinessInsights } = useBusinessInsightList({ filter: 'isactive eq true', orderBy: ['displayorder asc'] });
   const createBusinessInsight = useCreateBusinessInsight();
   const deleteBusinessInsight = useDeleteBusinessInsight();
+  const updateActivity = useUpdateActivity();
 
-  const userId = user?.objectId || 'demo-user-id';
+  // Filter activity-related insights to display in KPICards
+  const activityRelatedInsights = useMemo(() => {
+    return businessInsights.filter((insight: BusinessInsight) => isActivityRelatedInsightUtil(insight));
+  }, [businessInsights]);
+
+  const userId = user?.objectId;
 
   // Get source data for drawer
   const sourceData = useMemo(() => {
@@ -446,12 +548,12 @@ export default function HomeDashboard() {
 
     // Activity breakdown - use typeKey
     const visitCount = activities.filter((a: Activity) => {
-      const typeLabel = ActivityTypekeyToLabel[a.typeKey];
+      const typeLabel = ActivityTypeKeyToLabel[a.typeKey];
       return typeLabel === 'visit' || typeLabel === 'meeting';
     }).length;
     
     const callCount = activities.filter((a: Activity) => {
-      const typeLabel = ActivityTypekeyToLabel[a.typeKey];
+      const typeLabel = ActivityTypeKeyToLabel[a.typeKey];
       return typeLabel === 'call';
     }).length;
 
@@ -468,40 +570,95 @@ export default function HomeDashboard() {
     });
     
     const agendaItems: AgendaItem[] = todayActivities.slice(0, 5).map((a: Activity, idx: number) => {
-      const typeLabel = ActivityTypekeyToLabel[a.typeKey];
+      const typeLabel = ActivityTypeKeyToLabel[a.typeKey];
       const type = typeLabel === 'call' ? 'call' :
                    typeLabel === 'visit' || typeLabel === 'meeting' ? 'visit' :
                    typeLabel === 'email' ? 'proposal' : 'follow-up';
+      // Look up account address by account ID
+      const linkedAccount = a.account?.id ? accounts.find((acc: Account) => acc.id === a.account?.id) : undefined;
       return {
         id: a.id || `agenda-${idx}`,
         type,
         label: a.title || `${type} task`,
+        accountName: a.account?.name1,
+        address: linkedAccount?.address,
+      };
+    });
+
+    // Overdue items - any activity scheduled BEFORE today that is NOT completed
+    // This includes activities from this week before today AND any older activities
+    const overdueActivities = activities.filter((a: Activity) => {
+      if (!a.scheduleddate) return false;
+      const scheduled = new Date(a.scheduleddate);
+      // Any activity scheduled before today (not including today)
+      const isBeforeToday = scheduled < todayStart;
+      // NOT completed
+      const isNotCompleted = ActivityDraftstatusKeyToLabel[a.draftstatusKey] !== 'completed';
+      return isBeforeToday && isNotCompleted;
+    });
+    
+    const overdueItems: AgendaItem[] = overdueActivities.map((a: Activity, idx: number) => {
+      const typeLabel = ActivityTypeKeyToLabel[a.typeKey];
+      const type = typeLabel === 'call' ? 'call' :
+                   typeLabel === 'visit' || typeLabel === 'meeting' ? 'visit' :
+                   typeLabel === 'email' ? 'proposal' : 'follow-up';
+      // Look up account address by account ID
+      const linkedAccount = a.account?.id ? accounts.find((acc: Account) => acc.id === a.account?.id) : undefined;
+      return {
+        id: a.id || `overdue-${idx}`,
+        type,
+        label: a.title || `${type} task`,
+        accountName: a.account?.name1,
+        address: linkedAccount?.address,
+        description: a.notes,
+        scheduledDate: new Date(a.scheduleddate!),
       };
     });
 
     // No fallback placeholder data - show real data only
 
     const agendaCompleted = todayActivities.filter(
-      (a: Activity) => ActivityDraftstatuskeyToLabel[a.draftstatusKey] === 'completed'
+      (a: Activity) => ActivityDraftstatusKeyToLabel[a.draftstatusKey] === 'completed'
     ).length;
 
+    // Quarterly Performance calculation
+    // Get current quarter boundaries
+    const currentQuarter = Math.floor(today.getMonth() / 3);
+    const quarterStart = new Date(today.getFullYear(), currentQuarter * 3, 1);
+    const quarterEnd = new Date(today.getFullYear(), (currentQuarter + 1) * 3, 0, 23, 59, 59, 999);
+    
+    // Won opportunities this quarter
+    const wonOpportunities = opportunities.filter((o: Opportunity) => {
+      if (!isWonStage(o.stageKey)) return false;
+      const closedDate = o.closedon ? new Date(o.closedon) : null;
+      return closedDate && closedDate >= quarterStart && closedDate <= quarterEnd;
+    });
+    const quarterlyWonAmount = wonOpportunities.reduce((sum: number, o: Opportunity) => sum + (o.totalamount || 0), 0);
+    const quarterlyWonCount = wonOpportunities.length;
+    
+    // All opportunities in pipeline this quarter (active + won this quarter)
+    const quarterlyTotalCount = activeOpps.length + quarterlyWonCount;
+    
+    // Quarterly target - could be from settings, for now use a reasonable default based on pipeline
+    // Use 150% of current won amount as target, minimum $100,000
+    const estimatedQuarterlyTarget = Math.max(100000, quarterlyWonAmount > 0 ? quarterlyWonAmount * 1.5 : hotOpportunitiesValue * 0.8);
+    const quarterlyTarget = estimatedQuarterlyTarget;
+
     // Generate hot opportunities list
-    const hotOpportunitiesList: HotOpportunity[] = hotOpps.map((o: Opportunity) => ({
-      id: o.id,
-      name: o.name1 || 'Unnamed',
-      amount: o.totalamount || 0,
-      stage: OpportunityStagekeyToLabel[o.stageKey] || 'Unknown',
-    }));
+
 
     return {
       // Today's Agenda
       agendaItems,
       agendaCompleted: Math.min(agendaCompleted, agendaItems.length),
+      overdueItems: overdueItems.sort((a, b) => b.scheduledDate!.getTime() - a.scheduledDate!.getTime()), // Most recent first
       
-      // Hot Opportunities
-      hotOpportunities: hotOpportunitiesList,
-      hotOpportunitiesValue: hotOpportunitiesValue,
-      closingThisWeek: closingThisWeek,
+      // Quarterly Performance (replaces Hot Opportunities)
+      quarterlyWonAmount,
+      quarterlyTarget,
+      quarterlyWonCount,
+      quarterlyTotalCount,
+      closingThisWeek,
       
       // Client Coverage
       clientsTouchedThisWeek: clientsTouchedThisWeek,
@@ -520,8 +677,10 @@ export default function HomeDashboard() {
   // Extract stable primitive values from kpiData to avoid object reference changes
   const kpiSummary = useMemo(() => ({
     agendaCount: kpiData.agendaItems.length,
-    hotOppsCount: kpiData.hotOpportunities.length,
-    hotOppsValue: kpiData.hotOpportunitiesValue,
+    quarterlyWonAmount: kpiData.quarterlyWonAmount,
+    quarterlyTarget: kpiData.quarterlyTarget,
+    quarterlyWonCount: kpiData.quarterlyWonCount,
+    quarterlyTotalCount: kpiData.quarterlyTotalCount,
     clientsTouched: kpiData.clientsTouchedThisWeek,
     totalClients: kpiData.totalClients,
     clientsAtRisk: kpiData.clientsAtRisk,
@@ -531,11 +690,12 @@ export default function HomeDashboard() {
     callCount: kpiData.callCount,
     // Stringify arrays once for stable comparison
     agendaItemsJson: JSON.stringify(kpiData.agendaItems.map((item: AgendaItem) => ({ type: item.type, label: item.label }))),
-    hotOppsJson: JSON.stringify(kpiData.hotOpportunities.map((opp: HotOpportunity) => ({ name: opp.name, amount: opp.amount, stage: opp.stage }))),
   }), [
     kpiData.agendaItems,
-    kpiData.hotOpportunities,
-    kpiData.hotOpportunitiesValue,
+    kpiData.quarterlyWonAmount,
+    kpiData.quarterlyTarget,
+    kpiData.quarterlyWonCount,
+    kpiData.quarterlyTotalCount,
     kpiData.clientsTouchedThisWeek,
     kpiData.totalClients,
     kpiData.clientsAtRisk,
@@ -545,16 +705,25 @@ export default function HomeDashboard() {
     kpiData.callCount,
   ]);
 
+
+
   // Set page context for copilot agent awareness
   useEffect(() => {
+    const quarterlyProgress = kpiSummary.quarterlyTarget > 0 ? Math.round((kpiSummary.quarterlyWonAmount / kpiSummary.quarterlyTarget) * 100) : 0;
     copilot.setPageContext({
       currentPage: 'Home / Dashboard',
       summary: locale === 'zh-Hans'
-        ? `首页仪表盘：${kpiSummary.agendaCount}个待办事项，${kpiSummary.hotOppsCount}个热门商机（总价值￥${(kpiSummary.hotOppsValue / 10000).toFixed(0)}万），${kpiSummary.clientsTouched}/${kpiSummary.totalClients}个客户本周已联系，${kpiSummary.clientsAtRisk}个客户需要跟进`
-        : `Home dashboard: ${kpiSummary.agendaCount} agenda items, ${kpiSummary.hotOppsCount} hot opportunities (total ¥${(kpiSummary.hotOppsValue / 10000).toFixed(0)}k), ${kpiSummary.clientsTouched}/${kpiSummary.totalClients} clients contacted this week, ${kpiSummary.clientsAtRisk} clients need follow-up`,
+        ? `首页仪表盘：${kpiSummary.agendaCount}个待办事项，本季度业绩完成率${quarterlyProgress}%（已成交$${(kpiSummary.quarterlyWonAmount / 1000).toFixed(0)}K / 目标$${(kpiSummary.quarterlyTarget / 1000).toFixed(0)}K），${kpiSummary.clientsTouched}/${kpiSummary.totalClients}个客户本周已联系，${kpiSummary.clientsAtRisk}个客户需要跟进`
+        : `Home dashboard: ${kpiSummary.agendaCount} agenda items, Q performance ${quarterlyProgress}% (won $${(kpiSummary.quarterlyWonAmount / 1000).toFixed(0)}K / target $${(kpiSummary.quarterlyTarget / 1000).toFixed(0)}K), ${kpiSummary.clientsTouched}/${kpiSummary.totalClients} clients contacted this week, ${kpiSummary.clientsAtRisk} clients need follow-up`,
       pageData: {
         todayAgenda: JSON.parse(kpiSummary.agendaItemsJson),
-        hotOpportunities: JSON.parse(kpiSummary.hotOppsJson),
+        quarterlyPerformance: {
+          wonAmount: kpiSummary.quarterlyWonAmount,
+          target: kpiSummary.quarterlyTarget,
+          wonCount: kpiSummary.quarterlyWonCount,
+          totalCount: kpiSummary.quarterlyTotalCount,
+          progressPercent: quarterlyProgress,
+        },
         clientCoverage: {
           touched: kpiSummary.clientsTouched,
           total: kpiSummary.totalClients,
@@ -612,18 +781,17 @@ export default function HomeDashboard() {
     if (isStreaming) return;
     
     // Convert ChatMessage[] to serializable format
-    const messagesJson = JSON.stringify(
-      chatMessages
-        .filter((m: ChatMessage) => !m.isThinking && !m.isStreaming)
-        .map((m: ChatMessage) => ({
-          role: m.role,
-          content: m.content,
-          timestamp: m.timestamp,
-          agentName: m.agentName,
-          functionDisplayName: m.functionDisplayName,
-        }))
-    );
+    const filteredMessages = chatMessages
+      .filter((m: ChatMessage) => !m.isThinking && !m.isStreaming)
+      .map((m: ChatMessage) => ({
+        role: m.role,
+        content: m.content,
+        timestamp: m.timestamp,
+        agentName: m.agentName,
+        functionDisplayName: m.functionDisplayName,
+      }));
     
+    const messagesJson = JSON.stringify(filteredMessages);
     // Guard: No change since last save - prevents loop
     if (messagesJson === lastSavedRef.current) return;
     lastSavedRef.current = messagesJson;
@@ -642,138 +810,8 @@ export default function HomeDashboard() {
     return () => clearTimeout(saveTimer);
   }, [chatMessages, currentConversationId, updateConversation]);
 
-  // Initialize Copilot Studio connection when panel is expanded
-  useEffect(() => {
-    if (!chatPanelExpanded && !chatPanelFullScreen) return;
-    if (copilotConversationRef.current) return; // Already connected
-    
-    const initCopilot = async () => {
-      const config = getCopilotConfig();
-      if (!config) {
-        setCopilotConnected(false);
-        return;
-      }
-
-      setIsInitializingCopilot(true);
-      
-      try {
-        const conversation = await getOrCreateConversation(config);
-        copilotConversationRef.current = conversation;
-
-        if (user && !userContextSentRef.current) {
-          await sendUserContext(conversation, {
-            userId: user.objectId || '',
-            userPrincipalName: user.userPrincipalName || '',
-            displayName: user.fullName || '',
-          });
-          userContextSentRef.current = true;
-        }
-
-        setCopilotConnected(true);
-
-        // Start polling for responses
-        pollingIntervalRef.current = setInterval(async () => {
-          if (!copilotConversationRef.current) return;
-          
-          try {
-            const { activities, watermark } = await pollMessages(
-              copilotConversationRef.current,
-              watermarkRef.current
-            );
-            watermarkRef.current = watermark;
-
-            const botMessages = activities.filter(
-              (a) => a.type === 'message' && a.from === 'bot' && a.text
-            );
-            
-            if (botMessages.length > 0) {
-              // Stop sending indicator immediately when we get a response
-              setIsSending(false);
-              
-              const newMsgs: ChatMessage[] = botMessages.map((m) => ({
-                id: `bot-${m.timestamp.getTime()}-${Math.random().toString(36).slice(2, 7)}`,
-                type: 'agent' as const,
-                role: 'assistant' as const,
-                content: m.text || '',
-                agentName: 'Copilot',
-                timestamp: m.timestamp.toISOString(),
-              }));
-
-              setChatMessages((prev: ChatMessage[]) => {
-                // Deduplicate by content to avoid adding same message twice
-                const existingContents = new Set(prev.filter((p: ChatMessage) => p.type === 'agent').map((p: ChatMessage) => p.content));
-                const filtered = newMsgs.filter((m: ChatMessage) => !existingContents.has(m.content));
-                if (filtered.length > 0) {
-                  return [...prev, ...filtered];
-                }
-                return prev;
-              });
-            }
-          } catch (err) {
-            const error = err as Error & { status?: number };
-            if ((error.status === 403 || error.message?.includes('403')) && !isReconnectingRef.current) {
-              isReconnectingRef.current = true;
-              clearCopilotSession();
-              copilotConversationRef.current = null;
-              userContextSentRef.current = false;
-              watermarkRef.current = undefined;
-              
-              if (pollingIntervalRef.current) {
-                clearInterval(pollingIntervalRef.current);
-                pollingIntervalRef.current = null;
-              }
-              
-              setTimeout(async () => {
-                try {
-                  const config = getCopilotConfig();
-                  if (config) {
-                    const conversation = await getOrCreateConversation(config);
-                    copilotConversationRef.current = conversation;
-                    setCopilotConnected(true);
-                    toast.info(locale === 'zh-Hans' ? 'Copilot 已重新连接' : 'Copilot reconnected');
-                  }
-                } catch (reconnectErr) {
-                  console.error('Failed to reconnect:', reconnectErr);
-                  setCopilotConnected(false);
-                } finally {
-                  isReconnectingRef.current = false;
-                }
-              }, 1000);
-            }
-          }
-        }, 1000);
-      } catch (err) {
-        const error = err as Error;
-        console.error('Failed to connect to Copilot:', error);
-        setCopilotConnected(false);
-        
-        // Show user-friendly error message
-        if (error.message?.includes('Failed to fetch') || error.message?.includes('Network error')) {
-          toast.error(
-            locale === 'zh-Hans'
-              ? 'Copilot 连接失败：请检查网络连接和 Token Endpoint URL 配置'
-              : 'Copilot connection failed: Check your network and Token Endpoint URL settings'
-          );
-        } else if (error.message?.includes('CORS')) {
-          toast.error(
-            locale === 'zh-Hans'
-              ? 'Copilot 连接失败：CORS 错误，请检查 Token Endpoint 配置'
-              : 'Copilot connection failed: CORS error, check your Token Endpoint config'
-          );
-        }
-      } finally {
-        setIsInitializingCopilot(false);
-      }
-    };
-
-    initCopilot();
-
-    return () => {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-      }
-    };
-  }, [chatPanelExpanded, chatPanelFullScreen, user, locale]);
+  // Note: Removed auto-expand behavior - user should manually open Copilot panel
+  // Connection status indicator shows whether Copilot is configured (gray/orange/green)
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -868,15 +906,6 @@ export default function HomeDashboard() {
     }
   }, [chatMessages, locale]);
 
-  // Auto-dismiss in-memory banner after 4 seconds
-  useEffect(() => {
-    if (HAS_IN_MEMORY_TABLES) {
-      const timer = setTimeout(() => {
-        setShowInMemoryBanner(false);
-      }, 4000);
-      return () => clearTimeout(timer);
-    }
-  }, []);
 
   // Click outside to collapse chat panel
   useEffect(() => {
@@ -924,6 +953,35 @@ export default function HomeDashboard() {
   const handleViewOpportunities = () => {
     navigate('/opportunity-review');
   };
+
+  // Overdue agenda handlers
+  const handleMarkOverdueDone = useCallback(async (activityId: string) => {
+    try {
+      await updateActivity.mutateAsync({
+        id: activityId,
+        changedFields: { draftstatusKey: 'DraftstatusKey2' as const } // 'completed'
+      });
+      toast.success(locale === 'zh-Hans' ? '已标记完成' : 'Marked as done');
+      refetchActivities();
+    } catch (error) {
+      console.error('Failed to mark activity as done:', error);
+      toast.error(locale === 'zh-Hans' ? '操作失败' : 'Operation failed');
+    }
+  }, [updateActivity, refetchActivities, locale]);
+
+  const handleRescheduleOverdue = useCallback(async (activityId: string, newDate: Date) => {
+    try {
+      await updateActivity.mutateAsync({
+        id: activityId,
+        changedFields: { scheduleddate: newDate.toISOString() }
+      });
+      toast.success(locale === 'zh-Hans' ? '已重新安排' : 'Rescheduled');
+      refetchActivities();
+    } catch (error) {
+      console.error('Failed to reschedule activity:', error);
+      toast.error(locale === 'zh-Hans' ? '操作失败' : 'Operation failed');
+    }
+  }, [updateActivity, refetchActivities, locale]);
 
   // Brief Me insight texts for TTS - USE STORED BRIEF TRANSCRIPT, not card titles
   const briefMeInsightTexts = useMemo(() => {
@@ -1017,45 +1075,71 @@ export default function HomeDashboard() {
     const textToSpeak = briefMeInsightTexts[index];
     if (!textToSpeak) return;
     
-    const utterance = new SpeechSynthesisUtterance(textToSpeak);
-    utterance.lang = locale === 'zh-Hans' ? 'zh-CN' : 'en-US';
-    utterance.rate = briefMeSpeed;
+    // Split text into paragraphs for natural pauses
+    // Paragraphs are separated by double newlines or multiple newlines
+    const paragraphs = textToSpeak
+      .split(/\n\n+/)
+      .map((p: string) => p.trim())
+      .filter((p: string) => p.length > 0);
     
-    const selectedVoiceId = getSelectedVoice();
-    const matchingVoice = findMatchingSystemVoice(selectedVoiceId, locale);
-    if (matchingVoice) {
-      utterance.voice = matchingVoice;
-    }
+    // If no clear paragraphs, split by sentences for some pausing
+    const segments = paragraphs.length > 1 
+      ? paragraphs 
+      : textToSpeak.split(/(?<=[。！？.!?])/).map((s: string) => s.trim()).filter((s: string) => s.length > 0);
     
-    utterance.onend = () => {
-      // Automatically move to and play next insight
-      const nextIndex = index + 1;
-      if (nextIndex < briefMeInsightTexts.length) {
-        setBriefMeCurrentIndex(nextIndex);
-        // Play next card with a small delay
-        setTimeout(() => {
-          playInsightAtIndex(nextIndex);
-        }, 300);
-      } else {
-        // Finished all insights
+    let currentSegment = 0;
+    
+    const speakNextSegment = () => {
+      if (currentSegment >= segments.length) {
+        // Finished all segments in this insight, move to next insight
+        const nextIndex = index + 1;
+        if (nextIndex < briefMeInsightTexts.length) {
+          setBriefMeCurrentIndex(nextIndex);
+          // Play next insight with a longer pause between insights
+          setTimeout(() => {
+            playInsightAtIndex(nextIndex);
+          }, 800);
+        } else {
+          // Finished all insights
+          setBriefMeIsPlaying(false);
+          if (briefMeTimerRef.current) {
+            clearInterval(briefMeTimerRef.current);
+          }
+        }
+        return;
+      }
+      
+      const segment = segments[currentSegment];
+      const utterance = new SpeechSynthesisUtterance(segment);
+      utterance.lang = locale === 'zh-Hans' ? 'zh-CN' : 'en-US';
+      utterance.rate = briefMeSpeed;
+      
+      const selectedVoiceId = getSelectedVoice();
+      const matchingVoice = findMatchingSystemVoice(selectedVoiceId, locale);
+      if (matchingVoice) {
+        utterance.voice = matchingVoice;
+      }
+      
+      utterance.onend = () => {
+        currentSegment++;
+        // Add a natural pause between paragraphs (500ms)
+        setTimeout(speakNextSegment, 500);
+      };
+      
+      utterance.onerror = () => {
         setBriefMeIsPlaying(false);
         if (briefMeTimerRef.current) {
           clearInterval(briefMeTimerRef.current);
         }
-      }
+      };
+      
+      briefMeUtteranceRef.current = utterance;
+      window.speechSynthesis.speak(utterance);
     };
     
-    utterance.onerror = () => {
-      setBriefMeIsPlaying(false);
-      if (briefMeTimerRef.current) {
-        clearInterval(briefMeTimerRef.current);
-      }
-    };
-    
-    briefMeUtteranceRef.current = utterance;
     briefMeStartTimeRef.current = Date.now();
     setBriefMeIsPlaying(true);
-    window.speechSynthesis.speak(utterance);
+    speakNextSegment();
     
     // Start timer for current time
     if (briefMeTimerRef.current) {
@@ -1166,21 +1250,15 @@ export default function HomeDashboard() {
     
     const llmConfig = getLLMConfig();
     const agentFramework = getAgentFramework();
-    
-    // Check if agent framework is properly configured
-    if (agentFramework === 'local-agent') {
-      // Using local agent with BYOM
-      if (!llmConfig || !llmConfig.enabled || !llmConfig.endpoint) {
-        toast.error(locale === 'zh-Hans' ? '请先配置并启用自定义 LLM 模型' : 'Please configure and enable a custom LLM first');
-        return;
-      }
-    } else if (agentFramework === 'copilot-studio') {
-      // Using Copilot Studio
-      if (!copilotConnected || !copilotConversationRef.current) {
-        toast.error(locale === 'zh-Hans' ? '请先配置 Copilot Studio' : 'Please configure Copilot Studio first');
-        return;
-      }
-    } else {
+
+    // Only local-agent framework is supported for insight refresh
+    // Copilot Studio session is managed by CopilotContext for chat interactions
+    if (agentFramework !== 'local-agent' || !llmConfig || !llmConfig.enabled || !llmConfig.endpoint) {
+      toast.error(locale === 'zh-Hans' ? '请先配置并启用自定义 LLM 模型' : 'Please configure and enable a custom LLM first');
+      return;
+    }
+
+    if (!llmConfig || !llmConfig.enabled || !llmConfig.endpoint) {
       toast.error(locale === 'zh-Hans' ? '请先配置智能体框架' : 'Please configure an agent framework first');
       return;
     }
@@ -1194,50 +1272,63 @@ export default function HomeDashboard() {
       
       // Update status for LLM analysis
       setInsightRefreshStatus(locale === 'zh-Hans' ? '正在分析业务数据...' : 'Analyzing business data...');
+
+      // Build detailed context with specific names and data for richer insights (used by both branches)
+      const todayAgendaDetails = kpiData.agendaItems.slice(0, 5).map((item: AgendaItem) => 
+        `${item.type}: ${item.label}`
+      ).join('; ');
+      
+      // Calculate quarterly performance progress
+      const qProgress = kpiData.quarterlyTarget > 0 ? Math.round((kpiData.quarterlyWonAmount / kpiData.quarterlyTarget) * 100) : 0;
+      const quarterlyPerformanceDetails = `已成交 $${(kpiData.quarterlyWonAmount / 1000).toFixed(0)}K / 目标 $${(kpiData.quarterlyTarget / 1000).toFixed(0)}K (完成率 ${qProgress}%)`;
+      
+      const atRiskClientsDetails = kpiData.clientsAtRiskList.slice(0, 5).map((client: AtRiskClient) => 
+        `${client.name}`
+      ).join('; ');
+      
       if (agentFramework === 'local-agent' && llmConfig?.enabled) {
-        // Build detailed context with specific names and data for richer insights
-        const todayAgendaDetails = kpiData.agendaItems.slice(0, 5).map((item: AgendaItem) => 
-          `${item.type}: ${item.label}`
-        ).join('; ');
-        
-        const hotOpportunitiesDetails = kpiData.hotOpportunities.slice(0, 5).map((opp: HotOpportunity) => 
-          `${opp.name} (${opp.stage}, \u00a5${(opp.amount / 10000).toFixed(1)}\u4e07)`
-        ).join('; ');
-        
-        const atRiskClientsDetails = kpiData.clientsAtRiskList.slice(0, 5).map((client: AtRiskClient) => 
-          `${client.name}`
-        ).join('; ');
-        
         // Use local agent with BYOM to generate insights directly
         const systemPrompt = locale === 'zh-Hans'
-          ? `你是一个销售助手，负责分析销售数据并生成有价值的业务洞察。请基于以下详细的销售数据，生成具体、可执行的业务洞察和行动建议。每个洞察应该提到具体的客户名、商机名或活动，让销售人员可以立即行动。请用中文回复。
+          ? `你是一个销售助手，负责分析销售数据并生成有价值的业务洞察。
+
+【最重要规则 - 必须严格遵守】
+- 只能使用下方数据中明确列出的客户名、商机名、活动名
+- 绝对禁止编造、杜撰任何不存在于下方数据中的名称
+- 如果某类数据显示"暂无"或空，则不要生成相关洞察
+- 如果风险客户为0个，不要提及任何风险客户
+
+请用中文回复。
 
 === 今日待办事项 (${kpiData.agendaItems.length}项) ===
 ${todayAgendaDetails || '暂无待办'}
 
-=== 热门商机 (${kpiData.hotOpportunities.length}个, 总价值 ¥${(kpiData.hotOpportunitiesValue / 10000).toFixed(0)}万) ===
-${hotOpportunitiesDetails || '暂无热门商机'}
+=== 季度业绩 ===
+${quarterlyPerformanceDetails}
 
 === 风险客户 (${kpiData.clientsAtRisk}个需要关注) ===
 ${atRiskClientsDetails || '暂无风险客户'}
 
 === 其他统计 ===
-- 本周即将成交：${kpiData.closingThisWeek}个商机
 - 客户覆盖率：本周已联系 ${kpiData.clientsTouchedThisWeek}/${kpiData.totalClients} 个客户
 - 活动完成度：${kpiData.activitiesThisWeek}/${kpiData.weeklyTarget}`
-          : `You are a sales assistant that analyzes sales data and generates actionable business insights. Based on the detailed sales data below, generate specific, actionable insights and recommendations. Each insight should mention specific client names, opportunity names, or activities so sales reps can take immediate action.
+          : `You are a sales assistant that analyzes sales data and generates actionable business insights.
+
+[MOST CRITICAL RULE - MUST STRICTLY FOLLOW]
+- ONLY use client names, opportunity names, and activity names that are EXPLICITLY listed in the data below
+- ABSOLUTELY FORBIDDEN to fabricate, invent, or make up any names not present in the data
+- If a data category shows "No data" or empty, do NOT generate insights about it
+- If at-risk clients count is 0, do NOT mention any at-risk clients
 
 === Today's Agenda (${kpiData.agendaItems.length} items) ===
 ${todayAgendaDetails || 'No agenda items'}
 
-=== Hot Opportunities (${kpiData.hotOpportunities.length}, Total Value ¥${(kpiData.hotOpportunitiesValue / 10000).toFixed(0)}k) ===
-${hotOpportunitiesDetails || 'No hot opportunities'}
+=== Quarterly Performance ===
+Won $${(kpiData.quarterlyWonAmount / 1000).toFixed(0)}K / Target $${(kpiData.quarterlyTarget / 1000).toFixed(0)}K (${qProgress}% complete)
 
 === At-Risk Clients (${kpiData.clientsAtRisk} need attention) ===
 ${atRiskClientsDetails || 'No at-risk clients'}
 
 === Other Metrics ===
-- Closing this week: ${kpiData.closingThisWeek} opportunities
 - Client coverage: ${kpiData.clientsTouchedThisWeek}/${kpiData.totalClients} clients contacted this week
 - Activity progress: ${kpiData.activitiesThisWeek}/${kpiData.weeklyTarget}`;
         
@@ -1255,47 +1346,6 @@ ${atRiskClientsDetails || 'No at-risk clients'}
         } else {
           throw new Error(summaryResult.error || 'Failed to generate response from LLM');
         }
-      } else if (agentFramework === 'copilot-studio' && copilotConversationRef.current) {
-        // Update status for Copilot Studio
-        setInsightRefreshStatus(locale === 'zh-Hans' ? '正在查询 Copilot...' : 'Querying Copilot...');
-        // Use Copilot Studio
-        const summaryQuery = locale === 'zh-Hans' 
-          ? '请给我今日的业务跟进摘要，包括待跟进客户、即将到期的商机、风险提醒等。'
-        : 'Give me a business follow-up summary for today, including clients to follow up, opportunities closing soon, and risk alerts.';
-        
-        await sendCopilotMessage(
-          copilotConversationRef.current,
-          user?.objectId || 'anonymous',
-          summaryQuery
-        );
-        
-        // Poll for agent response
-        const maxWaitTime = 30000; // 30 seconds
-        const pollInterval = 1000; // 1 second
-        const startTime = Date.now();
-        
-        while (Date.now() - startTime < maxWaitTime) {
-          await new Promise(resolve => setTimeout(resolve, pollInterval));
-          
-          const result = await pollMessages(
-            copilotConversationRef.current,
-            watermarkRef.current
-          );
-          
-          if (result.activities && result.activities.length > 0) {
-            // Find the latest assistant message
-            const assistantMsgs = result.activities.filter((m: { from?: string; text?: string }) => m.from === 'bot' && m.text);
-            if (assistantMsgs.length > 0) {
-              agentResponse = assistantMsgs[assistantMsgs.length - 1].text || '';
-              watermarkRef.current = result.watermark;
-              break;
-            }
-          }
-        }
-        
-        if (!agentResponse) {
-          throw new Error('No response from agent');
-        }
       }
       
       if (!agentResponse) {
@@ -1307,57 +1357,95 @@ ${atRiskClientsDetails || 'No at-risk clients'}
       
       // Step 1: Generate insight bullet points for cards
       // Generate insights with rationale in JSON format
+      // Build raw data string directly for insight generation (avoid LLM fabrication)
+      const rawDataForInsights = locale === 'zh-Hans'
+        ? `=== 今日待办事项 (${kpiData.agendaItems.length}项) ===
+${todayAgendaDetails || '暂无待办'}
+
+=== 季度业绩 ===
+${quarterlyPerformanceDetails}
+
+=== 风险客户 (${kpiData.clientsAtRisk}个需要关注) ===
+${atRiskClientsDetails || '暂无风险客户'}
+
+=== 其他统计 ===
+- 本周即将成交：${kpiData.closingThisWeek}个商机
+- 客户覆盖率：本周已联系 ${kpiData.clientsTouchedThisWeek}/${kpiData.totalClients} 个客户
+- 活动完成度：${kpiData.activitiesThisWeek}/${kpiData.weeklyTarget}`
+        : `=== Today's Agenda (${kpiData.agendaItems.length} items) ===
+${todayAgendaDetails || 'No agenda items'}
+
+=== Quarterly Performance ===
+Won $${(kpiData.quarterlyWonAmount / 1000).toFixed(0)}K / Target $${(kpiData.quarterlyTarget / 1000).toFixed(0)}K (${qProgress}% complete)
+
+=== At-Risk Clients (${kpiData.clientsAtRisk} need attention) ===
+${atRiskClientsDetails || 'No at-risk clients'}
+
+=== Other Metrics ===
+- Closing this week: ${kpiData.closingThisWeek} opportunities
+- Client coverage: ${kpiData.clientsTouchedThisWeek}/${kpiData.totalClients} clients contacted this week
+- Activity progress: ${kpiData.activitiesThisWeek}/${kpiData.weeklyTarget}`;
+
       const insightSystemPrompt = locale === 'zh-Hans'
         ? `你是一个业务洞察生成器。基于以下业务数据，生成 5-6 条业务洞察。
 
+【最重要规则 - 必须严格遵守】
+- 只能使用下方"业务数据"中明确列出的客户名、商机名、活动名
+- 绝对禁止编造、杜撰任何不存在于数据中的名称
+- 如果数据中没有风险客户（显示"暂无风险客户"或数量为0），不要生成风险相关的洞察
+- 如果数据为空或"暂无"，如实反映，不要凭空填充
+
 每条洞察必须包含：
 1. insight: 简洁的洞察要点（不超过20字）
-2. rationale: 【重要】具体解释为什么得出这个洞察（限200字以内），必须包含：
+2. rationale: 具体解释（限200字以内），必须包含：
    - 引用原始数据中的具体数字（如金额、天数、百分比）
-   - 提及具体的客户名或商机名
+   - 只提及数据中真实存在的客户名或商机名
    - 说明数据之间的关联或趋势
    - 给出具体的建议行动
-   示例："该商机金额150万，距离预计成交日仅剩3天，但当前仍处于谈判阶段，建议今日优先安排电话会议推进合同签署"
 3. type: 洞察类型（followup/closing/risk/revisit/performance/opportunity/client/activity）
 
 【禁止】
+- 不要编造不存在于数据中的客户名或商机名
 - 不要使用"基于数据分析""根据历史记录"等模糊描述
 - 不要只说"需要关注"而不说明具体原因
-- rationale必须让用户能直接理解为什么要采取行动
 
-返回JSON数组格式，示例：
+返回JSON数组格式：
 [
-  {"insight": "立即跟进华为云项目", "rationale": "华为云项目金额150万，预计成交日期为5月10日（3天后），当前处于谈判阶段，信心指数75%。建议今日安排电话确认合同细节。", "type": "closing"},
-  {"insight": "腾讯科技15天未联系", "rationale": "腾讯科技是去年成交80万的重要客户，上次互动是4月22日的产品演示，距今15天。该客户有2个进行中商机共计120万，长期不联系可能影响续约。", "type": "revisit"}
+  {"insight": "洞察要点", "rationale": "具体原因和建议", "type": "类型"}
 ]
 
 只返回JSON数组，不要其他文字。`
         : `You are a business insight generator. Based on the following business data, generate 5-6 business insights.
 
+[MOST CRITICAL RULE - MUST STRICTLY FOLLOW]
+- ONLY use client names, opportunity names, and activity names that are EXPLICITLY listed in the "Business Data" below
+- ABSOLUTELY FORBIDDEN to fabricate, invent, or make up any names not present in the data
+- If there are no at-risk clients in the data (shows "No at-risk clients" or count is 0), do NOT generate risk-related insights
+- If data is empty or shows "No data", reflect that honestly - do NOT fill in with made-up content
+
 Each insight must include:
 1. insight: A concise insight point (max 10 words)
-2. rationale: [CRITICAL] Specific explanation (max 200 words) with:
+2. rationale: Specific explanation (max 200 words) with:
    - Concrete numbers from the data (amounts, days, percentages)
-   - Specific client or opportunity names
+   - ONLY mention client or opportunity names that actually exist in the data
    - Data relationships or trends
    - Specific recommended action
-   Example: "This $150K deal closes in 3 days but is still in negotiation. Schedule a call today to finalize contract terms."
 3. type: Insight type (followup/closing/risk/revisit/performance/opportunity/client/activity)
 
 [FORBIDDEN]
+- Do NOT fabricate client names or opportunity names not present in the data
 - Do NOT use vague phrases like "based on data analysis" or "according to records"
 - Do NOT just say "needs attention" without explaining why
-- rationale must clearly explain why action is needed
 
-Return JSON array format, example:
+Return JSON array format:
 [
-  {"insight": "Follow up Contoso deal now", "rationale": "Contoso project is valued at $150K with close date May 10 (3 days away), currently in negotiation stage with 75% confidence. Recommend scheduling a call today to confirm contract details.", "type": "closing"},
-  {"insight": "Fabrikam inactive 15 days", "rationale": "Fabrikam is a key client with $80K historical revenue. Last interaction was a product demo on April 22, now 15 days ago. They have 2 active opportunities worth $120K - prolonged silence may affect renewal.", "type": "revisit"}
+  {"insight": "Insight point", "rationale": "Specific reason and recommendation", "type": "type"}
 ]
 
 Return only the JSON array, no other text.`;
       
-      const insightResult = await generateVoiceSummary(agentResponse, locale, insightSystemPrompt, llmConfig || undefined);
+      // Pass raw data directly to insight generation instead of agentResponse
+      const insightResult = await generateVoiceSummary(rawDataForInsights, locale, insightSystemPrompt, llmConfig || undefined);
       
       if (!insightResult.success || !insightResult.summary) {
         throw new Error(insightResult.error || 'Failed to generate insight');
@@ -1405,6 +1493,8 @@ Return only the JSON array, no other text.`;
 5. 结尾简短有力，鼓励销售人员行动
 6. 整段播报控制在 1-2 分钟内朗读完成
 7. 不要使用 markdown 格式，返回纯文本
+8. 【重要】在每个洞察点之间用空行分隔，形成自然段落，便于朗读时停顿
+9. 【重要】每个段落结尾用句号，段落之间留空行
 
 业务洞察内容：
 ${insightListText}
@@ -1422,6 +1512,8 @@ Requirements:
 5. End with a brief, motivating call to action
 6. Keep the entire briefing to about 1-2 minutes when read aloud
 7. Do not use markdown formatting, return plain text only
+8. [IMPORTANT] Separate each insight point with a blank line to create natural paragraphs for pauses during reading
+9. [IMPORTANT] End each paragraph with a period, leave blank lines between paragraphs
 
 Business insights:
 ${insightListText}
@@ -1448,28 +1540,13 @@ ${agentResponse}`;
       
       if (insightLines.length > 0) {
         
-        // Get today's date range for filtering
-        const todayStart = new Date();
-        todayStart.setHours(0, 0, 0, 0);
-        const todayEnd = new Date();
-        todayEnd.setHours(23, 59, 59, 999);
-        
-        // Delete existing insights for today (replace instead of append)
+        // Delete ALL existing insights before creating new ones (replace instead of append)
         const { data: existingInsights } = await refetchBusinessInsights();
         if (existingInsights && existingInsights.length > 0) {
-          // Filter insights generated today
-          const todaysInsights = existingInsights.filter((insight: { generatedon?: string }) => {
-            if (!insight.generatedon) return false;
-            const generatedDate = new Date(insight.generatedon);
-            return generatedDate >= todayStart && generatedDate <= todayEnd;
-          });
-          
-          // Delete today's existing insights
-          if (todaysInsights.length > 0) {
-            await Promise.all(todaysInsights.map((insight: { id: string }) => 
-              deleteBusinessInsight.mutateAsync(insight.id)
-            ));
-          }
+          // Delete all existing insights to prevent accumulation
+          await Promise.all(existingInsights.map((insight: { id: string }) => 
+            deleteBusinessInsight.mutateAsync(insight.id)
+          ));
         }
         
 
@@ -1479,44 +1556,44 @@ ${agentResponse}`;
         
         const savePromises = parsedInsights.map((item: { insight: string; rationale: string; type: string }, idx: number) => {
           // Get category info for title and typeKey based on insight type
-          const typeMapping: Record<string, { title: string; typeKey: BusinessInsightTypekey }> = {
+          const typeMapping: Record<string, { title: string; typeKey: BusinessInsightTypeKey }> = {
             'followup': {
               title: locale === 'zh-Hans' ? '今日跟进提醒' : 'Follow-up Alert',
-              typeKey: 'Typekey1' as BusinessInsightTypekey
+              typeKey: 'TypeKey1' as BusinessInsightTypeKey
             },
             'closing': {
               title: locale === 'zh-Hans' ? '本周成交预测' : 'Closing This Week',
-              typeKey: 'Typekey2' as BusinessInsightTypekey
+              typeKey: 'TypeKey2' as BusinessInsightTypeKey
             },
             'risk': {
               title: locale === 'zh-Hans' ? '风险商机警告' : 'At-Risk Alert',
-              typeKey: 'Typekey0' as BusinessInsightTypekey
+              typeKey: 'TypeKey0' as BusinessInsightTypeKey
             },
             'revisit': {
               title: locale === 'zh-Hans' ? '待回访客户' : 'Pending Revisit',
-              typeKey: 'Typekey0' as BusinessInsightTypekey
+              typeKey: 'TypeKey0' as BusinessInsightTypeKey
             },
             'performance': {
               title: locale === 'zh-Hans' ? '业绩达成分析' : 'Performance Analysis',
-              typeKey: 'Typekey2' as BusinessInsightTypekey
+              typeKey: 'TypeKey2' as BusinessInsightTypeKey
             },
             'opportunity': {
               title: locale === 'zh-Hans' ? '商机动态' : 'Opportunity Update',
-              typeKey: 'Typekey1' as BusinessInsightTypekey
+              typeKey: 'TypeKey1' as BusinessInsightTypeKey
             },
             'client': {
               title: locale === 'zh-Hans' ? '客户洞察' : 'Client Insight',
-              typeKey: 'Typekey1' as BusinessInsightTypekey
+              typeKey: 'TypeKey1' as BusinessInsightTypeKey
             },
             'activity': {
               title: locale === 'zh-Hans' ? '活动动态' : 'Activity Update',
-              typeKey: 'Typekey1' as BusinessInsightTypekey
+              typeKey: 'TypeKey1' as BusinessInsightTypeKey
             }
           };
           
           const categoryInfo = typeMapping[item.type] || {
             title: locale === 'zh-Hans' ? `智能洞察 #${idx + 1}` : `Smart Insight #${idx + 1}`,
-            typeKey: 'Typekey1' as BusinessInsightTypekey
+            typeKey: 'TypeKey1' as BusinessInsightTypeKey
           };
           
           return createBusinessInsight.mutateAsync({
@@ -1527,9 +1604,9 @@ ${agentResponse}`;
             displayorder: idx,
             generatedon: now,
             isactive: true,
-            ownerid: userId,
+            ownerid: userId || '',
             referenceidsjson: '[]',
-            referencetypeKey: 'Referencetypekey0' as BusinessInsightReferencetypekey,
+            referencetypeKey: 'ReferencetypeKey0' as BusinessInsightReferencetypeKey,
             typeKey: categoryInfo.typeKey,
             validuntil: validUntil,
           });
@@ -1668,39 +1745,17 @@ ${agentResponse}`;
     copilot.openPanel();
   };
 
-  // Handle new conversation
+  // Handle new conversation - delegates to context for Direct Line session management
   const handleNewConversation = async () => {
     if (isCreatingConversation) return;
     setIsCreatingConversation(true);
     
     try {
-      if (copilotConversationRef.current) {
-        clearCopilotSession();
-        copilotConversationRef.current = null;
-        userContextSentRef.current = false;
-        watermarkRef.current = undefined;
+      // Let context handle Direct Line session reset
+      await copilot.startNewConversation();
 
-        const config = getCopilotConfig();
-        if (config) {
-          try {
-            const conversation = await getOrCreateConversation(config);
-            copilotConversationRef.current = conversation;
-            if (user) {
-              await sendUserContext(conversation, {
-                userId: user.objectId || '',
-                userPrincipalName: user.userPrincipalName || '',
-                displayName: user.fullName || '',
-              });
-              userContextSentRef.current = true;
-            }
-          } catch (err) {
-            console.error('Failed to re-initialize Copilot:', err);
-          }
-        }
-      }
-      
       const newConvo = await createConversation.mutateAsync({
-        ownerid: userId,
+        ownerid: userId || '',
         startedon: new Date().toISOString(),
         messagesjson: '[]',
         lastactiveon: new Date().toISOString(),
@@ -1942,6 +1997,7 @@ ${agentResponse}`;
             {copilotConnected && (
               <span className="w-2 h-2 bg-green-500 rounded-full" />
             )}
+
           </div>
 
           <div className="flex items-center gap-1">
@@ -2099,11 +2155,7 @@ ${agentResponse}`;
                       </div>
                     )}
                     <div
-                      className={cn('px-3 py-2 rounded-2xl rounded-br-md', getChatFontClass())}
-                      style={{
-                        background: 'rgba(255, 122, 0, 0.08)',
-                        border: '2px solid rgba(255, 122, 0, 0.4)',
-                      }}
+                      className={cn('px-3 py-2 rounded-2xl rounded-br-md user-message-bubble', getChatFontClass())}
                     >
                       {message.content}
                     </div>
@@ -2197,9 +2249,7 @@ ${agentResponse}`;
                         <DynamicDataRenderer content={message.content} />
                       ) : (
                         /* Render as markdown text */
-                        <div className={cn('text-foreground', getChatFontClass())}>
-                          <MarkdownContent content={message.content} />
-                        </div>
+                        <MarkdownRenderer content={message.content} className={cn('text-foreground', getChatFontClass())} />
                       )}
                       
                       {/* Sources */}
@@ -2390,7 +2440,7 @@ ${agentResponse}`;
   );
 
   return (
-    <div className="h-full flex flex-col overflow-hidden" style={{ background: 'linear-gradient(180deg, var(--scm-gradient-start) 0%, var(--scm-gradient-end) 100%)' }}>
+    <div className="h-full flex flex-col overflow-hidden bg-scm-gradient">
 
       {/* Offline Banner */}
       <AnimatePresence>
@@ -2408,10 +2458,87 @@ ${agentResponse}`;
       </AnimatePresence>
 
       {/* Main Content */}
-      <main className={cn(
-        'flex-1 pt-safe px-4 overflow-y-auto scrollbar-hide transition-all duration-300',
-        chatPanelExpanded ? 'pb-[55vh]' : 'pb-44'
-      )}>
+      <main
+        ref={mainContentRef}
+        className={cn(
+          'flex-1 pt-safe px-4 overflow-y-auto scrollbar-hide transition-all duration-300',
+          chatPanelExpanded ? 'pb-[55vh]' : 'pb-44'
+        )}
+        onTouchStart={(e: React.TouchEvent) => {
+          if (mainContentRef.current && mainContentRef.current.scrollTop <= 0) {
+            pullStartYRef.current = e.touches[0].clientY;
+          }
+        }}
+        onTouchMove={(e: React.TouchEvent) => {
+          if (pullStartYRef.current === null || isPullRefreshing) return;
+          if (mainContentRef.current && mainContentRef.current.scrollTop > 0) {
+            pullStartYRef.current = null;
+            setPullDistance(0);
+            return;
+          }
+          const currentY = e.touches[0].clientY;
+          const diff = currentY - pullStartYRef.current;
+          if (diff > 0) {
+            // Resistance factor for natural feel
+            setPullDistance(Math.min(diff * 0.5, 100));
+          }
+        }}
+        onTouchEnd={async () => {
+          if (pullDistance >= 60 && !isPullRefreshing) {
+            setIsPullRefreshing(true);
+            setPullDistance(60);
+            try {
+              await Promise.all([
+                refetchActivities(),
+                refetchOpportunities(),
+                refetchAccounts(),
+                refetchBusinessInsights()
+              ]);
+              toast.success(locale === 'zh-Hans' ? '已刷新' : 'Refreshed');
+            } catch (err) {
+              console.error('Refresh failed:', err);
+            } finally {
+              setIsPullRefreshing(false);
+              setPullDistance(0);
+            }
+          } else {
+            setPullDistance(0);
+          }
+          pullStartYRef.current = null;
+        }}
+      >
+        {/* Pull-to-refresh indicator */}
+        {(pullDistance > 0 || isPullRefreshing) && (
+          <div
+            className={cn(
+              'flex justify-center items-center transition-all duration-200',
+              isPullRefreshing ? 'h-[60px] mb-2' : pullDistance >= 60 ? 'h-[60px]' : pullDistance >= 40 ? 'h-10' : pullDistance >= 20 ? 'h-5' : 'h-0'
+            )}
+          >
+            {isPullRefreshing ? (
+              <div className="flex items-center gap-2">
+                <Loader2 className="w-5 h-5 text-primary animate-spin" />
+                <span className="text-sm text-muted-foreground">
+                  {locale === 'zh-Hans' ? '刷新中...' : 'Refreshing...'}
+                </span>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-1">
+                <ArrowUp
+                  className={cn(
+                    'w-5 h-5 text-primary transition-transform duration-200',
+                    pullDistance >= 60 ? 'rotate-180' : ''
+                  )}
+                />
+                <span className="text-xs text-muted-foreground">
+                  {pullDistance >= 60
+                    ? (locale === 'zh-Hans' ? '松开刷新' : 'Release to refresh')
+                    : (locale === 'zh-Hans' ? '下拉刷新' : 'Pull to refresh')}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
         <motion.div
           variants={containerVariants}
           initial="hidden"
@@ -2420,14 +2547,19 @@ ${agentResponse}`;
         >
           {/* Greeting Header */}
           <motion.div variants={itemVariants} className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-muted-foreground leading-none">{getGreeting(locale)}</p>
-              <p className="text-2xl font-bold text-foreground leading-tight mt-0.5">{user?.fullName || 'Sales User'}</p>
-            </div>
+            <HomeHeaderWidgetDisplay locale={locale} widget={homeHeaderWidget} kpiData={kpiData} />
             {/* Notification & Settings Icons */}
             <div className="flex items-center gap-1">
+              {/* Product Manual Icon */}
+              <button
+                onClick={() => navigate('/products')}
+                className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-muted/50 active:bg-muted transition-colors"
+                aria-label={locale === 'zh-Hans' ? '产品手册' : 'Product Manual'}
+              >
+                <BookOpen className="w-5 h-5 text-foreground" />
+              </button>
               {/* Notification Icon */}
-              <div className="relative">
+              <div className="relative inline-flex">
                 <button
                   onClick={() => setNotificationOpen(!notificationOpen)}
                   className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-muted/50 active:bg-muted transition-colors relative"
@@ -2438,6 +2570,7 @@ ${agentResponse}`;
                   <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-background" />
                 </button>
               </div>
+              {/* Settings with Connection Status */}
               <button
                 onClick={() => {
                   // On tablet/desktop, open sheet overlay; on mobile, navigate
@@ -2447,19 +2580,40 @@ ${agentResponse}`;
                     navigate('/settings');
                   }
                 }}
-                className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-muted/50 active:bg-muted transition-colors"
+                className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-muted/50 active:bg-muted transition-colors relative"
                 aria-label="Settings"
               >
                 <Settings className="w-5 h-5 text-foreground" />
+                {/* Connection Status Indicator - only show when NOT connected */}
+                {!isCopilotConfigured && (
+                  <span 
+                    className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-muted-foreground/50 rounded-full border-2 border-background"
+                    title={locale === 'zh-Hans' ? '未配置' : 'Not configured'}
+                  />
+                )}
               </button>
             </div>
           </motion.div>
+
 
           {/* KPI Cards - New comprehensive design */}
           <motion.div variants={itemVariants}>
             <KPICards
               data={kpiData}
               onNavigate={navigate}
+              onMarkDone={handleMarkOverdueDone}
+              onReschedule={handleRescheduleOverdue}
+              activityInsights={activityRelatedInsights}
+              allActivities={activities}
+              onCalendarDayClick={(date: Date) => {
+                // Navigate to activities page with day view and selected date
+                // Use local date components to avoid timezone offset issues with toISOString()
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                const dateStr = `${year}-${month}-${day}`;
+                navigate(`/activities?view=day&date=${dateStr}`);
+              }}
             />
           </motion.div>
 
@@ -2477,11 +2631,11 @@ ${agentResponse}`;
               isRefreshing={isRefreshingInsight}
               refreshingStatus={insightRefreshStatus}
               onRefresh={handleRefreshInsight}
-              onClear={handleClearAllInsights}
-              isClearing={isClearingInsights}
+
               onViewDetails={() => navigate('/brief-me')}
               isVoicePlaying={briefMeIsPlaying}
               voiceCurrentIndex={briefMeCurrentIndex}
+              excludeActivityInsights={true}
             />
           </motion.div>
 
@@ -2489,29 +2643,7 @@ ${agentResponse}`;
         </motion.div>
       </main>
 
-      {/* Floating In-Memory Banner */}
-      <AnimatePresence>
-        {showInMemoryBanner && (
-          <motion.div
-            initial={{ y: 0, opacity: 1 }}
-            exit={{ y: -100, opacity: 0 }}
-            transition={{ duration: 0.4, ease: "easeOut" as const }}
-            className="fixed top-4 left-4 right-4 z-50 safe-area-top"
-          >
-            <div className="bg-amber-500/20 backdrop-blur-md border border-amber-500/30 text-amber-200 px-4 py-3 rounded-xl text-sm flex items-center justify-between gap-2 shadow-lg">
-              <span>{t('inMemoryBanner', locale)}</span>
-              <button
-                type="button"
-                onClick={() => setShowInMemoryBanner(false)}
-                className="shrink-0 opacity-70 hover:opacity-100 transition-opacity"
-                aria-label="Dismiss"
-              >
-                ✕
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+
 
       {/* Expandable Chat Panel */}
       <AnimatePresence>
@@ -2549,22 +2681,13 @@ ${agentResponse}`;
         )}
       </AnimatePresence>
 
-      {/* Click-outside overlay for Brief Me player */}
-      <AnimatePresence>
-        {briefMeExpanded && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="fixed inset-0 z-40"
-            onClick={handleBriefMeClose}
-          />
-        )}
-      </AnimatePresence>
+      {/* Brief Me is now non-blocking - audio plays in background while user can interact with page */}
 
       {/* Fixed Bottom Area - Quick Actions + Voice Mic */}
-      <div className="fixed bottom-20 left-0 right-0 z-40 safe-area-bottom pointer-events-none" style={{ background: 'linear-gradient(to top, var(--scm-gradient-start) 40%, transparent)' }}>
+      <div className={cn(
+        'fixed left-0 right-0 z-40 safe-area-bottom pointer-events-none bg-scm-fade-up',
+        isCopilotConfigured ? 'bottom-20' : 'bottom-0'
+      )}>
         <div className="flex flex-col items-center px-4 pb-4 pointer-events-auto">
           {/* Quick Action Buttons - Hide when chat expanded or brief me expanded */}
           <AnimatePresence mode="wait">
@@ -2655,6 +2778,8 @@ ${agentResponse}`;
                     }}
                     disabled={briefMeCurrentIndex === 0}
                     className="w-7 h-7 flex items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
+                    aria-label={locale === 'zh-Hans' ? '上一条' : 'Previous'}
+                    title={locale === 'zh-Hans' ? '上一条' : 'Previous'}
                   >
                     <SkipBack className="w-4 h-4" />
                   </button>
@@ -2674,6 +2799,8 @@ ${agentResponse}`;
                       }
                     }}
                     className="w-12 h-12 flex items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                    aria-label={briefMeIsPlaying ? (locale === 'zh-Hans' ? '暂停' : 'Pause') : (locale === 'zh-Hans' ? '播放' : 'Play')}
+                    title={briefMeIsPlaying ? (locale === 'zh-Hans' ? '暂停' : 'Pause') : (locale === 'zh-Hans' ? '播放' : 'Play')}
                   >
                     {briefMeIsPlaying ? (
                       <Pause className="w-5 h-5" />
@@ -2690,6 +2817,8 @@ ${agentResponse}`;
                     }}
                     disabled={briefMeCurrentIndex >= briefMeInsightTexts.length - 1}
                     className="w-7 h-7 flex items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
+                    aria-label={locale === 'zh-Hans' ? '下一条' : 'Next'}
+                    title={locale === 'zh-Hans' ? '下一条' : 'Next'}
                   >
                     <SkipForward className="w-4 h-4" />
                   </button>
@@ -2708,6 +2837,8 @@ ${agentResponse}`;
                       handleBriefMeClose();
                     }}
                     className="w-7 h-7 flex items-center justify-center rounded-full bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                    aria-label={locale === 'zh-Hans' ? '关闭' : 'Close'}
+                    title={locale === 'zh-Hans' ? '关闭' : 'Close'}
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -2910,7 +3041,7 @@ ${agentResponse}`;
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">{locale === 'zh-Hans' ? '总金额' : 'Total Amount'}</p>
-                  <p className="text-sm text-foreground">¥{((sourceData as Opportunity).totalamount || 0).toLocaleString()}</p>
+                  <p className="text-sm text-foreground">${((sourceData as Opportunity).totalamount || 0).toLocaleString()}</p>
                 </div>
                 <button
                   onClick={() => {
@@ -2943,6 +3074,19 @@ ${agentResponse}`;
                 >
                   {locale === 'zh-Hans' ? '查看详情' : 'View Details'}
                 </button>
+              </div>
+            )}
+            {/* Fallback when sourceData is not found */}
+            {selectedSource && !sourceData && (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  {locale === 'zh-Hans' 
+                    ? `无法在本地加载 ${selectedSource.type} 类型的记录。该记录可能已被删除或ID类型不匹配。`
+                    : `Unable to load ${selectedSource.type} record locally. The record may have been deleted or the ID type is mismatched.`}
+                </p>
+                <p className="text-xs text-muted-foreground font-mono bg-muted/50 p-2 rounded">
+                  ID: {selectedSource.id}
+                </p>
               </div>
             )}
           </div>
@@ -2991,6 +3135,8 @@ ${agentResponse}`;
                   <button
                     onClick={() => setNotificationOpen(false)}
                     className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-muted transition-colors"
+                    aria-label={locale === 'zh-Hans' ? '关闭通知' : 'Close notifications'}
+                    title={locale === 'zh-Hans' ? '关闭通知' : 'Close notifications'}
                   >
                     <X className="w-4 h-4 text-muted-foreground" />
                   </button>
@@ -3107,8 +3253,7 @@ ${agentResponse}`;
               <div className="p-4 pt-6">
                 <div className="flex items-center gap-3 mb-8">
                   <div
-                    className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-semibold text-white"
-                    style={{ background: 'linear-gradient(135deg, #FF7A00 0%, #FF9933 100%)' }}
+                    className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-semibold text-white bg-avatar-brand"
                   >
                     {getInitial(user?.fullName)}
                   </div>

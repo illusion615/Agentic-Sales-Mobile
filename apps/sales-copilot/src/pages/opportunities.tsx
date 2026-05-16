@@ -1,14 +1,19 @@
-import { useMemo } from 'react';
+import { useMemo, useEffect, useCallback } from 'react';
 import { motion } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
 import { TrendingUp, Calendar, DollarSign, ChevronRight, TrendingDown, Minus } from 'lucide-react';
 import { MobileLayout } from '@/components/mobile-layout';
 import { GlassCard, GlassListItem } from '@/components/glass-card';
 import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/utils';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
-import { OpportunityStagekeyToLabel, OpportunityConfidencetrendkeyToLabel } from '@/generated/models/opportunity-model';
-import type { Opportunity as DataverseOpportunity, OpportunityStagekey, OpportunityConfidencetrendkey } from '@/generated/models/opportunity-model';
+import { useQueryClient } from '@tanstack/react-query';
+import { OpportunityStageKeyToLabel, OpportunityConfidencetrendKeyToLabel } from '@/generated/models/opportunity-model';
+import type { Opportunity as DataverseOpportunity, OpportunityConfidencetrendKey } from '@/generated/models/opportunity-model';
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
+import { useCopilot } from '@/contexts/copilot-context';
+import { getLocale } from '@/lib/i18n';
+import { PullToRefresh } from '@/components/pull-to-refresh';
 
 const stageColors: Record<string, string> = {
   prospecting: 'bg-[#6366F1]',
@@ -44,9 +49,9 @@ function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-function TrendIcon({ trendKey }: { trendKey?: OpportunityConfidencetrendkey }) {
+function TrendIcon({ trendKey }: { trendKey?: OpportunityConfidencetrendKey }) {
   if (!trendKey) return null;
-  const trend = OpportunityConfidencetrendkeyToLabel[trendKey];
+  const trend = OpportunityConfidencetrendKeyToLabel[trendKey];
   if (trend === 'up') return <TrendingUp className="w-3 h-3 text-emerald-500" />;
   if (trend === 'down') return <TrendingDown className="w-3 h-3 text-rose-500" />;
   return <Minus className="w-3 h-3 text-muted-foreground" />;
@@ -54,16 +59,26 @@ function TrendIcon({ trendKey }: { trendKey?: OpportunityConfidencetrendkey }) {
 
 export default function OpportunitiesPage() {
   const navigate = useNavigate();
+
+  // Copilot context for agent awareness
+  const copilot = useCopilot();
+  const locale = getLocale();
+  const queryClient = useQueryClient();
   const { data: opportunities = [], isLoading } = useOpportunityList({
     orderBy: ['expectedclosedate asc'],
   });
+
+  // Pull to refresh handler
+  const handleRefresh = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: ['opportunity-list'] });
+  }, [queryClient]);
 
   // Calculate pipeline stats by stage
   const pipelineStats = useMemo(() => {
     const stages = ['prospecting', 'qualification', 'proposal', 'negotiation'];
     return stages.map((stage: string) => {
       const stageOpps = opportunities.filter((opp: DataverseOpportunity) => 
-        OpportunityStagekeyToLabel[opp.stageKey] === stage
+        OpportunityStageKeyToLabel[opp.stageKey] === stage
       );
       const totalValue = stageOpps.reduce((sum: number, opp: DataverseOpportunity) => sum + (opp.totalamount || 0), 0);
       return {
@@ -79,10 +94,35 @@ export default function OpportunitiesPage() {
   // Filter to active opportunities (not won/lost)
   const activeOpportunities = useMemo(() => {
     return opportunities.filter((opp: DataverseOpportunity) => {
-      const stage = OpportunityStagekeyToLabel[opp.stageKey];
+      const stage = OpportunityStageKeyToLabel[opp.stageKey];
       return stage !== 'won' && stage !== 'lost';
     });
   }, [opportunities]);
+
+  // Calculate total pipeline value for context
+  const totalPipelineValue = useMemo(() => {
+    return activeOpportunities.reduce((sum: number, opp: DataverseOpportunity) => sum + (opp.totalamount || 0), 0);
+  }, [activeOpportunities]);
+
+  // Set page context for Copilot agent awareness
+  useEffect(() => {
+    copilot.setPageContext({
+      currentPage: locale === 'zh-Hans' ? '商机列表' : 'Opportunities List',
+      summary: locale === 'zh-Hans'
+        ? `商机列表: 共${opportunities.length}个商机，${activeOpportunities.length}个活跃，总管道价值 $${formatCurrency(totalPipelineValue)}`
+        : `Opportunities list: ${opportunities.length} total, ${activeOpportunities.length} active, pipeline value ${formatCurrency(totalPipelineValue)}`,
+      pageData: {
+        totalOpportunities: opportunities.length,
+        activeOpportunities: activeOpportunities.length,
+        totalPipelineValue,
+        pipelineByStage: pipelineStats.map((stat) => ({ stage: stat.fullName, count: stat.count, value: stat.value })),
+      },
+    });
+    
+    return () => {
+      copilot.setPageContext(null);
+    };
+  }, [opportunities.length, activeOpportunities.length, totalPipelineValue, pipelineStats, locale, copilot.setPageContext]);
 
   if (isLoading) {
     return (
@@ -96,7 +136,7 @@ export default function OpportunitiesPage() {
 
   return (
     <MobileLayout title="Pipeline">
-      <div className="flex-1 overflow-y-auto pb-32">
+      <PullToRefresh onRefresh={handleRefresh} className="flex-1 overflow-y-auto pb-32">
         <motion.div
           variants={containerVariants}
           initial="hidden"
@@ -144,7 +184,8 @@ export default function OpportunitiesPage() {
             ) : (
               <div className="space-y-3">
                 {activeOpportunities.map((opp: DataverseOpportunity) => {
-                  const stageLabel = OpportunityStagekeyToLabel[opp.stageKey];
+                  const stageLabel = OpportunityStageKeyToLabel[opp.stageKey];
+                  
                   return (
                     <motion.div key={opp.id} variants={itemVariants}>
                       <GlassListItem
@@ -208,7 +249,7 @@ export default function OpportunitiesPage() {
             )}
           </motion.section>
         </motion.div>
-      </div>
+      </PullToRefresh>
     </MobileLayout>
   );
 }

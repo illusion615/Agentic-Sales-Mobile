@@ -73,67 +73,11 @@ export default function BriefMePage() {
   const chapterStartTimeRef = useRef<number>(0);
   const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
   
-  // Demo briefing data (fallback when no data from Dataverse)
-  const demoBriefingPayload: BriefingPayload = useMemo(() => ({
-    items: [
-      {
-        id: 'ch1',
-        headline: { zh: '华北科技续约即将到期', en: 'Huabei Tech Renewal Expiring Soon' },
-        summary: { zh: '合同将于下周到期，客户对价格敏感度提升', en: 'Contract expires next week, customer showing price sensitivity' },
-        bullets: [
-          { zh: '当前合同年价值 ¥180K', en: 'Current annual contract worth ¥180K' },
-          { zh: '竞对已开始接触', en: 'Competitors have started engagement' }
-        ],
-        script: {
-          zh: '注意，华北科技的续约合同将于下周到期。这是一个年价值18万的重要客户。根据最近的沟通记录，客户对价格敏感度有所提升，同时我们发现竞争对手已经开始接触他们。建议您今天优先安排与华北科技采购负责人的沟通，了解他们的顾虑，并准备好有竞争力的续约方案。',
-          en: "Attention: Huabei Tech's renewal contract expires next week. This is a significant customer worth 180K annually. Based on recent communications, the customer is showing increased price sensitivity, and we've noticed competitors have started reaching out to them. I recommend prioritizing a call with their procurement lead today to understand their concerns and prepare a competitive renewal offer."
-        },
-        priority: 'risk',
-        time_range: { start_ms: 0, end_ms: 25000 },
-        pos: { index: 1, total: 3 }
-      },
-      {
-        id: 'ch2',
-        headline: { zh: '今日拜访计划确认', en: "Today's Visit Schedule Confirmed" },
-        summary: { zh: '5家客户拜访已确认，建议路线已优化', en: '5 customer visits confirmed, route optimized' },
-        bullets: [
-          { zh: '首站：东方电子 9:30', en: 'First stop: Dongfang Electronics 9:30' },
-          { zh: '最后一站：南山智造 16:00', en: 'Last stop: Nanshan Zhizao 16:00' }
-        ],
-        script: {
-          zh: '今天您有5家客户拜访计划，所有预约都已确认。我已经根据地理位置和客户优先级为您优化了拜访路线。首站是早上9点30分的东方电子，这是一个A级客户，主要讨论新项目合作。最后一站是下午4点的南山智造园区。路线已同步到您的导航应用，预计全程约45公里，请注意下午可能有阵雨。',
-          en: "You have 5 customer visits scheduled today, all confirmed. I've optimized your route based on location and customer priority. First stop is Dongfang Electronics at 9:30 AM - this is an A-tier customer, and you'll be discussing new project collaboration. Last stop is Nanshan Zhizao at 4 PM. The route has been synced to your navigation app, approximately 45km total. Note there may be afternoon showers."
-        },
-        priority: 'info',
-        time_range: { start_ms: 25000, end_ms: 50000 },
-        pos: { index: 2, total: 3 }
-      },
-      {
-        id: 'ch3',
-        headline: { zh: '本周业绩超额完成', en: 'Weekly Target Exceeded' },
-        summary: { zh: '本周签约额达到目标的112%，团队排名上升', en: 'Weekly signings reached 112% of target, team ranking improved' },
-        bullets: [
-          { zh: '新签约3单，总额 ¥85K', en: '3 new contracts, total ¥85K' },
-          { zh: '团队排名升至第2', en: 'Team ranking rose to #2' }
-        ],
-        metrics: [
-          { label: { zh: '周目标', en: 'Weekly' }, value: '112%', dir: 'up' as const },
-          { label: { zh: '排名', en: 'Rank' }, value: '#2', dir: 'up' as const }
-        ],
-        script: {
-          zh: '好消息！本周您的业绩表现非常出色。截至目前，本周签约额已达到目标的112%，超额完成任务。您成功签下了3个新订单，总金额8万5千元。得益于这个优秀表现，您在团队中的排名也上升到了第2位。继续保持这个势头，月度目标指日可待！',
-          en: "Great news! Your performance this week has been outstanding. Your weekly signings have reached 112% of target, exceeding the goal. You've successfully closed 3 new contracts totaling 85K. Thanks to this excellent performance, your team ranking has risen to #2. Keep up this momentum and the monthly target is well within reach!"
-        },
-        priority: 'opp',
-        time_range: { start_ms: 50000, end_ms: 75000 },
-        pos: { index: 3, total: 3 }
-      }
-    ]
-  }), []);
-  
   // Get today's briefing
   const briefing = useMemo(() => {
-    const userId = user?.objectId || 'demo-user-id';
+    const userId = user?.objectId;
+    if (!userId) return undefined;
+    
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
@@ -155,7 +99,7 @@ export default function BriefMePage() {
       });
     }
     
-    // Demo fallback
+    // Fallback to any briefing for user
     if (!todayBriefing && briefings.length > 0) {
       todayBriefing = briefings.find((b) => b.ownerid === userId) || briefings[0];
     }
@@ -163,7 +107,7 @@ export default function BriefMePage() {
     return todayBriefing;
   }, [briefings, user, isOffline]);
   
-  // Parse payload - use demo data if no briefing available
+  // Parse payload
   const payload: BriefingPayload | null = useMemo(() => {
     if (briefing?.payloadjson) {
       const parsed = parseBriefingPayload(briefing.payloadjson);
@@ -171,9 +115,8 @@ export default function BriefMePage() {
         return parsed;
       }
     }
-    // Fallback to demo data
-    return demoBriefingPayload;
-  }, [briefing, demoBriefingPayload]);
+    return null;
+  }, [briefing]);
   
   const items = payload?.items || [];
   const currentItem = items[currentIndex];

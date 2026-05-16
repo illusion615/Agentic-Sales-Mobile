@@ -10,12 +10,12 @@ export const OpportunitySchema = z.object({
   blocker: z.string().optional(),
   closedon: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/, "DateTime must be in ISO format").optional(),
   confidence: z.number().int().optional(),
-  confidencetrendKey: z.enum(['Confidencetrendkey0', 'Confidencetrendkey1', 'Confidencetrendkey2']).optional(),
+  confidencetrendKey: z.enum(['ConfidencetrendKey0', 'ConfidencetrendKey1', 'ConfidencetrendKey2']).optional(),
   createdon: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/, "DateTime must be in ISO format").optional(),
   expectedclosedate: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/, "DateTime must be in ISO format").optional(),
   lastaction: z.string().optional(),
   ownerid: z.string().min(1, { message: "Owner ID is required" }),
-  stageKey: z.enum(['Stagekey0', 'Stagekey1', 'Stagekey2', 'Stagekey3', 'Stagekey4', 'Stagekey5']),
+  stageKey: z.enum(['StageKey0', 'StageKey1', 'StageKey2', 'StageKey3', 'StageKey4', 'StageKey5']),
   totalamount: z.number(),
 });
 

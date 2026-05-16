@@ -35,20 +35,7 @@ export const ActivityOutcomeToEnglish: Record<string, string> = {
   '无结果': 'No Result',
 };
 
-// Task Status - Chinese labels to English display
-export const TaskStatusToEnglish: Record<string, string> = {
-  '待办': 'Pending',
-  '进行中': 'In Progress',
-  '已完成': 'Completed',
-  '已取消': 'Cancelled',
-};
 
-// Task Priority - Chinese labels to English display
-export const TaskPriorityToEnglish: Record<string, string> = {
-  '高': 'High',
-  '中': 'Medium',
-  '低': 'Low',
-};
 
 /**
  * Convert any Chinese label to English.
@@ -61,8 +48,7 @@ export function toEnglish(chineseLabel: string | undefined | null): string {
     CreditStatusToEnglish[chineseLabel] ||
     PaymentStatusToEnglish[chineseLabel] ||
     ActivityOutcomeToEnglish[chineseLabel] ||
-    TaskStatusToEnglish[chineseLabel] ||
-    TaskPriorityToEnglish[chineseLabel] ||
+
     chineseLabel
   );
 }
@@ -95,16 +81,4 @@ export function getActivityOutcomeEnglish(outcomeLabel: string | undefined | nul
   return ActivityOutcomeToEnglish[outcomeLabel || ''] || outcomeLabel || '';
 }
 
-/**
- * Helper to get English task status label
- */
-export function getTaskStatusEnglish(statusLabel: string | undefined | null): string {
-  return TaskStatusToEnglish[statusLabel || ''] || statusLabel || '';
-}
 
-/**
- * Helper to get English task priority label
- */
-export function getTaskPriorityEnglish(priorityLabel: string | undefined | null): string {
-  return TaskPriorityToEnglish[priorityLabel || ''] || priorityLabel || '';
-}

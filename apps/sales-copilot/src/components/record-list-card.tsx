@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronDown, ChevronUp, Building2, Target, Calendar, ArrowRight } from 'lucide-react';
+import { ChevronDown, ChevronUp, Building2, Target, Calendar, ArrowRight, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getLocale } from '@/lib/i18n';
 import { useCopilot } from '@/contexts/copilot-context';
 
-export type RecordType = 'account' | 'opportunity' | 'activity';
+export type RecordType = 'account' | 'opportunity' | 'activity' | 'contact';
 
 export interface RecordItem {
   id: string;
@@ -26,7 +26,7 @@ const typeConfig = {
     icon: Building2,
     labelZh: '客户列表',
     labelEn: 'Accounts',
-    route: '/clients',
+    route: '/accounts',
   },
   opportunity: {
     icon: Target,
@@ -39,6 +39,12 @@ const typeConfig = {
     labelZh: '活动列表',
     labelEn: 'Activities',
     route: '/activities',
+  },
+  contact: {
+    icon: User,
+    labelZh: '联系人列表',
+    labelEn: 'Contacts',
+    route: '/contacts',
   },
 };
 

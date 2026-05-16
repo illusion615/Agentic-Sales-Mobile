@@ -4,17 +4,17 @@ import './index.css';
 import App from '@/app.tsx';
 import { initColorTheme } from '@/lib/i18n';
 
-// Initialize theme from localStorage or default to dark
+// Initialize theme from localStorage or default to light
 const savedTheme = localStorage.getItem('theme');
 const root = document.documentElement;
 // Clear any existing theme classes first
 root.classList.remove('dark', 'light');
-if (savedTheme === 'light') {
-  root.classList.add('light');
-} else {
+if (savedTheme === 'dark') {
   root.classList.add('dark');
+} else {
+  root.classList.add('light');
   if (!savedTheme) {
-    localStorage.setItem('theme', 'dark');
+    localStorage.setItem('theme', 'light');
   }
 }
 

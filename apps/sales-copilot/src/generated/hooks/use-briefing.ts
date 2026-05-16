@@ -32,6 +32,7 @@ export function useBriefing(id: string) {
 
 /**
  * Create a new Briefing record.
+ * @remarks Form validation: use CreateBriefingSchema with zodResolver for type-safe create forms
  */
 export function useCreateBriefing() {
   const client = useQueryClient();
@@ -45,6 +46,7 @@ export function useCreateBriefing() {
 
 /**
  * Update an existing Briefing record.
+ * @remarks Form validation: use UpdateBriefingSchema.partial().omit({ id: true }) with zodResolver for edit forms (matches changedFields input)
  */
 export function useUpdateBriefing() {
   const client = useQueryClient();
@@ -79,3 +81,6 @@ export function useDeleteBriefing() {
 
 /** Data source type for this table — drives InMemoryDataBanner visibility. */
 export const Briefing_DATA_SOURCE_TYPE = 'Dataverse' as const;
+
+export { BriefingSchema, CreateBriefingSchema, UpdateBriefingSchema } from "../validators/briefing-validator";
+export type { BriefingInput, CreateBriefingInput, UpdateBriefingInput } from "../validators/briefing-validator";

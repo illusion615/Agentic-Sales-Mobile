@@ -11,6 +11,9 @@ import {
   ExternalLink,
   RefreshCw,
   AlertCircle,
+  Mic,
+  Mail,
+  MapPin,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -19,7 +22,7 @@ import { useActivity, useUpdateActivity } from '@/generated/hooks/use-activity';
 import { useAccountList } from '@/generated/hooks/use-account';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { getLocale, type Locale } from '@/lib/i18n';
-import { OpportunityStagekeyToLabel, type OpportunityStagekey } from '@/generated/models/opportunity-model';
+import { OpportunityStageKeyToLabel, type OpportunityStageKey } from '@/generated/models/opportunity-model';
 import {
   Sheet,
   SheetContent,
@@ -198,9 +201,6 @@ function EditableRow({
   const formatDisplayValue = () => {
     if (type === 'currency') {
       const num = parseFloat(value) || 0;
-      if (locale === 'zh-Hans') {
-        return num >= 10000 ? `¥${(num / 10000).toFixed(0)}万` : `¥${num.toLocaleString()}`;
-      }
       return num >= 1000 ? `$${(num / 1000).toFixed(0)}K` : `$${num.toLocaleString()}`;
     }
     if (type === 'date' && value) {
@@ -369,10 +369,10 @@ function SourceChip({
     return t('lastVisitSource', locale, { date: source.date || '' });
   };
 
-  const getIcon = () => {
-    if (source.type === 'recording') return '🎙️';
-    if (source.type === 'email') return '📧';
-    return '📍';
+  const getIcon = (): React.ComponentType<{ className?: string }> => {
+    if (source.type === 'recording') return Mic;
+    if (source.type === 'email') return Mail;
+    return MapPin;
   };
 
   return (
@@ -380,7 +380,7 @@ function SourceChip({
       onClick={onTap}
       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-muted border border-border text-helper text-foreground/80 hover:bg-muted/80 transition-colors"
     >
-      <span>{getIcon()}</span>
+      {(() => { const Icon = getIcon(); return <Icon className="w-4 h-4" />; })()}
       <span className="truncate max-w-[200px]">{getLabel()}</span>
       <ChevronDown className="w-3 h-3 text-muted-foreground" />
     </button>
@@ -390,7 +390,7 @@ function SourceChip({
 // OpportunityDraft interface
 interface OpportunityDraft {
   accountId: string;
-  stageKey: OpportunityStagekey;
+  stageKey: OpportunityStageKey;
   amount: number;
   expectedCloseDate: string;
   nextAction: string;
@@ -408,7 +408,7 @@ export default function OpportunityDraftReviewPage() {
 
   const locale: Locale = getLocale();
   const { data: user } = useUser();
-  const { data: activity, isLoading: activityLoading } = useActivity(finalActivityId);
+  const { data: activity, isLoading: activityLoading, error: activityError } = useActivity(finalActivityId);
   const { data: accounts = [] } = useAccountList();
   const { data: opportunities = [] } = useOpportunityList();
   const updateActivity = useUpdateActivity();
@@ -421,7 +421,7 @@ export default function OpportunityDraftReviewPage() {
   const [selectedSource, setSelectedSource] = useState<SourceData | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const userId = user?.objectId || 'demo-user-id';
+  const userId = user?.objectId || '';
 
   // Simulate AI draft generation
   useEffect(() => {
@@ -436,7 +436,7 @@ export default function OpportunityDraftReviewPage() {
         // Generate mock draft based on activity data
         const mockDraft: OpportunityDraft = {
           accountId: activity.account?.id || accounts[0]?.id || '',
-          stageKey: 'Stagekey2', // proposal
+          stageKey: 'StageKey2', // proposal
           amount: 620000,
           expectedCloseDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
           nextAction: locale === 'zh-Hans' ? '下周签约' : 'Sign contract next week',
@@ -491,7 +491,7 @@ export default function OpportunityDraftReviewPage() {
         if (field === 'amount') {
           updated.amount = parseFloat(newValue) || 0;
         } else if (field === 'stageKey') {
-          updated.stageKey = newValue as OpportunityStagekey;
+          updated.stageKey = newValue as OpportunityStageKey;
         } else {
           (updated as Record<string, unknown>)[field] = newValue;
         }
@@ -521,7 +521,7 @@ export default function OpportunityDraftReviewPage() {
     if (finalActivityId) {
       await updateActivity.mutateAsync({
         id: finalActivityId,
-        changedFields: { draftstatusKey: 'Draftstatuskey0' }, // back to draft
+        changedFields: { draftstatusKey: 'DraftstatusKey0' }, // back to draft
       });
     }
     toast.info(t('abandonedDraft', locale));
@@ -540,7 +540,7 @@ export default function OpportunityDraftReviewPage() {
       if (finalActivityId) {
         await updateActivity.mutateAsync({
           id: finalActivityId,
-          changedFields: { draftstatusKey: 'Draftstatuskey1' }, // confirmed
+          changedFields: { draftstatusKey: 'DraftstatusKey1' }, // confirmed
         });
       }
 
@@ -562,7 +562,7 @@ export default function OpportunityDraftReviewPage() {
       if (activity) {
         const newDraft: OpportunityDraft = {
           accountId: activity.account?.id || accounts[0]?.id || '',
-          stageKey: 'Stagekey2',
+          stageKey: 'StageKey2',
           amount: 580000,
           expectedCloseDate: new Date(Date.now() + 25 * 24 * 60 * 60 * 1000).toISOString(),
           nextAction: locale === 'zh-Hans' ? '本周回访确认' : 'Follow up this week',
@@ -596,7 +596,7 @@ export default function OpportunityDraftReviewPage() {
     if (finalActivityId) {
       await updateActivity.mutateAsync({
         id: finalActivityId,
-        changedFields: { draftstatusKey: 'Draftstatuskey3' }, // cancelled
+        changedFields: { draftstatusKey: 'DraftstatusKey3' }, // cancelled
       });
     }
     toast.info(t('abandonedDraft', locale));
@@ -604,7 +604,7 @@ export default function OpportunityDraftReviewPage() {
   }, [finalActivityId, updateActivity, locale, navigate]);
 
   // Stage options
-  const stageOptions = Object.entries(OpportunityStagekeyToLabel)
+  const stageOptions = Object.entries(OpportunityStageKeyToLabel)
     .filter(([, label]) => label !== 'won' && label !== 'lost')
     .map(([key, label]) => ({
       value: key,
@@ -674,7 +674,7 @@ export default function OpportunityDraftReviewPage() {
               <div className="w-12 h-12 rounded-full border-2 border-primary border-t-transparent animate-spin mb-4" />
               <p className="text-body text-muted-foreground">{t('processingAI', locale)}</p>
             </motion.div>
-          ) : !activity || !draft ? (
+          ) : activityError || !activity || !draft ? (
             <motion.div
               key="error"
               initial={{ opacity: 0 }}
@@ -684,6 +684,9 @@ export default function OpportunityDraftReviewPage() {
             >
               <AlertCircle className="w-12 h-12 text-muted-foreground mb-4" />
               <p className="text-body text-muted-foreground">{t('noActivity', locale)}</p>
+              <Button variant="outline" className="mt-4" onClick={() => navigate('/home')}>
+                {locale === 'zh-Hans' ? '返回首页' : 'Back to Home'}
+              </Button>
             </motion.div>
           ) : (
             <motion.div
@@ -843,12 +846,14 @@ export default function OpportunityDraftReviewPage() {
       <Sheet open={sourceDrawerOpen} onOpenChange={setSourceDrawerOpen}>
         <SheetContent side="bottom" className="h-[70vh] bg-card border-t border-border">
           <SheetHeader className="border-b border-border/20 pb-4">
-            <SheetTitle className="text-foreground">
-              {selectedSource?.type === 'recording'
-                ? '🎙️ ' + (locale === 'zh-Hans' ? '录音片段' : 'Recording Segment')
-                : selectedSource?.type === 'email'
-                  ? '📧 ' + (locale === 'zh-Hans' ? '邮件内容' : 'Email Content')
-                  : '📍 ' + (locale === 'zh-Hans' ? '拜访记录' : 'Visit Record')}
+            <SheetTitle className="text-foreground flex items-center gap-2">
+              {selectedSource?.type === 'recording' ? (
+                <><Mic className="w-5 h-5" /> {locale === 'zh-Hans' ? '录音片段' : 'Recording Segment'}</>
+              ) : selectedSource?.type === 'email' ? (
+                <><Mail className="w-5 h-5" /> {locale === 'zh-Hans' ? '邮件内容' : 'Email Content'}</>
+              ) : (
+                <><MapPin className="w-5 h-5" /> {locale === 'zh-Hans' ? '拜访记录' : 'Visit Record'}</>
+              )}
             </SheetTitle>
           </SheetHeader>
           <div className="py-4 space-y-4">

@@ -1,13 +1,15 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { ArrowLeft, Moon, Sun, Globe, HelpCircle, LogOut, Volume2, Play, Loader2, CheckCircle2, XCircle, Type, Palette, CircleDot, LayoutGrid, Speech, X, Zap, Bot, MessageSquare } from 'lucide-react';
+import { ArrowLeft, Moon, Sun, Globe, HelpCircle, LogOut, Volume2, Play, Loader2, CheckCircle2, XCircle, Type, Palette, CircleDot, LayoutGrid, Speech, X, Zap, Bot, MessageSquare, Gauge, LayoutDashboard, Database, Bug, FileCode, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+
 import { useUser } from '@/hooks/use-user';
-import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, setSelectedVoice, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getOrganizeInStructureCard, setOrganizeInStructureCard, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getLLMConfig, setLLMConfig, testBYOMConnection, clearAzureADTokenCache, findMatchingSystemVoice, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, type Locale, type VoiceOption, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type LLMProvider, type LLMConfig, type AzureAuthType } from '@/lib/i18n';
-import { getCopilotConfig, saveCopilotConfig, clearCopilotConfig, testConnection } from '@/services/copilot-service';
+import { useAppSettings } from '@/hooks/use-app-settings';
+import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, setSelectedVoice, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getOrganizeInStructureCard, setOrganizeInStructureCard, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, setLLMConfig, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, type Locale, type VoiceOption, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type LLMConfig, type HomeHeaderWidget } from '@/lib/i18n';
+import { saveCopilotConfig } from '@/services/copilot-service';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   Select,
@@ -62,7 +64,11 @@ interface SettingsPanelProps {
 }
 
 export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps) {
+  const navigate = useNavigate();
   const { data: user } = useUser();
+  
+  // Load settings from database
+  const { settings: appSettings, isLoading: isLoadingSettings, isFetched: isSettingsFetched } = useAppSettings();
   const [locale, setLocaleState] = useState<Locale>(getLocale);
   const [isDark, setIsDark] = useState(true);
   const [selectedVoice, setSelectedVoiceState] = useState(getSelectedVoice);
@@ -71,11 +77,6 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const [systemVoicesLoaded, setSystemVoicesLoaded] = useState(false);
   const [systemVoices, setSystemVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [selectedSystemVoice, setSelectedSystemVoiceState] = useState<string>(() => getSelectedSystemVoiceName() || '');
-
-  // Power Automate endpoint state
-  const [copilotEndpoint, setCopilotEndpoint] = useState('');
-  const [isTesting, setIsTesting] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState<'none' | 'success' | 'error'>('none');
 
   // Font size state
   const [chatFontSize, setChatFontSize] = useState<FontSizeOption>(() => getFontSizeConfig().chat);
@@ -87,262 +88,43 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const [voiceSummaryEnabled, setVoiceSummaryEnabledState] = useState(() => getVoiceSummaryEnabled());
   const [copilotInAllScreens, setCopilotInAllScreensState] = useState(() => getCopilotInAllScreens());
   const [simulateStreaming, setSimulateStreamingState] = useState(() => getSimulateStreaming());
+  const [homeHeaderWidget, setHomeHeaderWidgetState] = useState<HomeHeaderWidget>(() => getHomeHeaderWidget());
 
-  // Power Automate LLM state
-  const [llmProvider, setLLMProviderState] = useState<LLMProvider>('power-automate');
-  const [llmApiKey, setLLMApiKey] = useState('');
-  const [llmEndpoint, setLLMEndpoint] = useState('');
-  const [llmDeploymentName, setLLMDeploymentName] = useState('');
-  const [llmModel, setLLMModel] = useState('');
-  const [llmEnabled, setLLMEnabled] = useState(false);
-  const [isByomTesting, setIsByomTesting] = useState(false);
-  const [byomTestStatus, setByomTestStatus] = useState<'none' | 'success' | 'error'>('none');
-  // Azure AD Service Principal fields
-  const [azureAuthType, setAzureAuthType] = useState<AzureAuthType>('api-key');
-  const [azureTenantId, setAzureTenantId] = useState('');
-  const [azureClientId, setAzureClientId] = useState('');
-  const [azureClientSecret, setAzureClientSecret] = useState('');
+  // Track if database settings have been loaded
+  const [dbSettingsLoaded, setDbSettingsLoaded] = useState(false);
 
-  // Copilot Studio tool configuration
-  const [copilotStudioEnabled, setCopilotStudioEnabled] = useState(false);
-  const [copilotStudioEndpoint, setCopilotStudioEndpoint] = useState('');
-
-  const [isCopilotStudioTesting, setIsCopilotStudioTesting] = useState(false);
-  const [copilotStudioTestStatus, setCopilotStudioTestStatus] = useState<'none' | 'success' | 'error'>('none');
-  // Load Copilot config on mount
+  // Load settings from database when available (takes priority over localStorage)
   useEffect(() => {
-    const config = getCopilotConfig();
-    if (config) {
-      setCopilotEndpoint(config.tokenEndpoint);
-      setConnectionStatus('success');
-    }
-  }, []);
-
-  // Load BYOM config on mount
-  useEffect(() => {
-    const config = getLLMConfig();
-    if (config) {
-      setLLMProviderState(config.provider);
-      setLLMApiKey(config.apiKey || '');
-      setLLMEndpoint(config.endpoint || '');
-      setLLMDeploymentName(config.deploymentName || '');
-      setLLMModel(config.model || '');
-      setLLMEnabled(config.enabled);
-      // Azure AD fields
-      setAzureAuthType(config.azureAuthType || 'api-key');
-      setAzureTenantId(config.azureTenantId || '');
-      setAzureClientId(config.azureClientId || '');
-      setAzureClientSecret(config.azureClientSecret || '');
-    } else {
-      // Default to power-automate for local-agent
-      setLLMProviderState('power-automate');
-    }
-  }, []);
-
-  // Load Copilot Studio config on mount
-  useEffect(() => {
-    const savedConfig = localStorage.getItem('copilot-studio-config');
-    if (savedConfig) {
-      try {
-        const config = JSON.parse(savedConfig);
-        setCopilotStudioEnabled(config.enabled ?? false);
-        setCopilotStudioEndpoint(config.endpoint ?? '');
-        setCopilotStudioEndpoint(config.endpoint ?? '');
-        if (config.endpoint) {
-          setCopilotStudioTestStatus('success');
-        }
-      } catch (e) {
-        console.error('Failed to parse Copilot Studio config', e);
-      }
-    }
-  }, []);
-
-  // Save Copilot Studio config
-  const saveCopilotStudioConfig = () => {
-    const config = {
-      enabled: copilotStudioEnabled,
-      endpoint: copilotStudioEndpoint,
-    };
-    localStorage.setItem('copilot-studio-config', JSON.stringify(config));
-  };
-  // Auto-save Copilot Studio config
-  useEffect(() => {
-    const timeoutId = setTimeout(saveCopilotStudioConfig, 500);
-    return () => clearTimeout(timeoutId);
-  }, [copilotStudioEnabled, copilotStudioEndpoint]);
-
-  const handleTestCopilotStudioConnection = async () => {
-    if (!copilotStudioEndpoint) {
-      toast.error(locale === 'zh-Hans' ? '请先配置 Copilot Studio 端点' : 'Please configure Copilot Studio endpoint first');
-      return;
-    }
-
-    setIsCopilotStudioTesting(true);
-    setCopilotStudioTestStatus('none');
-
-    try {
-      // Token endpoint test - fetch token from the endpoint
-      const response = await fetch(copilotStudioEndpoint, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data.token) {
-          setCopilotStudioTestStatus('success');
-          if (!copilotStudioEnabled) {
-            setCopilotStudioEnabled(true);
-          }
-          toast.success(locale === 'zh-Hans' ? 'Copilot Studio Token 端点连接成功' : 'Copilot Studio token endpoint connected successfully');
-        } else {
-          setCopilotStudioTestStatus('error');
-          toast.error(locale === 'zh-Hans' ? '无效的 Token 响应' : 'Invalid token response');
-        }
-      } else {
-        setCopilotStudioTestStatus('error');
-        toast.error(locale === 'zh-Hans' ? `连接失败: ${response.statusText}` : `Connection failed: ${response.statusText}`);
-      }
-    } catch (err: unknown) {
-      setCopilotStudioTestStatus('error');
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      toast.error(locale === 'zh-Hans' ? `连接测试失败: ${errorMessage}` : `Connection test failed: ${errorMessage}`);
-    } finally {
-      setIsCopilotStudioTesting(false);
-    }
-  };
-
-  const handleClearCopilotStudioConfig = () => {
-    setCopilotStudioEnabled(false);
-    setCopilotStudioEndpoint('');
-    setCopilotStudioTestStatus('none');
-    localStorage.removeItem('copilot-studio-config');
-    toast.success(locale === 'zh-Hans' ? 'Copilot Studio 配置已清除' : 'Copilot Studio configuration cleared');
-  };
-
-  // Save BYOM config when it changes
-  const saveLLMConfig = () => {
-    if (!llmProvider) {
-      setLLMConfig(null);
-      return;
-    }
-    const config: LLMConfig = {
-      provider: llmProvider,
-      apiKey: llmApiKey || undefined,
-      endpoint: llmEndpoint || undefined,
-      deploymentName: llmDeploymentName || undefined,
-      model: llmModel || undefined,
-      enabled: llmEnabled,
-      // Azure AD fields (only for azure-openai)
-      azureAuthType: llmProvider === 'azure-openai' ? azureAuthType : undefined,
-      azureTenantId: llmProvider === 'azure-openai' && azureAuthType === 'service-principal' ? azureTenantId || undefined : undefined,
-      azureClientId: llmProvider === 'azure-openai' && azureAuthType === 'service-principal' ? azureClientId || undefined : undefined,
-      azureClientSecret: llmProvider === 'azure-openai' && azureAuthType === 'service-principal' ? azureClientSecret || undefined : undefined,
-    };
-
-    setLLMConfig(config);
-  };
-
-  // Auto-save BYOM config with debounce
-  useEffect(() => {
-    if (!llmProvider) return;
-    const timeoutId = setTimeout(saveLLMConfig, 500);
-    return () => clearTimeout(timeoutId);
-  }, [llmProvider, llmApiKey, llmEndpoint, llmDeploymentName, llmModel, llmEnabled, azureAuthType, azureTenantId, azureClientId, azureClientSecret]);
-
-  const handleLLMProviderChange = (provider: string) => {
-    setLLMProviderState(provider as LLMProvider);
-    // Reset fields when provider changes
-    setLLMApiKey('');
-    setLLMEndpoint('');
-    setLLMDeploymentName('');
-    setLLMModel('');
-    setByomTestStatus('none');
-    // Reset Azure AD fields
-    setAzureAuthType('api-key');
-    setAzureTenantId('');
-    setAzureClientId('');
-    setAzureClientSecret('');
-    clearAzureADTokenCache();
-  };
-
-  const handleClearLLMConfig = () => {
-    setLLMProviderState('power-automate');
-    setLLMApiKey('');
-    setLLMEndpoint('');
-    setLLMDeploymentName('');
-    setLLMModel('');
-    setLLMEnabled(false);
-    setByomTestStatus('none');
-    // Clear Azure AD fields
-    setAzureAuthType('api-key');
-    setAzureTenantId('');
-    setAzureClientId('');
-    setAzureClientSecret('');
-    clearAzureADTokenCache();
-    setLLMConfig(null);
-    toast.success(locale === 'zh-Hans' ? 'BYOM 配置已清除' : 'BYOM configuration cleared');
-  };
-
-  const handleTestBYOMConnection = async () => {
-    if (!llmProvider || !llmEndpoint) {
-      toast.error(locale === 'zh-Hans' ? '请先配置提供商和端点' : 'Please configure provider and endpoint first');
-      return;
-    }
+    // Only run when query has completed and we haven't loaded yet
+    if (!isSettingsFetched || dbSettingsLoaded) return;
     
-    setIsByomTesting(true);
-    setByomTestStatus('none');
-    
-    try {
+    // Initialize Power Automate Flow URL from database if available
+    if (appSettings.powerAutomateFlowUrl) {
+      // Save to localStorage for Copilot components to use
       const config: LLMConfig = {
-        provider: llmProvider,
-        apiKey: llmApiKey || undefined,
-        endpoint: llmEndpoint || undefined,
-        deploymentName: llmDeploymentName || undefined,
-        model: llmModel || undefined,
-        enabled: llmEnabled,
-        // Azure AD fields
-        azureAuthType: llmProvider === 'azure-openai' ? azureAuthType : undefined,
-        azureTenantId: llmProvider === 'azure-openai' && azureAuthType === 'service-principal' ? azureTenantId || undefined : undefined,
-        azureClientId: llmProvider === 'azure-openai' && azureAuthType === 'service-principal' ? azureClientId || undefined : undefined,
-        azureClientSecret: llmProvider === 'azure-openai' && azureAuthType === 'service-principal' ? azureClientSecret || undefined : undefined,
+        provider: 'power-automate',
+        endpoint: appSettings.powerAutomateFlowUrl,
+        enabled: true,
       };
-      
-      const result = await testBYOMConnection(config);
-      
-      if (result.success) {
-        setByomTestStatus('success');
-        // Auto-enable when test is successful
-        if (!llmEnabled) {
-          setLLMEnabled(true);
-        }
-        const latencyText = result.latencyMs ? t('byomLatency', locale, { ms: result.latencyMs }) : '';
-        toast.success(`${t('byomTestSuccess', locale)} ${latencyText} ${result.modelInfo ? `(${result.modelInfo})` : ''}`);
-      } else {
-        setByomTestStatus('error');
-        toast.error(`${t('byomTestFailed', locale)}: ${result.error}`);
-      }
-    } catch (err: unknown) {
-      setByomTestStatus('error');
-      const errorMessage = err instanceof Error 
-        ? err.message 
-        : (locale === 'zh-Hans' ? '连接测试失败，请检查网络连接和配置' : 'Connection test failed. Please check your network connection and settings.');
-      toast.error(errorMessage);
-    } finally {
-      setIsByomTesting(false);
+      setLLMConfig(config);
     }
-  };
+    
+    // Initialize Copilot Studio Token Endpoint from database if available
+    if (appSettings.copilotStudioTokenEndpoint) {
+      // Save to copilot-studio-config for copilot panel to use
+      const copilotStudioConfig = {
+        enabled: true,
+        endpoint: appSettings.copilotStudioTokenEndpoint,
+      };
+      localStorage.setItem('copilot-studio-config', JSON.stringify(copilotStudioConfig));
+      // Also save to copilot-service config
+      saveCopilotConfig({ tokenEndpoint: appSettings.copilotStudioTokenEndpoint });
+    }
+    
+    setDbSettingsLoaded(true);
+  }, [isSettingsFetched, dbSettingsLoaded, appSettings]);
 
-  // Auto-save Copilot endpoint
-  useEffect(() => {
-    if (!copilotEndpoint.trim()) return;
-    
-    const timeoutId = setTimeout(() => {
-      saveCopilotConfig({ tokenEndpoint: copilotEndpoint.trim() });
-    }, 500);
-    
-    return () => clearTimeout(timeoutId);
-  }, [copilotEndpoint]);
+
 
   // Load system voices
   useEffect(() => {
@@ -386,8 +168,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
 
   const handleLocaleChange = (newLocale: Locale) => {
     setLocaleState(newLocale);
-    setLocale(newLocale);
-    window.location.reload();
+    setLocale(newLocale); // setLocale dispatches the 'locale-changed' event
   };
 
   const handleChatFontSizeChange = (size: string) => {
@@ -446,6 +227,12 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const handleSimulateStreamingChange = (enabled: boolean) => {
     setSimulateStreamingState(enabled);
     setSimulateStreaming(enabled);
+  };
+
+  const handleHomeHeaderWidgetChange = (widget: string) => {
+    const newWidget = widget as HomeHeaderWidget;
+    setHomeHeaderWidgetState(newWidget);
+    setHomeHeaderWidget(newWidget);
   };
 
 
@@ -559,35 +346,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
     document.body.style.display = '';
   };
 
-  const handleTestConnection = async () => {
-    if (!copilotEndpoint.trim()) {
-      toast.error(locale === 'zh-Hans' ? '请输入 Token Endpoint URL' : 'Please enter Token Endpoint URL');
-      return;
-    }
 
-    setIsTesting(true);
-    setConnectionStatus('none');
-
-    const result = await testConnection(copilotEndpoint.trim());
-
-    if (result.success) {
-      saveCopilotConfig({ tokenEndpoint: copilotEndpoint.trim() });
-      setConnectionStatus('success');
-      toast.success(locale === 'zh-Hans' ? '连接成功！' : 'Connected successfully!');
-    } else {
-      setConnectionStatus('error');
-      toast.error(locale === 'zh-Hans' ? `连接失败: ${result.error}` : `Connection failed: ${result.error}`);
-    }
-
-    setIsTesting(false);
-  };
-
-  const handleClearConfig = () => {
-    clearCopilotConfig();
-    setCopilotEndpoint('');
-    setConnectionStatus('none');
-    toast.success(locale === 'zh-Hans' ? '配置已清除' : 'Configuration cleared');
-  };
 
   const getInitials = (name?: string) => {
     if (!name) return 'U';
@@ -613,7 +372,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
       </header>
 
       {/* Content */}
-      <main className="flex-1 pb-8 px-4 overflow-y-auto scrollbar-hide">
+      <main className={cn('flex-1 px-4 overflow-y-auto scrollbar-hide', isOverlay ? 'pb-8' : 'pb-32')}>
         <motion.div
           variants={containerVariants}
           initial="hidden"
@@ -652,6 +411,23 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                     <SelectContent>
                       <SelectItem value="zh-Hans">中文</SelectItem>
                       <SelectItem value="en-US">English</SelectItem>
+                    </SelectContent>
+                  </Select>
+                }
+              />
+              <SettingsItem
+                icon={LayoutDashboard}
+                label={locale === 'zh-Hans' ? '主页顶部显示' : 'Home Header Display'}
+                rightElement={
+                  <Select value={homeHeaderWidget} onValueChange={handleHomeHeaderWidgetChange}>
+                    <SelectTrigger className="w-36 h-8 text-sm bg-transparent border-border/50">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="date-time">{locale === 'zh-Hans' ? '日期和时间' : 'Date & Time'}</SelectItem>
+                      <SelectItem value="performance">{locale === 'zh-Hans' ? '我的绩效' : 'My Performance'}</SelectItem>
+                      <SelectItem value="task-completion">{locale === 'zh-Hans' ? '今日任务完成率' : 'Task Completion'}</SelectItem>
+                      <SelectItem value="pipeline-forecast">{locale === 'zh-Hans' ? '本季度成交/预测' : 'Pipeline/Forecast'}</SelectItem>
                     </SelectContent>
                   </Select>
                 }
@@ -757,91 +533,73 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
             </div>
           </motion.div>
 
-          {/* AI Assistant Configuration - Always show Power Automate Endpoint */}
+          {/* AI Assistant Configuration */}
           <motion.div variants={itemVariants} className="space-y-3">
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
               {locale === 'zh-Hans' ? 'AI 助手配置' : 'AI Assistant Configuration'}
             </h3>
             <div className="glass-card p-4 space-y-3">
-              <p className="text-xs text-muted-foreground">
-                {locale === 'zh-Hans'
-                  ? 'Power Automate Flow 作为 AI 功能调用后端，Copilot Studio 和本地数据操作作为工具函数'
-                  : 'Power Automate Flow serves as the AI function calling backend, with Copilot Studio and local data operations as tool functions'}
-              </p>
-              
-              {/* Power Automate Endpoint - Always show */}
-              <div className="pt-3 border-t border-border/30 space-y-3">
-                <div className="space-y-2">
-                  <label className="text-helper text-muted-foreground">
-                    {locale === 'zh-Hans' ? 'Power Automate Flow URL' : 'Power Automate Flow URL'}
-                  </label>
-                  <div className="flex gap-2">
-                    <Input
-                      value={llmEndpoint}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                        setLLMEndpoint(e.target.value);
-                        setByomTestStatus('none');
-                      }}
-                      placeholder="https://...powerplatform.com/..."
-                      className="flex-1 bg-muted/50 border-border/50 text-sm"
-                    />
-                    {byomTestStatus === 'success' && (
-                      <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0 my-auto" />
-                    )}
-                    {byomTestStatus === 'error' && (
-                      <XCircle className="w-5 h-5 text-red-500 flex-shrink-0 my-auto" />
+              {/* Connection Status from Dataverse */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-muted-foreground" />
+                    <span className="text-sm font-medium">
+                      {locale === 'zh-Hans' ? 'Power Automate Flow' : 'Power Automate Flow'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {isLoadingSettings ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                    ) : appSettings.powerAutomateFlowUrl ? (
+                      <>
+                        <CheckCircle2 className="w-4 h-4 text-green-500" />
+                        <span className="text-xs text-green-500">{locale === 'zh-Hans' ? '已配置' : 'Configured'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <XCircle className="w-4 h-4 text-muted-foreground" />
+                        <span className="text-xs text-muted-foreground">{locale === 'zh-Hans' ? '未配置' : 'Not configured'}</span>
+                      </>
                     )}
                   </div>
                 </div>
-                <div className="flex gap-2">
-                  <Button
-                    onClick={handleTestBYOMConnection}
-                    disabled={isByomTesting || !llmEndpoint}
-                    className="flex-1"
-                    variant={byomTestStatus === 'success' ? 'outline' : 'default'}
-                  >
-                    {isByomTesting ? (
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Bot className="w-4 h-4 text-muted-foreground" />
+                    <span className="text-sm font-medium">
+                      {locale === 'zh-Hans' ? 'Copilot Studio' : 'Copilot Studio'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {isLoadingSettings ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                    ) : appSettings.copilotStudioTokenEndpoint ? (
                       <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        {locale === 'zh-Hans' ? '测试中...' : 'Testing...'}
-                      </>
-                    ) : byomTestStatus === 'success' ? (
-                      <>
-                        <CheckCircle2 className="w-4 h-4 mr-2 text-green-500" />
-                        {locale === 'zh-Hans' ? '重新测试' : 'Re-test'}
-                      </>
-                    ) : byomTestStatus === 'error' ? (
-                      <>
-                        <XCircle className="w-4 h-4 mr-2 text-red-500" />
-                        {locale === 'zh-Hans' ? '测试连接' : 'Test Connection'}
+                        <CheckCircle2 className="w-4 h-4 text-green-500" />
+                        <span className="text-xs text-green-500">{locale === 'zh-Hans' ? '已配置' : 'Configured'}</span>
                       </>
                     ) : (
-                      locale === 'zh-Hans' ? '测试连接' : 'Test Connection'
+                      <>
+                        <XCircle className="w-4 h-4 text-muted-foreground" />
+                        <span className="text-xs text-muted-foreground">{locale === 'zh-Hans' ? '未配置' : 'Not configured'}</span>
+                      </>
                     )}
-                  </Button>
-                  {llmEndpoint && (
-                    <Button
-                      onClick={() => {
-                        setLLMEndpoint('');
-                        setByomTestStatus('none');
-                        setLLMEnabled(false);
-                        setLLMConfig(null);
-                        toast.success(locale === 'zh-Hans' ? '配置已清除' : 'Configuration cleared');
-                      }}
-                      variant="outline"
-                      className="text-destructive hover:text-destructive"
-                    >
-                      {locale === 'zh-Hans' ? '清除' : 'Clear'}
-                    </Button>
-                  )}
+                  </div>
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  {locale === 'zh-Hans'
+                    ? '如需变更配置，请联系管理员'
+                    : 'Contact your administrator to change the connection.'}
+                </p>
+
               </div>
 
               {/* Information Structure toggles */}
               <div className="pt-3 border-t border-border/30 space-y-2">
                 <div className={cn(
                   'transition-opacity',
-                  !llmEndpoint && 'opacity-50'
+                  !appSettings.powerAutomateFlowUrl && 'opacity-50'
                 )}>
                   <SettingsItem
                     icon={LayoutGrid}
@@ -850,7 +608,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                       <Switch
                         checked={organizeInStructureCard}
                         onCheckedChange={handleOrganizeInStructureCardChange}
-                        disabled={!llmEndpoint}
+                        disabled={!appSettings.powerAutomateFlowUrl}
                         className="data-[state=checked]:bg-primary"
                       />
                     }
@@ -858,7 +616,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                 </div>
                 <div className={cn(
                   'transition-opacity',
-                  !llmEndpoint && 'opacity-50'
+                  !appSettings.powerAutomateFlowUrl && 'opacity-50'
                 )}>
                   <SettingsItem
                     icon={Speech}
@@ -867,17 +625,17 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                       <Switch
                         checked={voiceSummaryEnabled}
                         onCheckedChange={handleVoiceSummaryEnabledChange}
-                        disabled={!llmEndpoint}
+                        disabled={!appSettings.powerAutomateFlowUrl}
                         className="data-[state=checked]:bg-primary"
                       />
                     }
                   />
                 </div>
-                {!llmEndpoint && (
+                {!appSettings.powerAutomateFlowUrl && (
                   <p className="text-xs text-muted-foreground/70 px-1 pt-1">
                     {locale === 'zh-Hans'
-                      ? '请先配置 Power Automate Endpoint'
-                      : 'Configure Power Automate Endpoint first'}
+                      ? '需要配置 Power Automate Flow'
+                      : 'Requires Power Automate Flow configuration'}
                   </p>
                 )}
               </div>
@@ -896,8 +654,8 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                 />
                 <p className="text-xs text-muted-foreground mt-1 pl-8">
                   {locale === 'zh-Hans'
-                    ? '启用后，Ask Copilot 输入框将显示在所有页面底部'
-                    : 'When enabled, Ask Copilot input will appear at the bottom of all screens'}
+                    ? '启用后，Ask Copilot 输入框将显示在所有页面底部，包括设置页'
+                    : 'When enabled, Ask Copilot input will appear at the bottom of all screens, including Settings'}
                 </p>
               </div>
 
@@ -918,101 +676,6 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                     ? '启用后，AI 回复将逐字显示，模拟打字效果'
                     : 'When enabled, AI responses will appear word by word with typing effect'}
                 </p>
-              </div>
-            </div>
-          </motion.div>
-
-          {/* Agent Configuration Section */}
-          <motion.div variants={itemVariants} className="space-y-3">
-            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
-              {locale === 'zh-Hans' ? 'Agent 配置' : 'Agent Configuration'}
-            </h3>
-            <div className="glass-card p-4 space-y-4">
-              {/* Copilot Studio Tool Configuration */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Bot className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-sm font-medium">
-                      {locale === 'zh-Hans' ? 'Copilot Studio 工具' : 'Copilot Studio Tool'}
-                    </span>
-                  </div>
-                  <Switch
-                    checked={copilotStudioEnabled}
-                    onCheckedChange={setCopilotStudioEnabled}
-                    disabled={!copilotStudioEndpoint}
-                    className="data-[state=checked]:bg-primary"
-                  />
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {locale === 'zh-Hans'
-                    ? 'Copilot Studio 作为 Power Automate 的工具函数，处理对话式 AI 交互'
-                    : 'Copilot Studio as a tool function for Power Automate, handling conversational AI interactions'}
-                </p>
-
-                <div className="space-y-2">
-                  <label className="text-helper text-muted-foreground">
-                    {locale === 'zh-Hans' ? 'Token 端点' : 'Token Endpoint'}
-                  </label>
-                  <div className="flex gap-2">
-                    <Input
-                      value={copilotStudioEndpoint}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                        setCopilotStudioEndpoint(e.target.value);
-                        setCopilotStudioTestStatus('none');
-                      }}
-                      placeholder="https://default...token.botframework.com/api/token"
-                      className="flex-1 bg-muted/50 border-border/50 text-sm"
-                    />
-                    {copilotStudioTestStatus === 'success' && (
-                      <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0 my-auto" />
-                    )}
-                    {copilotStudioTestStatus === 'error' && (
-                      <XCircle className="w-5 h-5 text-red-500 flex-shrink-0 my-auto" />
-                    )}
-                  </div>
-                </div>
-
-
-                <div className="flex gap-2">
-                  <Button
-                    onClick={handleTestCopilotStudioConnection}
-                    disabled={isCopilotStudioTesting || !copilotStudioEndpoint}
-                    className="flex-1"
-                    variant={copilotStudioTestStatus === 'success' ? 'outline' : 'default'}
-                  >
-                    {isCopilotStudioTesting ? (
-                      <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        {locale === 'zh-Hans' ? '测试中...' : 'Testing...'}
-                      </>
-                    ) : copilotStudioTestStatus === 'success' ? (
-                      <>
-                        <CheckCircle2 className="w-4 h-4 mr-2 text-green-500" />
-                        {locale === 'zh-Hans' ? '重新测试' : 'Re-test'}
-                      </>
-                    ) : copilotStudioTestStatus === 'error' ? (
-                      <>
-                        <XCircle className="w-4 h-4 mr-2 text-red-500" />
-                        {locale === 'zh-Hans' ? '测试连接' : 'Test Connection'}
-                      </>
-                    ) : (
-                      <>
-                        <MessageSquare className="w-4 h-4 mr-2" />
-                        {locale === 'zh-Hans' ? '测试连接' : 'Test Connection'}
-                      </>
-                    )}
-                  </Button>
-                  {copilotStudioEndpoint && (
-                    <Button
-                      onClick={handleClearCopilotStudioConfig}
-                      variant="outline"
-                      className="text-destructive hover:text-destructive"
-                    >
-                      {locale === 'zh-Hans' ? '清除' : 'Clear'}
-                    </Button>
-                  )}
-                </div>
               </div>
             </div>
           </motion.div>
@@ -1047,29 +710,32 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                             {/* Group voices by language */}
                             {(() => {
                               const langCode = locale === 'zh-Hans' ? 'zh' : 'en';
-                              const matchingVoices = systemVoices.filter((v: SpeechSynthesisVoice) => v.lang.startsWith(langCode));
-                              const otherVoices = systemVoices.filter((v: SpeechSynthesisVoice) => !v.lang.startsWith(langCode));
+                              // Get premium and natural tier voice names from voiceOptions
+                              const premiumNaturalVoiceNames = voicesForLocale
+                                .filter((v: VoiceOption) => v.tier === 'premium' || v.tier === 'natural')
+                                .map((v: VoiceOption) => extractVoiceName(v.id).toLowerCase());
+                              
+                              // Filter system voices to only those matching premium/natural tiers
+                              const filteredVoices = systemVoices.filter((v: SpeechSynthesisVoice) => {
+                                const voiceNameLower = v.name.toLowerCase();
+                                const matchesLang = v.lang.startsWith(langCode);
+                                const matchesTier = premiumNaturalVoiceNames.some((name: string) => voiceNameLower.includes(name));
+                                return matchesLang && matchesTier;
+                              });
+                              
+                              // Fallback: if no premium/natural voices found, show all voices for the language
+                              const voicesToShow = filteredVoices.length > 0 
+                                ? filteredVoices 
+                                : systemVoices.filter((v: SpeechSynthesisVoice) => v.lang.startsWith(langCode));
                               
                               return (
                                 <>
-                                  {matchingVoices.length > 0 && (
+                                  {voicesToShow.length > 0 && (
                                     <>
                                       <div className="px-2 py-1.5 text-xs text-muted-foreground font-medium">
-                                        {locale === 'zh-Hans' ? '推荐' : 'Recommended'}
+                                        {locale === 'zh-Hans' ? 'Premium & Natural' : 'Premium & Natural'}
                                       </div>
-                                      {matchingVoices.map((voice: SpeechSynthesisVoice) => (
-                                        <SelectItem key={voice.name} value={voice.name}>
-                                          {voice.name.replace(/Microsoft |Google |Apple /, '')}
-                                        </SelectItem>
-                                      ))}
-                                    </>
-                                  )}
-                                  {otherVoices.length > 0 && (
-                                    <>
-                                      <div className="px-2 py-1.5 text-xs text-muted-foreground font-medium border-t border-border/50 mt-1 pt-1.5">
-                                        {locale === 'zh-Hans' ? '其他' : 'Other'}
-                                      </div>
-                                      {otherVoices.slice(0, 10).map((voice: SpeechSynthesisVoice) => (
+                                      {voicesToShow.map((voice: SpeechSynthesisVoice) => (
                                         <SelectItem key={voice.name} value={voice.name}>
                                           {voice.name.replace(/Microsoft |Google |Apple /, '')}
                                         </SelectItem>
@@ -1112,10 +778,64 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
             </div>
           </motion.div>
 
+          {/* Help & Feedback Section */}
+          <motion.div variants={itemVariants} className="space-y-3">
+            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
+              {locale === 'zh-Hans' ? '帮助与反馈' : 'Help & Feedback'}
+            </h3>
+            <div className="glass-card p-3 rounded-xl space-y-2">
+              <button
+                onClick={() => {
+                  if (onClose) onClose();
+                  navigate('/help-feedback');
+                }}
+                className="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-muted/50 transition-colors"
+              >
+                <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                  <HelpCircle className="w-5 h-5 text-primary" />
+                </div>
+                <div className="flex-1 text-left">
+                  <p className="text-sm font-medium text-foreground">
+                    {locale === 'zh-Hans' ? '技能与工具指南' : 'Skills & Tools Guide'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {locale === 'zh-Hans' ? '了解所有可用的技能及其使用方法' : 'Learn all available skills and how to use them'}
+                  </p>
+                </div>
+                <ChevronRight className="w-5 h-5 text-muted-foreground" />
+              </button>
+              <button
+                onClick={() => {
+                  if (onClose) onClose();
+                  navigate('/debug/code-review');
+                }}
+                className="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-muted/50 transition-colors"
+              >
+                <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                  <FileCode className="w-5 h-5 text-primary" />
+                </div>
+                <div className="flex-1 text-left">
+                  <p className="text-sm font-medium text-foreground">
+                    {locale === 'zh-Hans' ? '代码审查报告' : 'Code Review Report'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {locale === 'zh-Hans' ? '查看最新的代码质量分析' : 'View latest code quality analysis'}
+                  </p>
+                </div>
+                <ChevronRight className="w-5 h-5 text-muted-foreground" />
+              </button>
+              <div className="border-t border-border/30 pt-2">
+                <p className="text-xs text-muted-foreground px-2">
+                  {locale === 'zh-Hans'
+                    ? '此部分提供帮助文档、调试工具和反馈渠道'
+                    : 'This section provides help documentation, debugging tools, and feedback channels'}
+                </p>
+              </div>
+            </div>
+          </motion.div>
 
-          {/* Help & Sign Out */}
+          {/* Sign Out */}
           <div className="pt-4 space-y-2">
-            <SettingsItem icon={HelpCircle} label={locale === 'zh-Hans' ? '帮助与反馈' : 'Help & Feedback'} />
             <SettingsItem icon={LogOut} label={locale === 'zh-Hans' ? '退出登录' : 'Sign Out'} danger />
           </div>
 

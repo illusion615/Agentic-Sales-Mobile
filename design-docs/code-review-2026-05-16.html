@@ -1,0 +1,1112 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sales Copilot Mobile 云端代码审查与修复验证</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6efe4;
+        --bg-2: #fef8ef;
+        --surface: rgba(255, 248, 239, 0.74);
+        --surface-strong: rgba(255, 252, 247, 0.92);
+        --text: #1f1b16;
+        --muted: #6f6254;
+        --line: rgba(70, 44, 22, 0.12);
+        --accent: #bb5a2b;
+        --accent-2: #d47a32;
+        --good: #2d7a4d;
+        --warn: #a15d11;
+        --bad: #b53c24;
+        --shadow: 0 24px 60px rgba(85, 48, 20, 0.12);
+        --chip: rgba(187, 90, 43, 0.12);
+      }
+
+      html.dark {
+        color-scheme: dark;
+        --bg: #171514;
+        --bg-2: #211c18;
+        --surface: rgba(34, 28, 24, 0.74);
+        --surface-strong: rgba(28, 24, 21, 0.92);
+        --text: #f4eee7;
+        --muted: #c4b6a6;
+        --line: rgba(255, 233, 209, 0.12);
+        --accent: #ff9a53;
+        --accent-2: #ffbe6e;
+        --good: #6fdd97;
+        --warn: #ffcb6f;
+        --bad: #ff8668;
+        --shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+        --chip: rgba(255, 154, 83, 0.14);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Avenir Next", "PingFang SC", "Hiragino Sans GB", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(255, 186, 120, 0.35), transparent 28%),
+          radial-gradient(circle at top right, rgba(255, 130, 87, 0.18), transparent 24%),
+          linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
+        min-height: 100vh;
+        line-height: 1.55;
+      }
+
+      .orb {
+        position: fixed;
+        border-radius: 999px;
+        filter: blur(20px);
+        opacity: 0.55;
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      .orb.one {
+        width: 16rem;
+        height: 16rem;
+        top: 6rem;
+        left: -4rem;
+        background: rgba(255, 156, 81, 0.25);
+      }
+
+      .orb.two {
+        width: 18rem;
+        height: 18rem;
+        right: -3rem;
+        top: 16rem;
+        background: rgba(248, 205, 109, 0.18);
+      }
+
+      .orb.three {
+        width: 14rem;
+        height: 14rem;
+        left: 18%;
+        bottom: 4rem;
+        background: rgba(255, 120, 98, 0.14);
+      }
+
+      .shell {
+        position: relative;
+        z-index: 1;
+        width: min(1180px, calc(100vw - 2rem));
+        margin: 0 auto;
+        padding: 1rem 0 4rem;
+      }
+
+      .topbar {
+        position: sticky;
+        top: 0.75rem;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.85rem 1rem;
+        margin-bottom: 1.25rem;
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        background: var(--surface);
+        -webkit-backdrop-filter: blur(18px);
+        backdrop-filter: blur(18px);
+        box-shadow: var(--shadow);
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 0.9rem;
+      }
+
+      .brand-mark {
+        width: 2.25rem;
+        height: 2.25rem;
+        border-radius: 16px;
+        display: grid;
+        place-items: center;
+        font-weight: 800;
+        color: white;
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      }
+
+      .brand-copy strong,
+      .hero-copy h1,
+      .section-head h2,
+      summary strong,
+      .metric-value,
+      .grade-letter {
+        letter-spacing: -0.02em;
+      }
+
+      .brand-copy strong {
+        display: block;
+        font-size: 0.96rem;
+      }
+
+      .brand-copy span,
+      .section-head p,
+      .finding-meta,
+      .card p,
+      .hotspot-card p,
+      .action-card p,
+      .evidence-log,
+      .grade-note,
+      footer {
+        color: var(--muted);
+      }
+
+      .topbar-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+      }
+
+      button {
+        font: inherit;
+      }
+
+      .toggle,
+      .toolbar-btn {
+        border: 1px solid var(--line);
+        background: var(--surface-strong);
+        color: var(--text);
+        border-radius: 999px;
+        padding: 0.65rem 0.9rem;
+        cursor: pointer;
+        transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
+      }
+
+      .toggle:hover,
+      .toolbar-btn:hover,
+      summary:hover {
+        transform: translateY(-1px);
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: 1.3fr 1fr;
+        gap: 1rem;
+        margin-bottom: 1rem;
+      }
+
+      .panel,
+      .card,
+      .finding,
+      .grade-card,
+      .hotspot-card,
+      .action-card,
+      .log-card {
+        border: 1px solid var(--line);
+        background: var(--surface);
+        border-radius: 24px;
+        box-shadow: var(--shadow);
+      }
+
+      .panel {
+        padding: 1.35rem;
+        -webkit-backdrop-filter: blur(18px);
+        backdrop-filter: blur(18px);
+      }
+
+      .hero-copy {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        min-height: 22rem;
+      }
+
+      .kicker {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        font-size: 0.76rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: var(--accent);
+      }
+
+      .kicker::before {
+        content: "";
+        width: 0.7rem;
+        height: 0.7rem;
+        border-radius: 999px;
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        box-shadow: 0 0 0 6px var(--chip);
+      }
+
+      .hero-copy h1 {
+        margin: 0.8rem 0 0.7rem;
+        font-size: clamp(2rem, 4vw, 3.25rem);
+        line-height: 1.03;
+      }
+
+      .lead {
+        max-width: 38rem;
+        font-size: 1.02rem;
+      }
+
+      .hero-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.65rem;
+      }
+
+      .chip {
+        padding: 0.48rem 0.75rem;
+        border-radius: 999px;
+        background: var(--chip);
+        color: var(--text);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        font-size: 0.88rem;
+      }
+
+      .inline-code {
+        font-family: "SF Mono", "Consolas", monospace;
+        font-size: 0.92em;
+      }
+
+      .metrics-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.85rem;
+      }
+
+      .metric {
+        border-radius: 22px;
+        padding: 1rem;
+        background: var(--surface-strong);
+        border: 1px solid var(--line);
+      }
+
+      .metric-label {
+        font-size: 0.82rem;
+        margin-bottom: 0.4rem;
+        color: var(--muted);
+      }
+
+      .metric-value {
+        font-size: clamp(1.6rem, 3vw, 2.3rem);
+        font-weight: 800;
+      }
+
+      .metric-note {
+        margin-top: 0.35rem;
+        font-size: 0.88rem;
+        color: var(--muted);
+      }
+
+      .section {
+        margin-top: 1rem;
+      }
+
+      .section-head {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 0.8rem;
+      }
+
+      .section-head h2 {
+        margin: 0.5rem 0 0.2rem;
+        font-size: clamp(1.45rem, 2vw, 2.1rem);
+      }
+
+      .summary-band {
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: 0.9rem;
+        margin-bottom: 0.9rem;
+      }
+
+      .card,
+      .grade-card,
+      .hotspot-card,
+      .action-card,
+      .log-card {
+        padding: 1.05rem 1.1rem;
+      }
+
+      .summary-band strong,
+      .finding-grid strong,
+      .action-card strong,
+      .hotspot-card strong {
+        display: block;
+        margin-bottom: 0.35rem;
+        font-size: 1rem;
+      }
+
+      .core-line {
+        font-size: 1.05rem;
+      }
+
+      .flow-list {
+        display: grid;
+        gap: 0.65rem;
+        margin-top: 0.7rem;
+      }
+
+      .flow-item {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 0.7rem;
+        align-items: start;
+      }
+
+      .flow-index {
+        width: 2rem;
+        height: 2rem;
+        border-radius: 999px;
+        display: grid;
+        place-items: center;
+        font-weight: 800;
+        background: var(--chip);
+        color: var(--accent);
+      }
+
+      .finding-list,
+      .grades-grid,
+      .hotspots-grid,
+      .actions-grid {
+        display: grid;
+        gap: 0.8rem;
+      }
+
+      details {
+        border-radius: 24px;
+      }
+
+      summary {
+        list-style: none;
+        cursor: pointer;
+        padding: 1.05rem 1.15rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+      }
+
+      summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .summary-left {
+        display: flex;
+        align-items: center;
+        gap: 0.85rem;
+      }
+
+      .severity {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 3.6rem;
+        padding: 0.36rem 0.65rem;
+        border-radius: 999px;
+        font-size: 0.76rem;
+        font-weight: 800;
+      }
+
+      .severity.high {
+        color: white;
+        background: linear-gradient(135deg, #d74c2f, #8f2e1d);
+      }
+
+      .severity.medium {
+        color: #2a1c0d;
+        background: linear-gradient(135deg, #ffd580, #e9a443);
+      }
+
+      .severity.low {
+        color: white;
+        background: linear-gradient(135deg, #4c7fd7, #2d5095);
+      }
+
+      .severity.closed {
+        color: white;
+        background: linear-gradient(135deg, #2f8f58, #1f5e39);
+      }
+
+      .severity.open {
+        color: #2a1c0d;
+        background: linear-gradient(135deg, #ffd580, #e9a443);
+      }
+
+      .severity.watch {
+        color: white;
+        background: linear-gradient(135deg, #4c7fd7, #2d5095);
+      }
+
+      .summary-arrow {
+        font-size: 1.2rem;
+        color: var(--muted);
+        transition: transform 180ms ease;
+      }
+
+      details[open] .summary-arrow {
+        transform: rotate(45deg);
+      }
+
+      .finding-body {
+        padding: 0 1.15rem 1.15rem;
+      }
+
+      .finding-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.75rem;
+      }
+
+      .finding-grid .card {
+        background: var(--surface-strong);
+      }
+
+      .finding-meta {
+        font-size: 0.86rem;
+      }
+
+      .code-line {
+        display: inline-block;
+        margin-top: 0.35rem;
+        padding: 0.45rem 0.6rem;
+        border-radius: 14px;
+        background: rgba(17, 14, 12, 0.07);
+        border: 1px solid var(--line);
+        font-family: "SF Mono", "Consolas", monospace;
+        font-size: 0.82rem;
+        word-break: break-all;
+      }
+
+      html.dark .code-line {
+        background: rgba(255, 255, 255, 0.06);
+      }
+
+      .grades-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .grade-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.8rem;
+        margin-bottom: 0.45rem;
+      }
+
+      .grade-letter {
+        font-size: 1.45rem;
+        font-weight: 800;
+      }
+
+      .grade-letter.grade-a {
+        color: var(--good);
+      }
+
+      .grade-letter.grade-b {
+        color: #5f8b3d;
+      }
+
+      .grade-letter.grade-c {
+        color: var(--warn);
+      }
+
+      .grade-letter.grade-d {
+        color: var(--bad);
+      }
+
+      .hotspots-grid,
+      .actions-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .hotspot-stat {
+        font-size: 1.8rem;
+        font-weight: 800;
+        margin: 0.35rem 0;
+      }
+
+      .log-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.8rem;
+      }
+
+      .evidence-log {
+        margin: 0;
+        padding: 0.9rem 1rem;
+        border-radius: 20px;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        box-shadow: var(--shadow);
+        overflow: auto;
+        font-family: "SF Mono", "Consolas", monospace;
+        font-size: 0.83rem;
+        white-space: pre-wrap;
+      }
+
+      footer {
+        margin-top: 1.2rem;
+        padding: 1rem 0 0;
+        font-size: 0.88rem;
+        text-align: center;
+      }
+
+      @media (max-width: 980px) {
+        .hero,
+        .summary-band,
+        .log-grid,
+        .grades-grid,
+        .hotspots-grid,
+        .actions-grid,
+        .finding-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 720px) {
+        .shell {
+          width: min(100vw - 1rem, 100%);
+        }
+
+        .topbar {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .topbar-actions {
+          justify-content: space-between;
+          flex-wrap: wrap;
+        }
+
+        .metrics-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .summary-left {
+          align-items: flex-start;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="orb one"></div>
+    <div class="orb two"></div>
+    <div class="orb three"></div>
+    <div class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark">CR</div>
+          <div class="brand-copy">
+            <strong>Sales Copilot Mobile</strong>
+            <span>云端同步代码审查 · 修复验证版</span>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <button class="toolbar-btn" id="expand-all" type="button">展开全部</button>
+          <button class="toolbar-btn" id="collapse-all" type="button">收起全部</button>
+          <button class="toggle" id="theme-toggle" type="button">切换深浅色</button>
+        </div>
+      </header>
+
+      <section class="hero">
+        <article class="panel hero-copy">
+          <div>
+            <span class="kicker">00 / Cloud Scope</span>
+            <h1>云端 Copilot 主链路已经收口，剩下的是清理和减重。</h1>
+            <p class="lead">
+              这次报告只看从 Vibe 同步下来的 <strong>188 个云端文件</strong>，不再讨论本地附加层是否能编译。最重要的 3 条高优先级设计问题已经在云端完成修改并回同步验证：<strong>会话 freshness</strong>、<strong>流式写放大</strong>、以及 <strong>页面自建 Direct Line</strong>。当前还没收尾的，主要是 provider 继续膨胀、遗留重复 hook、和首页可访问性细节。
+            </p>
+          </div>
+          <div class="hero-chips">
+            <span class="chip">审查范围只包含云端同步代码</span>
+            <span class="chip">3 条高优先级链路已在云端闭环</span>
+            <span class="chip">当前重点从“修断链”转为“防再次分叉”</span>
+          </div>
+        </article>
+
+        <aside class="panel metrics-grid">
+          <div class="metric">
+            <div class="metric-label">云端文件</div>
+            <div class="metric-value">188</div>
+            <div class="metric-note">本次 review 的唯一有效范围</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">同步核对</div>
+            <div class="metric-value">188 / 188</div>
+            <div class="metric-note">上一轮云端比对结果为 matched，无缺失无错位</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">高优先级闭环</div>
+            <div class="metric-value">5</div>
+            <div class="metric-note">freshness、持久化写放大、页面级 Direct Line、遗留 hook、首页可访问性/style debt</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">仍开放问题</div>
+            <div class="metric-value">1</div>
+            <div class="metric-note">provider 过载仍需继续拆 transport / persistence</div>
+          </div>
+        </aside>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <span class="kicker">01 / Findings</span>
+            <h2>先把已经闭环的和仍开放的分开看</h2>
+            <p>本轮 review 的关键不是再找一堆毛病，而是确认云端到底修到了哪一步，剩下的坑还值不值得继续追。</p>
+          </div>
+        </div>
+
+        <div class="summary-band">
+          <div class="card">
+            <strong>一句话判断</strong>
+            <div class="core-line">当前最危险的问题已经不在“主链路会不会断”，也不在“会不会再长回第二套 hook”，而在“provider 既然成了唯一 owner，内部还能不能继续瘦下来，不把后续需求都拖慢”。</div>
+          </div>
+          <div class="card">
+            <strong>建议的修复顺序</strong>
+            <div class="flow-list">
+              <div class="flow-item"><div class="flow-index">1</div><div>继续把 <span class="inline-code">copilot-context.tsx</span> 往下拆，优先处理 transport / session 和 message persistence，visit extraction 已经先抽成 helper。</div></div>
+              <div class="flow-item"><div class="flow-index">2</div><div>补一条围绕“新建会话、发送消息、visit extraction”的最小 smoke 回归链，让主链路收口后不再靠人工记忆守。</div></div>
+              <div class="flow-item"><div class="flow-index">3</div><div>下一个热点不是首页小 lint，而是 <span class="inline-code">function-executor.ts</span>，它已经比 provider 更像后续功能堆积点。</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="finding-list">
+          <div class="finding">
+            <details open>
+              <summary>
+                <div class="summary-left">
+                  <span class="severity closed">Closed</span>
+                  <div>
+                    <strong><span class="inline-code">copilot-service.ts</span> 已补 freshness 校验，旧 token 不再盲复用</strong>
+                    <div class="finding-meta">这条问题已经从“开放缺陷”变成“已在云端看到实现并同步回镜像”的状态。</div>
+                  </div>
+                </div>
+                <span class="summary-arrow">+</span>
+              </summary>
+              <div class="finding-body">
+                <div class="finding-grid">
+                  <div class="card">
+                    <strong>问题是什么</strong>
+                    <p>旧实现只要从缓存里读到 conversation 就直接复用。只要 token 过期，用户第一次发消息就可能踩到失效会话。</p>
+                  </div>
+                  <div class="card">
+                    <strong>证据</strong>
+                    <div class="code-line">apps/sales-copilot/src/services/copilot-service.ts:15</div>
+                    <div class="code-line">apps/sales-copilot/src/services/copilot-service.ts:80-102</div>
+                    <div class="code-line">apps/sales-copilot/src/services/copilot-service.ts:237-256</div>
+                  </div>
+                  <div class="card">
+                    <strong>现在变成了什么</strong>
+                    <p>会话对象现在带有 <span class="inline-code">tokenAcquiredAt</span> 和 <span class="inline-code">conversationStartedAt</span>。复用前会走 <span class="inline-code">isConversationValid()</span>，旧会话会被清掉再重建。</p>
+                  </div>
+                  <div class="card">
+                    <strong>结论</strong>
+                    <p>这条已经可以从“待修”列表里拿掉。后续如果再出断链，优先看 provider 或页面调用路径，不要再回头怀疑 service freshness。</p>
+                  </div>
+                </div>
+              </div>
+            </details>
+          </div>
+
+          <div class="finding">
+            <details open>
+              <summary>
+                <div class="summary-left">
+                  <span class="severity closed">Closed</span>
+                  <div>
+                    <strong><span class="inline-code">copilot-context.tsx</span> 已停止在 streaming tick 上频繁落盘</strong>
+                    <div class="finding-meta">云端当前实现已经把“UI 每帧更新”和“持久化落盘”拆开了。</div>
+                  </div>
+                </div>
+                <span class="summary-arrow">+</span>
+              </summary>
+              <div class="finding-body">
+                <div class="finding-grid">
+                  <div class="card">
+                    <strong>问题是什么</strong>
+                    <p>原先每次 <span class="inline-code">messages</span> 变化都写一次 <span class="inline-code">sessionStorage</span>。而 streaming 模拟本身又会高频刷新消息内容，等于把同步存储绑到了每个 tick 上。</p>
+                  </div>
+                  <div class="card">
+                    <strong>证据</strong>
+                    <div class="code-line">apps/sales-copilot/src/contexts/copilot-context.tsx:276-345</div>
+                    <div class="code-line">apps/sales-copilot/src/contexts/copilot-context.tsx:276</div>
+                    <div class="code-line">apps/sales-copilot/src/contexts/copilot-context.tsx:297-301</div>
+                  </div>
+                  <div class="card">
+                    <strong>现在变成了什么</strong>
+                    <p>当前实现使用 <span class="inline-code">lastPersistedRef</span> 去重，并且在有 <span class="inline-code">isStreaming</span> / <span class="inline-code">isThinking</span> 状态时直接跳过落盘，只在稳定 500ms 后再持久化。</p>
+                  </div>
+                  <div class="card">
+                    <strong>结论</strong>
+                    <p>这条性能缺陷已经实质关闭。后面如果聊天面板还有卡顿，就该查渲染树和大组件重绘，而不是继续怀疑 sessionStorage 每帧写入。</p>
+                  </div>
+                </div>
+              </div>
+            </details>
+          </div>
+
+          <div class="finding">
+            <details>
+              <summary>
+                <div class="summary-left">
+                  <span class="severity closed">Closed</span>
+                  <div>
+                    <strong>首页和 <span class="inline-code">visit-log</span> 的页面级 Direct Line 编排已回收进 provider</strong>
+                    <div class="finding-meta">这轮最大的结构收益，不是多了一个 helper，而是会话所有权终于收到了单一路径上。</div>
+                  </div>
+                </div>
+                <span class="summary-arrow">+</span>
+              </summary>
+              <div class="finding-body">
+                <div class="finding-grid">
+                  <div class="card">
+                    <strong>问题是什么</strong>
+                    <p>之前首页自己建 conversation、自己轮询；<span class="inline-code">visit-log</span> 也自己发提取 prompt 和手写轮询循环。结果是同一种服务被三处实现各管一段。</p>
+                  </div>
+                  <div class="card">
+                    <strong>证据</strong>
+                    <div class="code-line">apps/sales-copilot/src/pages/home.tsx:1749-1763</div>
+                    <div class="code-line">apps/sales-copilot/src/pages/visit-log.tsx:394-398</div>
+                    <div class="code-line">apps/sales-copilot/src/contexts/copilot-context.tsx:198</div>
+                    <div class="code-line">apps/sales-copilot/src/contexts/copilot-context.tsx:382-390</div>
+                  </div>
+                  <div class="card">
+                    <strong>现在变成了什么</strong>
+                    <p>首页新建会话直接走 <span class="inline-code">copilot.startNewConversation()</span>；<span class="inline-code">visit-log</span> 提取则走 <span class="inline-code">copilot.extractVisitData()</span>。页面不再自己抓 Direct Line 细节。</p>
+                  </div>
+                  <div class="card">
+                    <strong>结论</strong>
+                    <p>主链路所有权已经回到 provider。剩下要防的是“又出现第四处私接 Direct Line”，不是继续拆旧页面轮询。</p>
+                  </div>
+                </div>
+              </div>
+            </details>
+          </div>
+
+          <div class="finding">
+            <details>
+              <summary>
+                <div class="summary-left">
+                  <span class="severity open">Open</span>
+                  <div>
+                    <strong><span class="inline-code">copilot-context.tsx</span> 仍然是新的超级节点，但已经拆出第一块 helper</strong>
+                    <div class="finding-meta">这不是说 provider 不该做 owner，而是它虽然已经开始瘦身，体积和职责密度仍然偏高。</div>
+                  </div>
+                </div>
+                <span class="summary-arrow">+</span>
+              </summary>
+              <div class="finding-body">
+                <div class="finding-grid">
+                  <div class="card">
+                    <strong>问题是什么</strong>
+                    <p>收口之后，provider 仍同时管面板开合、消息持久化、Direct Line 连接、流式输出、表单卡片状态和匹配选择。<span class="inline-code">visit extraction</span> 已经抽出，但主文件依然接近两千行。</p>
+                  </div>
+                  <div class="card">
+                    <strong>证据</strong>
+                    <div class="code-line">apps/sales-copilot/src/contexts/copilot-context.tsx (1,917 lines)</div>
+                    <div class="code-line">apps/sales-copilot/src/contexts/copilot-context.tsx:276-345</div>
+                    <div class="code-line">apps/sales-copilot/src/contexts/copilot-context.tsx:382-390</div>
+                    <div class="code-line">apps/sales-copilot/src/lib/visit-extraction.ts:1-103</div>
+                  </div>
+                  <div class="card">
+                    <strong>影响</strong>
+                    <p>现在的风险不再是“会话是不是分叉”，而是“任何一处修改都必须读完整个 provider 才敢动”。即便已经拆出第一块 helper，这个阅读成本仍然会拖慢后续每个 Copilot 需求。</p>
+                  </div>
+                  <div class="card">
+                    <strong>建议</strong>
+                    <p>保持 provider API 不变，下一步继续拆两块：transport/session、message persistence/streaming。现在已经证明“先抽 helper、外部不动”这条路能走通，就别再把剩余职责继续堆回 provider。</p>
+                  </div>
+                </div>
+              </div>
+            </details>
+          </div>
+
+          <div class="finding">
+            <details>
+              <summary>
+                <div class="summary-left">
+                  <span class="severity closed">Closed</span>
+                  <div>
+                    <strong>遗留的 <span class="inline-code">src/hooks/use-copilot.ts</span> 已从仓库移除</strong>
+                    <div class="finding-meta">第二套 Copilot 实现的显式入口已经不在云端同步代码里了。</div>
+                  </div>
+                </div>
+                <span class="summary-arrow">+</span>
+              </summary>
+              <div class="finding-body">
+                <div class="finding-grid">
+                  <div class="card">
+                    <strong>问题是什么</strong>
+                    <p>主链路已经回收到 provider 后，仓库里还留着一份旧的 <span class="inline-code">use-copilot.ts</span>。它即使暂时没人 import，也还是一个会把第二套状态机重新带回来的入口。</p>
+                  </div>
+                  <div class="card">
+                    <strong>现在变成了什么</strong>
+                    <p>这份遗留 hook 已经直接删除，仓库里不再保留那套重复的 Direct Line 会话、轮询和发送逻辑。</p>
+                  </div>
+                  <div class="card">
+                    <strong>证据</strong>
+                    <div class="code-line">apps/sales-copilot/src/hooks/use-copilot.ts 已不存在</div>
+                    <div class="code-line">当前源码搜索未发现对该 hook 的实际 import</div>
+                  </div>
+                  <div class="card">
+                    <strong>结论</strong>
+                    <p>这条已经可以从开放问题里拿掉。后面真正需要防的不是旧 hook 复活，而是别在别的页面或 helper 里重新长出新的私有 owner。</p>
+                  </div>
+                </div>
+              </div>
+            </details>
+          </div>
+
+          <div class="finding">
+            <details>
+              <summary>
+                <div class="summary-left">
+                  <span class="severity closed">Closed</span>
+                  <div>
+                    <strong>首页图标按钮已补可访问名称，剩余 inline-style debt 也已收掉</strong>
+                    <div class="finding-meta">这不是决定架构方向的大问题，但它已经不再继续污染首页的校验结果。</div>
+                  </div>
+                </div>
+                <span class="summary-arrow">+</span>
+              </summary>
+              <div class="finding-body">
+                <div class="finding-grid">
+                  <div class="card">
+                    <strong>问题是什么</strong>
+                    <p>首页音频和通知区域原先有多个纯图标按钮没有名称，另外还有几处纯展示型 inline style 长期占着诊断输出。这些不是大故障，但会让真正的新回归被旧告警淹没。</p>
+                  </div>
+                  <div class="card">
+                    <strong>证据</strong>
+                    <div class="code-line">apps/sales-copilot/src/pages/home.tsx:2158</div>
+                    <div class="code-line">apps/sales-copilot/src/pages/home.tsx:2443</div>
+                    <div class="code-line">apps/sales-copilot/src/pages/home.tsx:2688</div>
+                    <div class="code-line">apps/sales-copilot/src/pages/home.tsx:2781</div>
+                    <div class="code-line">apps/sales-copilot/src/pages/home.tsx:2802</div>
+                    <div class="code-line">apps/sales-copilot/src/pages/home.tsx:3138</div>
+                    <div class="code-line">apps/sales-copilot/src/pages/home.tsx: no errors found</div>
+                  </div>
+                  <div class="card">
+                    <strong>现在变成了什么</strong>
+                    <p>相关图标按钮现在都补上了本地化的 <span class="inline-code">aria-label</span> 和 <span class="inline-code">title</span>；静态渐变和气泡样式则回收到 class / CSS utility，不再靠 JSX <span class="inline-code">style</span> 占位。</p>
+                  </div>
+                  <div class="card">
+                    <strong>结论</strong>
+                    <p>这条已经关闭。以后首页如果再冒告警，就更容易分辨那是不是新引入的问题，而不是历史噪音还没清完。</p>
+                  </div>
+                </div>
+              </div>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <span class="kicker">02 / Grades</span>
+            <h2>九个维度的当前档位</h2>
+            <p>这不是“夸修复成果”，而是看修完主链路以后，系统整体位置到底抬到了哪。</p>
+          </div>
+        </div>
+        <div class="grades-grid">
+          <article class="grade-card">
+            <div class="grade-top"><strong>架构一致性</strong><span class="grade-letter grade-b">B</span></div>
+            <div class="grade-note">会话所有权已经收回到 provider，主链路比上一版干净很多，但 provider 内部职责还没拆开。</div>
+          </article>
+          <article class="grade-card">
+            <div class="grade-top"><strong>代码重复度</strong><span class="grade-letter grade-b">B</span></div>
+            <div class="grade-note">首页和 visit-log 的重复编排已经删掉，遗留的 <span class="inline-code">use-copilot.ts</span> 也已移除；剩下主要不是重复实现，而是唯一 owner 还太重。</div>
+          </article>
+          <article class="grade-card">
+            <div class="grade-top"><strong>命名与可读性</strong><span class="grade-letter grade-c">C</span></div>
+            <div class="grade-note">命名不是主问题，真正的问题是 <span class="inline-code">home.tsx</span> 和 provider 都已经大到阅读成本过高。</div>
+          </article>
+          <article class="grade-card">
+            <div class="grade-top"><strong>错误处理与健壮性</strong><span class="grade-letter grade-b">B</span></div>
+            <div class="grade-note">会话 freshness 已经补上，直连路径也已收口；当前更大的风险来自 provider 过重，而不是会话本身不稳。</div>
+          </article>
+          <article class="grade-card">
+            <div class="grade-top"><strong>可测试性</strong><span class="grade-letter grade-c">C</span></div>
+            <div class="grade-note">主链路虽然修好了，但还缺一条围绕“发消息 / 新会话 / visit extraction”的最小 smoke 回归链。</div>
+          </article>
+          <article class="grade-card">
+            <div class="grade-top"><strong>性能与资源</strong><span class="grade-letter grade-b">B</span></div>
+            <div class="grade-note">sessionStorage 写放大已经处理掉，剩下的性能风险更多来自巨型页面和 provider 的整体重渲染面。</div>
+          </article>
+          <article class="grade-card">
+            <div class="grade-top"><strong>安全与数据完整性</strong><span class="grade-letter grade-b">B</span></div>
+            <div class="grade-note">会话缓存现在至少有有效期约束，但配置和会话仍在浏览器存储层，边界还是偏宽。</div>
+          </article>
+          <article class="grade-card">
+            <div class="grade-top"><strong>设计语言与组件复用</strong><span class="grade-letter grade-b">B</span></div>
+            <div class="grade-note">视觉语言仍然统一，但首页继续承载太多业务交互，组件复用收益还没完全释放出来。</div>
+          </article>
+          <article class="grade-card">
+            <div class="grade-top"><strong>文档健康度</strong><span class="grade-letter grade-c">C</span></div>
+            <div class="grade-note">这份报告已经转成云端口径，但后续最好单独维护一份“Copilot owner rules”，明确哪些文件可以碰 Direct Line。</div>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <span class="kicker">03 / Hotspots</span>
+            <h2>最该拆的三个热点</h2>
+            <p>大不一定错，但这几个文件都已经超出了“一个人一次能完整读懂”的舒适体积。</p>
+          </div>
+        </div>
+        <div class="hotspots-grid">
+          <article class="hotspot-card">
+            <strong>首页</strong>
+            <div class="hotspot-stat">3,309</div>
+            <p>文件：<span class="inline-code">src/pages/home.tsx</span></p>
+            <p>虽然页面级 Direct Line 已经拿掉，但它仍同时管 dashboard、brief me、音频控制、业务洞察、聊天 UI 和大量状态分支。</p>
+          </article>
+          <article class="hotspot-card">
+            <strong>Copilot Provider</strong>
+            <div class="hotspot-stat">1,917</div>
+            <p>文件：<span class="inline-code">src/contexts/copilot-context.tsx</span></p>
+            <p>这里现在是正确的 owner，而且已经先把 <span class="inline-code">visit extraction</span> 挪出一块。但它仍同时管面板状态、聊天消息、持久化、流式输出、表单草稿、匹配选择和重连，继续往里堆只会把新 owner 变成新瓶颈。</p>
+          </article>
+          <article class="hotspot-card">
+            <strong>函数执行器</strong>
+            <div class="hotspot-stat">1,449</div>
+            <p>文件：<span class="inline-code">src/lib/function-executor.ts</span></p>
+            <p>搜索、匹配、实体写入、OData 安全清洗都挤在一处。这个文件适合拆成“读模型”“写模型”“匹配策略”“参数规范化”四块。</p>
+          </article>
+          <article class="hotspot-card">
+            <strong>Visit Extraction Helper</strong>
+            <div class="hotspot-stat">103</div>
+            <p>文件：<span class="inline-code">src/lib/visit-extraction.ts</span></p>
+            <p>这不是新的热点，恰恰相反，它说明“先抽 helper、外部 API 不动”这条拆分路径已经跑通。接下来 provider 里剩下的 transport / persistence 也该按这个方式继续拆。</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <span class="kicker">04 / Action Plan</span>
+            <h2>建议的第一轮治理动作</h2>
+            <p>这些动作都很具体，目标不是“更优雅”，而是防止主链路再次分叉。</p>
+          </div>
+        </div>
+        <div class="actions-grid">
+          <article class="action-card">
+            <strong>动作 1：继续拆 provider 内部，不动 provider 外部 API</strong>
+            <p><span class="inline-code">visit extraction</span> 已经拆出去，下一步优先处理 transport / session 和 message persistence，两块都继续走“内部抽 helper、外部不改接口”的路子。</p>
+          </article>
+          <article class="action-card">
+            <strong>动作 2：补最小 smoke 回归链</strong>
+            <p>覆盖“新建会话、发送消息、visit extraction”三步就够。目标不是全量测试，而是给刚收口并开始拆分的主链路立一条护栏。</p>
+          </article>
+          <article class="action-card">
+            <strong>动作 3：处理 <span class="inline-code">function-executor.ts</span> 热点</strong>
+            <p>这个文件已经 1,449 行，比当前 provider 更像下一轮功能继续堆积的地方。优先把查询、写入、匹配和参数规范化拆层。</p>
+          </article>
+          <article class="action-card">
+            <strong>动作 4：补一份 Copilot owner 规则</strong>
+            <p>把“哪些文件可以碰 Direct Line、哪些页面只能消费 provider 动作”写成短规则，避免后面又有人从别处私接会话。</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <span class="kicker">05 / Evidence</span>
+            <h2>本次审查的可执行依据</h2>
+            <p>下面只放本轮云端范围真正有用的证据：同步基线、当前锚点、以及还没关掉的剩余告警。</p>
+          </div>
+        </div>
+        <div class="log-grid">
+          <div class="log-card">
+            <strong>已验证闭环</strong>
+            <pre class="evidence-log">云端同步基线：remote 188 / matched 188 / missing 0 / mismatched 0
+
+freshness 锚点：
+- services/copilot-service.ts:15
+- services/copilot-service.ts:80-102
+- services/copilot-service.ts:237-256
+
+持久化锚点：
+- contexts/copilot-context.tsx:276-345
+
+页面收口锚点：
+- pages/home.tsx:1749-1763
+- pages/visit-log.tsx:394-398
+- contexts/copilot-context.tsx:198, 382-390
+
+visit extraction 已抽 helper：
+- lib/visit-extraction.ts:1-103
+- contexts/copilot-context.tsx:18-21
+
+遗留 hook：
+- src/hooks/use-copilot.ts 已删除
+
+首页收尾：
+- pages/home.tsx:2158 / 2443 / 2688 / 2781 / 2802 / 3138
+
+文件级校验：
+- copilot-service.ts: no errors found
+- copilot-context.tsx: no errors found
+- visit-log.tsx: no errors found
+- home.tsx: no errors found</pre>
+          </div>
+          <div class="log-card">
+            <strong>仍开放的证据</strong>
+            <pre class="evidence-log">热点体积：
+- src/pages/home.tsx: 3,309 lines
+- src/contexts/copilot-context.tsx: 1,917 lines
+- src/lib/function-executor.ts: 1,449 lines
+
+provider 仍过重：
+- persistence 仍在 contexts/copilot-context.tsx:276-345
+- provider wrapper 仍在 contexts/copilot-context.tsx:382-390
+- 大型 value / state owner 仍集中在 contexts/copilot-context.tsx
+
+下一条护栏还没补：
+- 还没有覆盖“新建会话 / 发送消息 / visit extraction”的最小 smoke 回归链</pre>
+          </div>
+        </div>
+      </section>
+
+      <footer>
+        生成时间：2026-05-16 · 本报告口径只看云端同步代码。当前已新增记录：遗留 hook 已删除、首页可访问性和 style debt 已收尾、visit extraction 已从 provider 内部抽成 helper；剩余核心问题是 provider 继续瘦身和补最小 smoke 护栏。
+      </footer>
+    </div>
+
+    <script>
+      const root = document.documentElement;
+      const savedTheme = localStorage.getItem('review-theme');
+      if (savedTheme === 'dark') {
+        root.classList.add('dark');
+      }
+
+      document.getElementById('theme-toggle').addEventListener('click', () => {
+        root.classList.toggle('dark');
+        localStorage.setItem('review-theme', root.classList.contains('dark') ? 'dark' : 'light');
+      });
+
+      document.getElementById('expand-all').addEventListener('click', () => {
+        document.querySelectorAll('details').forEach((el) => {
+          el.open = true;
+        });
+      });
+
+      document.getElementById('collapse-all').addEventListener('click', () => {
+        document.querySelectorAll('details').forEach((el, index) => {
+          el.open = index < 2;
+        });
+      });
+    </script>
+  </body>
+</html>

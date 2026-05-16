@@ -4,7 +4,24 @@ import { motion } from 'motion/react';
 import { cn } from '@/lib/utils';
 import { ChevronRight, Building2, Target, Calendar, Users, FileText, Package } from 'lucide-react';
 import { getLocale, type Locale } from '@/lib/i18n';
+import { formatCurrencyFull } from '@/lib/format-currency';
 import { useCopilot } from '@/contexts/copilot-context';
+// Import Choice field mappings from generated models (not hardcoded)
+import {
+  ActivityDraftstatusKeyToLabel,
+  ActivityOutcomeKeyToLabel,
+  ActivityTypeKeyToLabel,
+} from '@/generated/models/activity-model';
+import {
+  OpportunityConfidencetrendKeyToLabel,
+  OpportunityStageKeyToLabel,
+} from '@/generated/models/opportunity-model';
+import {
+  AccountCreditstatusKeyToLabel,
+  AccountPaymentstatusKeyToLabel,
+  AccountRegionKeyToLabel,
+  AccountTierKeyToLabel,
+} from '@/generated/models/account-model';
 
 // Simple markdown renderer - handles basic formatting without external dependencies
 function SimpleMarkdown({ content }: { content: string }) {
@@ -238,7 +255,7 @@ type EntityType = 'activity' | 'opportunity' | 'account' | 'contact' | 'product'
 
 // Entity detection patterns
 const entityPatterns: Record<EntityType, string[]> = {
-  activity: ['activity', 'activities', 'visit', 'visits', 'task', 'tasks', 'meeting', 'meetings', 'call', 'calls', 'scheduleddate', 'draftstatusKey', 'typeKey'],
+  activity: ['activity', 'activities', 'visit', 'visits', 'task', 'tasks', 'meeting', 'meetings', 'call', 'calls', 'scheduleddate', 'scheduledDate', 'draftstatusKey', 'typeKey', 'TypeKey0', 'TypeKey1', 'TypeKey2', 'TypeKey3', 'TypeKey4'],
   opportunity: ['opportunity', 'opportunities', 'deal', 'deals', 'pipeline', 'stageKey', 'totalamount', 'expectedclosedate', 'confidence'],
   account: ['account', 'accounts', 'customer', 'customers', 'client', 'clients', 'company', 'companies', 'tierKey', 'creditstatusKey', 'regionKey'],
   contact: ['contact', 'contacts', 'person', 'people', 'employee', 'employees'],
@@ -318,54 +335,133 @@ const fieldDisplayNames: Record<string, Record<string, string>> = {
   },
 };
 
-// Key label mappings for enum values
-const keyLabelMappings: Record<string, Record<string, string>> = {
-  stageKey: {
-    Stagekey0: 'Prospecting',
-    Stagekey1: 'Qualification',
-    Stagekey2: 'Proposal',
-    Stagekey3: 'Negotiation',
-    Stagekey4: 'Won',
-    Stagekey5: 'Lost',
-  },
-  draftstatusKey: {
-    Draftstatuskey0: 'Draft',
-    Draftstatuskey1: 'Confirmed',
-    Draftstatuskey2: 'Completed',
-    Draftstatuskey3: 'Cancelled',
-  },
-  typeKey: {
-    Typekey0: 'Visit',
-    Typekey1: 'Call',
-    Typekey2: 'Meeting',
-    Typekey3: 'Email',
-    Typekey4: 'Other',
-  },
-  outcomeKey: {
-    Outcomekey0: '成功',
-    Outcomekey1: '拖延',
-    Outcomekey2: '人员变动',
-    Outcomekey3: '承诺后推迟',
-    Outcomekey4: '无结果',
-  },
-  tierKey: {
-    Tierkey0: 'S',
-    Tierkey1: 'A',
-    Tierkey2: 'B',
-    Tierkey3: 'C',
-  },
-  regionKey: {
-    Regionkey0: '华东',
-    Regionkey1: '华北',
-    Regionkey2: '华南',
-    Regionkey3: '西南',
-  },
-  confidencetrendKey: {
-    Confidencetrendkey0: '↑',
-    Confidencetrendkey1: '↓',
-    Confidencetrendkey2: '→',
-  },
+// Build keyLabelMappings dynamically from generated model mappings
+// This ensures UI stays in sync with Dataverse Choice field definitions
+// Helper to capitalize label for display
+const capitalizeLabel = (label: string): string => 
+  label.charAt(0).toUpperCase() + label.slice(1);
+
+// Helper to create display mapping from generated KeyToLabel const
+const createDisplayMapping = (source: Record<string, string>): Record<string, string> => {
+  const result: Record<string, string> = {};
+  for (const [key, label] of Object.entries(source)) {
+    result[key] = capitalizeLabel(label);
+  }
+  return result;
 };
+
+// Key label mappings for enum values - sourced from generated models
+const keyLabelMappings: Record<string, Record<string, string>> = {
+  // Opportunity stage
+  stageKey: createDisplayMapping(OpportunityStageKeyToLabel),
+  stage: createDisplayMapping(OpportunityStageKeyToLabel),
+  // Activity draft status
+  draftstatusKey: createDisplayMapping(ActivityDraftstatusKeyToLabel),
+  status: createDisplayMapping(ActivityDraftstatusKeyToLabel),
+  // Activity type
+  typeKey: createDisplayMapping(ActivityTypeKeyToLabel),
+  type: createDisplayMapping(ActivityTypeKeyToLabel),
+  // Activity outcome
+  outcomeKey: { ...ActivityOutcomeKeyToLabel },
+  // Account tier
+  tierKey: { ...AccountTierKeyToLabel },
+  // Account region
+  regionKey: { ...AccountRegionKeyToLabel },
+  // Opportunity confidence trend - use arrow symbols for display
+  confidencetrendKey: {
+    ConfidencetrendKey0: '↑',
+    ConfidencetrendKey1: '↓',
+    ConfidencetrendKey2: '→',
+  },
+  // Account credit status
+  creditstatusKey: { ...AccountCreditstatusKeyToLabel },
+  // Account payment status
+  paymentstatusKey: { ...AccountPaymentstatusKeyToLabel },
+};
+
+// Helper to get label from any key value (case-insensitive)
+// Uses imported mappings directly as the source of truth
+function getKeyLabel(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  
+  // Direct match from imported mappings first (source of truth)
+  // Activity type
+  if (value in ActivityTypeKeyToLabel) {
+    return capitalizeLabel(ActivityTypeKeyToLabel[value as keyof typeof ActivityTypeKeyToLabel]);
+  }
+  // Activity status
+  if (value in ActivityDraftstatusKeyToLabel) {
+    return capitalizeLabel(ActivityDraftstatusKeyToLabel[value as keyof typeof ActivityDraftstatusKeyToLabel]);
+  }
+  // Activity outcome
+  if (value in ActivityOutcomeKeyToLabel) {
+    return ActivityOutcomeKeyToLabel[value as keyof typeof ActivityOutcomeKeyToLabel];
+  }
+  // Opportunity stage
+  if (value in OpportunityStageKeyToLabel) {
+    return capitalizeLabel(OpportunityStageKeyToLabel[value as keyof typeof OpportunityStageKeyToLabel]);
+  }
+  // Opportunity confidence trend
+  if (value in OpportunityConfidencetrendKeyToLabel) {
+    return OpportunityConfidencetrendKeyToLabel[value as keyof typeof OpportunityConfidencetrendKeyToLabel];
+  }
+  // Account tier
+  if (value in AccountTierKeyToLabel) {
+    return AccountTierKeyToLabel[value as keyof typeof AccountTierKeyToLabel];
+  }
+  // Account region
+  if (value in AccountRegionKeyToLabel) {
+    return AccountRegionKeyToLabel[value as keyof typeof AccountRegionKeyToLabel];
+  }
+  // Account credit status
+  if (value in AccountCreditstatusKeyToLabel) {
+    return capitalizeLabel(AccountCreditstatusKeyToLabel[value as keyof typeof AccountCreditstatusKeyToLabel]);
+  }
+  // Account payment status
+  if (value in AccountPaymentstatusKeyToLabel) {
+    return capitalizeLabel(AccountPaymentstatusKeyToLabel[value as keyof typeof AccountPaymentstatusKeyToLabel]);
+  }
+  
+  // Case-insensitive fallback for all mappings
+  const lowerValue = value.toLowerCase();
+  
+  // Check each imported mapping with case-insensitive match
+  for (const [key, label] of Object.entries(ActivityTypeKeyToLabel)) {
+    if (key.toLowerCase() === lowerValue) return capitalizeLabel(label);
+  }
+  for (const [key, label] of Object.entries(ActivityDraftstatusKeyToLabel)) {
+    if (key.toLowerCase() === lowerValue) return capitalizeLabel(label);
+  }
+  for (const [key, label] of Object.entries(OpportunityStageKeyToLabel)) {
+    if (key.toLowerCase() === lowerValue) return capitalizeLabel(label);
+  }
+  for (const [key, label] of Object.entries(AccountTierKeyToLabel)) {
+    if (key.toLowerCase() === lowerValue) return label;
+  }
+  for (const [key, label] of Object.entries(AccountRegionKeyToLabel)) {
+    if (key.toLowerCase() === lowerValue) return label;
+  }
+  
+  return undefined;
+}
+
+// Helper to get type label specifically (handles case variations)
+function getTypeLabel(typeValue: string | undefined): string {
+  if (!typeValue) return '';
+  // Direct match from imported mapping (the source of truth)
+  const directFromSource = ActivityTypeKeyToLabel[typeValue as keyof typeof ActivityTypeKeyToLabel];
+  if (directFromSource) return capitalizeLabel(directFromSource);
+  // Try keyLabelMappings as fallback
+  const direct = keyLabelMappings.typeKey?.[typeValue] || keyLabelMappings.type?.[typeValue];
+  if (direct) return direct;
+  // Case-insensitive match for ActivityTypeKeyToLabel
+  const lowerValue = typeValue.toLowerCase();
+  for (const [key, label] of Object.entries(ActivityTypeKeyToLabel)) {
+    if (key.toLowerCase() === lowerValue) return capitalizeLabel(label);
+  }
+  // Fallback - return original value
+  return typeValue;
+}
 
 // Try to parse JSON from content
 export function tryParseJson(content: string): { isJson: boolean; data: unknown; isEmpty: boolean } {
@@ -405,10 +501,39 @@ export function tryParseJson(content: string): { isJson: boolean; data: unknown;
   }
 }
 
-// Detect entity type from data
+// Detect entity type from data - order matters! More specific checks first
 function detectEntityType(data: unknown): EntityType {
   const jsonStr = JSON.stringify(data).toLowerCase();
+  const dataObj = Array.isArray(data) && data.length > 0 ? data[0] : data;
+  const fields = dataObj && typeof dataObj === 'object' ? Object.keys(dataObj as object) : [];
   
+  // More specific field-based detection first
+  // Activity: has scheduleddate/scheduledDate or typeKey or type with TypeKey value, or draftstatusKey
+  if (fields.includes('scheduleddate') || fields.includes('scheduledDate') || 
+      fields.includes('draftstatusKey') || fields.includes('typeKey') ||
+      (fields.includes('type') && jsonStr.includes('typekey'))) {
+    return 'activity';
+  }
+  
+  // Opportunity: has stageKey or totalamount or confidence or expectedclosedate
+  if (fields.includes('stageKey') || fields.includes('totalamount') || 
+      fields.includes('confidence') || fields.includes('expectedclosedate') ||
+      fields.includes('expectedCloseDate')) {
+    return 'opportunity';
+  }
+  
+  // Account: has tierKey or regionKey or creditstatusKey (but NOT as nested field)
+  if (fields.includes('tierKey') || fields.includes('regionKey') || 
+      fields.includes('creditstatusKey') || fields.includes('paymentstatusKey')) {
+    return 'account';
+  }
+  
+  // Contact: has fullname field
+  if (fields.includes('fullname') || fields.includes('fullName')) {
+    return 'contact';
+  }
+  
+  // Fallback to pattern matching for less specific cases
   for (const [entityType, patterns] of Object.entries(entityPatterns)) {
     if (entityType === 'unknown') continue;
     for (const pattern of patterns) {
@@ -510,7 +635,7 @@ function formatCellValue(key: string, value: unknown, locale: Locale): string {
   if (key === 'totalamount' || key.includes('amount') || key.includes('price')) {
     const num = Number(value);
     if (!isNaN(num)) {
-      return '¥' + num.toLocaleString();
+      return formatCurrencyFull(num);
     }
   }
   
@@ -529,15 +654,9 @@ function getNavigationPath(entityType: EntityType, item: DataItem): string | nul
   
   switch (entityType) {
     case 'activity': {
-      // Navigate to activity detail (via account if available)
-      const accountRef = item.account as { id?: string } | undefined;
-      const accountId = accountRef?.id || item.accountId || item.account_id;
-      if (accountId) {
-        return `/activity/${accountId}`;
-      }
-      // If we have the activity id, pass it as state
+      // Navigate to activity detail using the activity's own id
       if (id) {
-        return `/activity-capture`;
+        return `/activities/${id}`;
       }
       return `/activity-capture`;
     }
@@ -573,19 +692,19 @@ function getNavigationPath(entityType: EntityType, item: DataItem): string | nul
 
 // Stage badge colors
 const stageBadgeColors: Record<string, string> = {
-  Stagekey0: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-  Stagekey1: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
-  Stagekey2: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
-  Stagekey3: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-  Stagekey4: 'bg-green-500/20 text-green-400 border-green-500/30',
-  Stagekey5: 'bg-red-500/20 text-red-400 border-red-500/30',
+  StageKey0: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+  StageKey1: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+  StageKey2: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
+  StageKey3: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
+  StageKey4: 'bg-green-500/20 text-green-400 border-green-500/30',
+  StageKey5: 'bg-red-500/20 text-red-400 border-red-500/30',
 };
 
 const statusBadgeColors: Record<string, string> = {
-  Draftstatuskey0: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
-  Draftstatuskey1: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-  Draftstatuskey2: 'bg-green-500/20 text-green-400 border-green-500/30',
-  Draftstatuskey3: 'bg-red-500/20 text-red-400 border-red-500/30',
+  DraftstatusKey0: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
+  DraftstatusKey1: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+  DraftstatusKey2: 'bg-green-500/20 text-green-400 border-green-500/30',
+  DraftstatusKey3: 'bg-red-500/20 text-red-400 border-red-500/30',
 };
 
 interface DynamicDataRendererProps {
@@ -664,7 +783,7 @@ export function DynamicDataRenderer({ content }: DynamicDataRendererProps) {
     let secondaryInfo: React.ReactNode = null;
     if (resolvedEntityType === 'opportunity') {
       const amount = item.totalamount || item.amount || item.value;
-      const amountStr = amount ? `¥${Number(amount).toLocaleString()}` : '';
+      const amountStr = amount ? formatCurrencyFull(Number(amount)) : '';
       const confidence = item.confidence || item.probability;
       const confidenceStr = confidence ? `${confidence}%` : '';
       const stage = (item.stageKey || item.stage || item.status) as string | undefined;
@@ -677,27 +796,35 @@ export function DynamicDataRenderer({ content }: DynamicDataRendererProps) {
               'text-[10px] px-1.5 py-0.5 rounded border',
               stageBadgeColors[stage] || 'bg-muted text-muted-foreground'
             )}>
-              {keyLabelMappings.stageKey?.[stage] || stage}
+              {getKeyLabel(stage) || stage}
             </span>
           )}
         </div>
       );
     } else if (resolvedEntityType === 'activity') {
-      const accountObj = item.account as { name1?: string; name?: string } | undefined;
-      const accountName = String(accountObj?.name1 || accountObj?.name || item.accountName || '');
+      // Handle account - can be string (from function-executor) or object (from raw data)
+      const accountValue = item.account;
+      const accountName = typeof accountValue === 'string' 
+        ? accountValue 
+        : (accountValue as { name1?: string; name?: string } | undefined)?.name1 || (accountValue as { name1?: string; name?: string } | undefined)?.name || String(item.accountName || '');
       const status = (item.draftstatusKey || item.status || item.state) as string | undefined;
-      const dateValue = item.scheduleddate || item.date || item.dueDate;
+      // Handle type - can be 'type' field (from function-executor with TypeKey value) or 'typeKey' field
+      const typeValue = (item.typeKey || item.type) as string | undefined;
+      // Map TypeKey values to readable labels using case-insensitive helper
+      const typeLabel = getTypeLabel(typeValue);
+      const dateValue = item.scheduleddate || item.scheduledDate || item.date || item.dueDate;
       const dateStr = dateValue ? formatCellValue('scheduleddate', dateValue, locale) : '';
       secondaryInfo = (
         <div className="flex items-center gap-2 mt-1 flex-wrap">
-          {accountName && <span className="text-xs text-muted-foreground">{accountName}</span>}
+          {typeLabel && <span className="text-xs font-medium text-primary">{typeLabel}</span>}
+          {accountName && <span className="text-xs text-muted-foreground">{typeLabel ? '• ' : ''}{accountName}</span>}
           {dateStr && <span className="text-xs text-muted-foreground">• {dateStr}</span>}
           {status && (
             <span className={cn(
               'text-[10px] px-1.5 py-0.5 rounded border',
               statusBadgeColors[status] || 'bg-muted text-muted-foreground'
             )}>
-              {keyLabelMappings.draftstatusKey?.[status] || status}
+              {getKeyLabel(status) || status}
             </span>
           )}
         </div>

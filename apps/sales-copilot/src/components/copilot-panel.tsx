@@ -1,14 +1,17 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence, useDragControls, type PanInfo } from 'motion/react';
-import { Sparkles, Mic, ArrowUp, SquarePen, X, ChevronDown, Copy, Volume2, VolumeX, Loader2, Square, Play, Pause } from 'lucide-react';
+import { Sparkles, ArrowUp, SquarePen, X, ChevronDown, Copy, Volume2, VolumeX, Loader2, Square, Play, Pause, Paperclip, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useCopilot, type ChatMessage } from '@/contexts/copilot-context';
 import { getLocale, getChatFontClass, getThinkingDotStyle, getSelectedVoice, findMatchingSystemVoice, getLLMConfig, getVoiceSummaryEnabled, generateVoiceSummary, type Locale, type ThinkingDotStyle } from '@/lib/i18n';
 import { DynamicDataRenderer, tryParseJson } from '@/components/dynamic-data-renderer';
 import { FormCard } from '@/components/form-card';
+import { BatchFormCard } from '@/components/batch-form-card';
+import { MatchSelectionCard } from '@/components/match-selection-card';
 import { MarkdownContent } from '@/components/markdown-content';
 import { RecordListCard } from '@/components/record-list-card';
+import { AdditionalIntentsCard } from '@/components/additional-intents-card';
 import { toast } from 'sonner';
 
 
@@ -35,9 +38,15 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
     sendMessage,
     inputValue,
     setInputValue,
-    isRecording,
-    setIsRecording,
+
     startNewConversation,
+    continuePendingAction,
+    createNewFromIntent,
+    pageContext,
+    setPageContext,
+    clarificationSuggestions,
+    executeClarificationAction,
+    rollbackToMessage,
   } = useCopilot();
 
   // Render counter for loop diagnostics
@@ -54,13 +63,80 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
   
   const inputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const recordTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const panelRef = useRef<HTMLDivElement>(null);
   const dragControls = useDragControls();
   // IME composition tracking (belt-and-suspenders for cross-browser reliability)
   const isComposingRef = useRef(false);
   
   const [playingInlineId, setPlayingInlineId] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<Array<{ file: File; preview: string; type: 'image' | 'file' }>>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Context chips that user can dismiss
+  const [dismissedContexts, setDismissedContexts] = useState<Set<string>>(new Set());
+  
+  // Clear dismissed contexts when page context changes
+  useEffect(() => {
+    if (pageContext?.currentPage) {
+      setDismissedContexts(new Set());
+    }
+  }, [pageContext?.currentPage]);
+  
+  // Handle dismissing a context chip
+  const handleDismissContext = useCallback(() => {
+    if (pageContext?.currentPage) {
+      setDismissedContexts((prev) => new Set([...prev, pageContext.currentPage]));
+      // Clear the page context so agent no longer uses it
+      setPageContext(null);
+    }
+  }, [pageContext?.currentPage, setPageContext]);
+
+  // Handle file selection
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    Array.from(files).forEach((file: File) => {
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          setAttachments((prev) => [...prev, {
+            file,
+            preview: event.target?.result as string,
+            type: 'image' as const
+          }]);
+        };
+        reader.readAsDataURL(file);
+      } else {
+        setAttachments((prev) => [...prev, {
+          file,
+          preview: '',
+          type: 'file' as const
+        }]);
+      }
+    });
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }, []);
+
+  // Handle remove attachment
+  const handleRemoveAttachment = useCallback((index: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  // Handle camera/attachment button click
+  const handleAttachmentClick = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+  
+  // Check if context should be shown
+  const shouldShowContext = pageContext && 
+    pageContext.currentPage && 
+    !dismissedContexts.has(pageContext.currentPage) &&
+    pageContext.currentPage !== 'Home';
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -119,29 +195,15 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
     }
   };
 
-  // Voice mic handlers
-  const handleMicPointerDown = () => {
-    recordTimerRef.current = setTimeout(() => {
-      setIsRecording(true);
-      toast.info(locale === 'zh-Hans' ? '开始录音...' : 'Recording...', { duration: 1500 });
-    }, 300);
-  };
 
-  const handleMicPointerUp = () => {
-    if (recordTimerRef.current) {
-      clearTimeout(recordTimerRef.current);
-      recordTimerRef.current = null;
-    }
-    if (isRecording) {
-      setIsRecording(false);
-      toast.success(locale === 'zh-Hans' ? '录音完成，正在处理...' : 'Processing...', { duration: 2000 });
-      const mockTranscript = locale === 'zh-Hans' ? '今天有哪些客户需要跟进？' : 'Which customers need follow-up today?';
-      sendMessage(mockTranscript);
-    }
-  };
 
-  // Get quick actions based on conversation
+  // Get quick actions based on conversation or clarification suggestions
   const getQuickActions = useCallback(() => {
+    // If there are clarification suggestions, show them as priority
+    if (clarificationSuggestions.length > 0) {
+      return clarificationSuggestions;
+    }
+    
     if (messages.length === 0) {
       return [
         { text: locale === 'zh-Hans' ? '今日待办' : "Today's tasks", query: locale === 'zh-Hans' ? '今天有哪些待办事项？' : 'What are my tasks for today?' },
@@ -154,9 +216,10 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
       { text: locale === 'zh-Hans' ? '今日待办' : "Today's tasks", query: locale === 'zh-Hans' ? '今天有哪些待办事项？' : 'What are my tasks for today?' },
       { text: locale === 'zh-Hans' ? '帮助' : 'Help', query: locale === 'zh-Hans' ? '你能帮我做什么？' : 'What can you help me with?' },
     ];
-  }, [messages, locale]);
+  }, [messages, locale, clarificationSuggestions]);
 
   const quickActions = getQuickActions();
+  const hasClarificationSuggestions = clarificationSuggestions.length > 0;
 
   // For overlay mode, the AnimatePresence handles the open/close animation,
   // so we don't return null here - it's handled in the overlay render section below
@@ -204,13 +267,13 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
         <>
 
           {messages.map((message: ChatMessage) => (
-            <div key={message.id} className={cn(
+            <div key={message.id} id={`message-${message.id}`} className={cn(
               'mb-3',
               message.type === 'user' ? 'flex justify-end' : ''
             )}>
               {/* User Message */}
               {message.type === 'user' && (
-                <div className="max-w-[85%]">
+                <div className="max-w-[85%] group">
                   <div
                     className={cn('px-3 py-2 rounded-2xl rounded-br-md', getChatFontClass())}
                     style={{
@@ -220,12 +283,107 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
                   >
                     {message.content}
                   </div>
-                  <p className="text-[9px] text-muted-foreground mt-1 text-right">
-                    {new Date(message.timestamp).toLocaleTimeString(locale === 'zh-Hans' ? 'zh-CN' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
-                  </p>
+                  <div className="flex items-center justify-end gap-1.5 mt-1">
+                    <button
+                      onClick={() => {
+                        // Rollback conversation to this message
+                        rollbackToMessage(message.id);
+                        // Put content in input
+                        setInputValue(message.content);
+                        // Focus input
+                        inputRef.current?.focus();
+                      }}
+                      className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-primary/10 hover:text-primary transition-all"
+                      aria-label={locale === 'zh-Hans' ? '重试' : 'Retry'}
+                    >
+                      <RotateCcw className="w-3 h-3 text-muted-foreground hover:text-primary" />
+                    </button>
+                    <p className="text-[9px] text-muted-foreground">
+                      {new Date(message.timestamp).toLocaleTimeString(locale === 'zh-Hans' ? 'zh-CN' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  </div>
                 </div>
               )}
               
+              {/* Batch Form Card Message */}
+              {message.type === 'batch-form-card' && message.batchFormCards && (
+                <div className="max-w-full">
+                  {/* Show thinking steps if present */}
+                  {message.thinkingSteps && message.thinkingSteps.length > 0 && (
+                    <details className="mb-2 text-xs" open>
+                      <summary className="cursor-pointer text-muted-foreground hover:text-foreground flex items-center gap-1">
+                        <span>🧠</span>
+                        <span>{locale === 'zh-Hans' ? '思考过程' : 'Thinking process'}</span>
+                      </summary>
+                      <div className="mt-1.5 pl-4 space-y-1 text-muted-foreground">
+                        {message.thinkingSteps.map((step, idx) => (
+                          <div key={idx} className="flex items-center gap-2">
+                            <span className="text-primary">✓</span>
+                            <span>{step.label}</span>
+                            {step.detail && <span>· {step.detail}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
+                  {message.content && (
+                    <p className="text-sm text-foreground mb-2">{message.content}</p>
+                  )}
+                  <BatchFormCard 
+                    messageId={message.id} 
+                    batchFormCards={message.batchFormCards}
+                  />
+                </div>
+              )}
+
+              {/* Match Selection Card Message */}
+              {message.type === 'match-selection' && message.matchSelection && (
+                <div className="max-w-full">
+                  {/* Show thinking steps if present */}
+                  {message.thinkingSteps && message.thinkingSteps.length > 0 && (
+                    <details className="mb-2 text-xs" open>
+                      <summary className="cursor-pointer text-muted-foreground hover:text-foreground flex items-center gap-1">
+                        <span>🧠</span>
+                        <span>{locale === 'zh-Hans' ? '思考过程' : 'Thinking process'}</span>
+                      </summary>
+                      <div className="mt-1.5 pl-4 space-y-1 text-muted-foreground">
+                        {message.thinkingSteps.map((step, idx) => (
+                          <div key={idx} className="flex items-center gap-2">
+                            <span className="text-primary">✓</span>
+                            <span>{step.label}</span>
+                            {step.detail && <span>· {step.detail}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
+                  {message.content && (
+                    <p className="text-sm text-foreground mb-2">{message.content}</p>
+                  )}
+                  <MatchSelectionCard
+                    messageId={message.id}
+                    matchSelection={message.matchSelection}
+                    onSelect={(record) => {
+                      toast.success(locale === 'zh-Hans' 
+                        ? `已选择: ${record.name}` 
+                        : `Selected: ${record.name}`);
+                    }}
+                    onContinueWithSelection={(record, pendingIntent) => {
+                      // Continue with the pending action using the selected record
+                      continuePendingAction(
+                        record,
+                        pendingIntent,
+                        message.matchSelection?.entityType || 'account'
+                      );
+                    }}
+                    onCreateNew={(pendingIntent) => {
+                      // Create new record without using any existing match
+                      createNewFromIntent(pendingIntent);
+                    }}
+                  />
+                </div>
+              )}
+
               {/* Agent Message */}
               {message.type === 'agent' && (() => {
                 // Thinking state - show progress steps
@@ -367,6 +525,14 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
                         <MarkdownContent content={message.content} />
                       </div>
                     )}
+                    
+                    {/* Additional Intents (multi-intent support) */}
+                    {message.additionalIntents && message.additionalIntents.forms.length > 0 && (
+                      <AdditionalIntentsCard
+                        messageId={message.id}
+                        additionalIntents={message.additionalIntents}
+                      />
+                    )}
                   </div>
                 );
               })()}
@@ -392,13 +558,13 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
                       </div>
                     </details>
                   )}
+                  {message.content && (
+                    <p className="text-sm text-foreground mb-2">{message.content}</p>
+                  )}
                   <FormCard 
                     messageId={message.id} 
                     formCard={message.formCard}
                   />
-                  {message.content && (
-                    <p className="text-xs text-muted-foreground mt-2">{message.content}</p>
-                  )}
                 </div>
               )}
               
@@ -424,20 +590,43 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
 
   const renderInputArea = () => (
     <>
-      {/* Quick Action Pills */}
-      <div className="px-3 pb-2 pt-1 border-t border-border/20">
+      {/* Quick Action Pills - highlighted when showing clarification suggestions */}
+      <div className={cn(
+        'px-3 pb-2 pt-1 border-t',
+        hasClarificationSuggestions 
+          ? 'border-primary/30 bg-primary/5' 
+          : 'border-border/20'
+      )}>
+        {hasClarificationSuggestions && (
+          <p className="text-xs text-primary mb-2 font-medium">
+            {locale === 'zh-Hans' ? '请选择一个操作：' : 'Please choose an option:'}
+          </p>
+        )}
         <div className="flex flex-wrap gap-2">
-          {quickActions.map((action: { text: string; query: string }, idx: number) => (
+          {quickActions.map((action: { text: string; query: string; action?: { function: string; arguments: Record<string, unknown> } }, idx: number) => (
             <button
               key={idx}
-              onClick={() => sendMessage(action.query)}
+              onClick={() => {
+                // If action has function info, execute directly without LLM re-analysis
+                if (action.action) {
+                  executeClarificationAction(
+                    action.action.function,
+                    action.action.arguments,
+                    action.text
+                  );
+                } else {
+                  // Regular query - send as message
+                  sendMessage(action.query);
+                }
+              }}
               disabled={isSending}
               className={cn(
                 'px-3 py-1.5 rounded-full text-xs font-medium',
-                'bg-muted/50 hover:bg-muted text-foreground',
-                'border border-border/50 hover:border-border',
                 'transition-all active:scale-95',
-                'disabled:opacity-50 disabled:cursor-not-allowed'
+                'disabled:opacity-50 disabled:cursor-not-allowed',
+                hasClarificationSuggestions
+                  ? 'bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 hover:border-primary/50'
+                  : 'bg-muted/50 hover:bg-muted text-foreground border border-border/50 hover:border-border'
               )}
             >
               {action.text}
@@ -446,6 +635,40 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
         </div>
       </div>
 
+      {/* Attachment Preview */}
+      {attachments.length > 0 && (
+        <div className="px-3 pb-2">
+          <div className="flex gap-2 flex-wrap">
+            {attachments.map((attachment, index: number) => (
+              <div key={index} className="relative group">
+                {attachment.type === 'image' ? (
+                  <div className="w-16 h-16 rounded-lg overflow-hidden border border-border/50">
+                    <img
+                      src={attachment.preview}
+                      alt="Attachment"
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                ) : (
+                  <div className="w-16 h-16 rounded-lg border border-border/50 bg-muted/50 flex flex-col items-center justify-center">
+                    <Paperclip className="w-5 h-5 text-muted-foreground" />
+                    <span className="text-[8px] text-muted-foreground mt-1 px-1 truncate max-w-full">
+                      {attachment.file.name.length > 8 ? attachment.file.name.slice(0, 8) + '...' : attachment.file.name}
+                    </span>
+                  </div>
+                )}
+                <button
+                  onClick={() => handleRemoveAttachment(index)}
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Input Bar */}
       <div className="px-3 pb-3 pt-2">
         <div className="relative p-[2px] rounded-2xl">
@@ -453,34 +676,25 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
           <div className="absolute inset-0 rounded-2xl neon-glow" />
           
           <div className="relative flex items-center gap-2 p-2 rounded-[14px] bg-background" style={{ backgroundColor: 'var(--background)' }}>
-            {/* Mic Button */}
-            <div className="relative">
-              <AnimatePresence>
-                {isRecording && (
-                  <motion.div
-                    initial={{ scale: 1, opacity: 0.4 }}
-                    animate={{ scale: 2, opacity: 0 }}
-                    transition={{ duration: 1.2, repeat: Infinity, ease: 'easeOut' as const }}
-                    className="absolute inset-0 rounded-full bg-primary/30"
-                  />
-                )}
-              </AnimatePresence>
-              <button
-                onPointerDown={handleMicPointerDown}
-                onPointerUp={handleMicPointerUp}
-                onPointerLeave={handleMicPointerUp}
-                className={cn(
-                  'w-10 h-10 flex items-center justify-center',
-                  'transition-all touch-none select-none',
-                  isRecording ? 'text-rose-500 animate-pulse' : 'text-muted-foreground hover:brightness-150'
-                )}
-                style={{ touchAction: 'none' }}
-                aria-label={locale === 'zh-Hans' ? '按住录音' : 'Hold to record'}
-              >
-                <Mic className="w-5 h-5" />
-              </button>
-            </div>
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+              multiple
+              onChange={handleFileSelect}
+              className="hidden"
+            />
 
+            {/* Camera/Attachment Button */}
+            <button
+              type="button"
+              onClick={handleAttachmentClick}
+              className="w-10 h-10 flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+              aria-label={locale === 'zh-Hans' ? '添加附件' : 'Add attachment'}
+            >
+              <Paperclip className="w-5 h-5" />
+            </button>
             {/* Input Field */}
             <input
               ref={inputRef}
@@ -557,6 +771,49 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
           </button>
         </div>
 
+        {/* Context Chips */}
+        {shouldShowContext && (
+          <div className="px-4 py-2 border-b border-border/20 bg-muted/30">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-muted-foreground">
+                {locale === 'zh-Hans' ? '当前上下文:' : 'Context:'}
+              </span>
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 border border-primary/20">
+                <span className="text-xs font-medium text-primary">
+                  {pageContext.currentPage}
+                </span>
+                {((pageContext.pageData as Record<string, unknown>)?.accountName as string | undefined) && (
+                  <span className="text-xs text-primary/80">
+                    {' · '}{(pageContext.pageData as Record<string, unknown>).accountName as string}
+                  </span>
+                )}
+                {((pageContext.pageData as Record<string, unknown>)?.contactName as string | undefined) && (
+                  <span className="text-xs text-primary/80">
+                    {' · '}{(pageContext.pageData as Record<string, unknown>).contactName as string}
+                  </span>
+                )}
+                {((pageContext.pageData as Record<string, unknown>)?.opportunityName as string | undefined) && (
+                  <span className="text-xs text-primary/80">
+                    {' · '}{(pageContext.pageData as Record<string, unknown>).opportunityName as string}
+                  </span>
+                )}
+                {((pageContext.pageData as Record<string, unknown>)?.activitySubject as string | undefined) && (
+                  <span className="text-xs text-primary/80">
+                    {' · '}{(pageContext.pageData as Record<string, unknown>).activitySubject as string}
+                  </span>
+                )}
+                <button
+                  onClick={handleDismissContext}
+                  className="ml-0.5 w-4 h-4 flex items-center justify-center rounded-full hover:bg-primary/20 transition-colors"
+                  aria-label={locale === 'zh-Hans' ? '移除上下文' : 'Remove context'}
+                >
+                  <X className="w-3 h-3 text-primary" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Messages */}
         {renderMessages()}
 
@@ -604,7 +861,7 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
               transition={{ type: 'spring', damping: 30, stiffness: 300 }}
               className="fixed bottom-0 left-0 right-0 z-[60] bg-background/98 backdrop-blur-xl flex flex-col safe-area-bottom"
               style={{ 
-                height: '70vh',
+                height: '78vh',
                 borderTopLeftRadius: 20, 
                 borderTopRightRadius: 20,
                 boxShadow: '0 -8px 32px -4px rgba(0, 0, 0, 0.15), 0 -4px 16px -4px rgba(0, 0, 0, 0.1)'
@@ -642,6 +899,49 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
                   </button>
                 </div>
               </div>
+
+              {/* Context Chips */}
+              {shouldShowContext && (
+                <div className="px-4 py-2 border-b border-border/20 bg-muted/30">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs text-muted-foreground">
+                      {locale === 'zh-Hans' ? '当前上下文:' : 'Context:'}
+                    </span>
+                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 border border-primary/20">
+                      <span className="text-xs font-medium text-primary">
+                        {pageContext.currentPage}
+                      </span>
+                      {((pageContext.pageData as Record<string, unknown>)?.accountName as string | undefined) && (
+                        <span className="text-xs text-primary/80">
+                          {' · '}{(pageContext.pageData as Record<string, unknown>).accountName as string}
+                        </span>
+                      )}
+                      {((pageContext.pageData as Record<string, unknown>)?.contactName as string | undefined) && (
+                        <span className="text-xs text-primary/80">
+                          {' · '}{(pageContext.pageData as Record<string, unknown>).contactName as string}
+                        </span>
+                      )}
+                      {((pageContext.pageData as Record<string, unknown>)?.opportunityName as string | undefined) && (
+                        <span className="text-xs text-primary/80">
+                          {' · '}{(pageContext.pageData as Record<string, unknown>).opportunityName as string}
+                        </span>
+                      )}
+                      {((pageContext.pageData as Record<string, unknown>)?.activitySubject as string | undefined) && (
+                        <span className="text-xs text-primary/80">
+                          {' · '}{(pageContext.pageData as Record<string, unknown>).activitySubject as string}
+                        </span>
+                      )}
+                      <button
+                        onClick={handleDismissContext}
+                        className="ml-0.5 w-4 h-4 flex items-center justify-center rounded-full hover:bg-primary/20 transition-colors"
+                        aria-label={locale === 'zh-Hans' ? '移除上下文' : 'Remove context'}
+                      >
+                        <X className="w-3 h-3 text-primary" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Messages */}
               {renderMessages()}

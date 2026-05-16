@@ -6,7 +6,7 @@ import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useAccountList } from '@/generated/hooks/use-account';
 import { useUser } from '@/hooks/use-user';
 import { getLocale, type Locale } from '@/lib/i18n';
-import { OpportunityStagekeyToLabel, type OpportunityStagekey } from '@/generated/models/opportunity-model';
+import { OpportunityStageKeyToLabel, type OpportunityStageKey } from '@/generated/models/opportunity-model';
 import type { Opportunity } from '@/generated/models/opportunity-model';
 
 const containerVariants = {
@@ -31,8 +31,8 @@ const stageConfig: Record<string, { zh: string; en: string; color: string }> = {
   lost: { zh: '丢单', en: 'Lost', color: 'bg-red-500' },
 };
 
-function isClosedStage(stageKey: OpportunityStagekey): boolean {
-  const label = OpportunityStagekeyToLabel[stageKey];
+function isClosedStage(stageKey: OpportunityStageKey): boolean {
+  const label = OpportunityStageKeyToLabel[stageKey];
   return label === 'won' || label === 'lost';
 }
 
@@ -41,59 +41,13 @@ export default function OpportunityReviewPage() {
   const locale: Locale = getLocale();
   const { data: user } = useUser();
   const { data: opportunities = [] } = useOpportunityList();
-  const { data: accounts = [] } = useAccountList();
 
-  const userId = user?.objectId || 'demo-user-id';
-  
-  // Demo data for when Dataverse is empty
-  const demoOpportunities: Opportunity[] = [
-    {
-      id: 'demo-opp-1',
-      name1: '华北科技 - ERP系统升级',
-      account: { id: 'demo-acc-1', name1: '华北科技有限公司' },
-      ownerid: userId,
-      stageKey: 'negotiation' as OpportunityStagekey,
-      confidence: 75,
-      totalamount: 280000,
-      expectedclosedate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-    },
-    {
-      id: 'demo-opp-2',
-      name1: '东方集团 - 云服务订阅',
-      account: { id: 'demo-acc-2', name1: '东方集团' },
-      ownerid: userId,
-      stageKey: 'proposal' as OpportunityStagekey,
-      confidence: 60,
-      totalamount: 156000,
-      expectedclosedate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
-    },
-    {
-      id: 'demo-opp-3',
-      name1: '南方制造 - 智能工厂方案',
-      account: { id: 'demo-acc-3', name1: '南方制造股份' },
-      ownerid: userId,
-      stageKey: 'qualification' as OpportunityStagekey,
-      confidence: 40,
-      totalamount: 520000,
-      expectedclosedate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-    },
-    {
-      id: 'demo-opp-4',
-      name1: '西部物流 - 仓储管理系统',
-      account: { id: 'demo-acc-4', name1: '西部物流集团' },
-      ownerid: userId,
-      stageKey: 'prospecting' as OpportunityStagekey,
-      confidence: 30,
-      totalamount: 98000,
-      expectedclosedate: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000).toISOString(),
-    },
-  ];
+  const userId = user?.objectId;
 
-  // Filter user's active opportunities, fallback to demo data
-  const userOpportunities = opportunities.filter(
+  // Filter user's active opportunities
+  const activeOpps = opportunities.filter(
     (o: Opportunity) => o.ownerid === userId && !isClosedStage(o.stageKey)
   );
-  const activeOpps = userOpportunities.length > 0 ? userOpportunities : demoOpportunities;
 
   const getAccountName = (accountRef: { id: string; name1: string } | undefined) => {
     if (!accountRef) return '';
@@ -101,21 +55,17 @@ export default function OpportunityReviewPage() {
   };
 
   const formatCurrency = (amount: number) => {
-    if (locale === 'zh-Hans') {
-      if (amount >= 10000) return `¥${(amount / 10000).toFixed(0)}万`;
-      return `¥${amount.toLocaleString()}`;
-    }
     if (amount >= 1000) return `$${(amount / 1000).toFixed(0)}K`;
     return `$${amount.toLocaleString()}`;
   };
 
-  const getStageConfig = (stageKey: OpportunityStagekey) => {
-    const label = OpportunityStagekeyToLabel[stageKey];
+  const getStageConfig = (stageKey: OpportunityStageKey) => {
+    const label = OpportunityStageKeyToLabel[stageKey];
     return stageConfig[label] || stageConfig.prospecting;
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
+    <div className="h-screen flex flex-col bg-background">
       {/* Header */}
       <header className="fixed top-0 left-0 right-0 z-40 glass-surface border-b border-border/50 safe-area-top">
         <div className="flex items-center justify-between h-14 px-4">
@@ -139,12 +89,12 @@ export default function OpportunityReviewPage() {
       </header>
 
       {/* Content */}
-      <main className="flex-1 pt-14 pb-8 px-4 overflow-y-auto scrollbar-hide">
+      <main className="flex-1 pt-14 px-4 overflow-y-auto scrollbar-hide safe-area-top">
         <motion.div
           variants={containerVariants}
           initial="hidden"
           animate="show"
-          className="space-y-3 py-4"
+          className="space-y-3 py-4 pb-safe"
         >
           {/* Summary */}
           <motion.div variants={itemVariants} className="glass-card p-4 flex items-center justify-between">
@@ -173,7 +123,16 @@ export default function OpportunityReviewPage() {
               <motion.div
                 key={opp.id}
                 variants={itemVariants}
-                className="glass-card p-4"
+                className="glass-card p-4 cursor-pointer hover:bg-muted/30 active:bg-muted/50 transition-colors"
+                onClick={() => navigate(`/opportunities/${opp.id}`)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e: React.KeyboardEvent) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    navigate(`/opportunities/${opp.id}`);
+                  }
+                }}
               >
                 <div className="flex items-start justify-between mb-2">
                   <div className="flex-1 min-w-0">

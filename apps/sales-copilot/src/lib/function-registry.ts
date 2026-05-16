@@ -25,6 +25,78 @@ export interface FunctionDefinition {
  * Keep descriptions concise but clear for the LLM to understand
  */
 export const availableFunctions: FunctionDefinition[] = [
+  // ===== Multi-Entity Batch Functions =====
+  {
+    name: 'batchDraft',
+    displayName: { 'zh-Hans': '批量草拟', 'en-US': 'Batch Draft' },
+    description: '当用户在一句话中提到要创建多个记录时调用。例如："帮我添加一个客户和一个联系人"、"创建两条活动记录"。将每个记录作为items数组中的一个元素。When user mentions creating multiple records in one request, use this function. Each record becomes an item in the items array.',
+    parameters: {
+      type: 'object',
+      properties: {
+        items: {
+          type: 'array',
+          description: '要创建的记录数组，每个元素包含type和data',
+        },
+      },
+      required: ['items'],
+    },
+  },
+
+  // ===== Fuzzy Matching Functions =====
+  {
+    name: 'fuzzyMatchAccount',
+    displayName: { 'zh-Hans': '模糊匹配客户', 'en-US': 'Fuzzy Match Account' },
+    description: '当用户提到客户名称但可能不完全准确时，先调用此函数查找可能匹配的客户。返回匹配列表供确认。Use when user mentions an account name that might not be exact - returns possible matches for confirmation.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '用户提到的客户名称或关键词 / Account name or keyword mentioned by user' },
+        context: { type: 'string', description: '上下文信息（如产品、区域）帮助缩小范围 / Context info to narrow down matches' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'fuzzyMatchContact',
+    displayName: { 'zh-Hans': '模糊匹配联系人', 'en-US': 'Fuzzy Match Contact' },
+    description: '当用户提到联系人名字但可能不完全准确时，先调用此函数查找可能匹配的联系人。Use when user mentions a contact name that might not be exact.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '用户提到的联系人姓名 / Contact name mentioned by user' },
+        accountId: { type: 'string', description: '可选：限定在特定客户下查找 / Optional: limit search to specific account' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'fuzzyMatchOpportunity',
+    displayName: { 'zh-Hans': '模糊匹配商机', 'en-US': 'Fuzzy Match Opportunity' },
+    description: '当用户提到商机名称但可能不完全准确时，先调用此函数查找可能匹配的商机。Use when user mentions an opportunity name that might not be exact.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '用户提到的商机名称或关键词 / Opportunity name or keyword' },
+        accountId: { type: 'string', description: '可选：限定在特定客户下查找 / Optional: limit to specific account' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'fuzzyMatchActivity',
+    displayName: { 'zh-Hans': '模糊匹配活动', 'en-US': 'Fuzzy Match Activity' },
+    description: '当用户提到活动标题/描述但可能已存在类似活动时，先调用此函数查找可能重复的活动。Use when user describes an activity that might already exist - returns possible duplicates for confirmation.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '活动标题或描述关键词 / Activity title or description keywords' },
+        accountId: { type: 'string', description: '可选：限定在特定客户下查找 / Optional: limit to specific account' },
+        dateRange: { type: 'string', description: '可选：日期范围如 "7days"、"30days" / Optional: date range like "7days", "30days"' },
+      },
+      required: ['query'],
+    },
+  },
+
   // ===== Account Functions =====
   {
     name: 'searchAccounts',
@@ -173,21 +245,19 @@ export const availableFunctions: FunctionDefinition[] = [
     },
   },
   {
-    name: 'createActivity',
-    displayName: { 'zh-Hans': '创建活动', 'en-US': 'Create Activity' },
-    description: '创建新的活动/拜访记录。Create a new activity record.',
+    name: 'getContactsByAccount',
+    displayName: { 'zh-Hans': '客户联系人', 'en-US': 'Account Contacts' },
+    description: '获取指定客户的所有联系人列表。Get all contacts for a specific account.',
     parameters: {
       type: 'object',
       properties: {
-        accountId: { type: 'string', description: '客户ID' },
-        type: { type: 'string', description: '活动类型', enum: ['visit', 'call', 'meeting', 'email', 'other'] },
-        title: { type: 'string', description: '活动标题' },
-        notes: { type: 'string', description: '备注内容' },
-        scheduledDate: { type: 'string', description: '计划日期，ISO格式 YYYY-MM-DD' },
+        accountId: { type: 'string', description: '客户ID / Account ID' },
+        limit: { type: 'number', description: '返回数量，默认10 / Max results, default 10' },
       },
-      required: ['type', 'title'],
+      required: ['accountId'],
     },
   },
+
 
   // ===== Draft/Create Functions (return form cards) =====
   {
@@ -197,14 +267,21 @@ export const availableFunctions: FunctionDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
-        title: { type: 'string', description: '活动标题，简洁概括（10字以内）' },
+        title: { 
+          type: 'string', 
+          description: '活动标题：必须具体且有意义，包含关键信息（如客户名称、讨论主题、产品名称）。例如："Royal London Hospital - BeneVision N22 Demo"、"Liverpool Heart & Chest 报价跟进"、"Charité ICU 监护系统需求讨论"。禁止使用泛泛的标题如"客户拜访"、"电话沟通"、"会议"等。Activity title: Must be specific and meaningful, including key info (account name, topic, product). Examples: "Royal London Hospital - BeneVision N22 Demo", "Liverpool pricing follow-up". Never use generic titles like "Customer Visit" or "Phone Call".'
+        },
         type: { type: 'string', description: '活动类型', enum: ['visit', 'call', 'meeting', 'email', 'other'] },
+        accountId: { type: 'string', description: '客户ID（如果已知）/ Account ID (if known)' },
         accountName: { type: 'string', description: '客户/公司名称' },
         contactName: { type: 'string', description: '联系人姓名' },
+        contactTitle: { type: 'string', description: '联系人职位/科室 / Contact job title or department' },
         scheduledDate: { type: 'string', description: '日期，ISO格式 YYYY-MM-DD' },
         result: { type: 'string', description: '结果/讨论要点' },
         nextStep: { type: 'string', description: '下一步行动计划' },
-        notes: { type: 'string', description: '备注' },
+        opportunityId: { type: 'string', description: '关联商机ID（如果已知）/ Related opportunity ID (if known)' },
+        opportunityName: { type: 'string', description: '关联商机名称' },
+        notes: { type: 'string', description: '备注 - 将所有不能映射到其他字段的有价值信息都放到这里（如：公司历史、特殊资质、重要背景、合作伙伴关系等）/ Notes - Put ALL valuable information that cannot be mapped to other structured fields here (e.g., company history, certifications, important background, partnerships, etc.)' },
       },
       required: ['title', 'type'],
     },
@@ -246,7 +323,101 @@ export const availableFunctions: FunctionDefinition[] = [
       required: ['name'],
     },
   },
+  {
+    name: 'draftContact',
+    displayName: { 'zh-Hans': '草拟联系人', 'en-US': 'Draft Contact' },
+    description: '从用户描述中提取联系人信息，生成联系人草稿供用户确认。当用户想要添加新联系人/新的人员时调用。注意：联系人是指客户公司中的具体人员（如张经理、李医生），不是客户/公司本身。Extract contact info and create a draft for confirmation. A contact is a person at a customer company (e.g. Dr. Smith, Manager Wang), NOT the company itself.',
+    parameters: {
+      type: 'object',
+      properties: {
+        fullName: { type: 'string', description: '联系人姓名 / Full name' },
+        accountName: { type: 'string', description: '所属客户/公司名称 / Account/company name' },
+        title: { type: 'string', description: '职位/职务 / Job title' },
+        phone: { type: 'string', description: '电话 / Phone' },
+        email: { type: 'string', description: '邮箱 / Email' },
+      },
+      required: ['fullName'],
+    },
+  },
 
+
+  // ===== Update Functions =====
+  {
+    name: 'updateAccount',
+    displayName: { 'zh-Hans': '更新客户', 'en-US': 'Update Account' },
+    description: '更新现有客户的信息。当用户说"更新客户XXX"、"修改客户信息"、"把这个客户的XX改成XX"时调用。Update existing account information. Use when user says "update account", "modify account", "change this account\'s XX to XX".',
+    parameters: {
+      type: 'object',
+      properties: {
+        accountId: { type: 'string', description: '客户ID / Account ID (required for update)' },
+        accountName: { type: 'string', description: '客户名称（用于查找匹配）/ Account name (for matching)' },
+        name: { type: 'string', description: '新的客户名称 / New account name' },
+        industry: { type: 'string', description: '新的行业 / New industry' },
+        region: { type: 'string', description: '新的区域 / New region', enum: ['华东', '华北', '华南', '西南'] },
+        tier: { type: 'string', description: '新的等级 / New tier', enum: ['S', 'A', 'B', 'C'] },
+        phone: { type: 'string', description: '新的电话 / New phone' },
+        email: { type: 'string', description: '新的邮箱 / New email' },
+        address: { type: 'string', description: '新的地址 / New address' },
+        notes: { type: 'string', description: '新的备注 / New notes' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'updateOpportunity',
+    displayName: { 'zh-Hans': '更新商机', 'en-US': 'Update Opportunity' },
+    description: '更新现有商机的信息。当用户说"更新商机"、"修改商机金额"、"把这个商机的金额改成XX"、"商机金额调整为XX"时调用。注意：当用户在商机详情页或刚查询完商机后说"更新金额"等，应从页面上下文获取 opportunityId。Update existing opportunity information. Use when user says "update opportunity", "change amount to XX", "adjust revenue".',
+    parameters: {
+      type: 'object',
+      properties: {
+        opportunityId: { type: 'string', description: '商机ID / Opportunity ID (required for update)' },
+        opportunityName: { type: 'string', description: '商机名称（用于查找匹配）/ Opportunity name (for matching)' },
+        name: { type: 'string', description: '新的商机名称 / New opportunity name' },
+        amount: { type: 'number', description: '新的金额 / New amount (e.g., 300000 for 300k, 2000000 for 2M)' },
+        stage: { type: 'string', description: '新的阶段 / New stage', enum: ['prospecting', 'qualification', 'proposal', 'negotiation', 'won', 'lost'] },
+        confidence: { type: 'number', description: '新的信心度 0-100 / New confidence 0-100' },
+        expectedCloseDate: { type: 'string', description: '新的预计成交日期 YYYY-MM-DD / New expected close date' },
+        lastAction: { type: 'string', description: '新的最近动作 / New last action notes' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'updateActivity',
+    displayName: { 'zh-Hans': '更新活动', 'en-US': 'Update Activity' },
+    description: '更新现有活动记录。当用户说"更新活动"、"修改这个活动"、"把活动日期改成XX"时调用。Update existing activity record.',
+    parameters: {
+      type: 'object',
+      properties: {
+        activityId: { type: 'string', description: '活动ID / Activity ID (required for update)' },
+        activityTitle: { type: 'string', description: '活动标题（用于查找匹配）/ Activity title (for matching)' },
+        title: { type: 'string', description: '新的活动标题 / New activity title' },
+        type: { type: 'string', description: '新的活动类型 / New activity type', enum: ['visit', 'call', 'meeting', 'email', 'other'] },
+        scheduledDate: { type: 'string', description: '新的日期 YYYY-MM-DD / New scheduled date' },
+        result: { type: 'string', description: '新的结果 / New result' },
+        nextStep: { type: 'string', description: '新的下一步 / New next step' },
+        notes: { type: 'string', description: '新的备注 / New notes' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'updateContact',
+    displayName: { 'zh-Hans': '更新联系人', 'en-US': 'Update Contact' },
+    description: '更新现有联系人信息。当用户说"更新联系人"、"修改联系人电话"、"把这个联系人的邮箱改成XX"时调用。Update existing contact information.',
+    parameters: {
+      type: 'object',
+      properties: {
+        contactId: { type: 'string', description: '联系人ID / Contact ID (required for update)' },
+        contactName: { type: 'string', description: '联系人姓名（用于查找匹配）/ Contact name (for matching)' },
+        fullName: { type: 'string', description: '新的姓名 / New full name' },
+        title: { type: 'string', description: '新的职位 / New title' },
+        phone: { type: 'string', description: '新的电话 / New phone' },
+        email: { type: 'string', description: '新的邮箱 / New email' },
+      },
+      required: [],
+    },
+  },
   // ===== Form Fill Functions (legacy - for page forms) =====
   {
     name: 'fillActivityForm',

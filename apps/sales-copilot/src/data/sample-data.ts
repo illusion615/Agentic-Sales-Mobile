@@ -3,20 +3,20 @@
  * All data is in English with consistent relationships.
  * 
  * Data relationships:
- * - Accounts have Contacts, Opportunities, Activities, and Tasks
+ * - Accounts have Contacts, Opportunities, and Activities
  * - Contacts belong to an Account
  * - Opportunities belong to an Account
  * - Activities can be linked to an Account and/or Opportunity
- * - Tasks can be linked to an Account and/or Opportunity
  * - Business Insights reference Accounts or Opportunities
  */
 
-import type { Account, AccountTierkey, AccountRegionkey, AccountCreditstatuskey } from '@/generated/models/account-model';
+import type { Account, AccountTierKey, AccountRegionKey, AccountCreditstatusKey } from '@/generated/models/account-model';
 import type { Contact } from '@/generated/models/contact-model';
-import type { Opportunity, OpportunityStagekey, OpportunityConfidencetrendkey } from '@/generated/models/opportunity-model';
-import type { Activity, ActivityTypekey, ActivityDraftstatuskey, ActivityOutcomekey } from '@/generated/models/activity-model';
-import type { Task, TaskPrioritykey, TaskStatuskey } from '@/generated/models/task-model';
-import type { BusinessInsight, BusinessInsightTypekey, BusinessInsightReferencetypekey } from '@/generated/models/business-insight-model';
+import type { Opportunity, OpportunityStageKey, OpportunityConfidencetrendKey } from '@/generated/models/opportunity-model';
+import type { Activity, ActivityTypeKey, ActivityDraftstatusKey, ActivityOutcomeKey } from '@/generated/models/activity-model';
+import type { Task } from '@/generated/models/task-model';
+
+import type { BusinessInsight, BusinessInsightTypeKey, BusinessInsightReferencetypeKey } from '@/generated/models/business-insight-model';
 
 // Sample Owner ID (represents the current sales rep)
 const SAMPLE_OWNER_ID = 'user-001';
@@ -29,14 +29,14 @@ export const sampleAccounts: Account[] = [
     id: 'acc-001',
     name1: 'Tech Innovations Corp',
     industry: 'Technology',
-    tierKey: 'Tierkey0' as AccountTierkey, // S
-    regionKey: 'Regionkey0' as AccountRegionkey, // East
+    tierKey: 'TierKey0' as AccountTierKey, // S
+    regionKey: 'RegionKey0' as AccountRegionKey, // East
     phone: '+1-555-0101',
     email: 'contact@techinnovations.com',
     address: '100 Innovation Way, San Francisco, CA 94105',
     lastcontactedon: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(), // 2 days ago
     ownerid: SAMPLE_OWNER_ID,
-    creditstatusKey: 'Creditstatuskey0' as AccountCreditstatuskey, // Normal
+    creditstatusKey: 'CreditstatusKey0' as AccountCreditstatusKey, // Normal
     latitude: 37.7749,
     longitude: -122.4194,
   },
@@ -44,14 +44,14 @@ export const sampleAccounts: Account[] = [
     id: 'acc-002',
     name1: 'Global Manufacturing Ltd',
     industry: 'Manufacturing',
-    tierKey: 'Tierkey1' as AccountTierkey, // A
-    regionKey: 'Regionkey1' as AccountRegionkey, // North
+    tierKey: 'TierKey1' as AccountTierKey, // A
+    regionKey: 'RegionKey1' as AccountRegionKey, // North
     phone: '+1-555-0102',
     email: 'info@globalmanufacturing.com',
     address: '250 Industrial Blvd, Chicago, IL 60601',
     lastcontactedon: new Date(Date.now() - 18 * 24 * 60 * 60 * 1000).toISOString(), // 18 days ago - AT RISK
     ownerid: SAMPLE_OWNER_ID,
-    creditstatusKey: 'Creditstatuskey0' as AccountCreditstatuskey,
+    creditstatusKey: 'CreditstatusKey0' as AccountCreditstatusKey,
     latitude: 41.8781,
     longitude: -87.6298,
   },
@@ -59,14 +59,14 @@ export const sampleAccounts: Account[] = [
     id: 'acc-003',
     name1: 'Summit Healthcare Systems',
     industry: 'Healthcare',
-    tierKey: 'Tierkey0' as AccountTierkey, // S
-    regionKey: 'Regionkey2' as AccountRegionkey, // South
+    tierKey: 'TierKey0' as AccountTierKey, // S
+    regionKey: 'RegionKey2' as AccountRegionKey, // South
     phone: '+1-555-0103',
     email: 'partnerships@summithealth.com',
     address: '500 Medical Center Dr, Houston, TX 77001',
     lastcontactedon: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(), // 5 days ago
     ownerid: SAMPLE_OWNER_ID,
-    creditstatusKey: 'Creditstatuskey0' as AccountCreditstatuskey,
+    creditstatusKey: 'CreditstatusKey0' as AccountCreditstatusKey,
     latitude: 29.7604,
     longitude: -95.3698,
   },
@@ -74,14 +74,14 @@ export const sampleAccounts: Account[] = [
     id: 'acc-004',
     name1: 'Pacific Financial Group',
     industry: 'Financial Services',
-    tierKey: 'Tierkey1' as AccountTierkey, // A
-    regionKey: 'Regionkey3' as AccountRegionkey, // West
+    tierKey: 'TierKey1' as AccountTierKey, // A
+    regionKey: 'RegionKey3' as AccountRegionKey, // West
     phone: '+1-555-0104',
     email: 'business@pacificfinancial.com',
     address: '800 Finance St, Seattle, WA 98101',
     lastcontactedon: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000).toISOString(), // 12 days ago
     ownerid: SAMPLE_OWNER_ID,
-    creditstatusKey: 'Creditstatuskey0' as AccountCreditstatuskey,
+    creditstatusKey: 'CreditstatusKey0' as AccountCreditstatusKey,
     latitude: 47.6062,
     longitude: -122.3321,
   },
@@ -89,14 +89,14 @@ export const sampleAccounts: Account[] = [
     id: 'acc-005',
     name1: 'Metro Retail Solutions',
     industry: 'Retail',
-    tierKey: 'Tierkey2' as AccountTierkey, // B
-    regionKey: 'Regionkey0' as AccountRegionkey, // East
+    tierKey: 'TierKey2' as AccountTierKey, // B
+    regionKey: 'RegionKey0' as AccountRegionKey, // East
     phone: '+1-555-0105',
     email: 'sales@metroretail.com',
     address: '350 Commerce Ave, New York, NY 10001',
     lastcontactedon: new Date(Date.now() - 25 * 24 * 60 * 60 * 1000).toISOString(), // 25 days ago - AT RISK
     ownerid: SAMPLE_OWNER_ID,
-    creditstatusKey: 'Creditstatuskey1' as AccountCreditstatuskey, // Warning
+    creditstatusKey: 'CreditstatusKey1' as AccountCreditstatusKey, // Warning
     latitude: 40.7128,
     longitude: -74.0060,
   },
@@ -104,14 +104,14 @@ export const sampleAccounts: Account[] = [
     id: 'acc-006',
     name1: 'Evergreen Energy Co',
     industry: 'Energy',
-    tierKey: 'Tierkey2' as AccountTierkey, // B
-    regionKey: 'Regionkey2' as AccountRegionkey, // South
+    tierKey: 'TierKey2' as AccountTierKey, // B
+    regionKey: 'RegionKey2' as AccountRegionKey, // South
     phone: '+1-555-0106',
     email: 'contact@evergreenergy.com',
     address: '600 Energy Plaza, Dallas, TX 75201',
     lastcontactedon: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(), // 8 days ago
     ownerid: SAMPLE_OWNER_ID,
-    creditstatusKey: 'Creditstatuskey0' as AccountCreditstatuskey,
+    creditstatusKey: 'CreditstatusKey0' as AccountCreditstatusKey,
     latitude: 32.7767,
     longitude: -96.7970,
   },
@@ -119,14 +119,14 @@ export const sampleAccounts: Account[] = [
     id: 'acc-007',
     name1: 'Precision Logistics Inc',
     industry: 'Logistics',
-    tierKey: 'Tierkey3' as AccountTierkey, // C
-    regionKey: 'Regionkey1' as AccountRegionkey, // North
+    tierKey: 'TierKey3' as AccountTierKey, // C
+    regionKey: 'RegionKey1' as AccountRegionKey, // North
     phone: '+1-555-0107',
     email: 'ops@precisionlogistics.com',
     address: '150 Shipping Lane, Detroit, MI 48201',
     lastcontactedon: new Date(Date.now() - 35 * 24 * 60 * 60 * 1000).toISOString(), // 35 days ago - AT RISK
     ownerid: SAMPLE_OWNER_ID,
-    creditstatusKey: 'Creditstatuskey0' as AccountCreditstatuskey,
+    creditstatusKey: 'CreditstatusKey0' as AccountCreditstatusKey,
     latitude: 42.3314,
     longitude: -83.0458,
   },
@@ -134,14 +134,14 @@ export const sampleAccounts: Account[] = [
     id: 'acc-008',
     name1: 'Creative Media Studios',
     industry: 'Media & Entertainment',
-    tierKey: 'Tierkey3' as AccountTierkey, // C
-    regionKey: 'Regionkey3' as AccountRegionkey, // West
+    tierKey: 'TierKey3' as AccountTierKey, // C
+    regionKey: 'RegionKey3' as AccountRegionKey, // West
     phone: '+1-555-0108',
     email: 'hello@creativemedia.com',
     address: '900 Studio Blvd, Los Angeles, CA 90028',
     lastcontactedon: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(), // 3 days ago
     ownerid: SAMPLE_OWNER_ID,
-    creditstatusKey: 'Creditstatuskey0' as AccountCreditstatuskey,
+    creditstatusKey: 'CreditstatusKey0' as AccountCreditstatusKey,
     latitude: 34.0522,
     longitude: -118.2437,
   },
@@ -246,10 +246,10 @@ export const sampleOpportunities: Opportunity[] = [
     id: 'opp-001',
     name1: 'Enterprise Platform License',
     account: { id: 'acc-001', name1: 'Tech Innovations Corp' },
-    stageKey: 'Stagekey3' as OpportunityStagekey, // Negotiation
+    stageKey: 'StageKey3' as OpportunityStageKey, // Negotiation
     totalamount: 45000, // HOT - closing this week
     confidence: 85,
-    confidencetrendKey: 'Confidencetrendkey0' as OpportunityConfidencetrendkey, // Up
+    confidencetrendKey: 'ConfidencetrendKey0' as OpportunityConfidencetrendKey, // Up
     expectedclosedate: new Date(today.getTime() + 3 * 24 * 60 * 60 * 1000).toISOString(), // 3 days from now
     ownerid: SAMPLE_OWNER_ID,
     lastaction: 'Sent final pricing proposal',
@@ -259,10 +259,10 @@ export const sampleOpportunities: Opportunity[] = [
     id: 'opp-002',
     name1: 'Manufacturing Process Automation',
     account: { id: 'acc-002', name1: 'Global Manufacturing Ltd' },
-    stageKey: 'Stagekey2' as OpportunityStagekey, // Proposal
+    stageKey: 'StageKey2' as OpportunityStageKey, // Proposal
     totalamount: 72000,
     confidence: 60,
-    confidencetrendKey: 'Confidencetrendkey1' as OpportunityConfidencetrendkey, // Down
+    confidencetrendKey: 'ConfidencetrendKey1' as OpportunityConfidencetrendKey, // Down
     expectedclosedate: new Date(today.getTime() + 21 * 24 * 60 * 60 * 1000).toISOString(),
     ownerid: SAMPLE_OWNER_ID,
     lastaction: 'Proposal under review',
@@ -273,10 +273,10 @@ export const sampleOpportunities: Opportunity[] = [
     id: 'opp-003',
     name1: 'Healthcare Data Analytics Suite',
     account: { id: 'acc-003', name1: 'Summit Healthcare Systems' },
-    stageKey: 'Stagekey3' as OpportunityStagekey, // Negotiation
+    stageKey: 'StageKey3' as OpportunityStageKey, // Negotiation
     totalamount: 25000, // HOT - closing this week
     confidence: 90,
-    confidencetrendKey: 'Confidencetrendkey0' as OpportunityConfidencetrendkey, // Up
+    confidencetrendKey: 'ConfidencetrendKey0' as OpportunityConfidencetrendKey, // Up
     expectedclosedate: new Date(today.getTime() + 5 * 24 * 60 * 60 * 1000).toISOString(),
     ownerid: SAMPLE_OWNER_ID,
     lastaction: 'Contract terms agreed',
@@ -286,10 +286,10 @@ export const sampleOpportunities: Opportunity[] = [
     id: 'opp-004',
     name1: 'Financial Compliance Platform',
     account: { id: 'acc-004', name1: 'Pacific Financial Group' },
-    stageKey: 'Stagekey2' as OpportunityStagekey, // Proposal
+    stageKey: 'StageKey2' as OpportunityStageKey, // Proposal
     totalamount: 55000,
     confidence: 70,
-    confidencetrendKey: 'Confidencetrendkey2' as OpportunityConfidencetrendkey, // Flat
+    confidencetrendKey: 'ConfidencetrendKey2' as OpportunityConfidencetrendKey, // Flat
     expectedclosedate: new Date(today.getTime() + 14 * 24 * 60 * 60 * 1000).toISOString(),
     ownerid: SAMPLE_OWNER_ID,
     lastaction: 'Demo completed successfully',
@@ -299,10 +299,10 @@ export const sampleOpportunities: Opportunity[] = [
     id: 'opp-005',
     name1: 'Retail POS Integration',
     account: { id: 'acc-005', name1: 'Metro Retail Solutions' },
-    stageKey: 'Stagekey1' as OpportunityStagekey, // Qualification
+    stageKey: 'StageKey1' as OpportunityStageKey, // Qualification
     totalamount: 18000,
     confidence: 40,
-    confidencetrendKey: 'Confidencetrendkey1' as OpportunityConfidencetrendkey, // Down
+    confidencetrendKey: 'ConfidencetrendKey1' as OpportunityConfidencetrendKey, // Down
     expectedclosedate: new Date(today.getTime() + 45 * 24 * 60 * 60 * 1000).toISOString(),
     ownerid: SAMPLE_OWNER_ID,
     lastaction: 'Initial discovery call',
@@ -313,10 +313,10 @@ export const sampleOpportunities: Opportunity[] = [
     id: 'opp-006',
     name1: 'Energy Management System',
     account: { id: 'acc-006', name1: 'Evergreen Energy Co' },
-    stageKey: 'Stagekey0' as OpportunityStagekey, // Prospecting
+    stageKey: 'StageKey0' as OpportunityStageKey, // Prospecting
     totalamount: 32000,
     confidence: 25,
-    confidencetrendKey: 'Confidencetrendkey0' as OpportunityConfidencetrendkey, // Up
+    confidencetrendKey: 'ConfidencetrendKey0' as OpportunityConfidencetrendKey, // Up
     expectedclosedate: new Date(today.getTime() + 60 * 24 * 60 * 60 * 1000).toISOString(),
     ownerid: SAMPLE_OWNER_ID,
     lastaction: 'Meeting scheduled for next week',
@@ -326,7 +326,7 @@ export const sampleOpportunities: Opportunity[] = [
     id: 'opp-007',
     name1: 'Logistics Tracking Solution',
     account: { id: 'acc-007', name1: 'Precision Logistics Inc' },
-    stageKey: 'Stagekey4' as OpportunityStagekey, // Won
+    stageKey: 'StageKey4' as OpportunityStageKey, // Won
     totalamount: 28000,
     confidence: 100,
     expectedclosedate: new Date(today.getTime() - 5 * 24 * 60 * 60 * 1000).toISOString(),
@@ -339,7 +339,7 @@ export const sampleOpportunities: Opportunity[] = [
     id: 'opp-008',
     name1: 'Creative Suite License',
     account: { id: 'acc-008', name1: 'Creative Media Studios' },
-    stageKey: 'Stagekey5' as OpportunityStagekey, // Lost
+    stageKey: 'StageKey5' as OpportunityStageKey, // Lost
     totalamount: 15000,
     confidence: 0,
     expectedclosedate: new Date(today.getTime() - 10 * 24 * 60 * 60 * 1000).toISOString(),
@@ -361,8 +361,8 @@ export const sampleActivities: Activity[] = [
     title: 'Follow-up call with John Chen',
     account: { id: 'acc-001', name1: 'Tech Innovations Corp' },
     opportunity: { id: 'opp-001', name1: 'Enterprise Platform License' },
-    typeKey: 'Typekey1' as ActivityTypekey, // Call
-    draftstatusKey: 'Draftstatuskey1' as ActivityDraftstatuskey, // Confirmed
+    typeKey: 'TypeKey1' as ActivityTypeKey, // Call
+    draftstatusKey: 'DraftstatusKey1' as ActivityDraftstatusKey, // Confirmed
     scheduleddate: new Date().toISOString(),
     ownerid: SAMPLE_OWNER_ID,
     notes: 'Discuss final contract terms and timeline',
@@ -372,8 +372,8 @@ export const sampleActivities: Activity[] = [
     title: 'Send proposal to Emily Zhang',
     account: { id: 'acc-003', name1: 'Summit Healthcare Systems' },
     opportunity: { id: 'opp-003', name1: 'Healthcare Data Analytics Suite' },
-    typeKey: 'Typekey3' as ActivityTypekey, // Email
-    draftstatusKey: 'Draftstatuskey1' as ActivityDraftstatuskey, // Confirmed
+    typeKey: 'TypeKey3' as ActivityTypeKey, // Email
+    draftstatusKey: 'DraftstatusKey1' as ActivityDraftstatusKey, // Confirmed
     scheduleddate: new Date().toISOString(),
     ownerid: SAMPLE_OWNER_ID,
     notes: 'Final pricing document with implementation timeline',
@@ -384,11 +384,11 @@ export const sampleActivities: Activity[] = [
     title: 'Site visit to Tech Innovations',
     account: { id: 'acc-001', name1: 'Tech Innovations Corp' },
     opportunity: { id: 'opp-001', name1: 'Enterprise Platform License' },
-    typeKey: 'Typekey0' as ActivityTypekey, // Visit
-    draftstatusKey: 'Draftstatuskey2' as ActivityDraftstatuskey, // Completed
+    typeKey: 'TypeKey0' as ActivityTypeKey, // Visit
+    draftstatusKey: 'DraftstatusKey2' as ActivityDraftstatusKey, // Completed
     scheduleddate: new Date(today.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString(),
     ownerid: SAMPLE_OWNER_ID,
-    outcomeKey: 'Outcomekey0' as ActivityOutcomekey, // Success
+    outcomeKey: 'OutcomeKey0' as ActivityOutcomeKey, // Success
     notes: 'Great meeting. Client ready to move forward.',
   },
   {
@@ -396,11 +396,11 @@ export const sampleActivities: Activity[] = [
     title: 'Demo for Pacific Financial',
     account: { id: 'acc-004', name1: 'Pacific Financial Group' },
     opportunity: { id: 'opp-004', name1: 'Financial Compliance Platform' },
-    typeKey: 'Typekey2' as ActivityTypekey, // Meeting
-    draftstatusKey: 'Draftstatuskey2' as ActivityDraftstatuskey, // Completed
+    typeKey: 'TypeKey2' as ActivityTypeKey, // Meeting
+    draftstatusKey: 'DraftstatusKey2' as ActivityDraftstatusKey, // Completed
     scheduleddate: new Date(today.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString(),
     ownerid: SAMPLE_OWNER_ID,
-    outcomeKey: 'Outcomekey0' as ActivityOutcomekey, // Success
+    outcomeKey: 'OutcomeKey0' as ActivityOutcomeKey, // Success
     notes: 'Stakeholders impressed with compliance features.',
   },
   {
@@ -408,33 +408,33 @@ export const sampleActivities: Activity[] = [
     title: 'Call with Summit Healthcare',
     account: { id: 'acc-003', name1: 'Summit Healthcare Systems' },
     opportunity: { id: 'opp-003', name1: 'Healthcare Data Analytics Suite' },
-    typeKey: 'Typekey1' as ActivityTypekey, // Call
-    draftstatusKey: 'Draftstatuskey2' as ActivityDraftstatuskey, // Completed
+    typeKey: 'TypeKey1' as ActivityTypeKey, // Call
+    draftstatusKey: 'DraftstatusKey2' as ActivityDraftstatusKey, // Completed
     scheduleddate: new Date(today.getTime() - 5 * 24 * 60 * 60 * 1000).toISOString(),
     ownerid: SAMPLE_OWNER_ID,
-    outcomeKey: 'Outcomekey0' as ActivityOutcomekey, // Success
+    outcomeKey: 'OutcomeKey0' as ActivityOutcomeKey, // Success
     notes: 'Contract terms discussed and agreed in principle.',
   },
   {
     id: 'act-006',
     title: 'Visit to Evergreen Energy',
     account: { id: 'acc-006', name1: 'Evergreen Energy Co' },
-    typeKey: 'Typekey0' as ActivityTypekey, // Visit
-    draftstatusKey: 'Draftstatuskey2' as ActivityDraftstatuskey, // Completed
+    typeKey: 'TypeKey0' as ActivityTypeKey, // Visit
+    draftstatusKey: 'DraftstatusKey2' as ActivityDraftstatusKey, // Completed
     scheduleddate: new Date(today.getTime() - 6 * 24 * 60 * 60 * 1000).toISOString(),
     ownerid: SAMPLE_OWNER_ID,
-    outcomeKey: 'Outcomekey0' as ActivityOutcomekey, // Success
+    outcomeKey: 'OutcomeKey0' as ActivityOutcomeKey, // Success
     notes: 'Initial requirements gathered. Strong interest.',
   },
   {
     id: 'act-007',
     title: 'Email follow-up to Creative Media',
     account: { id: 'acc-008', name1: 'Creative Media Studios' },
-    typeKey: 'Typekey3' as ActivityTypekey, // Email
-    draftstatusKey: 'Draftstatuskey2' as ActivityDraftstatuskey, // Completed
+    typeKey: 'TypeKey3' as ActivityTypeKey, // Email
+    draftstatusKey: 'DraftstatusKey2' as ActivityDraftstatusKey, // Completed
     scheduleddate: new Date(today.getTime() - 4 * 24 * 60 * 60 * 1000).toISOString(),
     ownerid: SAMPLE_OWNER_ID,
-    outcomeKey: 'Outcomekey4' as ActivityOutcomekey, // No result
+    outcomeKey: 'OutcomeKey4' as ActivityOutcomeKey, // No result
     notes: 'Sent check-in email. No response yet.',
   },
   // Scheduled future activities (5)
@@ -443,8 +443,8 @@ export const sampleActivities: Activity[] = [
     title: 'Contract review meeting',
     account: { id: 'acc-001', name1: 'Tech Innovations Corp' },
     opportunity: { id: 'opp-001', name1: 'Enterprise Platform License' },
-    typeKey: 'Typekey2' as ActivityTypekey, // Meeting
-    draftstatusKey: 'Draftstatuskey1' as ActivityDraftstatuskey, // Confirmed
+    typeKey: 'TypeKey2' as ActivityTypeKey, // Meeting
+    draftstatusKey: 'DraftstatusKey1' as ActivityDraftstatusKey, // Confirmed
     scheduleddate: new Date(today.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString(),
     ownerid: SAMPLE_OWNER_ID,
     notes: 'Final contract review with legal team',
@@ -454,8 +454,8 @@ export const sampleActivities: Activity[] = [
     title: 'Call Global Manufacturing',
     account: { id: 'acc-002', name1: 'Global Manufacturing Ltd' },
     opportunity: { id: 'opp-002', name1: 'Manufacturing Process Automation' },
-    typeKey: 'Typekey1' as ActivityTypekey, // Call
-    draftstatusKey: 'Draftstatuskey1' as ActivityDraftstatuskey, // Confirmed
+    typeKey: 'TypeKey1' as ActivityTypeKey, // Call
+    draftstatusKey: 'DraftstatusKey1' as ActivityDraftstatusKey, // Confirmed
     scheduleddate: new Date(today.getTime() + 1 * 24 * 60 * 60 * 1000).toISOString(),
     ownerid: SAMPLE_OWNER_ID,
     notes: 'Check on budget approval status',
@@ -465,8 +465,8 @@ export const sampleActivities: Activity[] = [
     title: 'Visit Metro Retail',
     account: { id: 'acc-005', name1: 'Metro Retail Solutions' },
     opportunity: { id: 'opp-005', name1: 'Retail POS Integration' },
-    typeKey: 'Typekey0' as ActivityTypekey, // Visit
-    draftstatusKey: 'Draftstatuskey1' as ActivityDraftstatuskey, // Confirmed
+    typeKey: 'TypeKey0' as ActivityTypeKey, // Visit
+    draftstatusKey: 'DraftstatusKey1' as ActivityDraftstatusKey, // Confirmed
     scheduleddate: new Date(today.getTime() + 3 * 24 * 60 * 60 * 1000).toISOString(),
     ownerid: SAMPLE_OWNER_ID,
     notes: 'Re-engage after period of no contact',
@@ -476,8 +476,8 @@ export const sampleActivities: Activity[] = [
     title: 'Discovery call with Evergreen',
     account: { id: 'acc-006', name1: 'Evergreen Energy Co' },
     opportunity: { id: 'opp-006', name1: 'Energy Management System' },
-    typeKey: 'Typekey1' as ActivityTypekey, // Call
-    draftstatusKey: 'Draftstatuskey1' as ActivityDraftstatuskey, // Confirmed
+    typeKey: 'TypeKey1' as ActivityTypeKey, // Call
+    draftstatusKey: 'DraftstatusKey1' as ActivityDraftstatusKey, // Confirmed
     scheduleddate: new Date(today.getTime() + 5 * 24 * 60 * 60 * 1000).toISOString(),
     ownerid: SAMPLE_OWNER_ID,
     notes: 'Deeper technical requirements discussion',
@@ -487,111 +487,15 @@ export const sampleActivities: Activity[] = [
     title: 'Proposal presentation',
     account: { id: 'acc-004', name1: 'Pacific Financial Group' },
     opportunity: { id: 'opp-004', name1: 'Financial Compliance Platform' },
-    typeKey: 'Typekey2' as ActivityTypekey, // Meeting
-    draftstatusKey: 'Draftstatuskey1' as ActivityDraftstatuskey, // Confirmed
+    typeKey: 'TypeKey2' as ActivityTypeKey, // Meeting
+    draftstatusKey: 'DraftstatusKey1' as ActivityDraftstatusKey, // Confirmed
     scheduleddate: new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString(),
     ownerid: SAMPLE_OWNER_ID,
     notes: 'Present final proposal to full stakeholder group',
   },
 ];
 
-// ============================================================================
-// TASKS (8 tasks - 3 due today, 1 overdue)
-// ============================================================================
-export const sampleTasks: Task[] = [
-  // Overdue (1)
-  {
-    id: 'task-001',
-    title: 'Send case study to Global Manufacturing',
-    account: { id: 'acc-002', name1: 'Global Manufacturing Ltd' },
-    opportunity: { id: 'opp-002', name1: 'Manufacturing Process Automation' },
-    priorityKey: 'Prioritykey0' as TaskPrioritykey, // High
-    statusKey: 'Statuskey0' as TaskStatuskey, // Pending
-    duedate: new Date(today.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    isoverdue: true,
-    ownerid: SAMPLE_OWNER_ID,
-    notes: 'Michael requested manufacturing case studies',
-  },
-  // Due today (3)
-  {
-    id: 'task-002',
-    title: 'Prepare contract for Tech Innovations',
-    account: { id: 'acc-001', name1: 'Tech Innovations Corp' },
-    opportunity: { id: 'opp-001', name1: 'Enterprise Platform License' },
-    priorityKey: 'Prioritykey0' as TaskPrioritykey, // High
-    statusKey: 'Statuskey1' as TaskStatuskey, // In Progress
-    duedate: new Date().toISOString(),
-    ownerid: SAMPLE_OWNER_ID,
-    notes: 'Final contract with negotiated terms',
-  },
-  {
-    id: 'task-003',
-    title: 'Call Jennifer at Pacific Financial',
-    account: { id: 'acc-004', name1: 'Pacific Financial Group' },
-    opportunity: { id: 'opp-004', name1: 'Financial Compliance Platform' },
-    priorityKey: 'Prioritykey1' as TaskPrioritykey, // Medium
-    statusKey: 'Statuskey0' as TaskStatuskey, // Pending
-    duedate: new Date().toISOString(),
-    ownerid: SAMPLE_OWNER_ID,
-    notes: 'Follow up on demo feedback',
-  },
-  {
-    id: 'task-004',
-    title: 'Update Summit Healthcare proposal',
-    account: { id: 'acc-003', name1: 'Summit Healthcare Systems' },
-    opportunity: { id: 'opp-003', name1: 'Healthcare Data Analytics Suite' },
-    priorityKey: 'Prioritykey0' as TaskPrioritykey, // High
-    statusKey: 'Statuskey0' as TaskStatuskey, // Pending
-    duedate: new Date().toISOString(),
-    ownerid: SAMPLE_OWNER_ID,
-    notes: 'Incorporate agreed pricing',
-  },
-  // Upcoming (4)
-  {
-    id: 'task-005',
-    title: 'Research Metro Retail competitors',
-    account: { id: 'acc-005', name1: 'Metro Retail Solutions' },
-    opportunity: { id: 'opp-005', name1: 'Retail POS Integration' },
-    priorityKey: 'Prioritykey2' as TaskPrioritykey, // Low
-    statusKey: 'Statuskey0' as TaskStatuskey, // Pending
-    duedate: new Date(today.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString(),
-    ownerid: SAMPLE_OWNER_ID,
-    notes: 'Understand competitive landscape',
-  },
-  {
-    id: 'task-006',
-    title: 'Schedule visit to Evergreen Energy',
-    account: { id: 'acc-006', name1: 'Evergreen Energy Co' },
-    opportunity: { id: 'opp-006', name1: 'Energy Management System' },
-    priorityKey: 'Prioritykey1' as TaskPrioritykey, // Medium
-    statusKey: 'Statuskey0' as TaskStatuskey, // Pending
-    duedate: new Date(today.getTime() + 3 * 24 * 60 * 60 * 1000).toISOString(),
-    ownerid: SAMPLE_OWNER_ID,
-    notes: 'On-site facility tour',
-  },
-  {
-    id: 'task-007',
-    title: 'Prepare ROI analysis for Pacific Financial',
-    account: { id: 'acc-004', name1: 'Pacific Financial Group' },
-    opportunity: { id: 'opp-004', name1: 'Financial Compliance Platform' },
-    priorityKey: 'Prioritykey0' as TaskPrioritykey, // High
-    statusKey: 'Statuskey0' as TaskStatuskey, // Pending
-    duedate: new Date(today.getTime() + 5 * 24 * 60 * 60 * 1000).toISOString(),
-    ownerid: SAMPLE_OWNER_ID,
-    notes: 'Quantify compliance cost savings',
-  },
-  {
-    id: 'task-008',
-    title: 'Completed: Close Logistics deal',
-    account: { id: 'acc-007', name1: 'Precision Logistics Inc' },
-    opportunity: { id: 'opp-007', name1: 'Logistics Tracking Solution' },
-    priorityKey: 'Prioritykey0' as TaskPrioritykey, // High
-    statusKey: 'Statuskey2' as TaskStatuskey, // Completed
-    duedate: new Date(today.getTime() - 5 * 24 * 60 * 60 * 1000).toISOString(),
-    ownerid: SAMPLE_OWNER_ID,
-    notes: 'Successfully closed!',
-  },
-];
+
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -617,10 +521,7 @@ export function getActivitiesByAccountId(accountId: string): Activity[] {
   return sampleActivities.filter((a: Activity) => a.account?.id === accountId);
 }
 
-/** Get tasks for an account */
-export function getTasksByAccountId(accountId: string): Task[] {
-  return sampleTasks.filter((t: Task) => t.account?.id === accountId);
-}
+
 
 /** Get opportunity by ID */
 export function getOpportunityById(id: string): Opportunity | undefined {
@@ -632,12 +533,13 @@ export function getActivitiesByOpportunityId(opportunityId: string): Activity[] 
   return sampleActivities.filter((a: Activity) => a.opportunity?.id === opportunityId);
 }
 
-/** Get tasks for an opportunity */
-export function getTasksByOpportunityId(opportunityId: string): Task[] {
-  return sampleTasks.filter((t: Task) => t.opportunity?.id === opportunityId);
-}
+
 
 /** Get contact by ID */
 export function getContactById(id: string): Contact | undefined {
   return sampleContacts.find((c: Contact) => c.id === id);
 }
+
+// Local shim seed for the generated Task data source.
+// Cloud review scope does not use this file, but local testing needs the export to exist.
+export const sampleTasks: Task[] = [];

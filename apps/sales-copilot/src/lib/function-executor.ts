@@ -7,9 +7,45 @@ import { initialize } from '@microsoft/power-apps/app';
 import { AccountService } from '@/generated/services/account-service';
 import { OpportunityService } from '@/generated/services/opportunity-service';
 import { ActivityService } from '@/generated/services/activity-service';
-import type { Account, AccountRegionkey, AccountTierkey } from '@/generated/models/account-model';
-import type { Opportunity, OpportunityStagekey } from '@/generated/models/opportunity-model';
-import type { Activity, ActivityTypekey } from '@/generated/models/activity-model';
+import { ContactService } from '@/generated/services/contact-service';
+import type { Account, AccountRegionKey, AccountTierKey } from '@/generated/models/account-model';
+import type { Opportunity, OpportunityStageKey } from '@/generated/models/opportunity-model';
+import type { Activity, ActivityTypeKey, ActivityDraftstatusKey } from '@/generated/models/activity-model';
+import type { Contact } from '@/generated/models/contact-model';
+import { calculateEnhancedMatchScore, getConfidenceLevel, type EnhancedMatchScore } from './agent-utils';
+
+/**
+ * Escape special characters for OData queries
+ * - Single quotes must be doubled in OData string literals
+ * - Newlines and other control characters should be normalized
+ */
+function escapeODataString(value: string): string {
+  return value
+    .replace(/'/g, "''") // Escape single quotes
+    .replace(/\r\n/g, ' ') // Replace CRLF with space
+    .replace(/\r/g, ' ') // Replace CR with space
+    .replace(/\n/g, ' '); // Replace LF with space to avoid OData issues
+}
+
+/**
+ * Sanitize object fields that contain strings to be OData-safe
+ * Also filters out undefined values that could cause issues
+ */
+function sanitizeForOData<T extends Record<string, unknown>>(obj: T): T {
+  const sanitized: Record<string, unknown> = {};
+  for (const key in obj) {
+    const value = obj[key];
+    // Skip undefined values
+    if (value === undefined) continue;
+    
+    if (typeof value === 'string') {
+      sanitized[key] = escapeODataString(value);
+    } else if (value !== null) {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized as T;
+}
 
 // Direct Line session refs types (imported from context)
 export interface DirectLineTokenRef {
@@ -32,41 +68,67 @@ export interface FunctionCallResult {
   success: boolean;
   data?: unknown;
   error?: string;
+  // Query keys to invalidate after mutation (for UI refresh)
+  invalidateQueries?: string[];
 }
 
 // Region label to key mapping
-const regionLabelToKey: Record<string, AccountRegionkey> = {
-  '华东': 'Regionkey0',
-  '华北': 'Regionkey1',
-  '华南': 'Regionkey2',
-  '西南': 'Regionkey3',
+const regionLabelToKey: Record<string, AccountRegionKey> = {
+  '华东': 'RegionKey0',
+  '华北': 'RegionKey1',
+  '华南': 'RegionKey2',
+  '西南': 'RegionKey3',
 };
 
 // Tier label to key mapping
-const tierLabelToKey: Record<string, AccountTierkey> = {
-  'S': 'Tierkey0',
-  'A': 'Tierkey1',
-  'B': 'Tierkey2',
-  'C': 'Tierkey3',
+const tierLabelToKey: Record<string, AccountTierKey> = {
+  'S': 'TierKey0',
+  'A': 'TierKey1',
+  'B': 'TierKey2',
+  'C': 'TierKey3',
 };
 
 // Stage label to key mapping
-const stageLabelToKey: Record<string, OpportunityStagekey> = {
-  'prospecting': 'Stagekey0',
-  'qualification': 'Stagekey1',
-  'proposal': 'Stagekey2',
-  'negotiation': 'Stagekey3',
-  'won': 'Stagekey4',
-  'lost': 'Stagekey5',
+const stageLabelToKey: Record<string, OpportunityStageKey> = {
+  'prospecting': 'StageKey0',
+  'qualification': 'StageKey1',
+  'proposal': 'StageKey2',
+  'negotiation': 'StageKey3',
+  'won': 'StageKey4',
+  'lost': 'StageKey5',
 };
 
 // Activity type label to key mapping
-const activityTypeLabelToKey: Record<string, ActivityTypekey> = {
-  'visit': 'Typekey0',
-  'call': 'Typekey1',
-  'meeting': 'Typekey2',
-  'email': 'Typekey3',
-  'other': 'Typekey4',
+const activityTypeLabelToKey: Record<string, ActivityTypeKey> = {
+  'visit': 'TypeKey0',
+  'call': 'TypeKey1',
+  'meeting': 'TypeKey2',
+  'email': 'TypeKey3',
+  'other': 'TypeKey4',
+};
+
+// Activity status label to key mapping (supports various user expressions)
+const activityStatusLabelToKey: Record<string, ActivityDraftstatusKey> = {
+  // English
+  'draft': 'DraftstatusKey0',
+  'confirmed': 'DraftstatusKey1',
+  'completed': 'DraftstatusKey2',
+  'cancelled': 'DraftstatusKey3',
+  'canceled': 'DraftstatusKey3',
+  // Common variations
+  'done': 'DraftstatusKey2',
+  'complete': 'DraftstatusKey2',
+  'finished': 'DraftstatusKey2',
+  'cancel': 'DraftstatusKey3',
+  'confirm': 'DraftstatusKey1',
+  // Chinese
+  '草稿': 'DraftstatusKey0',
+  '已确认': 'DraftstatusKey1',
+  '确认': 'DraftstatusKey1',
+  '已完成': 'DraftstatusKey2',
+  '完成': 'DraftstatusKey2',
+  '已取消': 'DraftstatusKey3',
+  '取消': 'DraftstatusKey3',
 };
 
 /**
@@ -323,58 +385,28 @@ export async function executeFunction(
         };
       }
 
-      case 'createActivity': {
-        const typeLabel = args.type as string;
-        const title = args.title as string;
-        const notes = args.notes as string | undefined;
-        const scheduledDate = args.scheduledDate as string | undefined;
-        const accountId = args.accountId as string | undefined;
-        const accountName = args.accountName as string | undefined;
-
-        if (!typeLabel || !title) {
-          return { success: false, error: '缺少必需参数: type, title' };
-        }
-
-        const typeKey = activityTypeLabelToKey[typeLabel];
-        if (!typeKey) {
-          return { success: false, error: `未知活动类型: ${typeLabel}` };
-        }
-
-        // Find account by ID or name for lookup
-        let accountLookup: { id: string; name1: string } | undefined;
-        if (accountId) {
-          const account = await AccountService.get(accountId);
-          if (account) {
-            accountLookup = { id: account.id, name1: account.name1 };
-          }
-        } else if (accountName) {
-          const accounts = await AccountService.getAll();
-          const found = accounts.find((a: Account) => a.name1?.toLowerCase().includes(accountName.toLowerCase()));
-          if (found) {
-            accountLookup = { id: found.id, name1: found.name1 };
-          }
-        }
-
-        const newActivity = await ActivityService.create({
-          title,
-          typeKey,
-          draftstatusKey: 'Draftstatuskey0', // draft
-          ownerid: context.userId || 'unknown',
-          scheduleddate: scheduledDate || new Date().toISOString(),
-          notes: notes || '',
-          ...(accountLookup && { account: accountLookup }),
-        });
-
+      case 'getContactsByAccount': {
+        const accountId = args.accountId as string;
+        const limit = (args.limit as number) || 10;
+        if (!accountId) return { success: false, error: '缺少 accountId 参数' };
+        const contacts = await ContactService.getAll();
+        const filtered = contacts
+          .filter((c: Contact) => c.account?.id === accountId)
+          .slice(0, limit);
         return {
           success: true,
-          data: {
-            id: newActivity.id,
-            title: newActivity.title,
-            account: accountLookup?.name1,
-            message: '活动创建成功',
-          },
+          data: filtered.map((c: Contact) => ({
+            id: c.id,
+            name: c.fullname,
+            title: c.title,
+            phone: c.phone,
+            email: c.email,
+            accountName: c.account?.name1,
+          })),
         };
       }
+
+
 
       // ===== Draft Functions (return form card data) =====
       case 'draftActivity': {
@@ -385,11 +417,16 @@ export async function executeFunction(
           data: {
             title: args.title as string || '',
             type: args.type as string || 'visit',
+            accountId: args.accountId as string || '',
             accountName: args.accountName as string || '',
+            contactId: args.contactId as string || '',  // Add contactId support
             contactName: args.contactName as string || '',
+            contactTitle: args.contactTitle as string || '',
             scheduledDate: args.scheduledDate as string || new Date().toISOString().split('T')[0],
             result: args.result as string || '',
             nextStep: args.nextStep as string || '',
+            opportunityId: args.opportunityId as string || '',
+            opportunityName: args.opportunityName as string || '',
             notes: args.notes as string || '',
           },
         };
@@ -406,6 +443,7 @@ export async function executeFunction(
           isNew: true,
           data: {
             name: args.name as string || '',
+            accountId: args.accountId as string || '',  // Pass accountId directly from matched result
             accountName: args.accountName as string || '',
             amount: args.amount as number || 0,
             stage: args.stage as string || 'prospecting',
@@ -439,6 +477,267 @@ export async function executeFunction(
         return {
           success: true,
           data: formCardData,
+        };
+      }
+
+      case 'draftContact': {
+        // Returns form card data for contact - no backend call
+        const formCardData = {
+          type: 'contact' as const,
+          isNew: true,
+          data: {
+            fullName: args.fullName as string || '',
+            accountId: args.accountId as string || '',  // Pass accountId directly from matched result
+            accountName: args.accountName as string || '',
+            title: args.title as string || '',
+            phone: args.phone as string || '',
+            email: args.email as string || '',
+          },
+        };
+        return {
+          success: true,
+          data: formCardData,
+        };
+      }
+
+
+      // ===== Update Functions =====
+      case 'updateAccount': {
+        const accountId = args.accountId as string;
+        const accountName = args.accountName as string;
+        
+        // If no accountId, try to find by name
+        let targetId = accountId;
+        if (!targetId && accountName) {
+          const accounts = await AccountService.getAll();
+          const match = accounts.find((a: Account) => 
+            a.name1?.toLowerCase().includes(accountName.toLowerCase())
+          );
+          if (match) targetId = match.id;
+        }
+        
+        if (!targetId) {
+          return { success: false, error: '缺少 accountId 或无法找到匹配的客户 / Missing accountId or cannot find matching account' };
+        }
+        
+        // Build changed fields
+        const accountChanges: Partial<Account> = {};
+        if (args.name) accountChanges.name1 = args.name as string;
+        if (args.industry) accountChanges.industry = args.industry as string;
+        if (args.region && regionLabelToKey[args.region as string]) {
+          accountChanges.regionKey = regionLabelToKey[args.region as string];
+        }
+        if (args.tier && tierLabelToKey[args.tier as string]) {
+          accountChanges.tierKey = tierLabelToKey[args.tier as string];
+        }
+        if (args.phone) accountChanges.phone = args.phone as string;
+        if (args.email) accountChanges.email = args.email as string;
+        if (args.address) accountChanges.address = args.address as string;
+        if (args.notes) accountChanges.notes = args.notes as string;
+        
+        if (Object.keys(accountChanges).length === 0) {
+          return { success: false, error: '没有提供要更新的字段 / No fields to update' };
+        }
+        
+        await AccountService.update(targetId, sanitizeForOData(accountChanges));
+        const updatedAccount = await AccountService.get(targetId);
+        
+        return {
+          success: true,
+          data: {
+            message: `客户信息已更新 / Account updated successfully`,
+            account: updatedAccount,
+            updatedFields: Object.keys(accountChanges),
+          },
+          invalidateQueries: ['account-list'],
+        };
+      }
+
+      case 'updateOpportunity': {
+        const opportunityId = args.opportunityId as string;
+        const opportunityName = args.opportunityName as string;
+        
+        // If no opportunityId, try to find by name
+        let targetId = opportunityId;
+        if (!targetId && opportunityName) {
+          const opportunities = await OpportunityService.getAll();
+          const match = opportunities.find((o: Opportunity) => 
+            o.name1?.toLowerCase().includes(opportunityName.toLowerCase())
+          );
+          if (match) targetId = match.id;
+        }
+        
+        if (!targetId) {
+          return { success: false, error: '缺少 opportunityId 或无法找到匹配的商机 / Missing opportunityId or cannot find matching opportunity' };
+        }
+        
+        // Build changed fields
+        const oppChanges: Partial<Opportunity> = {};
+        if (args.name) oppChanges.name1 = args.name as string;
+        if (args.amount !== undefined) oppChanges.totalamount = args.amount as number;
+        if (args.stage && stageLabelToKey[args.stage as string]) {
+          oppChanges.stageKey = stageLabelToKey[args.stage as string];
+        }
+        if (args.confidence !== undefined) oppChanges.confidence = args.confidence as number;
+        if (args.expectedCloseDate) oppChanges.expectedclosedate = args.expectedCloseDate as string;
+        if (args.lastAction) oppChanges.lastaction = args.lastAction as string;
+        
+        if (Object.keys(oppChanges).length === 0) {
+          return { success: false, error: '没有提供要更新的字段 / No fields to update' };
+        }
+        
+        await OpportunityService.update(targetId, sanitizeForOData(oppChanges));
+        const updatedOpp = await OpportunityService.get(targetId);
+        
+        return {
+          success: true,
+          data: {
+            message: `商机信息已更新 / Opportunity updated successfully`,
+            opportunity: updatedOpp,
+            updatedFields: Object.keys(oppChanges),
+          },
+          invalidateQueries: ['opportunity-list'],
+        };
+      }
+
+      case 'updateActivity': {
+        const activityId = args.activityId as string;
+        const activityTitle = args.activityTitle as string;
+        
+        // If no activityId, try to find by title
+        let targetId = activityId;
+        if (!targetId && activityTitle) {
+          const activities = await ActivityService.getAll();
+          const match = activities.find((a: Activity) => 
+            a.title?.toLowerCase().includes(activityTitle.toLowerCase())
+          );
+          if (match) targetId = match.id;
+        }
+        
+        if (!targetId) {
+          return { success: false, error: '缺少 activityId 或无法找到匹配的活动 / Missing activityId or cannot find matching activity' };
+        }
+        
+        // Build changed fields
+        // Build changed fields
+        const actChanges: Partial<Activity> = {};
+        if (args.title) actChanges.title = args.title as string;
+        if (args.type && activityTypeLabelToKey[args.type as string]) {
+          actChanges.typeKey = activityTypeLabelToKey[args.type as string];
+        }
+        // Handle status update - map user-friendly terms to draftstatusKey
+        if (args.status) {
+          const statusStr = (args.status as string).toLowerCase();
+          if (activityStatusLabelToKey[statusStr]) {
+            actChanges.draftstatusKey = activityStatusLabelToKey[statusStr];
+          }
+        }
+        if (args.scheduledDate) actChanges.scheduleddate = args.scheduledDate as string;
+        if (args.notes) actChanges.notes = args.notes as string;
+        // result and nextStep might be stored in notes or outcome
+        if (args.result) {
+          actChanges.notes = (actChanges.notes || '') + ' | 结果: ' + (args.result as string);
+        }
+        if (args.nextStep) {
+          actChanges.notes = (actChanges.notes || '') + ' | 下一步: ' + (args.nextStep as string);
+        }
+        
+        // Handle opportunity binding - find by ID or name
+        if (args.opportunityId || args.opportunityName) {
+          const opportunities = await OpportunityService.getAll();
+          let targetOpportunity: Opportunity | undefined;
+          
+          if (args.opportunityId) {
+            targetOpportunity = opportunities.find((o: Opportunity) => o.id === args.opportunityId);
+          } else if (args.opportunityName) {
+            const oppNameLower = (args.opportunityName as string).toLowerCase();
+            targetOpportunity = opportunities.find((o: Opportunity) => 
+              o.name1?.toLowerCase().includes(oppNameLower)
+            );
+          }
+          
+          if (targetOpportunity) {
+            actChanges.opportunity = { id: targetOpportunity.id, name1: targetOpportunity.name1 };
+          }
+        }
+        
+        // Handle account binding - find by ID or name
+        if (args.accountId || args.accountName) {
+          const accounts = await AccountService.getAll();
+          let targetAccount: Account | undefined;
+          
+          if (args.accountId) {
+            targetAccount = accounts.find((a: Account) => a.id === args.accountId);
+          } else if (args.accountName) {
+            const accNameLower = (args.accountName as string).toLowerCase();
+            targetAccount = accounts.find((a: Account) => 
+              a.name1?.toLowerCase().includes(accNameLower)
+            );
+          }
+          
+          if (targetAccount) {
+            actChanges.account = { id: targetAccount.id, name1: targetAccount.name1 };
+          }
+        }
+        
+        if (Object.keys(actChanges).length === 0) {
+          return { success: false, error: '没有提供要更新的字段 / No fields to update' };
+        }
+        
+        await ActivityService.update(targetId, sanitizeForOData(actChanges));
+        const updatedActivity = await ActivityService.get(targetId);
+        
+        return {
+          success: true,
+          data: {
+            message: `活动记录已更新 / Activity updated successfully`,
+            activity: updatedActivity,
+            updatedFields: Object.keys(actChanges),
+          },
+          invalidateQueries: ['activity-list'],
+        };
+      }
+
+      case 'updateContact': {
+        const contactId = args.contactId as string;
+        const contactName = args.contactName as string;
+        
+        // If no contactId, try to find by name
+        let targetId = contactId;
+        if (!targetId && contactName) {
+          const contacts = await ContactService.getAll();
+          const match = contacts.find((c: Contact) => 
+            c.fullname?.toLowerCase().includes(contactName.toLowerCase())
+          );
+          if (match) targetId = match.id;
+        }
+        
+        if (!targetId) {
+          return { success: false, error: '缺少 contactId 或无法找到匹配的联系人 / Missing contactId or cannot find matching contact' };
+        }
+        
+        // Build changed fields
+        const contactChanges: Partial<Contact> = {};
+        if (args.fullName) contactChanges.fullname = args.fullName as string;
+        if (args.title) contactChanges.title = args.title as string;
+        if (args.phone) contactChanges.phone = args.phone as string;
+        if (args.email) contactChanges.email = args.email as string;
+        
+        if (Object.keys(contactChanges).length === 0) {
+          return { success: false, error: '没有提供要更新的字段 / No fields to update' };
+        }
+        
+        await ContactService.update(targetId, sanitizeForOData(contactChanges));
+        const updatedContact = await ContactService.get(targetId);
+        
+        return {
+          success: true,
+          data: {
+            message: `联系人信息已更新 / Contact updated successfully`,
+            contact: updatedContact,
+            updatedFields: Object.keys(contactChanges),
+          },
+          invalidateQueries: ['contact-list'],
         };
       }
 
@@ -814,6 +1113,328 @@ export async function executeFunction(
         
         // Execute the query with session reuse
         return attemptQuery();
+      }
+
+      // ===== Fuzzy Matching Functions =====
+      case 'fuzzyMatchAccount': {
+        const query = (args.query as string || '');
+        const contextStr = (args.context as string || '');
+        const accounts = await AccountService.getAll();
+        
+        // Enhanced score-based matching with Levenshtein
+        interface MatchResult {
+          id: string;
+          name: string;
+          industry?: string;
+          region?: string;
+          score: number;
+          matchType: 'exact' | 'contains' | 'fuzzy' | 'levenshtein';
+          scoreBreakdown?: EnhancedMatchScore['breakdown'];
+        }
+        
+        const matches: MatchResult[] = accounts
+          .map((a: Account) => {
+            const name = a.name1 || '';
+            const enhancedScore = calculateEnhancedMatchScore(query, name, contextStr || a.industry);
+            
+            return {
+              id: a.id,
+              name: a.name1 || '',
+              industry: a.industry,
+              region: a.regionKey,
+              score: enhancedScore.score,
+              matchType: enhancedScore.matchType,
+              scoreBreakdown: enhancedScore.breakdown,
+            };
+          })
+          .filter((m: MatchResult) => m.score > 20)
+          .sort((a: MatchResult, b: MatchResult) => b.score - a.score)
+          .slice(0, 5);
+        
+        // Use configurable confidence thresholds
+        const bestMatch = matches[0];
+        const confidence = bestMatch ? getConfidenceLevel(bestMatch.score) : 'none';
+        
+        return {
+          success: true,
+          data: {
+            matches,
+            confidence,
+            needsConfirmation: confidence !== 'high' || matches.length > 1,
+            exactMatch: confidence === 'high' && matches.length === 1 ? bestMatch : null,
+          },
+        };
+      }
+
+      case 'fuzzyMatchContact': {
+        const query = (args.query as string || '');
+        const accountId = args.accountId as string | undefined;
+        const contacts = await ContactService.getAll();
+        
+        interface ContactMatchResult {
+          id: string;
+          name: string;
+          title?: string;
+          accountName?: string;
+          accountId?: string;
+          score: number;
+          matchType: 'exact' | 'contains' | 'fuzzy' | 'levenshtein';
+        }
+        
+        const matches: ContactMatchResult[] = contacts
+          .filter((c: Contact) => !accountId || c.account?.id === accountId)
+          .map((c: Contact) => {
+            const name = c.fullname || '';
+            const enhancedScore = calculateEnhancedMatchScore(query, name);
+            
+            return {
+              id: c.id,
+              name: c.fullname || '',
+              title: c.title,
+              accountName: c.account?.name1,
+              accountId: c.account?.id,
+              score: enhancedScore.score,
+              matchType: enhancedScore.matchType,
+            };
+          })
+          .filter((m: ContactMatchResult) => m.score > 20)
+          .sort((a: ContactMatchResult, b: ContactMatchResult) => b.score - a.score)
+          .slice(0, 5);
+        
+        const bestMatch = matches[0];
+        const confidence = bestMatch ? getConfidenceLevel(bestMatch.score) : 'none';
+        
+        return {
+          success: true,
+          data: {
+            matches,
+            confidence,
+            needsConfirmation: confidence !== 'high' || matches.length > 1,
+            exactMatch: confidence === 'high' && matches.length === 1 ? bestMatch : null,
+          },
+        };
+      }
+
+      case 'fuzzyMatchOpportunity': {
+        const query = (args.query as string || '');
+        const accountId = args.accountId as string | undefined;
+        const opportunities = await OpportunityService.getAll();
+        
+        interface OppMatchResult {
+          id: string;
+          name: string;
+          accountName?: string;
+          amount?: number;
+          stage?: string;
+          score: number;
+          matchType: 'exact' | 'contains' | 'fuzzy' | 'levenshtein';
+        }
+        
+        const matches: OppMatchResult[] = opportunities
+          .filter((o: Opportunity) => !accountId || o.account?.id === accountId)
+          .map((o: Opportunity) => {
+            const name = o.name1 || '';
+            const enhancedScore = calculateEnhancedMatchScore(query, name);
+            
+            return {
+              id: o.id,
+              name: o.name1 || '',
+              accountName: o.account?.name1,
+              amount: o.totalamount,
+              stage: o.stageKey,
+              score: enhancedScore.score,
+              matchType: enhancedScore.matchType,
+            };
+          })
+          .filter((m: OppMatchResult) => m.score > 20)
+          .sort((a: OppMatchResult, b: OppMatchResult) => b.score - a.score)
+          .slice(0, 5);
+        
+        const bestMatch = matches[0];
+        const confidence = bestMatch ? getConfidenceLevel(bestMatch.score) : 'none';
+        
+        return {
+          success: true,
+          data: {
+            matches,
+            confidence,
+            needsConfirmation: confidence !== 'high' || matches.length > 1,
+            exactMatch: confidence === 'high' && matches.length === 1 ? bestMatch : null,
+          },
+        };
+      }
+
+      // ===== Fuzzy Match Activity (Deduplication) =====
+      case 'fuzzyMatchActivity': {
+        const query = args.query as string;
+        const accountIdArg = args.accountId as string | undefined;
+        const dateRange = args.dateRange as string | undefined;
+        
+        if (!query) {
+          return { success: false, error: '缺少 query 参数' };
+        }
+        
+        // Get all activities
+        let allActivities = await ActivityService.getAll();
+        
+        // Filter by account if specified
+        if (accountIdArg) {
+          allActivities = allActivities.filter((a: Activity) => a.account?.id === accountIdArg);
+        }
+        
+        // Filter by date range if specified
+        if (dateRange) {
+          const now = new Date();
+          let daysBack = 30; // default
+          if (dateRange === '7days') daysBack = 7;
+          else if (dateRange === '14days') daysBack = 14;
+          else if (dateRange === '30days') daysBack = 30;
+          else if (dateRange === '60days') daysBack = 60;
+          else if (dateRange === '90days') daysBack = 90;
+          
+          const cutoffDate = new Date(now.getTime() - daysBack * 24 * 60 * 60 * 1000);
+          allActivities = allActivities.filter((a: Activity) => {
+            if (!a.scheduleddate) return false;
+            const actDate = new Date(a.scheduleddate);
+            return actDate >= cutoffDate;
+          });
+        }
+        
+        // Calculate similarity scores
+        const queryLower = query.toLowerCase();
+        const queryWords = queryLower.split(/\s+/).filter((w: string) => w.length > 1);
+        
+        interface ActivityMatch {
+          id: string;
+          title: string;
+          typeKey?: string;
+          scheduleddate?: string;
+          accountId?: string;
+          accountName: string;
+          notes?: string;
+          score: number;
+        }
+        
+        const scoredActivities: ActivityMatch[] = allActivities.map((activity: Activity) => {
+          const titleLower = (activity.title || '').toLowerCase();
+          const notesLower = (activity.notes || '').toLowerCase();
+          const combinedText = `${titleLower} ${notesLower}`;
+          
+          let score = 0;
+          
+          // Exact title match: high score
+          if (titleLower === queryLower) {
+            score = 100;
+          } else if (titleLower.includes(queryLower)) {
+            score = 80;
+          } else {
+            // Word-based matching
+            for (const word of queryWords) {
+              if (combinedText.includes(word)) {
+                score += 15;
+              }
+            }
+            // Boost for title matches
+            for (const word of queryWords) {
+              if (titleLower.includes(word)) {
+                score += 10;
+              }
+            }
+          }
+          
+          // Bonus for recent activities
+          if (activity.scheduleddate) {
+            const actDate = new Date(activity.scheduleddate);
+            const daysDiff = Math.floor((new Date().getTime() - actDate.getTime()) / (1000 * 60 * 60 * 24));
+            if (daysDiff <= 7) score += 10;
+            else if (daysDiff <= 14) score += 5;
+          }
+          
+          return {
+            id: activity.id,
+            title: activity.title,
+            typeKey: activity.typeKey,
+            scheduleddate: activity.scheduleddate,
+            accountId: activity.account?.id,
+            accountName: activity.account?.name1 || '未关联客户',
+            notes: activity.notes,
+            score,
+          };
+        });
+        
+        // Filter and sort by score
+        const matches = scoredActivities
+          .filter((a: ActivityMatch) => a.score >= 25)
+          .sort((a: ActivityMatch, b: ActivityMatch) => b.score - a.score)
+          .slice(0, 5);
+        
+        const bestMatch = matches[0];
+        let confidence: 'high' | 'medium' | 'low' = 'low';
+        
+        if (bestMatch) {
+          if (bestMatch.score >= 80) confidence = 'high';
+          else if (bestMatch.score >= 50) confidence = 'medium';
+        }
+        
+        return {
+          success: true,
+          data: {
+            matches,
+            confidence,
+            needsConfirmation: confidence !== 'high' || matches.length > 1,
+            exactMatch: confidence === 'high' && matches.length === 1 ? bestMatch : null,
+            message: matches.length > 0 
+              ? `找到 ${matches.length} 条可能匹配的活动记录`
+              : '未找到类似的活动记录，这是新活动',
+          },
+        };
+      }
+
+
+      // ===== Batch Draft Function =====
+      case 'batchDraft': {
+        const items = args.items as Array<{ type: string; data: Record<string, unknown> }>;
+        if (!items || !Array.isArray(items) || items.length === 0) {
+          return { success: false, error: '缺少 items 参数或 items 为空' };
+        }
+        
+        // Extract top-level account info to inject into items that don't have their own
+        const topLevelAccountId = args.accountId as string | undefined;
+        const topLevelAccountName = args.accountName as string | undefined;
+        console.log('[batchDraft] topLevelAccountId:', topLevelAccountId, 'topLevelAccountName:', topLevelAccountName);
+        
+        // Process each item and return batch form card data
+        const formCards = items.map((item: { type: string; data: Record<string, unknown> }, index: number) => {
+          const itemType = item.type || 'activity';
+          const itemData = { ...(item.data || {}) };
+          
+          // Inject top-level account info if item doesn't have its own (for activity, opportunity, contact)
+          if (['activity', 'opportunity', 'contact'].includes(itemType)) {
+            if (!itemData.accountId && topLevelAccountId) {
+              itemData.accountId = topLevelAccountId;
+            }
+            if (!itemData.accountName && topLevelAccountName) {
+              itemData.accountName = topLevelAccountName;
+            }
+          }
+          console.log('[batchDraft] item', index, 'type:', itemType, 'accountId:', itemData.accountId, 'accountName:', itemData.accountName);
+          
+          return {
+            type: itemType as 'activity' | 'opportunity' | 'account' | 'contact',
+            isNew: true,
+            data: itemData,
+            batchIndex: index,
+          };
+        });
+        
+        return {
+          success: true,
+          data: {
+            isBatch: true,
+            items: formCards,
+            totalCount: formCards.length,
+          },
+        };
       }
 
       default:

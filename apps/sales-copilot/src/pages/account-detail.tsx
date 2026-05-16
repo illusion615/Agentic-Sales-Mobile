@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
 import {
@@ -13,10 +13,12 @@ import {
   TrendingUp,
   AlertTriangle,
   CheckCircle2,
+  CheckSquare,
   User,
   Trash2,
   Save,
   X,
+  ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MobileLayout } from '@/components/mobile-layout';
@@ -46,24 +48,30 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
+import { FloatingQuickActions } from '@/components/floating-quick-actions';
+import { AISummaryCard } from '@/components/ai-summary-card';
 import { useAccount, useUpdateAccount, useDeleteAccount } from '@/generated/hooks/use-account';
+import { useQueryClient } from '@tanstack/react-query';
 import { useContactList } from '@/generated/hooks/use-contact';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useActivityList } from '@/generated/hooks/use-activity';
+import { useEntityAISummary, useWithAISummaryTrigger } from '@/hooks/use-ai-summary-trigger';
 import {
-  AccountTierkeyToLabel,
-  AccountRegionkeyToLabel,
-  AccountCreditstatuskeyToLabel,
+  AccountTierKeyToLabel,
+  AccountRegionKeyToLabel,
+  AccountCreditstatusKeyToLabel,
 } from '@/generated/models/account-model';
-import type { AccountTierkey, AccountRegionkey, AccountCreditstatuskey } from '@/generated/models/account-model';
-import { OpportunityStagekeyToLabel } from '@/generated/models/opportunity-model';
-import type { Opportunity, OpportunityStagekey } from '@/generated/models/opportunity-model';
-import { ActivityTypekeyToLabel, ActivityDraftstatuskeyToLabel } from '@/generated/models/activity-model';
-import type { Activity, ActivityTypekey, ActivityDraftstatuskey } from '@/generated/models/activity-model';
+import type { AccountTierKey, AccountRegionKey, AccountCreditstatusKey } from '@/generated/models/account-model';
+import { OpportunityStageKeyToLabel } from '@/generated/models/opportunity-model';
+import type { Opportunity, OpportunityStageKey } from '@/generated/models/opportunity-model';
+import { ActivityTypeKeyToLabel, ActivityDraftstatusKeyToLabel } from '@/generated/models/activity-model';
+import type { Activity, ActivityTypeKey, ActivityDraftstatusKey } from '@/generated/models/activity-model';
 import type { Contact } from '@/generated/models/contact-model';
 import { getRegionEnglish } from '@/lib/display-labels';
 import { toast } from 'sonner';
 import { getLocale } from '@/lib/i18n';
+import { useCopilot } from '@/contexts/copilot-context';
+import { PullToRefresh } from '@/components/pull-to-refresh';
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -95,13 +103,13 @@ function getDaysSince(dateStr?: string): number {
   return Math.ceil(Math.abs(now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
 }
 
-function getActivityTypeIcon(typeKey: ActivityTypekey | null | undefined): string {
+function getActivityTypeIcon(typeKey: ActivityTypeKey | null | undefined): React.ComponentType<{ className?: string }> {
   switch (typeKey) {
-    case 'Typekey0': return '📍'; // visit
-    case 'Typekey1': return '📞'; // call
-    case 'Typekey2': return '📅'; // meeting
-    case 'Typekey3': return '✉️'; // email
-    default: return '📌';
+    case 'TypeKey0': return MapPin; // visit
+    case 'TypeKey1': return Phone; // call
+    case 'TypeKey2': return Calendar; // meeting
+    case 'TypeKey3': return Mail; // email
+    default: return CheckSquare;
   }
 }
 
@@ -122,17 +130,52 @@ export default function ClientDetailPage() {
     email: '',
     address: '',
     notes: '',
-    tierKey: '' as AccountTierkey | '',
-    regionKey: '' as AccountRegionkey | '',
+    tierKey: '' as AccountTierKey | '',
+    regionKey: '' as AccountRegionKey | '',
   });
 
   // Fetch data from Dataverse
-  const { data: account, isLoading: isLoadingAccount } = useAccount(id || '');
+  const { data: account, isLoading: isLoadingAccount, error } = useAccount(id || '');
+
+  // Debug logging for account fetch issues
+  useEffect(() => {
+    if (id) {
+      console.log('[AccountDetail] Fetching account with ID:', id);
+    }
+    if (error) {
+      console.error('[AccountDetail] Error fetching account:', {
+        id,
+        error: error instanceof Error ? error.message : String(error),
+        errorObj: error,
+      });
+    }
+    if (account) {
+      console.log('[AccountDetail] Account loaded successfully:', {
+        id: account.id,
+        name: account.name1,
+      });
+    }
+  }, [id, error, account]);
   const { data: allContacts = [] } = useContactList();
   const { data: allOpportunities = [] } = useOpportunityList();
   const { data: allActivities = [] } = useActivityList();
   const updateAccount = useUpdateAccount();
   const deleteAccount = useDeleteAccount();
+  const queryClient = useQueryClient();
+
+  // Pull to refresh handler
+  const handleRefresh = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['account', id] }),
+      queryClient.invalidateQueries({ queryKey: ['contact-list'] }),
+      queryClient.invalidateQueries({ queryKey: ['opportunity-list'] }),
+      queryClient.invalidateQueries({ queryKey: ['activity-list'] }),
+    ]);
+  }, [queryClient, id]);
+
+  // AI Summary hooks
+  const { summary: aiSummary, isLoading: isLoadingAISummary, isGenerating, isExpired, isFailed, refetch: refetchAISummary } = useEntityAISummary('account', id || '');
+  const { triggerForEntity, isTriggering } = useWithAISummaryTrigger();
 
   // Initialize edit form when account loads
   useMemo(() => {
@@ -144,8 +187,8 @@ export default function ClientDetailPage() {
         email: account.email || '',
         address: account.address || '',
         notes: account.notes || '',
-        tierKey: (account.tierKey as AccountTierkey) || '',
-        regionKey: (account.regionKey as AccountRegionkey) || '',
+        tierKey: (account.tierKey as AccountTierKey) || '',
+        regionKey: (account.regionKey as AccountRegionKey) || '',
       });
     }
   }, [account, isEditMode]);
@@ -158,24 +201,78 @@ export default function ClientDetailPage() {
   const activities = useMemo(() => 
     allActivities.filter((a: Activity) => a.account?.id === id), [allActivities, id]);
 
+  // Local state for immediate refresh feedback
+  const [isRefreshingAI, setIsRefreshingAI] = useState(false);
+
+  const handleRefreshAISummary = useCallback(() => {
+    if (!account) return;
+    setIsRefreshingAI(true);
+    triggerForEntity('account', account.id, { ...account } as Record<string, unknown>, {
+      opportunities: opportunities.map((o: Opportunity) => ({ id: o.id, name: o.name1, stage: o.stageKey, amount: o.totalamount })),
+      activities: activities.map((a: Activity) => ({ id: a.id, title: a.title, type: a.typeKey, date: a.scheduleddate })),
+      contacts: contacts.map((c: Contact) => ({ id: c.id, name: c.fullname, title: c.title })),
+    });
+    setTimeout(() => {
+      refetchAISummary();
+      setIsRefreshingAI(false);
+    }, 500);
+  }, [account, opportunities, activities, contacts, triggerForEntity, refetchAISummary]);
+
   // Calculate stats
   const totalPipelineValue = opportunities.reduce(
     (sum: number, opp: Opportunity) => sum + (opp.totalamount || 0),
     0
   );
-  const wonStageKey = 'Stagekey4';
-  const lostStageKey = 'Stagekey5';
+  const wonStageKey = 'StageKey4';
+  const lostStageKey = 'StageKey5';
   const activeDeals = opportunities.filter(
     (opp: Opportunity) => opp.stageKey !== wonStageKey && opp.stageKey !== lostStageKey
   );
+
   const daysSinceContact = getDaysSince(account?.lastcontactedon || account?.lastinteractiondate);
+
+  // Copilot context for agent awareness
+  const copilot = useCopilot();
+
+  // Set page context for Copilot agent awareness
+  useEffect(() => {
+    if (!account) return;
+    
+    copilot.setPageContext({
+      currentPage: locale === 'zh-Hans' ? '客户详情' : 'Account Detail',
+      summary: locale === 'zh-Hans'
+        ? `查看客户: ${account.name1}，行业: ${account.industry || '未分类'}，管线价值: ${formatCurrency(totalPipelineValue)}，${activeDeals.length}个活跃商机，${contacts.length}个联系人`
+        : `Viewing account: ${account.name1}, Industry: ${account.industry || 'Uncategorized'}, Pipeline: ${formatCurrency(totalPipelineValue)}, ${activeDeals.length} active deals, ${contacts.length} contacts`,
+      pageData: {
+        accountId: account.id,
+        accountName: account.name1,
+        industry: account.industry,
+        tier: account.tierKey,
+        region: account.regionKey,
+        phone: account.phone,
+        email: account.email,
+        address: account.address,
+        contactsCount: contacts.length,
+        opportunitiesCount: opportunities.length,
+        activitiesCount: activities.length,
+        totalPipelineValue,
+        daysSinceLastContact: daysSinceContact,
+        creditStatus: account.creditstatusKey,
+        notes: account.notes,
+      },
+    });
+    
+    return () => {
+      copilot.setPageContext(null);
+    };
+  }, [account, contacts.length, opportunities.length, activities.length, totalPipelineValue, daysSinceContact, activeDeals.length, locale, copilot.setPageContext]);
 
   const handleDelete = async () => {
     if (!account) return;
     try {
       await deleteAccount.mutateAsync(account.id);
       toast.success('Client deleted');
-      navigate('/clients');
+      navigate('/accounts');
     } catch (error: unknown) {
       toast.error('Failed to delete client');
     }
@@ -184,19 +281,32 @@ export default function ClientDetailPage() {
   const handleSave = async () => {
     if (!account) return;
     try {
+      const updatedData = {
+        name1: editForm.name1,
+        industry: editForm.industry,
+        phone: editForm.phone,
+        email: editForm.email,
+        address: editForm.address,
+        notes: editForm.notes,
+        tierKey: editForm.tierKey || undefined,
+        regionKey: editForm.regionKey || undefined,
+      };
+      
       await updateAccount.mutateAsync({
         id: account.id,
-        changedFields: {
-          name1: editForm.name1,
-          industry: editForm.industry,
-          phone: editForm.phone,
-          email: editForm.email,
-          address: editForm.address,
-          notes: editForm.notes,
-          tierKey: editForm.tierKey || undefined,
-          regionKey: editForm.regionKey || undefined,
-        },
+        changedFields: updatedData,
       });
+      
+      // Trigger AI summary generation in the background
+      triggerForEntity('account', account.id, {
+        ...account,
+        ...updatedData,
+      } as Record<string, unknown>, {
+        opportunities: opportunities.map((o: Opportunity) => ({ id: o.id, name: o.name1, stage: o.stageKey, amount: o.totalamount })),
+        activities: activities.map((a: Activity) => ({ id: a.id, title: a.title, type: a.typeKey, date: a.scheduleddate })),
+        contacts: contacts.map((c: Contact) => ({ id: c.id, name: c.fullname, title: c.title })),
+      });
+      
       toast.success('Client updated');
       setIsEditMode(false);
     } catch (error: unknown) {
@@ -214,8 +324,8 @@ export default function ClientDetailPage() {
         email: account.email || '',
         address: account.address || '',
         notes: account.notes || '',
-        tierKey: (account.tierKey as AccountTierkey) || '',
-        regionKey: (account.regionKey as AccountRegionkey) || '',
+        tierKey: (account.tierKey as AccountTierKey) || '',
+        regionKey: (account.regionKey as AccountRegionKey) || '',
       });
     }
   };
@@ -230,16 +340,31 @@ export default function ClientDetailPage() {
     );
   }
 
-  if (!account) {
+  if (error || !account) {
+    // Log error details for debugging
+    if (error) {
+      console.error('[AccountDetail] Error loading account:', {
+        id,
+        error: error instanceof Error ? error.message : error,
+      });
+    }
+    
     return (
-      <MobileLayout title="Client">
-        <div className="flex flex-col items-center justify-center h-64 gap-4">
-          <Building2 className="w-16 h-16 text-muted-foreground/40" />
-          <p className="text-muted-foreground">Client not found</p>
-          <Button variant="outline" onClick={() => navigate('/clients')}>
-            Back to Clients
+      <MobileLayout title={locale === 'zh-Hans' ? '客户' : 'Client'}>
+        <Empty className="py-20">
+          <EmptyHeader>
+            <Building2 className="w-16 h-16 mx-auto mb-4 text-muted-foreground/40" />
+            <EmptyTitle>{locale === 'zh-Hans' ? '找不到客户' : 'Client not found'}</EmptyTitle>
+            <EmptyDescription>
+              {locale === 'zh-Hans' 
+                ? '该记录可能已被删除，或此 ID 不属于客户表' 
+                : 'This record may have been deleted, or the ID does not belong to the Accounts table'}
+            </EmptyDescription>
+          </EmptyHeader>
+          <Button variant="outline" className="mt-4" onClick={() => navigate('/accounts')}>
+            {locale === 'zh-Hans' ? '返回客户列表' : 'Back to Clients'}
           </Button>
-        </div>
+        </Empty>
       </MobileLayout>
     );
   }
@@ -311,14 +436,14 @@ export default function ClientDetailPage() {
                   <Label htmlFor="tier">Tier</Label>
                   <Select
                     value={editForm.tierKey || 'none'}
-                    onValueChange={(val: string) => setEditForm({ ...editForm, tierKey: val === 'none' ? '' : val as AccountTierkey })}
+                    onValueChange={(val: string) => setEditForm({ ...editForm, tierKey: val === 'none' ? '' : val as AccountTierKey })}
                   >
                     <SelectTrigger id="tier">
                       <SelectValue placeholder="Select tier" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">None</SelectItem>
-                      {Object.entries(AccountTierkeyToLabel).map(([key, label]) => (
+                      {Object.entries(AccountTierKeyToLabel).map(([key, label]) => (
                         <SelectItem key={key} value={key}>{label}</SelectItem>
                       ))}
                     </SelectContent>
@@ -329,14 +454,14 @@ export default function ClientDetailPage() {
                   <Label htmlFor="region">Region</Label>
                   <Select
                     value={editForm.regionKey || 'none'}
-                    onValueChange={(val: string) => setEditForm({ ...editForm, regionKey: val === 'none' ? '' : val as AccountRegionkey })}
+                    onValueChange={(val: string) => setEditForm({ ...editForm, regionKey: val === 'none' ? '' : val as AccountRegionKey })}
                   >
                     <SelectTrigger id="region">
                       <SelectValue placeholder="Select region" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">None</SelectItem>
-                      {Object.entries(AccountRegionkeyToLabel).map(([key, label]) => (
+                      {Object.entries(AccountRegionKeyToLabel).map(([key, label]) => (
                         <SelectItem key={key} value={key}>{getRegionEnglish(label)}</SelectItem>
                       ))}
                     </SelectContent>
@@ -416,13 +541,13 @@ export default function ClientDetailPage() {
   // View Mode UI
   return (
     <MobileLayout title="Client Details" hideVoiceButton headerRight={deleteButton}>
-      {/* Main scrollable content */}
-      <motion.div
-        className="py-4 space-y-4 pb-48"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, ease: 'easeOut' as const }}
-      >
+      <PullToRefresh onRefresh={handleRefresh} className="flex-1 overflow-y-auto">
+        <motion.div
+          className="py-4 space-y-4 pb-48"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, ease: 'easeOut' as const }}
+        >
         {/* Header Card */}
         <GlassCard className="space-y-4">
           <div className="flex items-start gap-4">
@@ -434,13 +559,13 @@ export default function ClientDetailPage() {
                 <h1 className="text-xl font-bold text-foreground truncate">{account.name1}</h1>
                 {account.tierKey && (
                   <Badge variant="secondary" className="flex-shrink-0">
-                    {AccountTierkeyToLabel[account.tierKey as AccountTierkey]}
+                    {AccountTierKeyToLabel[account.tierKey as AccountTierKey]}
                   </Badge>
                 )}
               </div>
               <p className="text-sm text-muted-foreground mb-2">
                 {account.industry || 'Uncategorized'}
-                {account.regionKey && ` • ${getRegionEnglish(AccountRegionkeyToLabel[account.regionKey as AccountRegionkey])}`}
+                {account.regionKey && ` • ${getRegionEnglish(AccountRegionKeyToLabel[account.regionKey as AccountRegionKey])}`}
               </p>
               <div className="flex flex-wrap gap-2">
                 {daysSinceContact <= 14 ? (
@@ -454,9 +579,9 @@ export default function ClientDetailPage() {
                     At Risk
                   </Badge>
                 ) : null}
-                {account.creditstatusKey && account.creditstatusKey !== 'Creditstatuskey0' && (
+                {account.creditstatusKey && account.creditstatusKey !== 'CreditstatusKey0' && (
                   <Badge variant="outline" className="gap-1 text-amber-600 border-amber-200 dark:border-amber-900">
-                    {AccountCreditstatuskeyToLabel[account.creditstatusKey as AccountCreditstatuskey]}
+                    {AccountCreditstatusKeyToLabel[account.creditstatusKey as AccountCreditstatusKey]}
                   </Badge>
                 )}
               </div>
@@ -488,11 +613,22 @@ export default function ClientDetailPage() {
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="contacts">Contacts ({contacts.length})</TabsTrigger>
             <TabsTrigger value="opportunities">Deals ({opportunities.length})</TabsTrigger>
-            <TabsTrigger value="activities">Activities</TabsTrigger>
+            <TabsTrigger value="activities">Activities ({activities.length})</TabsTrigger>
           </TabsList>
 
           {/* Overview Tab */}
           <TabsContent value="overview" className="mt-4 space-y-4">
+            {/* AI Insights */}
+            <AISummaryCard
+              summary={aiSummary}
+              isLoading={isLoadingAISummary}
+              isGenerating={isGenerating}
+              isExpired={isExpired}
+              isFailed={isFailed}
+              isRefreshing={isRefreshingAI || isTriggering}
+              onRefresh={handleRefreshAISummary}
+            />
+
             {/* Contact Info */}
             <GlassCard>
               <h3 className="text-sm font-medium text-foreground mb-3">Contact Info</h3>
@@ -562,8 +698,9 @@ export default function ClientDetailPage() {
                 <motion.div
                   key={contact.id}
                   variants={itemVariants}
-                  className="glass-card p-3"
+                  className="glass-card p-3 cursor-pointer hover:bg-muted/50 transition-colors"
                   style={{ borderRadius: 14 }}
+                  onClick={() => navigate(`/contacts/${contact.id}`)}
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
@@ -577,12 +714,15 @@ export default function ClientDetailPage() {
                         {contact.title}
                       </p>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex items-center gap-2">
                       {contact.phone && (
                         <Button
                           variant="ghost"
                           size="icon-sm"
-                          onClick={() => window.open(`tel:${contact.phone}`)}
+                          onClick={(e: React.MouseEvent) => {
+                            e.stopPropagation();
+                            window.open(`tel:${contact.phone}`);
+                          }}
                         >
                           <Phone className="w-4 h-4" />
                         </Button>
@@ -591,11 +731,15 @@ export default function ClientDetailPage() {
                         <Button
                           variant="ghost"
                           size="icon-sm"
-                          onClick={() => window.open(`mailto:${contact.email}`)}
+                          onClick={(e: React.MouseEvent) => {
+                            e.stopPropagation();
+                            window.open(`mailto:${contact.email}`);
+                          }}
                         >
                           <Mail className="w-4 h-4" />
                         </Button>
                       )}
+                      <ChevronRight className="w-4 h-4 text-muted-foreground/50" />
                     </div>
                   </div>
                 </motion.div>
@@ -632,7 +776,7 @@ export default function ClientDetailPage() {
                   </div>
                   <div className="flex items-center gap-2 text-xs">
                     <Badge variant="outline" className="text-[10px]">
-                      {OpportunityStagekeyToLabel[opp.stageKey as OpportunityStagekey]}
+                      {OpportunityStageKeyToLabel[opp.stageKey as OpportunityStageKey]}
                     </Badge>
                     {opp.confidence && (
                       <span className="text-muted-foreground">
@@ -670,9 +814,14 @@ export default function ClientDetailPage() {
                   onClick={() => navigate(`/activities/${activity.id}`)}
                 >
                   <div className="flex gap-3">
-                    <div className="text-xl flex-shrink-0">
-                      {getActivityTypeIcon(activity.typeKey)}
-                    </div>
+                    {(() => {
+                      const Icon = getActivityTypeIcon(activity.typeKey);
+                      return (
+                        <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                          <Icon className="w-4 h-4 text-primary" />
+                        </div>
+                      );
+                    })()}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
                         <h4 className="text-sm font-medium text-foreground truncate">
@@ -683,16 +832,16 @@ export default function ClientDetailPage() {
                             variant="outline"
                             className={cn(
                               'text-[10px]',
-                              activity.draftstatusKey === 'Draftstatuskey2' && 'text-emerald-600 border-emerald-200'
+                              activity.draftstatusKey === 'DraftstatusKey2' && 'text-emerald-600 border-emerald-200'
                             )}
                           >
-                            {ActivityDraftstatuskeyToLabel[activity.draftstatusKey as ActivityDraftstatuskey]}
+                            {ActivityDraftstatusKeyToLabel[activity.draftstatusKey as ActivityDraftstatusKey]}
                           </Badge>
                         )}
                       </div>
                       <p className="text-xs text-muted-foreground mb-1">
                         {formatDate(activity.scheduleddate)}
-                        {activity.typeKey && ` • ${ActivityTypekeyToLabel[activity.typeKey as ActivityTypekey]}`}
+                        {activity.typeKey && ` • ${ActivityTypeKeyToLabel[activity.typeKey as ActivityTypeKey]}`}
                       </p>
                       {activity.notes && (
                         <p className="text-xs text-muted-foreground line-clamp-2">
@@ -707,36 +856,24 @@ export default function ClientDetailPage() {
           </TabsContent>
         </Tabs>
       </motion.div>
+      </PullToRefresh>
 
-      {/* Quick Actions - positioned above global copilot */}
-      <div className="fixed bottom-20 left-0 right-0 z-40 safe-area-bottom pointer-events-none" style={{ background: 'linear-gradient(to top, var(--background) 40%, transparent)' }}>
-        <div className="flex items-center justify-center gap-2 px-4 pointer-events-auto">
-          <button
-            onClick={() => navigate('/activity-capture')}
-            className={cn(
-              'flex items-center gap-2 px-4 py-2.5',
-              'rounded-full glass-card-hover',
-              'text-xs font-medium text-foreground',
-              'active:scale-95 transition-transform'
-            )}
-          >
-            <Plus className="w-4 h-4 text-primary" />
-            <span>{locale === 'zh-Hans' ? '新建活动' : 'New Activity'}</span>
-          </button>
-          <button
-            onClick={() => setIsEditMode(true)}
-            className={cn(
-              'flex items-center gap-2 px-4 py-2.5',
-              'rounded-full glass-card-hover',
-              'text-xs font-medium text-foreground',
-              'active:scale-95 transition-transform'
-            )}
-          >
-            <Edit className="w-4 h-4 text-primary" />
-            <span>{locale === 'zh-Hans' ? '编辑' : 'Edit'}</span>
-          </button>
-        </div>
-      </div>
+      <FloatingQuickActions
+        actions={[
+          {
+            id: 'new-activity',
+            icon: Plus,
+            label: locale === 'zh-Hans' ? '新建活动' : 'New Activity',
+            onClick: () => navigate(`/activity/${id}`),
+          },
+          {
+            id: 'edit',
+            icon: Edit,
+            label: locale === 'zh-Hans' ? '编辑' : 'Edit',
+            onClick: () => setIsEditMode(true),
+          },
+        ]}
+      />
     </MobileLayout>
   );
 }

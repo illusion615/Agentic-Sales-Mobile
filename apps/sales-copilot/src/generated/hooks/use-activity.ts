@@ -27,11 +27,14 @@ export function useActivity(id: string) {
     queryKey: ["activity", id],
     queryFn: () => ActivityService.get(id),
     enabled: !!id && UUID_REGEX.test(id),
+    retry: false, // Don't retry on "record not found" errors
+    throwOnError: false, // Let component handle errors gracefully
   });
 }
 
 /**
  * Create a new Activity record.
+ * @remarks Form validation: use CreateActivitySchema with zodResolver for type-safe create forms
  */
 export function useCreateActivity() {
   const client = useQueryClient();
@@ -45,6 +48,7 @@ export function useCreateActivity() {
 
 /**
  * Update an existing Activity record.
+ * @remarks Form validation: use UpdateActivitySchema.partial().omit({ id: true }) with zodResolver for edit forms (matches changedFields input)
  */
 export function useUpdateActivity() {
   const client = useQueryClient();
@@ -79,3 +83,6 @@ export function useDeleteActivity() {
 
 /** Data source type for this table — drives InMemoryDataBanner visibility. */
 export const Activity_DATA_SOURCE_TYPE = 'Dataverse' as const;
+
+export { ActivitySchema, CreateActivitySchema, UpdateActivitySchema } from "../validators/activity-validator";
+export type { ActivityInput, CreateActivityInput, UpdateActivityInput } from "../validators/activity-validator";

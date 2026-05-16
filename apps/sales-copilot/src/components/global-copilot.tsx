@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
-import { ArrowUp, Mic } from 'lucide-react';
+import { ArrowUp, X, Paperclip } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getLocale, getCopilotInAllScreens, getLLMConfig, getAgentFramework, type Locale } from '@/lib/i18n';
 import { getCopilotConfig } from '@/services/copilot-service';
@@ -44,7 +44,8 @@ export function GlobalCopilot() {
   const [enabled, setEnabled] = useState(() => getCopilotInAllScreens());
   const [localInputValue, setLocalInputValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [attachments, setAttachments] = useState<Array<{ file: File; preview: string; type: 'image' | 'file' }>>([]);
   const locale: Locale = getLocale();
   
   const { isOpen, openPanel, sendMessage, setInputValue, isRecording, setIsRecording, inputPlaceholder } = useCopilot();
@@ -62,111 +63,57 @@ export function GlobalCopilot() {
     return () => window.removeEventListener('copilotinallscreens-changed', handleChange as EventListener);
   }, []);
 
-  // Initialize Speech Recognition
-  useEffect(() => {
-    const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (SpeechRecognitionAPI) {
-      const recognition = new SpeechRecognitionAPI();
-      recognition.continuous = false;
-      recognition.interimResults = true;
-      recognition.lang = locale === 'zh-Hans' ? 'zh-CN' : 'en-US';
-      recognitionRef.current = recognition;
-    }
-    
-    return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.abort();
+  // Handle file selection
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    Array.from(files).forEach((file: File) => {
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          setAttachments((prev) => [...prev, {
+            file,
+            preview: event.target?.result as string,
+            type: 'image' as const
+          }]);
+        };
+        reader.readAsDataURL(file);
+      } else {
+        setAttachments((prev) => [...prev, {
+          file,
+          preview: '',
+          type: 'file' as const
+        }]);
       }
-    };
-  }, [locale]);
+    });
 
-  // Start voice recognition
-  const startRecognition = useCallback(() => {
-    const recognition = recognitionRef.current;
-    if (!recognition) {
-      toast.error(
-        locale === 'zh-Hans'
-          ? '您的浏览器不支持语音识别'
-          : 'Your browser does not support speech recognition'
-      );
-      return;
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
+  }, []);
 
-    recognition.onstart = () => {
-      setIsRecording(true);
-    };
+  // Handle remove attachment
+  const handleRemoveAttachment = useCallback((index: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
+  }, []);
 
-    recognition.onresult = (event: SpeechRecognitionEvent) => {
-      let transcript = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        transcript += event.results[i][0].transcript;
-      }
-      setLocalInputValue(transcript);
-    };
+  // Handle camera/attachment button click
+  const handleAttachmentClick = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
 
-    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-      console.error('[Speech Recognition] Error:', event.error);
-      setIsRecording(false);
-      
-      if (event.error === 'not-allowed') {
-        toast.error(
-          locale === 'zh-Hans'
-            ? '请允许麦克风权限以使用语音输入'
-            : 'Please allow microphone access to use voice input'
-        );
-      } else if (event.error !== 'aborted') {
-        toast.error(
-          locale === 'zh-Hans'
-            ? `语音识别错误: ${event.error}`
-            : `Speech recognition error: ${event.error}`
-        );
-      }
-    };
 
-    recognition.onend = () => {
-      setIsRecording(false);
-      // Auto-send if we have transcribed text
-      if (localInputValue.trim()) {
-        handleSendMessage(localInputValue);
-      }
-    };
 
-    try {
-      recognition.start();
-    } catch (err) {
-      console.error('[Speech Recognition] Start error:', err);
-      setIsRecording(false);
-    }
-  }, [locale, localInputValue, setIsRecording]);
-
-  // Stop voice recognition
-  const stopRecognition = useCallback(() => {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-    }
-    setIsRecording(false);
-  }, [setIsRecording]);
-
-  // Toggle recording
-  const handleMicClick = useCallback(() => {
-    if (isRecording) {
-      stopRecognition();
-    } else {
-      openPanel();
-      startRecognition();
-    }
-  }, [isRecording, openPanel, startRecognition, stopRecognition]);
-
-  // Check if copilot is configured (either Copilot Studio or BYOM)
+  // Check if AI assistant is configured for visibility
   const copilotConfig = getCopilotConfig();
   const llmConfig = getLLMConfig();
   const isCopilotConfigured = !!copilotConfig?.tokenEndpoint || (!!llmConfig?.enabled && !!llmConfig?.endpoint);
-
-  // Don't show on settings page
+  const isHomePage = location.pathname === '/' || location.pathname === '/home';
   const isSettingsPage = location.pathname === '/settings';
-  
-  // Hide completely if neither copilot nor BYOM is configured, or setting is disabled
-  if (!enabled || !isCopilotConfigured || isSettingsPage) {
+  const shouldShowCopilot = !isSettingsPage && isCopilotConfigured && (isHomePage || enabled);
+
+  if (!shouldShowCopilot) {
     return null;
   }
 
@@ -247,6 +194,40 @@ export function GlobalCopilot() {
           style={{ background: 'linear-gradient(to top, var(--scm-gradient-start) 60%, transparent)' }}
         >
           <div className="flex flex-col items-center px-4 pb-6 pointer-events-auto">
+            {/* Attachment Preview */}
+            {attachments.length > 0 && (
+              <div className="w-full max-w-md mb-2">
+                <div className="flex gap-2 flex-wrap bg-background/80 backdrop-blur-sm rounded-xl p-2">
+                  {attachments.map((attachment, index: number) => (
+                    <div key={index} className="relative group">
+                      {attachment.type === 'image' ? (
+                        <div className="w-12 h-12 rounded-lg overflow-hidden border border-border/50">
+                          <img
+                            src={attachment.preview}
+                            alt="Attachment"
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      ) : (
+                        <div className="w-12 h-12 rounded-lg border border-border/50 bg-muted/50 flex flex-col items-center justify-center">
+                          <Paperclip className="w-4 h-4 text-muted-foreground" />
+                          <span className="text-[6px] text-muted-foreground mt-0.5 px-1 truncate max-w-full">
+                            {attachment.file.name.length > 6 ? attachment.file.name.slice(0, 6) + '...' : attachment.file.name}
+                          </span>
+                        </div>
+                      )}
+                      <button
+                        onClick={() => handleRemoveAttachment(index)}
+                        className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Input Box - Neon Glow Effect */}
             <div className="w-full max-w-md">
               <div className="relative p-[2px] rounded-2xl">
@@ -256,18 +237,23 @@ export function GlobalCopilot() {
                 
                 {/* Input container - solid opaque background to block glow inside */}
                 <div className="relative flex items-center gap-2 px-4 py-2 rounded-[14px] bg-background" style={{ backgroundColor: 'var(--background)' }}>
-                  {/* Mic Button - Left side */}
+                  {/* Hidden file input */}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+                    multiple
+                    onChange={handleFileSelect}
+                    className="hidden"
+                  />
+
+                  {/* Camera/Attachment Button - Left side */}
                   <button
-                    onClick={handleMicClick}
-                    className={cn(
-                      'w-10 h-10 flex items-center justify-center transition-all',
-                      isRecording
-                        ? 'text-rose-500 animate-pulse'
-                        : 'text-muted-foreground hover:brightness-150'
-                    )}
-                    aria-label={locale === 'zh-Hans' ? '语音输入' : 'Voice input'}
+                    onClick={handleAttachmentClick}
+                    className="w-10 h-10 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-full transition-colors"
+                    aria-label={locale === 'zh-Hans' ? '添加附件' : 'Add attachment'}
                   >
-                    <Mic className="w-5 h-5" />
+                    <Paperclip className="w-5 h-5" />
                   </button>
 
                   {/* Input Field */}
@@ -278,7 +264,7 @@ export function GlobalCopilot() {
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLocalInputValue(e.target.value)}
                     onKeyDown={handleKeyDown}
                     onFocus={handleInputFocus}
-                    placeholder={isRecording ? (locale === 'zh-Hans' ? '正在聆听...' : 'Listening...') : placeholder}
+                    placeholder={placeholder}
                     className="flex-1 bg-transparent border-0 outline-none text-sm text-foreground placeholder:text-muted-foreground"
                   />
 

@@ -1,10 +1,11 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect, useMemo, type ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useUser } from '@/hooks/use-user';
+import { useSettingsReady } from '@/contexts/settings-context';
 import { 
   getCopilotConfig, 
   getOrCreateConversation, 
   sendUserContext, 
-  sendMessage as sendCopilotMessage, 
   pollMessages,
   clearConversation,
   createWebSocketConnection,
@@ -12,10 +13,15 @@ import {
   type CopilotMessage
 } from '@/services/copilot-service';
 import { getLocale, getLLMConfig, getSimulateStreaming, type Locale } from '@/lib/i18n';
+import { toast } from 'sonner';
 import { processMessage, type ThinkingProgress } from '@/lib/copilot-agent';
+import { extractVisitDataFromText, type ExtractedVisitData } from '@/lib/visit-extraction';
+
+// Re-export ExtractedVisitData for consumers that import from context
+export type { ExtractedVisitData } from '@/lib/visit-extraction';
 
 export interface ThinkingStep {
-  stage: 'intent' | 'executing' | 'generating';
+  stage: 'intent' | 'matching' | 'executing' | 'generating';
   status: 'pending' | 'active' | 'completed';
   label: string;
   detail?: string;
@@ -23,7 +29,7 @@ export interface ThinkingStep {
 
 export interface ChatMessage {
   id: string;
-  type: 'user' | 'agent' | 'stage-card' | 'form-card';
+  type: 'user' | 'agent' | 'stage-card' | 'form-card' | 'batch-form-card' | 'match-selection' | 'clarification';
   role?: 'user' | 'assistant';
   content: string;
   audioUrl?: string;
@@ -49,15 +55,73 @@ export interface ChatMessage {
   };
   // Form card for draft records (Activity/Opportunity/Account)
   formCard?: {
-    type: 'activity' | 'opportunity' | 'account';
+    type: 'activity' | 'opportunity' | 'account' | 'contact';
     isNew: boolean;
     existingId?: string;
     data: Record<string, unknown>;
     status?: 'pending' | 'confirmed' | 'modified';
+    createdRecordId?: string;
   };
+  // Batch form cards for multiple drafts
+  batchFormCards?: {
+    items: Array<{
+      type: 'activity' | 'opportunity' | 'account' | 'contact';
+      isNew: boolean;
+      data: Record<string, unknown>;
+      batchIndex: number;
+      status?: 'pending' | 'confirmed' | 'modified';
+      createdRecordId?: string;
+    }>;
+    totalCount: number;
+  };
+  // Match selection for fuzzy matching
+  matchSelection?: {
+    entityType: 'account' | 'contact' | 'opportunity' | 'activity';
+    query: string;
+    matches: Array<{
+      id: string;
+      name: string;
+      subtitle?: string;
+      score: number;
+      matchType: 'exact' | 'contains' | 'fuzzy';
+    }>;
+    confidence: 'high' | 'medium' | 'low' | 'none';
+    pendingAction?: string;
+    // Pending intent to execute after user selects a match
+    pendingIntent?: {
+      function: string;
+      arguments: Record<string, unknown>;
+    };
+  };
+  // Clarification question for ambiguous inputs
+  clarification?: {
+    summary: string;
+    questions: Array<{
+      id: string;
+      question: string;
+      options?: Array<{
+        id: string;
+        label: string;
+        description?: string;
+      }>;
+      allowFreeInput?: boolean;
+    }>;
+  };
+
+  // Additional intents inferred from user input (multi-intent support)
+  additionalIntents?: {
+    message: string;
+    forms: Array<{
+      type: 'activity' | 'opportunity' | 'account' | 'contact';
+      data: Record<string, unknown>;
+      reason: string;
+      batchIndex: number;
+    }>;
+  };
+
   // Record list for displaying query results
   recordList?: {
-    type: 'account' | 'opportunity' | 'activity';
+    type: 'account' | 'opportunity' | 'activity' | 'contact';
     records: Array<{
       id: string;
       title: string;
@@ -129,9 +193,47 @@ interface CopilotContextValue {
   
   // Conversation management
   startNewConversation: () => Promise<void>;
+
+  // Extract structured visit data using Copilot Studio
+  extractVisitData: (text: string, findAccountByName: (name: string) => { id: string; name1?: string } | undefined) => Promise<ExtractedVisitData | null>;
   
   // Direct Line session refs for Copilot Studio
   directLineSessionRefs: DirectLineSessionRefs;
+  
+  // Continue pending action after match selection
+  continuePendingAction: (
+    selectedRecord: { id: string; name: string; accountId?: string; accountName?: string },
+    pendingIntent: { function: string; arguments: Record<string, unknown> },
+    entityType: 'account' | 'contact' | 'opportunity' | 'activity'
+  ) => Promise<void>;
+  
+  // Create new record from intent (skip match selection)
+  createNewFromIntent: (
+    pendingIntent: { function: string; arguments: Record<string, unknown> }
+  ) => Promise<void>;
+  
+  // Clarification suggestions for quick action pills
+  clarificationSuggestions: Array<{ text: string; query: string; action?: { function: string; arguments: Record<string, unknown> } }>;
+  setClarificationSuggestions: (suggestions: Array<{ text: string; query: string; action?: { function: string; arguments: Record<string, unknown> } }>) => void;
+  clearClarificationSuggestions: () => void;
+  
+  // Execute a clarification action directly (skip LLM re-analysis)
+  executeClarificationAction: (
+    actionFunction: string,
+    actionArguments: Record<string, unknown>,
+    displayText: string
+  ) => Promise<void>;
+  
+  // Update form card status in a message (for persisting confirmed/modified state)
+  updateFormCardStatus: (
+    messageId: string,
+    status: 'pending' | 'confirmed' | 'modified',
+    batchIndex?: number,
+    createdRecordId?: string
+  ) => void;
+  
+  // Rollback conversation to a specific message (removes that message and all after it)
+  rollbackToMessage: (messageId: string) => void;
 }
 
 export interface PageContext {
@@ -143,9 +245,10 @@ export interface PageContext {
 const CopilotContext = createContext<CopilotContextValue | null>(null);
 
 export function CopilotProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
   const { data: user } = useUser();
   const locale: Locale = getLocale();
-
+  const settingsReady = useSettingsReady();
   
   // Panel state
   const [isOpen, setIsOpen] = useState(false);
@@ -168,14 +271,71 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
   const [isSending, setIsSending] = useState(false);
   const [inputValue, setInputValue] = useState('');
 
-  // Persist messages to sessionStorage whenever they change
-  useEffect(() => {
+  // Persist messages to sessionStorage - only when all streaming/thinking is complete
+  // Use a ref to track the last persisted snapshot and avoid redundant writes
+  const lastPersistedRef = useRef<string>('');
+  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Separate persistence into a stable callback that doesn't change on every render
+  const persistMessages = useCallback((messagesToPersist: ChatMessage[]) => {
+    // Filter out any message that is still streaming or thinking
+    const hasActiveState = messagesToPersist.some((m) => m.isStreaming || m.isThinking);
+    if (hasActiveState) {
+      return; // Don't persist during active streaming/thinking
+    }
+
+    // Strip transient flags before persisting
+    const persistableMessages = messagesToPersist.map((m) => ({
+      ...m,
+      isStreaming: undefined,
+      isThinking: undefined,
+    }));
+
+    const json = JSON.stringify(persistableMessages);
+
+    // Skip if unchanged from last persisted snapshot
+    if (json === lastPersistedRef.current) {
+      return;
+    }
+
+    lastPersistedRef.current = json;
+
     try {
-      sessionStorage.setItem('copilot-messages', JSON.stringify(messages));
+      sessionStorage.setItem('copilot-messages', json);
     } catch (e) {
       console.warn('Failed to persist copilot messages:', e);
     }
-  }, [messages]);
+  }, []);
+
+  // Effect to trigger persistence with debounce - only when messages settle
+  useEffect(() => {
+    // Don't even schedule if any message is actively streaming or thinking
+    const hasActiveState = messages.some((m) => m.isStreaming || m.isThinking);
+    if (hasActiveState) {
+      // Clear any pending timer - we'll persist when streaming completes
+      if (persistTimerRef.current) {
+        clearTimeout(persistTimerRef.current);
+        persistTimerRef.current = null;
+      }
+      return;
+    }
+
+    // Debounce persistence by 500ms after all streaming/thinking completes
+    if (persistTimerRef.current) {
+      clearTimeout(persistTimerRef.current);
+    }
+
+    persistTimerRef.current = setTimeout(() => {
+      persistMessages(messages);
+      persistTimerRef.current = null;
+    }, 500);
+
+    return () => {
+      if (persistTimerRef.current) {
+        clearTimeout(persistTimerRef.current);
+      }
+    };
+  }, [messages, persistMessages]);
   
   // Recording state
   const [isRecording, setIsRecording] = useState(false);
@@ -197,33 +357,41 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       return next;
     });
   }, []);
+
+  // Rollback conversation to a specific message (removes that message and all after it)
+  const rollbackToMessage = useCallback((messageId: string) => {
+    setMessages((prev) => {
+      const targetIndex = prev.findIndex((msg) => msg.id === messageId);
+      if (targetIndex === -1) return prev;
+      // Keep messages before the target message
+      return prev.slice(0, targetIndex);
+    });
+  }, []);
   const pageContext = pageContextState;
   const pageContextRef = useRef<PageContext | null>(null);
   
   // Keep pageContextRef in sync with pageContext state
   
-  // Debug: track what's causing re-renders
-  const prevUserRef = useRef(user);
-  const prevLocaleRef = useRef(locale);
-  const prevMessagesRef = useRef(messages);
-  const prevPageContextRef = useRef(pageContextState);
-  useEffect(() => {
-    const changes: string[] = [];
-    if (prevUserRef.current !== user) changes.push('user');
-    if (prevLocaleRef.current !== locale) changes.push('locale');
-    if (prevMessagesRef.current !== messages) changes.push('messages');
-    if (prevPageContextRef.current !== pageContextState) changes.push('pageContext');
-    if (changes.length > 0) {
-      console.log('[LOOP DEBUG] CopilotProvider deps changed:', changes.join(', '));
-    }
-    prevUserRef.current = user;
-    prevLocaleRef.current = locale;
-    prevMessagesRef.current = messages;
-    prevPageContextRef.current = pageContextState;
-  });
+  // Debug effect removed - was causing performance issues by running on every render
   useEffect(() => {
     pageContextRef.current = pageContext;
   }, [pageContext]);
+
+  // Extract structured visit data using Copilot Studio Direct Line
+  // Delegates to the visit-extraction helper module
+  const extractVisitData = useCallback(async (
+    text: string,
+    findAccountByName: (name: string) => { id: string; name1?: string } | undefined
+  ): Promise<ExtractedVisitData | null> => {
+    return extractVisitDataFromText(
+      text,
+      findAccountByName,
+      locale,
+      user?.objectId,
+      copilotConversationRef,
+      watermarkRef
+    );
+  }, [locale, user]);
   
   // Dynamic input placeholder (with guard to prevent loops)
   const [inputPlaceholderState, setInputPlaceholderState] = useState('');
@@ -234,6 +402,134 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     });
   }, []);
   const inputPlaceholder = inputPlaceholderState;
+  
+  // Clarification suggestions for quick action pills
+  const [clarificationSuggestions, setClarificationSuggestionsState] = useState<Array<{ text: string; query: string; action?: { function: string; arguments: Record<string, unknown> } }>>([]);
+  const setClarificationSuggestions = useCallback((suggestions: Array<{ text: string; query: string; action?: { function: string; arguments: Record<string, unknown> } }>) => {
+    setClarificationSuggestionsState(suggestions);
+  }, []);
+  const clearClarificationSuggestions = useCallback(() => {
+    setClarificationSuggestionsState([]);
+  }, []);
+  
+  // Execute a clarification action directly (calls draft function and shows form)
+  const executeClarificationAction = useCallback(async (
+    actionFunction: string,
+    actionArguments: Record<string, unknown>,
+    displayText: string
+  ) => {
+    setIsSending(true);
+    clearClarificationSuggestions();
+    
+    // Add user message showing their selection
+    const userMessage: ChatMessage = {
+      id: `msg-${Date.now()}-user`,
+      type: 'user',
+      role: 'user',
+      content: displayText,
+      timestamp: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, userMessage]);
+    
+    // Create a thinking message
+    const thinkingMsgId = `msg-${Date.now()}-action`;
+    const thinkingMessage: ChatMessage = {
+      id: thinkingMsgId,
+      type: 'agent',
+      role: 'assistant',
+      content: '',
+      agentName: 'Sales Copilot',
+      timestamp: new Date().toISOString(),
+      isThinking: true,
+      thinkingSteps: [
+        { 
+          stage: 'executing', 
+          status: 'active', 
+          label: locale === 'zh-Hans' ? `正在准备${displayText}...` : `Preparing ${displayText}...` 
+        },
+      ],
+    };
+    setMessages((prev) => [...prev, thinkingMessage]);
+    
+    try {
+      const { executeFunction } = await import('@/lib/function-executor');
+      const { getDisplayName } = await import('@/lib/function-registry');
+      
+      // Enhance arguments with page context if available
+      const enhancedArgs = { ...actionArguments };
+      if (pageContextRef.current?.pageData) {
+        const pageData = pageContextRef.current.pageData as Record<string, unknown>;
+        if (pageData.accountId) enhancedArgs.accountId = pageData.accountId;
+        if (pageData.accountName) enhancedArgs.accountName = pageData.accountName;
+        if (pageData.contactId) enhancedArgs.contactId = pageData.contactId;
+        if (pageData.contactName) enhancedArgs.contactName = pageData.contactName;
+        if (pageData.opportunityId) enhancedArgs.opportunityId = pageData.opportunityId;
+        if (pageData.opportunityName) enhancedArgs.opportunityName = pageData.opportunityName;
+      }
+      
+      const fnDisplayName = getDisplayName(actionFunction, locale === 'zh-Hans' ? 'zh-Hans' : 'en-US');
+      
+      const functionResult = await executeFunction(
+        actionFunction,
+        enhancedArgs,
+        { userId: user?.objectId, userEmail: user?.userPrincipalName }
+      );
+      
+      if (functionResult.success && functionResult.data) {
+        const formCardResult = functionResult.data as { type: string; isNew: boolean; data: Record<string, unknown> };
+        setMessages((prev) => prev.map((msg) => {
+          if (msg.id !== thinkingMsgId) return msg;
+          return {
+            ...msg,
+            type: 'form-card' as const,
+            content: locale === 'zh-Hans' ? '请确认以下信息' : 'Please confirm the following information',
+            functionCalled: actionFunction,
+            functionDisplayName: fnDisplayName,
+            isThinking: false,
+            thinkingSteps: [
+              { stage: 'executing' as const, status: 'completed' as const, label: locale === 'zh-Hans' ? `${fnDisplayName}：已准备表单` : `${fnDisplayName}: Form ready` },
+            ],
+            formCard: {
+              type: formCardResult.type as 'activity' | 'opportunity' | 'account' | 'contact',
+              isNew: formCardResult.isNew,
+              data: formCardResult.data,
+              status: 'pending' as const,
+            },
+          };
+        }));
+      } else {
+        // Show error
+        setMessages((prev) => prev.map((msg) => {
+          if (msg.id !== thinkingMsgId) return msg;
+          return {
+            ...msg,
+            content: locale === 'zh-Hans'
+              ? `❌ 操作失败: ${functionResult.error}`
+              : `❌ Error: ${functionResult.error}`,
+            agentName: 'System',
+            isThinking: false,
+            thinkingSteps: undefined,
+          };
+        }));
+      }
+    } catch (error) {
+      console.error('[CopilotContext] executeClarificationAction error:', error);
+      setMessages((prev) => prev.map((msg) => {
+        if (msg.id !== thinkingMsgId) return msg;
+        return {
+          ...msg,
+          content: locale === 'zh-Hans'
+            ? `❌ 操作失败: ${error instanceof Error ? error.message : '未知错误'}`
+            : `❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          agentName: 'System',
+          isThinking: false,
+          thinkingSteps: undefined,
+        };
+      }));
+    } finally {
+      setIsSending(false);
+    }
+  }, [user, locale]);
   
   // Form fill callback for agent to populate page forms
   const formFillCallbackRef = useRef<FormFillCallback | null>(null);
@@ -415,69 +711,19 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     }
   }, [simulateStreamingText]);
 
-  // Initialize copilot connection when panel opens
+  // Initialize copilot connection when panel opens AND settings are ready
+  // Connection is non-blocking - Copilot Studio is just a tool, not required for user interaction
   useEffect(() => {
+    // Wait for settings to be loaded from Dataverse before attempting connection
+    if (!settingsReady) {
+      console.log('[Copilot] Waiting for settings to load from Dataverse...');
+      return;
+    }
+    
     if (!isOpen) return;
     if (copilotConversationRef.current) return; // Already connected
     
-    const initCopilot = async () => {
-      const config = getCopilotConfig();
-      if (!config) {
-        setIsConnected(false);
-        return;
-      }
-      
-      setIsConnecting(true);
-      try {
-        const conversation = await getOrCreateConversation(config);
-        copilotConversationRef.current = conversation;
-        setIsConnected(true);
-        
-        // Send user context if user is available
-        if (user && !userContextSentRef.current) {
-          await sendUserContext(conversation, {
-            userId: user.objectId || '',
-            userPrincipalName: user.userPrincipalName || '',
-            displayName: user.fullName || '',
-          });
-          userContextSentRef.current = true;
-        }
-        
-        // Try WebSocket connection first for real-time updates
-        // WebSocket provides typing indicators, polling is the fallback
-        if (conversation.streamUrl) {
-          console.log('[Copilot] Setting up WebSocket connection');
-          wsCleanupRef.current = createWebSocketConnection(conversation, {
-            onTyping: () => {
-              console.log('[Copilot] Received typing indicator');
-              showTypingIndicator();
-            },
-            onMessage: (message) => {
-              console.log('[Copilot] Received WebSocket message:', message);
-              handleBotMessage(message);
-            },
-            onClose: () => {
-              console.log('[Copilot] WebSocket closed, falling back to polling');
-              // Fall back to polling if WebSocket closes (includes error cases)
-              wsCleanupRef.current = null;
-              if (!pollIntervalRef.current && copilotConversationRef.current) {
-                startPolling();
-              }
-            },
-          });
-        } else {
-          // No streamUrl, use polling
-          startPolling();
-        }
-      } catch (error) {
-        console.error('Failed to initialize Copilot:', error);
-        setIsConnected(false);
-      } finally {
-        setIsConnecting(false);
-      }
-    };
-    
-    // Polling fallback function
+    // Polling fallback function (hoisted for use in initCopilot)
     const startPolling = () => {
       console.log('[Copilot] Starting polling fallback');
       pollIntervalRef.current = setInterval(async () => {
@@ -541,6 +787,74 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       }, 1000);
     };
     
+    // Initialize Copilot Studio connection in background (non-blocking)
+    const initCopilot = async () => {
+      const config = getCopilotConfig();
+      if (!config) {
+        console.log('[Copilot] No Copilot config found in localStorage');
+        setIsConnected(false);
+        return;
+      }
+      
+      // Don't set isConnecting - let user interact immediately
+      // Connection happens silently in background
+      console.log('[Copilot] Background: Initializing Copilot Studio connection...');
+      try {
+        const conversation = await getOrCreateConversation(config);
+        copilotConversationRef.current = conversation;
+        setIsConnected(true);
+        console.log('[Copilot] Background: Successfully connected');
+        
+        // Send user context if user is available
+        if (user && !userContextSentRef.current) {
+          await sendUserContext(conversation, {
+            userId: user.objectId || '',
+            userPrincipalName: user.userPrincipalName || '',
+            displayName: user.fullName || '',
+          });
+          userContextSentRef.current = true;
+        }
+        
+        // Try WebSocket connection first for real-time updates
+        // WebSocket provides typing indicators, polling is the fallback
+        if (conversation.streamUrl) {
+          console.log('[Copilot] Setting up WebSocket connection');
+          wsCleanupRef.current = createWebSocketConnection(conversation, {
+            onTyping: () => {
+              console.log('[Copilot] Received typing indicator');
+              showTypingIndicator();
+            },
+            onMessage: (message) => {
+              console.log('[Copilot] Received WebSocket message:', message);
+              handleBotMessage(message);
+            },
+            onClose: () => {
+              console.log('[Copilot] WebSocket closed, falling back to polling');
+              // Fall back to polling if WebSocket closes (includes error cases)
+              wsCleanupRef.current = null;
+              if (!pollIntervalRef.current && copilotConversationRef.current) {
+                startPolling();
+              }
+            },
+          });
+        } else {
+          // No streamUrl, use polling
+          startPolling();
+        }
+      } catch (error) {
+        console.error('[Copilot] Background: Failed to initialize:', error);
+        setIsConnected(false);
+        // Silent failure - Copilot Studio is optional, orchestration uses Power Automate Flow
+        // Only show error toast for critical issues (like invalid config)
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        if (errorMessage.includes('404')) {
+          console.warn('[Copilot] Token Endpoint not found - check Settings');
+        } else if (errorMessage.includes('HTML instead of JSON')) {
+          console.warn('[Copilot] Token Endpoint returned invalid response');
+        }
+      }
+    };
+    
     initCopilot();
     
     return () => {
@@ -557,7 +871,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         typingTimeoutRef.current = null;
       }
     };
-  }, [isOpen, user, showTypingIndicator, handleBotMessage]);
+  }, [isOpen, settingsReady, user, showTypingIndicator, handleBotMessage]);
 
   const openPanel = useCallback((fullScreen = false) => {
     setIsOpen(true);
@@ -586,6 +900,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     };
     setMessages((prev) => [...prev, userMessage]);
     setInputValue('');
+    clearClarificationSuggestions(); // Clear any pending clarification suggestions
     setIsSending(true);
     
     // Always use Power Automate Flow as the orchestrator for LLM function calling
@@ -612,7 +927,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           // Build conversation history from messages
           // Build conversation history from messages
           // Use ref to avoid dependency on messages state
-          const currentMessages = messages;
+          // Use messagesRef to get current messages without depending on messages state
+          const currentMessages = [...messages]; // Create copy at call time
           const conversationHistory = currentMessages
             .filter((m: ChatMessage) => m.role === 'user' || m.role === 'assistant')
             .map((m: ChatMessage) => ({
@@ -690,15 +1006,139 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             sessionRefs: directLineSessionRefs,
           }, handleProgress);
           
-
+          // Clarification is now handled naturally by the LLM as a regular response
+          // No special clarificationQuestions handling needed - LLM will ask for more info naturally
+          
+          // ===== Handle additional intents (multi-intent support) =====
+          if (response.additionalIntents && response.additionalIntents.items.length > 0) {
+            // If primary action succeeded AND there are additional intents, show them
+            setIsSending(false);
+            setMessages((prev) => prev.map((msg) => {
+              if (msg.id !== thinkingMsgId) return msg;
+              return {
+                ...msg,
+                type: 'agent' as const,
+                content: response.content || '',
+                functionCalled: response.functionCalled,
+                functionDisplayName: response.functionDisplayName,
+                isThinking: false,
+                thinkingSteps: response.thinkingSteps?.map((s) => ({
+                  stage: s.stage,
+                  status: 'completed' as const,
+                  label: s.label,
+                  detail: s.detail,
+                })),
+                additionalIntents: {
+                  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                  message: response.additionalIntents!.message,
+                  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                  forms: response.additionalIntents!.items.map((item) => ({
+                    type: item.type,
+                    data: item.data,
+                    reason: item.reason,
+                    batchIndex: item.batchIndex,
+                  })),
+                },
+              };
+            }));
+            return;
+          }
           
           // Check if response is a draft function (returns form card)
-          const isDraftFunction = response.functionCalled && ['draftActivity', 'draftOpportunity', 'draftAccount'].includes(response.functionCalled);
+          const isDraftFunction = response.functionCalled && ['draftActivity', 'draftOpportunity', 'draftAccount', 'draftContact'].includes(response.functionCalled);
           
-          if (isDraftFunction && response.success && response.functionResult) {
+          // Check if response is a batch draft function
+          const isBatchDraftFunction = response.functionCalled === 'batchDraft' && response.success && response.functionResult;
+          
+          // Check if response is a fuzzy match function
+          const isFuzzyMatchFunction = response.functionCalled && ['fuzzyMatchAccount', 'fuzzyMatchContact', 'fuzzyMatchOpportunity'].includes(response.functionCalled);
+          
+          if (isBatchDraftFunction) {
+            // Create a batch-form-card message for multiple drafts
+            setIsSending(false);
+            const batchResult = response.functionResult as { isBatch: boolean; items: Array<{ type: string; isNew: boolean; data: Record<string, unknown>; batchIndex: number }>; totalCount: number };
+            
+            setMessages((prev) => prev.map((msg) => {
+              if (msg.id !== thinkingMsgId) return msg;
+              return {
+                ...msg,
+                type: 'batch-form-card' as const,
+                content: response.content || (locale === 'zh-Hans' ? `共${batchResult.totalCount}条记录待确认` : `${batchResult.totalCount} records to confirm`),
+                functionCalled: response.functionCalled,
+                functionDisplayName: response.functionDisplayName,
+                isThinking: false,
+                thinkingSteps: response.thinkingSteps?.map((s) => ({
+                  stage: s.stage,
+                  status: 'completed' as const,
+                  label: s.label,
+                  detail: s.detail,
+                })),
+                batchFormCards: {
+                  items: batchResult.items.map((item) => ({
+                    type: item.type as 'activity' | 'opportunity' | 'account' | 'contact',
+                    isNew: item.isNew,
+                    data: item.data,
+                    batchIndex: item.batchIndex,
+                    status: 'pending' as const,
+                  })),
+                  totalCount: batchResult.totalCount,
+                },
+              };
+            }));
+          } else if (isFuzzyMatchFunction && response.success && response.functionResult) {
+            // Create a match-selection message for fuzzy matching
+            setIsSending(false);
+            const matchResult = response.functionResult as { 
+              matches: Array<{ id: string; name: string; industry?: string; title?: string; score: number; matchType: 'exact' | 'contains' | 'fuzzy' }>; 
+              confidence: 'high' | 'medium' | 'low' | 'none'; 
+              needsConfirmation: boolean; 
+              exactMatch?: { id: string; name: string };
+              pendingIntent?: { function: string; arguments: Record<string, unknown> };
+            };
+            
+            // Determine entity type from function name
+            const entityType = response.functionCalled === 'fuzzyMatchAccount' ? 'account' :
+                             response.functionCalled === 'fuzzyMatchContact' ? 'contact' :
+                             response.functionCalled === 'fuzzyMatchActivity' ? 'activity' : 'opportunity';
+            
+            setMessages((prev) => prev.map((msg) => {
+              if (msg.id !== thinkingMsgId) return msg;
+              return {
+                ...msg,
+                type: 'match-selection' as const,
+                content: matchResult.confidence === 'high' && !matchResult.needsConfirmation
+                  ? (locale === 'zh-Hans' ? `找到匹配: ${matchResult.exactMatch?.name}` : `Found match: ${matchResult.exactMatch?.name}`)
+                  : (locale === 'zh-Hans' ? '请选择一个匹配项：' : 'Please select a match:'),
+                functionCalled: response.functionCalled,
+                functionDisplayName: response.functionDisplayName,
+                isThinking: false,
+                thinkingSteps: response.thinkingSteps?.map((s) => ({
+                  stage: s.stage,
+                  status: 'completed' as const,
+                  label: s.label,
+                  detail: s.detail,
+                })),
+                matchSelection: {
+                  entityType: entityType as 'account' | 'contact' | 'opportunity' | 'activity',
+                  query: '',
+                  matches: matchResult.matches.map((m) => ({
+                    id: m.id,
+                    name: m.name,
+                    subtitle: m.industry || m.title,
+                    score: m.score,
+                    matchType: m.matchType,
+                  })),
+                  confidence: matchResult.confidence,
+                  // Pass pendingIntent so UI can continue after user selects a match
+                  pendingIntent: matchResult.pendingIntent,
+                },
+              };
+              console.log('[CopilotContext] Match selection created with pendingIntent:', matchResult.pendingIntent);
+            }));
+          } else if (isDraftFunction && response.success && response.functionResult) {
             // Create a form-card message instead of regular response
             setIsSending(false);
-            const formCardResult = response.functionResult as { type: 'activity' | 'opportunity' | 'account'; isNew: boolean; data: Record<string, unknown> };
+            const formCardResult = response.functionResult as { type: 'activity' | 'opportunity' | 'account' | 'contact'; isNew: boolean; data: Record<string, unknown> };
             
             setMessages((prev) => prev.map((msg) => {
               if (msg.id !== thinkingMsgId) return msg;
@@ -829,6 +1269,13 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             formFillCallbackRef.current(response.functionResult as Record<string, unknown>);
           }
           
+          // Invalidate React Query cache if the operation modified data
+          if (response.invalidateQueries && response.invalidateQueries.length > 0) {
+            response.invalidateQueries.forEach((queryKey: string) => {
+              queryClient.invalidateQueries({ queryKey: [queryKey] });
+            });
+          }
+          
           // Log function call for debugging
           if (response.functionCalled) {
 
@@ -868,7 +1315,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
   }, [user, locale]); // pageContext accessed via ref to avoid re-creating sendMessage
 
   const startNewConversation = useCallback(async () => {
-    // Clear current session
+    // Clear current session immediately for instant UX
     clearConversation();
     copilotConversationRef.current = null;
     userContextSentRef.current = false;
@@ -899,41 +1346,493 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       typingTimeoutRef.current = null;
     }
     
-    // Re-initialize
+    // Re-initialize Copilot Studio connection in background (non-blocking)
+    // Copilot Studio is just a tool, not required for conversation to start
     const config = getCopilotConfig();
     if (config) {
-      setIsConnecting(true);
-      try {
-        const conversation = await getOrCreateConversation(config);
-        copilotConversationRef.current = conversation;
-        setIsConnected(true);
-        
-        if (user) {
-          await sendUserContext(conversation, {
-            userId: user.objectId || '',
-            userPrincipalName: user.userPrincipalName || '',
-            displayName: user.fullName || '',
-          });
-          userContextSentRef.current = true;
+      // Don't set isConnecting - let user interact immediately
+      // Connection happens silently in background
+      (async () => {
+        try {
+          console.log('[Copilot] Background: Re-initializing Copilot Studio connection...');
+          const conversation = await getOrCreateConversation(config);
+          copilotConversationRef.current = conversation;
+          setIsConnected(true);
+          console.log('[Copilot] Background: Successfully connected');
+          
+          if (user) {
+            await sendUserContext(conversation, {
+              userId: user.objectId || '',
+              userPrincipalName: user.userPrincipalName || '',
+              displayName: user.fullName || '',
+            });
+            userContextSentRef.current = true;
+          }
+          
+          // Set up WebSocket connection for new conversation
+          if (conversation.streamUrl) {
+            wsCleanupRef.current = createWebSocketConnection(conversation, {
+              onTyping: () => showTypingIndicator(),
+              onMessage: (message: CopilotMessage) => handleBotMessage(message),
+              onError: (error: Error) => console.error('[Copilot] WebSocket error:', error),
+              onClose: () => console.log('[Copilot] WebSocket closed'),
+            });
+          }
+        } catch (error) {
+          console.error('[Copilot] Background: Failed to re-initialize:', error);
+          setIsConnected(false);
+          // Silent failure - Copilot Studio is optional, orchestration uses Power Automate Flow
         }
-        
-        // Set up WebSocket connection for new conversation
-        if (conversation.streamUrl) {
-          wsCleanupRef.current = createWebSocketConnection(conversation, {
-            onTyping: () => showTypingIndicator(),
-            onMessage: (message) => handleBotMessage(message),
-            onError: (error) => console.error('[Copilot] WebSocket error:', error),
-            onClose: () => console.log('[Copilot] WebSocket closed'),
-          });
-        }
-      } catch (error) {
-        console.error('Failed to re-initialize Copilot:', error);
-        setIsConnected(false);
-      } finally {
-        setIsConnecting(false);
-      }
+      })();
     }
   }, [user, showTypingIndicator, handleBotMessage]);
+
+  // Continue pending action after user selects a match from match-selection card
+  const continuePendingAction = useCallback(async (
+    selectedRecord: { id: string; name: string; accountId?: string; accountName?: string },
+    pendingIntent: { function: string; arguments: Record<string, unknown> },
+    entityType: 'account' | 'contact' | 'opportunity' | 'activity'
+  ) => {
+    setIsSending(true);
+    
+    // Create a thinking message
+    const thinkingMsgId = `msg-${Date.now()}-continue`;
+    const thinkingMessage: ChatMessage = {
+      id: thinkingMsgId,
+      type: 'agent',
+      role: 'assistant',
+      content: '',
+      agentName: 'Sales Copilot',
+      timestamp: new Date().toISOString(),
+      isThinking: true,
+      thinkingSteps: [
+        { 
+          stage: 'executing', 
+          status: 'active', 
+          label: locale === 'zh-Hans' 
+            ? `使用选中的${entityType === 'account' ? '客户' : entityType === 'contact' ? '联系人' : entityType === 'activity' ? '活动' : '商机'}继续...`
+            : `Continuing with selected ${entityType}...` 
+        },
+      ],
+    };
+    setMessages((prev) => [...prev, thinkingMessage]);
+
+    try {
+      // Import function executor and processMessage for full flow
+      const { executeFunction } = await import('@/lib/function-executor');
+      const { getDisplayName } = await import('@/lib/function-registry');
+      const { processMessage } = await import('@/lib/copilot-agent');
+      
+      // Inject the selected record into the pending intent arguments
+      // For contact selection, also inject the contact's account info if available
+      const updatedArguments: Record<string, unknown> = {
+        ...pendingIntent.arguments,
+      };
+      
+      if (entityType === 'account') {
+        updatedArguments.accountId = selectedRecord.id;
+        updatedArguments.accountName = selectedRecord.name;
+      } else if (entityType === 'contact') {
+        updatedArguments.contactId = selectedRecord.id;
+        updatedArguments.contactName = selectedRecord.name;
+        // Also inject the contact's account info if available
+        if (selectedRecord.accountId) {
+          updatedArguments.accountId = selectedRecord.accountId;
+        }
+        if (selectedRecord.accountName) {
+          updatedArguments.accountName = selectedRecord.accountName;
+        }
+      } else if (entityType === 'opportunity') {
+        updatedArguments.opportunityId = selectedRecord.id;
+        updatedArguments.opportunityName = selectedRecord.name;
+      } else if (entityType === 'activity') {
+        updatedArguments.activityId = selectedRecord.id;
+      }
+
+      console.log('[CopilotContext] Continuing pending action:', pendingIntent.function);
+      console.log('[CopilotContext] pendingIntent.arguments:', JSON.stringify(pendingIntent.arguments, null, 2));
+      console.log('[CopilotContext] updatedArguments:', JSON.stringify(updatedArguments, null, 2));
+
+      const fnDisplayName = getDisplayName(pendingIntent.function, locale === 'zh-Hans' ? 'zh-Hans' : 'en-US');
+      const isDraftFunction = ['draftActivity', 'draftOpportunity', 'draftAccount', 'draftContact'].includes(pendingIntent.function);
+      const isBatchDraft = pendingIntent.function === 'batchDraft';
+      
+      if (isBatchDraft) {
+        // For batch draft, execute and show batch form cards
+        const functionResult = await executeFunction(
+          pendingIntent.function,
+          updatedArguments,
+          { userId: user?.objectId, userEmail: user?.userPrincipalName }
+        );
+        
+        if (functionResult.success && functionResult.data) {
+          const batchResult = functionResult.data as { isBatch: boolean; items: Array<{ type: string; isNew: boolean; data: Record<string, unknown>; batchIndex: number }>; totalCount: number };
+          setMessages((prev) => prev.map((msg) => {
+            if (msg.id !== thinkingMsgId) return msg;
+            return {
+              ...msg,
+              type: 'batch-form-card' as const,
+              content: locale === 'zh-Hans' ? `共${batchResult.totalCount}条记录待确认` : `${batchResult.totalCount} records to confirm`,
+              functionCalled: pendingIntent.function,
+              functionDisplayName: fnDisplayName,
+              isThinking: false,
+              thinkingSteps: [
+                { stage: 'executing' as const, status: 'completed' as const, label: locale === 'zh-Hans' ? `${fnDisplayName}：已准备表单` : `${fnDisplayName}: Forms ready` },
+              ],
+              batchFormCards: {
+                items: batchResult.items.map((item) => ({
+                  type: item.type as 'activity' | 'opportunity' | 'account' | 'contact',
+                  isNew: item.isNew,
+                  data: item.data,
+                  batchIndex: item.batchIndex,
+                  status: 'pending' as const,
+                })),
+                totalCount: batchResult.totalCount,
+              },
+            };
+          }));
+        } else {
+          // Show error for batch draft failure
+          setMessages((prev) => prev.map((msg) => {
+            if (msg.id !== thinkingMsgId) return msg;
+            return {
+              ...msg,
+              content: locale === 'zh-Hans'
+                ? `❌ 操作失败: ${functionResult.error}`
+                : `❌ Error: ${functionResult.error}`,
+              agentName: 'System',
+              isThinking: false,
+              thinkingSteps: undefined,
+            };
+          }));
+        }
+      } else if (isDraftFunction) {
+        // For single draft functions, execute directly and show form card
+        const functionResult = await executeFunction(
+          pendingIntent.function,
+          updatedArguments,
+          { userId: user?.objectId, userEmail: user?.userPrincipalName }
+        );
+        
+        if (functionResult.success && functionResult.data) {
+          const formCardResult = functionResult.data as { type: string; isNew: boolean; data: Record<string, unknown> };
+          setMessages((prev) => prev.map((msg) => {
+            if (msg.id !== thinkingMsgId) return msg;
+            return {
+              ...msg,
+              type: 'form-card' as const,
+              content: locale === 'zh-Hans' ? '请确认以下信息' : 'Please confirm the following information',
+              functionCalled: pendingIntent.function,
+              functionDisplayName: fnDisplayName,
+              isThinking: false,
+              thinkingSteps: [
+                { stage: 'executing' as const, status: 'completed' as const, label: locale === 'zh-Hans' ? `${fnDisplayName}：已准备表单` : `${fnDisplayName}: Form ready` },
+              ],
+              formCard: {
+                type: formCardResult.type as 'activity' | 'opportunity' | 'account' | 'contact',
+                isNew: formCardResult.isNew,
+                data: formCardResult.data,
+                status: 'pending' as const,
+              },
+            };
+          }));
+        } else {
+          // Show error for draft function failure
+          setMessages((prev) => prev.map((msg) => {
+            if (msg.id !== thinkingMsgId) return msg;
+            return {
+              ...msg,
+              content: locale === 'zh-Hans'
+                ? `❌ 操作失败: ${functionResult.error}`
+                : `❌ Error: ${functionResult.error}`,
+              agentName: 'System',
+              isThinking: false,
+              thinkingSteps: undefined,
+            };
+          }));
+        }
+      } else {
+        // For non-draft functions (queries, summaries, etc.), use full processMessage flow
+        // Reconstruct the original user message with the selected entity
+        const syntheticMessage = locale === 'zh-Hans'
+          ? `关于${entityType === 'account' ? '客户' : entityType === 'contact' ? '联系人' : entityType === 'activity' ? '活动' : '商机'}「${selectedRecord.name}」的${pendingIntent.function === 'queryAccountSummary' ? '概况' : pendingIntent.function === 'queryOpportunities' ? '商机' : pendingIntent.function === 'queryActivities' ? '活动' : pendingIntent.function === 'queryContacts' ? '联系人' : '详情'}`
+          : `${pendingIntent.function === 'queryAccountSummary' ? 'Summary' : pendingIntent.function === 'queryOpportunities' ? 'Opportunities' : pendingIntent.function === 'queryActivities' ? 'Activities' : pendingIntent.function === 'queryContacts' ? 'Contacts' : 'Details'} for ${entityType} "${selectedRecord.name}"`;
+        
+        // Build conversation history
+        const currentMessages = messages;
+        const conversationHistory = currentMessages
+          .filter((m: ChatMessage) => m.role === 'user' || m.role === 'assistant')
+          .map((m: ChatMessage) => ({
+            role: m.role as 'user' | 'assistant',
+            content: m.content,
+          }));
+        
+        // Add synthetic message indicating selection
+        conversationHistory.push({
+          role: 'user',
+          content: locale === 'zh-Hans'
+            ? `用户选择了${entityType === 'account' ? '客户' : entityType === 'contact' ? '联系人' : entityType === 'activity' ? '活动' : '商机'}：${selectedRecord.name} (ID: ${selectedRecord.id})`
+            : `User selected ${entityType}: ${selectedRecord.name} (ID: ${selectedRecord.id})`,
+        });
+        
+        // Progress callback to update thinking message
+        const handleProgress = (progress: ThinkingProgress) => {
+          setMessages((prev) => prev.map((msg) => {
+            if (msg.id !== thinkingMsgId) return msg;
+            
+            const newSteps = [...(msg.thinkingSteps || [])];
+            const stepIndex = newSteps.findIndex((s) => s.stage === progress.stage);
+            
+            if (stepIndex >= 0) {
+              if (progress.status === 'completed') {
+                newSteps[stepIndex] = {
+                  ...newSteps[stepIndex],
+                  status: 'completed',
+                  label: progress.functionDisplayName || newSteps[stepIndex].label,
+                };
+              }
+            } else {
+              newSteps.push({
+                stage: progress.stage,
+                status: progress.status,
+                label: progress.functionDisplayName || (progress.stage === 'executing'
+                  ? (locale === 'zh-Hans' ? '执行中...' : 'Executing...')
+                  : (locale === 'zh-Hans' ? '生成回复...' : 'Generating response...')),
+              });
+            }
+            
+            return { ...msg, thinkingSteps: newSteps };
+          }));
+        };
+        
+        // Execute the function directly first
+        const functionResult = await executeFunction(
+          pendingIntent.function,
+          updatedArguments,
+          { userId: user?.objectId, userEmail: user?.userPrincipalName }
+        );
+        
+        if (functionResult.success) {
+          // Now use processMessage for full response generation
+          // But we need to pass the already-executed function result
+          // So we'll call processMessage with a hint about the selected record
+          const response = await processMessage(syntheticMessage, {
+            userId: user?.objectId,
+            userEmail: user?.userPrincipalName,
+            locale,
+            conversationHistory,
+            pageContext: pageContextRef.current ? {
+              currentPage: pageContextRef.current.currentPage,
+              pageData: {
+                ...(pageContextRef.current.pageData || {}),
+                // Inject selected record info so agent knows context
+                selectedRecord: { entityType, ...selectedRecord },
+                injectedFunction: pendingIntent.function,
+                injectedArguments: updatedArguments,
+              },
+              summary: pageContextRef.current.summary,
+            } : {
+              currentPage: 'Selection Context',
+              pageData: {
+                selectedRecord: { entityType, ...selectedRecord },
+                injectedFunction: pendingIntent.function,
+                injectedArguments: updatedArguments,
+              },
+              summary: `User selected ${entityType}: ${selectedRecord.name}`,
+            },
+            sessionRefs: directLineSessionRefs,
+          }, handleProgress);
+          
+          // Update message with response
+          setMessages((prev) => prev.map((msg) => {
+            if (msg.id !== thinkingMsgId) return msg;
+            return {
+              ...msg,
+              content: response.content || (locale === 'zh-Hans' ? '已完成' : 'Done'),
+              functionCalled: response.functionCalled || pendingIntent.function,
+              functionDisplayName: response.functionDisplayName || fnDisplayName,
+              isThinking: false,
+              thinkingSteps: response.thinkingSteps?.map((s) => ({
+                stage: s.stage,
+                status: 'completed' as const,
+                label: s.label,
+                detail: s.detail,
+              })) || [
+                { stage: 'executing' as const, status: 'completed' as const, label: fnDisplayName },
+              ],
+              recordList: response.recordList,
+            };
+          }));
+        } else {
+          // Show error message
+          setMessages((prev) => prev.map((msg) => {
+            if (msg.id !== thinkingMsgId) return msg;
+            return {
+              ...msg,
+              content: locale === 'zh-Hans'
+                ? `❌ 操作失败: ${functionResult.error}`
+                : `❌ Error: ${functionResult.error}`,
+              agentName: 'System',
+              isThinking: false,
+              thinkingSteps: undefined,
+            };
+          }));
+        }
+      }
+    } catch (error) {
+      console.error('[CopilotContext] continuePendingAction error:', error);
+      setMessages((prev) => prev.map((msg) => {
+        if (msg.id !== thinkingMsgId) return msg;
+        return {
+          ...msg,
+          content: locale === 'zh-Hans'
+            ? `❌ 操作失败: ${error instanceof Error ? error.message : '未知错误'}`
+            : `❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          agentName: 'System',
+          isThinking: false,
+          thinkingSteps: undefined,
+        };
+      }));
+    } finally {
+      setIsSending(false);
+    }
+  }, [user, locale, messages, directLineSessionRefs]);
+
+  // Create new record from pending intent (when user clicks 'Create New' instead of selecting a match)
+  const createNewFromIntent = useCallback(async (
+    pendingIntent: { function: string; arguments: Record<string, unknown> }
+  ) => {
+    setIsSending(true);
+    
+    // Create a thinking message
+    const thinkingMsgId = `msg-${Date.now()}-create-new`;
+    const thinkingMessage: ChatMessage = {
+      id: thinkingMsgId,
+      type: 'agent',
+      role: 'assistant',
+      content: '',
+      agentName: 'Sales Copilot',
+      timestamp: new Date().toISOString(),
+      isThinking: true,
+      thinkingSteps: [
+        { 
+          stage: 'executing', 
+          status: 'active', 
+          label: locale === 'zh-Hans' ? '正在创建新记录...' : 'Creating new record...' 
+        },
+      ],
+    };
+    setMessages((prev) => [...prev, thinkingMessage]);
+
+    try {
+      const { executeFunction } = await import('@/lib/function-executor');
+      const { getDisplayName } = await import('@/lib/function-registry');
+      
+      const fnDisplayName = getDisplayName(pendingIntent.function, locale === 'zh-Hans' ? 'zh-Hans' : 'en-US');
+      
+      // Execute the draft function directly
+      const functionResult = await executeFunction(
+        pendingIntent.function,
+        pendingIntent.arguments,
+        { userId: user?.objectId, userEmail: user?.userPrincipalName }
+      );
+      
+      if (functionResult.success && functionResult.data) {
+        const formCardResult = functionResult.data as { type: string; isNew: boolean; data: Record<string, unknown> };
+        setMessages((prev) => prev.map((msg) => {
+          if (msg.id !== thinkingMsgId) return msg;
+          return {
+            ...msg,
+            type: 'form-card' as const,
+            content: locale === 'zh-Hans' ? '请确认以下信息' : 'Please confirm the following information',
+            functionCalled: pendingIntent.function,
+            functionDisplayName: fnDisplayName,
+            isThinking: false,
+            thinkingSteps: [
+              { stage: 'executing' as const, status: 'completed' as const, label: locale === 'zh-Hans' ? `${fnDisplayName}：已准备表单` : `${fnDisplayName}: Form ready` },
+            ],
+            formCard: {
+              type: formCardResult.type as 'activity' | 'opportunity' | 'account' | 'contact',
+              isNew: true, // Always new when user clicks 'Create New'
+              data: formCardResult.data,
+              status: 'pending' as const,
+            },
+          };
+        }));
+      } else {
+        // Show error
+        setMessages((prev) => prev.map((msg) => {
+          if (msg.id !== thinkingMsgId) return msg;
+          return {
+            ...msg,
+            content: locale === 'zh-Hans'
+              ? `❌ 操作失败: ${functionResult.error}`
+              : `❌ Error: ${functionResult.error}`,
+            agentName: 'System',
+            isThinking: false,
+            thinkingSteps: undefined,
+          };
+        }));
+      }
+    } catch (error) {
+      console.error('[CopilotContext] createNewFromIntent error:', error);
+      setMessages((prev) => prev.map((msg) => {
+        if (msg.id !== thinkingMsgId) return msg;
+        return {
+          ...msg,
+          content: locale === 'zh-Hans'
+            ? `❌ 操作失败: ${error instanceof Error ? error.message : '未知错误'}`
+            : `❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          agentName: 'System',
+          isThinking: false,
+          thinkingSteps: undefined,
+        };
+      }));
+    } finally {
+      setIsSending(false);
+    }
+  }, [user, locale]);
+
+  // Update form card status in a message (for persisting confirmed/modified state)
+  const updateFormCardStatus = useCallback((
+    messageId: string,
+    status: 'pending' | 'confirmed' | 'modified',
+    batchIndex?: number,
+    createdRecordId?: string
+  ) => {
+    setMessages((prev) => prev.map((msg) => {
+      if (msg.id !== messageId) return msg;
+      
+      // Handle batch form cards
+      if (typeof batchIndex === 'number' && msg.batchFormCards) {
+        const updatedItems = msg.batchFormCards.items.map((item, idx) => {
+          if (idx !== batchIndex) return item;
+          return { ...item, status, ...(createdRecordId && { createdRecordId }) };
+        });
+        return {
+          ...msg,
+          batchFormCards: {
+            ...msg.batchFormCards,
+            items: updatedItems,
+          },
+        };
+      }
+      
+      // Handle single form card
+      if (msg.formCard) {
+        return {
+          ...msg,
+          formCard: {
+            ...msg.formCard,
+            status,
+            ...(createdRecordId && { createdRecordId }),
+          },
+        };
+      }
+      
+      return msg;
+    }));
+  }, []);
 
   const value: CopilotContextValue = useMemo(() => ({
     isOpen,
@@ -961,7 +1860,16 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     formFillCallback: formFillCallbackRef.current,
     setFormFillCallback,
     startNewConversation,
+    extractVisitData,
     directLineSessionRefs,
+    continuePendingAction,
+    createNewFromIntent,
+    updateFormCardStatus,
+    rollbackToMessage,
+    clarificationSuggestions,
+    setClarificationSuggestions,
+    clearClarificationSuggestions,
+    executeClarificationAction,
   }), [
     isOpen,
     isFullScreen,
@@ -982,7 +1890,15 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     setInputPlaceholder,
     setFormFillCallback,
     startNewConversation,
+    extractVisitData,
     directLineSessionRefs,
+    continuePendingAction,
+    createNewFromIntent,
+    updateFormCardStatus,
+    clarificationSuggestions,
+    setClarificationSuggestions,
+    clearClarificationSuggestions,
+    executeClarificationAction,
   ]);
 
   return (

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
 import {
@@ -11,10 +11,15 @@ import {
   Minus,
   AlertTriangle,
   CheckCircle2,
+  CheckSquare,
   Clock,
   FileText,
   Plus,
   Trash2,
+  Loader2,
+  MapPin,
+  Phone,
+  Mail,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -33,18 +38,24 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { MobileLayout } from '@/components/mobile-layout';
+import { AISummaryCard } from '@/components/ai-summary-card';
 import { useOpportunity, useDeleteOpportunity } from '@/generated/hooks/use-opportunity';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAccount } from '@/generated/hooks/use-account';
 import { useActivityList } from '@/generated/hooks/use-activity';
+import { useEntityAISummary, useWithAISummaryTrigger } from '@/hooks/use-ai-summary-trigger';
 import {
-  OpportunityStagekeyToLabel,
-  OpportunityConfidencetrendkeyToLabel,
+  OpportunityStageKeyToLabel,
+  OpportunityConfidencetrendKeyToLabel,
 } from '@/generated/models/opportunity-model';
-import type { OpportunityStagekey, OpportunityConfidencetrendkey } from '@/generated/models/opportunity-model';
-import { ActivityTypekeyToLabel, ActivityDraftstatuskeyToLabel } from '@/generated/models/activity-model';
-import type { Activity, ActivityTypekey, ActivityDraftstatuskey } from '@/generated/models/activity-model';
+import type { OpportunityStageKey, OpportunityConfidencetrendKey } from '@/generated/models/opportunity-model';
+import { ActivityTypeKeyToLabel, ActivityDraftstatusKeyToLabel } from '@/generated/models/activity-model';
+import type { Activity, ActivityTypeKey, ActivityDraftstatusKey } from '@/generated/models/activity-model';
 import { toast } from 'sonner';
 import { getLocale, t } from '@/lib/i18n';
+import { FloatingQuickActions } from '@/components/floating-quick-actions';
+import { useCopilot } from '@/contexts/copilot-context';
+import { PullToRefresh } from '@/components/pull-to-refresh';
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -71,33 +82,34 @@ function formatDate(dateStr?: string): string {
   return new Date(dateStr).toLocaleDateString();
 }
 
-function getStageIndex(stageKey: OpportunityStagekey): number {
-  const label = OpportunityStagekeyToLabel[stageKey];
+function getStageIndex(stageKey: OpportunityStageKey): number {
+  const label = OpportunityStageKeyToLabel[stageKey];
   return stages.indexOf(label);
 }
 
-function getTrendIcon(trendKey?: OpportunityConfidencetrendkey) {
+function getTrendIcon(trendKey?: OpportunityConfidencetrendKey) {
   if (!trendKey) return null;
-  const label = OpportunityConfidencetrendkeyToLabel[trendKey];
+  const label = OpportunityConfidencetrendKeyToLabel[trendKey];
   if (label === 'up') return <TrendingUp className="w-4 h-4 text-emerald-500" />;
   if (label === 'down') return <TrendingDown className="w-4 h-4 text-rose-500" />;
   return <Minus className="w-4 h-4 text-muted-foreground" />;
 }
 
-function getActivityTypeIcon(typeKey: ActivityTypekey | null | undefined): string {
+function getActivityTypeIcon(typeKey: ActivityTypeKey | null | undefined): React.ComponentType<{ className?: string }> {
   switch (typeKey) {
-    case 'Typekey0': return '📍'; // visit
-    case 'Typekey1': return '📞'; // call
-    case 'Typekey2': return '📅'; // meeting
-    case 'Typekey3': return '✉️'; // email
-    default: return '📌';
+    case 'TypeKey0': return MapPin; // visit
+    case 'TypeKey1': return Phone; // call
+    case 'TypeKey2': return Calendar; // meeting
+    case 'TypeKey3': return Mail; // email
+    default: return CheckSquare;
   }
 }
 
-function StageProgress({ stageKey, confidence }: { stageKey: OpportunityStagekey; confidence?: number }) {
+function StageProgress({ stageKey, confidence }: { stageKey: OpportunityStageKey; confidence?: number }) {
   const currentIndex = getStageIndex(stageKey);
-  const stageLabel = OpportunityStagekeyToLabel[stageKey];
+  const stageLabel = OpportunityStageKeyToLabel[stageKey];
   const isClosed = stageLabel === 'won' || stageLabel === 'lost';
+
   const displayStages = stages.slice(0, 4); // Only show active stages
 
   return (
@@ -141,17 +153,47 @@ export default function OpportunityDetailPage() {
   const isEditMode = searchParams.get('edit') === 'true';
   const [activeTab, setActiveTab] = useState('overview');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const locale = getLocale();
 
   // Fetch data from Dataverse
-  const { data: opportunity, isLoading } = useOpportunity(id || '');
+  const { data: opportunity, isLoading, error } = useOpportunity(id || '');
   const { data: account } = useAccount(opportunity?.account?.id || '');
   const { data: allActivities = [] } = useActivityList();
   const deleteOpportunity = useDeleteOpportunity();
+  const queryClient = useQueryClient();
+
+  // Pull to refresh handler
+  const handleRefresh = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['opportunity', id] }),
+      queryClient.invalidateQueries({ queryKey: ['activity-list'] }),
+    ]);
+  }, [queryClient, id]);
+
+  // AI Summary hooks
+  const { summary: aiSummary, isLoading: isLoadingAISummary, isGenerating, isExpired, isFailed, refetch: refetchAISummary } = useEntityAISummary('opportunity', id || '');
+  const { triggerForEntity, isTriggering } = useWithAISummaryTrigger();
 
   // Filter activities for this opportunity
   const activities = useMemo(() => 
     allActivities.filter((a: Activity) => a.opportunity?.id === id), [allActivities, id]);
+
+  // Local state for immediate refresh feedback
+  const [isRefreshingAI, setIsRefreshingAI] = useState(false);
+
+  const handleRefreshAISummary = useCallback(() => {
+    if (!opportunity) return;
+    setIsRefreshingAI(true);
+    triggerForEntity('opportunity', opportunity.id, JSON.parse(JSON.stringify(opportunity)), {
+      account: account ? { id: account.id, name: account.name1, tier: account.tierKey } : undefined,
+      activities: activities.map((a: Activity) => ({ id: a.id, title: a.title, type: a.typeKey, date: a.scheduleddate })),
+    });
+    setTimeout(() => {
+      refetchAISummary();
+      setIsRefreshingAI(false);
+    }, 500);
+  }, [opportunity, account, activities, triggerForEntity, refetchAISummary]);
 
   // Calculate days until close
   const daysUntilClose = opportunity?.expectedclosedate
@@ -163,17 +205,56 @@ export default function OpportunityDetailPage() {
 
   const handleDelete = async () => {
     if (!id) return;
+    setIsDeleting(true);
     try {
       await deleteOpportunity.mutateAsync(id);
       toast.success(locale === 'zh-Hans' ? '商机已删除' : 'Opportunity deleted');
       navigate('/opportunities');
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : 'Failed to delete');
+      setIsDeleting(false);
     }
   };
 
-  const stageLabel = opportunity ? OpportunityStagekeyToLabel[opportunity.stageKey] : '';
+  const stageLabel = opportunity ? OpportunityStageKeyToLabel[opportunity.stageKey] : '';
   const isClosed = stageLabel === 'won' || stageLabel === 'lost';
+
+  // Copilot context for agent awareness
+  const copilot = useCopilot();
+
+  // Set page context for Copilot agent awareness
+  useEffect(() => {
+    if (!opportunity) return;
+    
+    const stageDisplayLabel = OpportunityStageKeyToLabel[opportunity.stageKey];
+    
+    copilot.setPageContext({
+      currentPage: locale === 'zh-Hans' ? '商机详情' : 'Opportunity Detail',
+      summary: locale === 'zh-Hans'
+        ? `查看商机: ${opportunity.name1}，客户: ${account?.name1 || '未知'}，金额: ${formatCurrency(opportunity.totalamount || 0)}，阶段: ${stageDisplayLabel}，信心度: ${opportunity.confidence || 0}%`
+        : `Viewing opportunity: ${opportunity.name1}, Account: ${account?.name1 || 'Unknown'}, Amount: ${formatCurrency(opportunity.totalamount || 0)}, Stage: ${stageDisplayLabel}, Confidence: ${opportunity.confidence || 0}%`,
+      pageData: {
+        opportunityId: opportunity.id,
+        opportunityName: opportunity.name1,
+        accountId: opportunity.account?.id,
+        accountName: account?.name1,
+        totalAmount: opportunity.totalamount,
+        stage: stageDisplayLabel,
+        confidence: opportunity.confidence,
+        confidenceTrend: opportunity.confidencetrendKey,
+        expectedCloseDate: opportunity.expectedclosedate,
+        daysUntilClose,
+        activitiesCount: activities.length,
+        lastAction: opportunity.lastaction,
+        blocker: opportunity.blocker,
+        isClosed,
+      },
+    });
+    
+    return () => {
+      copilot.setPageContext(null);
+    };
+  }, [opportunity, account, activities.length, daysUntilClose, isClosed, locale, copilot.setPageContext]);
 
   // Delete button for header
   const deleteButton = (
@@ -196,8 +277,19 @@ export default function OpportunityDetailPage() {
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>{locale === 'zh-Hans' ? '取消' : 'Cancel'}</AlertDialogCancel>
-          <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-            {locale === 'zh-Hans' ? '删除' : 'Delete'}
+          <AlertDialogAction
+            onClick={handleDelete}
+            disabled={isDeleting}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            {isDeleting ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                {locale === 'zh-Hans' ? '删除中...' : 'Deleting...'}
+              </>
+            ) : (
+              locale === 'zh-Hans' ? '删除' : 'Delete'
+            )}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -214,15 +306,23 @@ export default function OpportunityDetailPage() {
     );
   }
 
-  if (!opportunity) {
+  if (error || !opportunity) {
     return (
       <MobileLayout title={locale === 'zh-Hans' ? '商机' : 'Opportunity'} showBack>
-        <div className="flex flex-col items-center justify-center h-64 gap-4">
-          <Target className="w-16 h-16 text-muted-foreground/40" />
-          <p className="text-muted-foreground">
-            {locale === 'zh-Hans' ? '商机不存在' : 'Opportunity not found'}
-          </p>
-        </div>
+        <Empty className="py-20">
+          <EmptyHeader>
+            <Target className="w-16 h-16 mx-auto mb-4 text-muted-foreground/40" />
+            <EmptyTitle>
+              {locale === 'zh-Hans' ? '商机不存在' : 'Opportunity not found'}
+            </EmptyTitle>
+            <EmptyDescription>
+              {locale === 'zh-Hans' ? '该记录可能已被删除' : 'This record may have been deleted'}
+            </EmptyDescription>
+          </EmptyHeader>
+          <Button variant="outline" className="mt-4" onClick={() => navigate('/opportunities')}>
+            {locale === 'zh-Hans' ? '返回列表' : 'Back to list'}
+          </Button>
+        </Empty>
       </MobileLayout>
     );
   }
@@ -233,12 +333,13 @@ export default function OpportunityDetailPage() {
       showBack
       headerRight={deleteButton}
     >
-      <motion.div
-        variants={containerVariants}
-        initial="hidden"
-        animate="show"
-        className="px-4 pb-40"
-      >
+      <PullToRefresh onRefresh={handleRefresh} className="flex-1 overflow-y-auto">
+        <motion.div
+          variants={containerVariants}
+          initial="hidden"
+          animate="show"
+          className="px-4 pb-40"
+        >
         {/* Opportunity Header Card */}
         <motion.div
           variants={itemVariants}
@@ -270,7 +371,7 @@ export default function OpportunityDetailPage() {
                 <Building2 className="w-3.5 h-3.5 text-muted-foreground" />
                 <span
                   className="text-sm text-primary cursor-pointer hover:underline"
-                  onClick={() => navigate(`/clients/${opportunity.account?.id}`)}
+                  onClick={() => navigate(`/accounts/${opportunity.account?.id}`)}
                 >
                   {account?.name1 || 'Unknown Account'}
                 </span>
@@ -357,6 +458,17 @@ export default function OpportunityDetailPage() {
 
             {/* Overview Tab */}
             <TabsContent value="overview" className="mt-4 space-y-4">
+              {/* AI Insights */}
+              <AISummaryCard
+                summary={aiSummary}
+                isLoading={isLoadingAISummary}
+                isGenerating={isGenerating}
+                isExpired={isExpired}
+                isFailed={isFailed}
+                isRefreshing={isRefreshingAI || isTriggering}
+                onRefresh={handleRefreshAISummary}
+              />
+
               {/* Key Dates */}
               <div className="glass-card p-4" style={{ borderRadius: 16 }}>
                 <h3 className="text-sm font-medium text-foreground mb-3">
@@ -443,9 +555,14 @@ export default function OpportunityDetailPage() {
                       onClick={() => navigate(`/activities/${activity.id}`)}
                     >
                       <div className="flex gap-3">
-                        <div className="text-xl flex-shrink-0">
-                          {getActivityTypeIcon(activity.typeKey)}
-                        </div>
+                        {(() => {
+                          const Icon = getActivityTypeIcon(activity.typeKey);
+                          return (
+                            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                              <Icon className="w-4 h-4 text-primary" />
+                            </div>
+                          );
+                        })()}
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1">
                             <h4 className="text-sm font-medium text-foreground truncate">
@@ -456,16 +573,16 @@ export default function OpportunityDetailPage() {
                                 variant="outline"
                                 className={cn(
                                   'text-[10px]',
-                                  activity.draftstatusKey === 'Draftstatuskey2' && 'text-emerald-600 border-emerald-200'
+                                  activity.draftstatusKey === 'DraftstatusKey2' && 'text-emerald-600 border-emerald-200'
                                 )}
                               >
-                                {ActivityDraftstatuskeyToLabel[activity.draftstatusKey as ActivityDraftstatuskey]}
+                                {ActivityDraftstatusKeyToLabel[activity.draftstatusKey as ActivityDraftstatusKey]}
                               </Badge>
                             )}
                           </div>
                           <p className="text-xs text-muted-foreground mb-1">
                             {formatDate(activity.scheduleddate)}
-                            {activity.typeKey && ` • ${ActivityTypekeyToLabel[activity.typeKey as ActivityTypekey]}`}
+                            {activity.typeKey && ` • ${ActivityTypeKeyToLabel[activity.typeKey as ActivityTypeKey]}`}
                           </p>
                           {activity.notes && (
                             <p className="text-xs text-muted-foreground line-clamp-2">
@@ -497,36 +614,24 @@ export default function OpportunityDetailPage() {
           </Tabs>
         </motion.div>
       </motion.div>
+      </PullToRefresh>
 
-      {/* Quick Actions - positioned above global copilot */}
-      <div className="fixed bottom-20 left-0 right-0 z-40 safe-area-bottom pointer-events-none" style={{ background: 'linear-gradient(to top, var(--background) 40%, transparent)' }}>
-        <div className="flex items-center justify-center gap-2 px-4 pointer-events-auto">
-          <button
-            onClick={() => navigate('/activity-capture')}
-            className={cn(
-              'flex items-center gap-2 px-4 py-2.5',
-              'rounded-full glass-card-hover',
-              'text-xs font-medium text-foreground',
-              'active:scale-95 transition-transform'
-            )}
-          >
-            <Plus className="w-4 h-4 text-primary" />
-            <span>{locale === 'zh-Hans' ? '新建活动' : 'New Activity'}</span>
-          </button>
-          <button
-            onClick={() => navigate(`/opportunities/${id}/edit`)}
-            className={cn(
-              'flex items-center gap-2 px-4 py-2.5',
-              'rounded-full glass-card-hover',
-              'text-xs font-medium text-foreground',
-              'active:scale-95 transition-transform'
-            )}
-          >
-            <Edit className="w-4 h-4 text-primary" />
-            <span>{locale === 'zh-Hans' ? '编辑' : 'Edit'}</span>
-          </button>
-        </div>
-      </div>
+      <FloatingQuickActions
+        actions={[
+          {
+            id: 'new-activity',
+            icon: Plus,
+            label: locale === 'zh-Hans' ? '新建活动' : 'New Activity',
+            onClick: () => navigate(`/activity/${opportunity.account?.id || 'new'}`),
+          },
+          {
+            id: 'edit',
+            icon: Edit,
+            label: locale === 'zh-Hans' ? '编辑' : 'Edit',
+            onClick: () => navigate(`/opportunities/${id}/edit`),
+          },
+        ]}
+      />
     </MobileLayout>
   );
 }

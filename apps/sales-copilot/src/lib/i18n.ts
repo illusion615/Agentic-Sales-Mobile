@@ -1,5 +1,6 @@
 // Bilingual support zh-Hans / en-US
 
+import { useState, useEffect } from 'react';
 import { testFlowConnection, invokeFlowForLLM } from '@/services/power-automate-service';
 
 export type Locale = 'zh-Hans' | 'en-US';
@@ -350,6 +351,25 @@ export interface FontSizeConfig {
   ui: FontSizeOption;
 }
 
+// Font size CSS variable values (in rem)
+const fontSizeValues = {
+  small: {
+    title: '0.875rem',   // 14px
+    body: '0.8125rem',   // 13px
+    helper: '0.75rem',   // 12px
+  },
+  medium: {
+    title: '1rem',        // 16px
+    body: '0.875rem',    // 14px
+    helper: '0.8125rem', // 13px
+  },
+  large: {
+    title: '1.125rem',   // 18px
+    body: '1rem',        // 16px
+    helper: '0.875rem',  // 14px
+  },
+} as const;
+
 const fontSizeClasses = {
   small: {
     chat: 'text-sm',
@@ -365,6 +385,22 @@ const fontSizeClasses = {
   },
 } as const;
 
+// Apply font size CSS variables to the document
+export function applyFontSizeToDocument(config: FontSizeConfig): void {
+  const root = document.documentElement;
+  const uiSizes = fontSizeValues[config.ui];
+  
+  root.style.setProperty('--scm-font-title', uiSizes.title);
+  root.style.setProperty('--scm-font-body', uiSizes.body);
+  root.style.setProperty('--scm-font-helper', uiSizes.helper);
+}
+
+// Initialize font size from localStorage (call on app startup)
+export function initFontSize(): void {
+  const config = getFontSizeConfig();
+  applyFontSizeToDocument(config);
+}
+
 export function getFontSizeConfig(): FontSizeConfig {
   const saved = localStorage.getItem('fontSizeConfig');
   if (saved) {
@@ -379,6 +415,8 @@ export function getFontSizeConfig(): FontSizeConfig {
 
 export function setFontSizeConfig(config: FontSizeConfig): void {
   localStorage.setItem('fontSizeConfig', JSON.stringify(config));
+  // Apply CSS variables immediately for real-time update
+  applyFontSizeToDocument(config);
   window.dispatchEvent(new CustomEvent('fontsize-changed', { detail: config }));
 }
 
@@ -398,7 +436,7 @@ export function getColorTheme(): ColorTheme {
   if (saved && ['sunset', 'ocean', 'forest', 'berry', 'mono'].includes(saved)) {
     return saved as ColorTheme;
   }
-  return 'mono';
+  return 'sunset'; // Default to sunset (orange) theme
 }
 
 export function setColorTheme(theme: ColorTheme): void {
@@ -1119,7 +1157,7 @@ export function setVoiceSummaryEnabled(enabled: boolean): void {
 
 // Copilot in all screens setting
 export function getCopilotInAllScreens(): boolean {
-  return localStorage.getItem('copilotInAllScreens') === 'true'; // default false
+  return localStorage.getItem('copilotInAllScreens') !== 'false'; // default true
 }
 
 export function setCopilotInAllScreens(enabled: boolean): void {
@@ -1129,12 +1167,35 @@ export function setCopilotInAllScreens(enabled: boolean): void {
 
 // Simulate streaming response setting
 export function getSimulateStreaming(): boolean {
-  return localStorage.getItem('simulateStreaming') === 'true';
+  return localStorage.getItem('simulateStreaming') !== 'false'; // default true
 }
 
 export function setSimulateStreaming(enabled: boolean): void {
   localStorage.setItem('simulateStreaming', String(enabled));
   window.dispatchEvent(new CustomEvent('simulatestreaming-changed', { detail: enabled }));
+}
+
+// Home header widget display setting
+export type HomeHeaderWidget = 'date-time' | 'performance' | 'task-completion' | 'pipeline-forecast';
+
+export const homeHeaderWidgetLabels: Record<HomeHeaderWidget, { zh: string; en: string }> = {
+  'date-time': { zh: '日期和时间', en: 'Date & Time' },
+  'performance': { zh: '我的业绩', en: 'My Performance' },
+  'task-completion': { zh: '今日任务完成率', en: "Today's Task Completion" },
+  'pipeline-forecast': { zh: '本季度成交额/预测', en: 'Closed Pipeline / Forecast' },
+};
+
+export function getHomeHeaderWidget(): HomeHeaderWidget {
+  const saved = localStorage.getItem('homeHeaderWidget');
+  if (saved && saved in homeHeaderWidgetLabels) {
+    return saved as HomeHeaderWidget;
+  }
+  return 'date-time'; // Default to date & time display
+}
+
+export function setHomeHeaderWidget(widget: HomeHeaderWidget): void {
+  localStorage.setItem('homeHeaderWidget', widget);
+  window.dispatchEvent(new CustomEvent('homeheaderwidget-changed', { detail: widget }));
 }
 
 export const translations = {
@@ -1279,6 +1340,7 @@ export const translations = {
     voiceNatural: '自然',
     voicePremium: '高级',
     autoPlayAgentResponse: '自动朗读回复',
+    homeHeaderWidget: '首页左上角显示'
   },
   'en-US': {
     // Greetings
@@ -1420,6 +1482,7 @@ export const translations = {
     voiceNatural: 'Natural',
     autoPlayAgentResponse: 'Auto-play Agent Response',
     voicePremium: 'Premium',
+    homeHeaderWidget: 'Home Header Widget',
   },
 } as const;
 
@@ -1462,4 +1525,24 @@ export function getGreeting(locale: Locale = 'zh-Hans'): string {
   if (hour >= 5 && hour < 12) return t('morning', locale);
   if (hour >= 12 && hour < 18) return t('afternoon', locale);
   return t('evening', locale);
+}
+
+
+/**
+ * React hook that subscribes to locale changes.
+ * Use this instead of calling getLocale() directly to ensure components
+ * re-render when the locale changes.
+ */
+export function useLocale(): Locale {
+  const [locale, setLocaleState] = useState<Locale>(getLocale);
+
+  useEffect(() => {
+    const handleLocaleChange = (event: CustomEvent<Locale>) => {
+      setLocaleState(event.detail);
+    };
+    window.addEventListener('locale-changed', handleLocaleChange as EventListener);
+    return () => window.removeEventListener('locale-changed', handleLocaleChange as EventListener);
+  }, []);
+
+  return locale;
 }

@@ -32,6 +32,7 @@ export function useOpportunity(id: string) {
 
 /**
  * Create a new Opportunity record.
+ * @remarks Form validation: use CreateOpportunitySchema with zodResolver for type-safe create forms
  */
 export function useCreateOpportunity() {
   const client = useQueryClient();
@@ -45,6 +46,7 @@ export function useCreateOpportunity() {
 
 /**
  * Update an existing Opportunity record.
+ * @remarks Form validation: use UpdateOpportunitySchema.partial().omit({ id: true }) with zodResolver for edit forms (matches changedFields input)
  */
 export function useUpdateOpportunity() {
   const client = useQueryClient();
@@ -79,3 +81,6 @@ export function useDeleteOpportunity() {
 
 /** Data source type for this table — drives InMemoryDataBanner visibility. */
 export const Opportunity_DATA_SOURCE_TYPE = 'Dataverse' as const;
+
+export { OpportunitySchema, CreateOpportunitySchema, UpdateOpportunitySchema } from "../validators/opportunity-validator";
+export type { OpportunityInput, CreateOpportunityInput, UpdateOpportunityInput } from "../validators/opportunity-validator";

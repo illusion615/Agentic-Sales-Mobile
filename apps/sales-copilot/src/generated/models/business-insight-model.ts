@@ -1,15 +1,15 @@
-export const BusinessInsightReferencetypekeyToLabel = {
-  'Referencetypekey0': 'client',
-  'Referencetypekey1': 'opportunity'
+export const BusinessInsightReferencetypeKeyToLabel = {
+  'ReferencetypeKey0': 'client',
+  'ReferencetypeKey1': 'opportunity'
 } as const;
-export type BusinessInsightReferencetypekey = keyof typeof BusinessInsightReferencetypekeyToLabel;
+export type BusinessInsightReferencetypeKey = keyof typeof BusinessInsightReferencetypeKeyToLabel;
 
-export const BusinessInsightTypekeyToLabel = {
-  'Typekey0': 'warning',
-  'Typekey1': 'info',
-  'Typekey2': 'success'
+export const BusinessInsightTypeKeyToLabel = {
+  'TypeKey0': 'warning',
+  'TypeKey1': 'info',
+  'TypeKey2': 'success'
 } as const;
-export type BusinessInsightTypekey = keyof typeof BusinessInsightTypekeyToLabel;
+export type BusinessInsightTypeKey = keyof typeof BusinessInsightTypeKeyToLabel;
 
 export interface BusinessInsight {
   /**
@@ -63,7 +63,7 @@ export interface BusinessInsight {
    * @displayName Reference Type
    * @validationRule Required for create/update operations
    */
-  referencetypeKey: BusinessInsightReferencetypekey;
+  referencetypeKey: BusinessInsightReferencetypeKey;
   /**
    * @displayName Summary
    * @validationRule Required for create/update operations
@@ -73,7 +73,7 @@ export interface BusinessInsight {
    * @displayName Type
    * @validationRule Required for create/update operations
    */
-  typeKey: BusinessInsightTypekey;
+  typeKey: BusinessInsightTypeKey;
   /**
    * @displayName Valid Until
    * @validationRule Required for create/update operations

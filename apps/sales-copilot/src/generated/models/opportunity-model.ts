@@ -1,21 +1,21 @@
 import type { Account } from './account-model';
 
-export const OpportunityConfidencetrendkeyToLabel = {
-  'Confidencetrendkey0': 'up',
-  'Confidencetrendkey1': 'down',
-  'Confidencetrendkey2': 'flat'
+export const OpportunityConfidencetrendKeyToLabel = {
+  'ConfidencetrendKey0': 'up',
+  'ConfidencetrendKey1': 'down',
+  'ConfidencetrendKey2': 'flat'
 } as const;
-export type OpportunityConfidencetrendkey = keyof typeof OpportunityConfidencetrendkeyToLabel;
+export type OpportunityConfidencetrendKey = keyof typeof OpportunityConfidencetrendKeyToLabel;
 
-export const OpportunityStagekeyToLabel = {
-  'Stagekey0': 'prospecting',
-  'Stagekey1': 'qualification',
-  'Stagekey2': 'proposal',
-  'Stagekey3': 'negotiation',
-  'Stagekey4': 'won',
-  'Stagekey5': 'lost'
+export const OpportunityStageKeyToLabel = {
+  'StageKey0': 'prospecting',
+  'StageKey1': 'qualification',
+  'StageKey2': 'proposal',
+  'StageKey3': 'negotiation',
+  'StageKey4': 'won',
+  'StageKey5': 'lost'
 } as const;
-export type OpportunityStagekey = keyof typeof OpportunityStagekeyToLabel;
+export type OpportunityStageKey = keyof typeof OpportunityStageKeyToLabel;
 
 export interface Opportunity {
   /**
@@ -50,7 +50,7 @@ export interface Opportunity {
   /**
    * @displayName Confidence Trend
    */
-  confidencetrendKey?: OpportunityConfidencetrendkey;
+  confidencetrendKey?: OpportunityConfidencetrendKey;
   /**
    * @displayName Created On
    */
@@ -72,7 +72,7 @@ export interface Opportunity {
    * @displayName Stage
    * @validationRule Required for create/update operations
    */
-  stageKey: OpportunityStagekey;
+  stageKey: OpportunityStageKey;
   /**
    * @displayName Total Amount
    * @validationRule Required for create/update operations

@@ -11,6 +11,10 @@ export interface ConversationInfo {
   conversationId: string;
   token: string;
   streamUrl?: string;
+  /** Timestamp when token was acquired (epoch ms) */
+  tokenAcquiredAt: number;
+  /** Timestamp when conversation was started (epoch ms) */
+  conversationStartedAt: number;
 }
 
 export interface UserContext {
@@ -30,6 +34,11 @@ export interface CopilotMessage {
 
 const STORAGE_KEY = 'copilot-config';
 const CONVERSATION_KEY = 'copilot-conversation';
+
+// Direct Line tokens are valid for 30 minutes, but we use 25 minutes to be safe
+const TOKEN_TTL_MS = 25 * 60 * 1000;
+// Conversations can go stale after inactivity; we consider them stale after 4 hours
+const CONVERSATION_TTL_MS = 4 * 60 * 60 * 1000;
 
 /**
  * Get stored Copilot configuration
@@ -64,10 +73,38 @@ export function clearCopilotConfig(): void {
 function getStoredConversation(): ConversationInfo | null {
   try {
     const stored = localStorage.getItem(CONVERSATION_KEY);
-    return stored ? JSON.parse(stored) : null;
+    if (!stored) return null;
+    const conversation = JSON.parse(stored) as ConversationInfo;
+
+    // Validate freshness metadata exists (backwards compatibility)
+    if (!conversation.tokenAcquiredAt || !conversation.conversationStartedAt) {
+      console.log('[Copilot Service] Stored conversation missing freshness metadata, invalidating');
+      localStorage.removeItem(CONVERSATION_KEY);
+      return null;
+    }
+
+    return conversation;
   } catch {
     return null;
   }
+}
+
+function isConversationValid(conversation: ConversationInfo): boolean {
+  const now = Date.now();
+
+  // Check if token is expired
+  if (now - conversation.tokenAcquiredAt > TOKEN_TTL_MS) {
+    console.log('[Copilot Service] Token expired, conversation invalid');
+    return false;
+  }
+
+  // Check if conversation is stale
+  if (now - conversation.conversationStartedAt > CONVERSATION_TTL_MS) {
+    console.log('[Copilot Service] Conversation stale (too old), conversation invalid');
+    return false;
+  }
+
+  return true;
 }
 
 /**
@@ -97,6 +134,9 @@ async function getDirectLineToken(tokenEndpoint: string): Promise<{ token: strin
     });
 
     if (!response.ok) {
+      if (response.status === 404) {
+        throw new Error('Token endpoint not found (404). Please verify the Copilot Studio Token Endpoint URL in Settings is correct.');
+      }
       throw new Error(`Failed to get token: ${response.status} ${response.statusText}`);
     }
 
@@ -154,10 +194,14 @@ async function startConversation(token: string): Promise<ConversationInfo> {
       throw new Error('Invalid response from Direct Line API.');
     }
 
+    const now = Date.now();
+
     return {
       conversationId: data.conversationId,
       token: data.token || token,
       streamUrl: data.streamUrl,
+      tokenAcquiredAt: now,
+      conversationStartedAt: now,
     };
   } catch (error) {
     if (error instanceof TypeError && error.message === 'Failed to fetch') {
@@ -193,15 +237,31 @@ export async function testConnection(tokenEndpoint: string): Promise<{ success: 
 export async function getOrCreateConversation(config: CopilotConfig): Promise<ConversationInfo> {
   // Check for existing conversation
   const existing = getStoredConversation();
-  if (existing) {
+
+  if (existing && isConversationValid(existing)) {
+    console.log('[Copilot Service] Reusing valid cached conversation');
     return existing;
   }
 
+  // Clear any stale/invalid conversation
+  if (existing) {
+    console.log('[Copilot Service] Clearing stale conversation, will create new');
+    clearConversation();
+  }
+
   // Get new token and start conversation
+  const now = Date.now();
   const { token } = await getDirectLineToken(config.tokenEndpoint);
-  const conversation = await startConversation(token);
+  const conversationData = await startConversation(token);
+
+  const conversation: ConversationInfo = {
+    ...conversationData,
+    tokenAcquiredAt: now,
+    conversationStartedAt: now,
+  };
+
   saveConversation(conversation);
-  
+
   return conversation;
 }
 
@@ -438,6 +498,11 @@ export function createWebSocketConnection(
 
   ws.onmessage = (event: MessageEvent) => {
     try {
+      // Skip empty messages
+      if (!event.data || event.data === '') {
+        return;
+      }
+      
       const data = JSON.parse(event.data);
       console.log('[Copilot WebSocket] Received:', data);
 
@@ -500,7 +565,10 @@ export function createWebSocketConnection(
         }
       }
     } catch (err) {
-      console.error('[Copilot WebSocket] Parse error:', err);
+      // Only log parse errors for non-empty data - suppress console noise for empty/keepalive messages
+      if (event.data && event.data.length > 0) {
+        console.warn('[Copilot WebSocket] Parse error, data length:', event.data?.length);
+      }
     }
   };
 

@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Sales Copilot · iPhone Preview</title>
+    <style>
+      :root {
+        /* iPhone 15 Pro logical viewport: 393 × 852 (CSS pt) */
+        --device-w: 393px;
+        --device-h: 852px;
+        --bezel: 14px;          /* black bezel thickness */
+        --radius-outer: 60px;   /* outer chassis radius */
+        --radius-inner: 47px;   /* screen radius */
+        --frame: #0b0b0d;
+        --frame-edge: #2a2a2e;
+        --shadow: 0 40px 90px -20px rgba(0, 0, 0, 0.55),
+          0 14px 40px -12px rgba(0, 0, 0, 0.45),
+          inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+        --bg-1: #1a1d2e;
+        --bg-2: #2b1d3a;
+        --bg-3: #0e1421;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: radial-gradient(1200px 800px at 20% 10%, var(--bg-2), transparent 60%),
+                    radial-gradient(1000px 700px at 90% 90%, #1a3147, transparent 55%),
+                    linear-gradient(160deg, var(--bg-1), var(--bg-3));
+        color: #e8eaf2;
+        font: 13px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+        overflow: hidden;
+        -webkit-font-smoothing: antialiased;
+      }
+      .stage {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+
+      /* Floating ambient orbs */
+      .orb {
+        position: absolute;
+        border-radius: 50%;
+        filter: blur(60px);
+        opacity: 0.55;
+        pointer-events: none;
+      }
+      .orb.a { width: 380px; height: 380px; left: -80px; top: -60px;
+        background: radial-gradient(circle, #5b8cff 0%, transparent 70%); }
+      .orb.b { width: 420px; height: 420px; right: -80px; bottom: -100px;
+        background: radial-gradient(circle, #c47bff 0%, transparent 70%); }
+
+      /* Top toolbar — pinned to bottom-right so it never overlaps the phone */
+      .toolbar {
+        position: fixed;
+        bottom: 14px; right: 14px;
+        z-index: 10;
+        display: flex; gap: 8px; align-items: center;
+        padding: 8px 14px;
+        background: rgba(20, 22, 34, 0.55);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 999px;
+        backdrop-filter: blur(20px) saturate(140%);
+        -webkit-backdrop-filter: blur(20px) saturate(140%);
+        color: #cfd3e3;
+        font-size: 12px;
+      }
+      .toolbar .dot {
+        width: 8px; height: 8px; border-radius: 50%;
+        background: #4ade80;
+        box-shadow: 0 0 10px #4ade80aa;
+      }
+      .toolbar button {
+        appearance: none; border: none; cursor: pointer;
+        padding: 6px 10px; border-radius: 999px;
+        background: rgba(255,255,255,0.06);
+        color: inherit; font-size: 12px;
+      }
+      .toolbar button:hover { background: rgba(255,255,255,0.12); }
+      .toolbar a { color: #9bb0ff; text-decoration: none; }
+
+      /* Phone chassis */
+      .phone-wrap {
+        position: relative;
+        transform-origin: center center;
+        transform: scale(0.9);
+      }
+      .phone {
+        position: relative;
+        width: calc(var(--device-w) + var(--bezel) * 2);
+        height: calc(var(--device-h) + var(--bezel) * 2);
+        background: linear-gradient(145deg, #1a1a1d 0%, #0a0a0b 50%, #1a1a1d 100%);
+        border-radius: var(--radius-outer);
+        padding: var(--bezel);
+        box-shadow: var(--shadow);
+        /* titanium edge */
+        outline: 1px solid var(--frame-edge);
+        outline-offset: -1px;
+      }
+      /* Subtle outer rim highlight */
+      .phone::before {
+        content: "";
+        position: absolute;
+        inset: 2px;
+        border-radius: calc(var(--radius-outer) - 2px);
+        background: linear-gradient(145deg, rgba(255,255,255,0.06), transparent 30%, transparent 70%, rgba(255,255,255,0.04));
+        pointer-events: none;
+      }
+
+      /* Side buttons */
+      .btn-side {
+        position: absolute;
+        background: linear-gradient(90deg, #1c1c1f, #2a2a2e 40%, #1c1c1f);
+        box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
+      }
+      /* Right: power */
+      .btn-power {
+        right: -3px; top: 180px;
+        width: 4px; height: 100px;
+        border-radius: 2px;
+      }
+      /* Left: silent + volume up + volume down */
+      .btn-silent {
+        left: -3px; top: 130px;
+        width: 4px; height: 30px;
+        border-radius: 2px;
+      }
+      .btn-vol-up {
+        left: -3px; top: 190px;
+        width: 4px; height: 60px;
+        border-radius: 2px;
+      }
+      .btn-vol-down {
+        left: -3px; top: 270px;
+        width: 4px; height: 60px;
+        border-radius: 2px;
+      }
+
+      /* Screen */
+      .screen {
+        position: relative;
+        width: var(--device-w);
+        height: var(--device-h);
+        border-radius: var(--radius-inner);
+        overflow: hidden;
+        background: #000;
+        isolation: isolate;
+      }
+      .screen iframe {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        border: 0;
+        display: block;
+        background: #0F1424;
+      }
+
+      /* Dynamic Island */
+      .island {
+        position: absolute;
+        top: 11px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 124px;
+        height: 36px;
+        background: #000;
+        border-radius: 20px;
+        z-index: 5;
+        pointer-events: none;
+        box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
+      }
+
+      /* iOS status bar overlay (time, signal, battery) */
+      .status {
+        position: absolute;
+        top: 0; left: 0; right: 0;
+        height: 54px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 28px;
+        font: 600 15px/1 -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
+        color: #fff;
+        z-index: 4;
+        pointer-events: none;
+        letter-spacing: 0.2px;
+      }
+      .status .time { padding-top: 16px; }
+      .status .right {
+        padding-top: 16px;
+        display: flex; align-items: center; gap: 6px;
+      }
+      .status svg { display: block; }
+
+      /* Home indicator */
+      .home-indicator {
+        position: absolute;
+        bottom: 8px; left: 50%;
+        transform: translateX(-50%);
+        width: 134px; height: 5px;
+        background: rgba(255,255,255,0.85);
+        border-radius: 3px;
+        z-index: 5;
+        pointer-events: none;
+      }
+
+      /* Reflection sheen */
+      .screen::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        background: linear-gradient(135deg, rgba(255,255,255,0.05) 0%, transparent 30%, transparent 70%, rgba(255,255,255,0.03) 100%);
+        pointer-events: none;
+        mix-blend-mode: screen;
+        z-index: 6;
+      }
+
+      /* Footer label */
+      .footer {
+        position: fixed;
+        bottom: 14px; left: 14px;
+        font-size: 11px;
+        color: rgba(255,255,255,0.45);
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+      }
+
+      /* Responsive: scale phone to fit small windows */
+      @media (max-height: 920px) {
+        .phone-wrap { transform: scale(0.85); }
+      }
+      @media (max-height: 860px) {
+        .phone-wrap { transform: scale(0.78); }
+      }
+      @media (max-height: 780px) {
+        .phone-wrap { transform: scale(0.7); }
+      }
+      @media (max-height: 700px) {
+        .phone-wrap { transform: scale(0.6); }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="orb a"></div>
+    <div class="orb b"></div>
+
+    <div class="toolbar">
+      <span class="dot"></span>
+      <span>iPhone 15 Pro · 393 × 852</span>
+      <span style="opacity:.4">|</span>
+      <button id="reload">↻ Reload</button>
+      <button id="open">↗ Open Raw</button>
+    </div>
+
+    <div class="stage">
+      <div class="phone-wrap">
+        <div class="phone">
+          <span class="btn-side btn-silent"></span>
+          <span class="btn-side btn-vol-up"></span>
+          <span class="btn-side btn-vol-down"></span>
+          <span class="btn-side btn-power"></span>
+
+          <div class="screen">
+            <iframe id="app" src="http://localhost:4173/" title="Sales Copilot Mobile" allow="clipboard-read; clipboard-write"></iframe>
+
+            <div class="island"></div>
+
+            <div class="status">
+              <span class="time" id="clock">9:41</span>
+              <span class="right">
+                <!-- signal -->
+                <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor" aria-hidden="true">
+                  <rect x="0"  y="8" width="3" height="4" rx="0.6"/>
+                  <rect x="5"  y="5" width="3" height="7" rx="0.6"/>
+                  <rect x="10" y="2" width="3" height="10" rx="0.6"/>
+                  <rect x="15" y="0" width="3" height="12" rx="0.6"/>
+                </svg>
+                <!-- wifi -->
+                <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+                  <path d="M1 4.5 A11 11 0 0 1 15 4.5"/>
+                  <path d="M3.2 7.0 A7.2 7.2 0 0 1 12.8 7.0"/>
+                  <path d="M5.4 9.5 A3.6 3.6 0 0 1 10.6 9.5"/>
+                  <circle cx="8" cy="11" r="0.9" fill="currentColor" stroke="none"/>
+                </svg>
+                <!-- battery -->
+                <svg width="26" height="12" viewBox="0 0 26 12" aria-hidden="true">
+                  <rect x="0.5" y="0.5" width="22" height="11" rx="3" ry="3" fill="none" stroke="currentColor" stroke-opacity="0.5"/>
+                  <rect x="2"   y="2"   width="18" height="8"  rx="1.5" ry="1.5" fill="currentColor"/>
+                  <rect x="23"  y="3.5" width="2"  height="5"  rx="1"  fill="currentColor" opacity="0.5"/>
+                </svg>
+              </span>
+            </div>
+
+            <div class="home-indicator"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">Sales Copilot · localhost preview</div>
+
+    <script>
+      // Live clock in status bar (HH:MM)
+      const clock = document.getElementById('clock');
+      function tick() {
+        const d = new Date();
+        const h = d.getHours();
+        const m = String(d.getMinutes()).padStart(2, '0');
+        clock.textContent = h + ':' + m;
+      }
+      tick();
+      setInterval(tick, 30_000);
+
+      // Toolbar actions
+      const iframe = document.getElementById('app');
+      document.getElementById('reload').addEventListener('click', () => {
+        iframe.src = iframe.src;
+      });
+      document.getElementById('open').addEventListener('click', () => {
+        window.open(iframe.src, '_blank');
+      });
+
+      // Simulate iOS safe-area insets inside the iframe.
+      //
+      // On a real iPhone, when the app is added to the Home Screen as a
+      // PWA, iOS extends the WebView under the status bar / Dynamic
+      // Island and reports the inset via env(safe-area-inset-top). The
+      // app then uses .safe-area-top / .pt-safe to dodge those areas.
+      //
+      // A desktop browser iframe does not propagate any safe-area inset
+      // (env() resolves to 0), so we directly override those four
+      // utility classes with literal pixel values that match an iPhone
+      // 15 Pro. This is the most faithful PWA-on-iOS preview we can do
+      // on Mac.
+      iframe.addEventListener('load', () => {
+        try {
+          const doc = iframe.contentDocument;
+          if (!doc) return;
+          let style = doc.getElementById('mockup-safe-area');
+          if (!style) {
+            style = doc.createElement('style');
+            style.id = 'mockup-safe-area';
+            doc.head.appendChild(style);
+          }
+          style.textContent = `
+            /* iPhone 15 Pro Dynamic Island region ≈ 54px logical */
+            .safe-area-top { padding-top: 54px !important; }
+            .pt-safe       { padding-top: 54px !important; }
+            /* Home indicator region ≈ 24px logical */
+            .safe-area-bottom { padding-bottom: 24px !important; }
+            .pb-safe          { padding-bottom: 24px !important; }
+          `;
+        } catch (e) {
+          // Cross-origin would block this; localhost → localhost is fine.
+          console.warn('[mockup] could not inject safe-area css:', e);
+        }
+      });
+
+
+    </script>
+  </body>
+</html>

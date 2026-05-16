@@ -32,6 +32,7 @@ export function useCopilotConversation(id: string) {
 
 /**
  * Create a new CopilotConversation record.
+ * @remarks Form validation: use CreateCopilotConversationSchema with zodResolver for type-safe create forms
  */
 export function useCreateCopilotConversation() {
   const client = useQueryClient();
@@ -45,6 +46,7 @@ export function useCreateCopilotConversation() {
 
 /**
  * Update an existing CopilotConversation record.
+ * @remarks Form validation: use UpdateCopilotConversationSchema.partial().omit({ id: true }) with zodResolver for edit forms (matches changedFields input)
  */
 export function useUpdateCopilotConversation() {
   const client = useQueryClient();
@@ -57,9 +59,7 @@ export function useUpdateCopilotConversation() {
       changedFields: Partial<Omit<CopilotConversation, "id">>;
     }) => CopilotConversationService.update(id, changedFields),
     onSuccess: (_data, variables) => {
-      // NOTE: Intentionally NOT invalidating copilotConversation-list here
-      // to prevent infinite loops when saving chat messages.
-      // The local state is already up-to-date.
+      client.invalidateQueries({ queryKey: ["copilotConversation-list"] });
       client.invalidateQueries({ queryKey: ["copilotConversation", variables.id] });
     },
   });
@@ -81,3 +81,6 @@ export function useDeleteCopilotConversation() {
 
 /** Data source type for this table — drives InMemoryDataBanner visibility. */
 export const CopilotConversation_DATA_SOURCE_TYPE = 'Dataverse' as const;
+
+export { CopilotConversationSchema, CreateCopilotConversationSchema, UpdateCopilotConversationSchema } from "../validators/copilot-conversation-validator";
+export type { CopilotConversationInput, CreateCopilotConversationInput, UpdateCopilotConversationInput } from "../validators/copilot-conversation-validator";

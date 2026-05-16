@@ -1,13 +1,26 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence, type PanInfo } from 'motion/react';
-import { Sparkles, RefreshCw, ExternalLink, TrendingUp, AlertTriangle, Target, Users, Calendar, Lightbulb, Play, Pause, ChevronDown, ChevronUp, Trash2, Loader2 } from 'lucide-react';
+import { Sparkles, RefreshCw, ExternalLink, TrendingUp, AlertTriangle, Target, Users, Calendar, Lightbulb, Play, Pause, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getLocale, t, getThinkingDotStyle, type Locale, type ThinkingDotStyle } from '@/lib/i18n';
 import { useNavigate } from 'react-router-dom';
 import { useBusinessInsightList } from '@/generated/hooks/use-business-insight';
-import { BusinessInsightTypekeyToLabel } from '@/generated/models/business-insight-model';
-import type { BusinessInsight as DataverseBusinessInsight, BusinessInsightTypekey } from '@/generated/models/business-insight-model';
+import { BusinessInsightTypeKeyToLabel } from '@/generated/models/business-insight-model';
+import type { BusinessInsight as DataverseBusinessInsight, BusinessInsightTypeKey } from '@/generated/models/business-insight-model';
 
+// Helper to check if an insight is activity-related (exported for use in home.tsx)
+export function isActivityRelatedInsightUtil(insight: DataverseBusinessInsight): boolean {
+  const titleLower = (insight.title || '').toLowerCase();
+  const summaryLower = (insight.summary || '').toLowerCase();
+  // Check if it matches follow-up/agenda/todo patterns
+  const activityPatterns = [
+    '跟进', '待办', '活动', 'follow-up', 'agenda', 'todo', 'task', 'activity',
+    '今日跟进', 'follow up', '计划', 'schedule', '日程'
+  ];
+  return activityPatterns.some(pattern => 
+    titleLower.includes(pattern) || summaryLower.includes(pattern)
+  );
+}
 
 interface ReferenceRecord {
   id: string;
@@ -37,8 +50,7 @@ interface InsightCarouselProps {
   isRefreshing: boolean;
   refreshingStatus?: string;
   onRefresh: () => void;
-  onClear?: () => void;
-  isClearing?: boolean;
+
   onViewDetails: () => void;
   // Brief Me sync props
   isVoicePlaying?: boolean;
@@ -46,7 +58,10 @@ interface InsightCarouselProps {
   onCardCountReady?: (count: number) => void;
   // Optional: override business insights data
   businessInsights?: DataverseBusinessInsight[];
+  // Filter out activity-related insights (they will be shown in Agenda card)
+  excludeActivityInsights?: boolean;
 }
+
 
 export function InsightCarousel({
   customInsightText,
@@ -54,13 +69,13 @@ export function InsightCarousel({
   isRefreshing,
   refreshingStatus,
   onRefresh,
-  onClear,
-  isClearing = false,
+
   onViewDetails,
   isVoicePlaying = false,
   voiceCurrentIndex,
   onCardCountReady,
   businessInsights: externalInsights,
+  excludeActivityInsights = false,
 }: InsightCarouselProps) {
   const locale: Locale = getLocale();
   const navigate = useNavigate();
@@ -83,14 +98,38 @@ export function InsightCarousel({
     orderBy: ['displayorder asc'],
   });
 
+  // Helper to check if an insight is activity-related
+  const isActivityRelatedInsight = useCallback((insight: DataverseBusinessInsight): boolean => {
+    const titleLower = (insight.title || '').toLowerCase();
+    const summaryLower = (insight.summary || '').toLowerCase();
+    // Check if it matches follow-up/agenda/todo patterns
+    const activityPatterns = [
+      '跟进', '待办', '活动', 'follow-up', 'agenda', 'todo', 'task', 'activity',
+      '今日跟进', 'follow up', '计划', 'schedule', '日程'
+    ];
+    return activityPatterns.some(pattern => 
+      titleLower.includes(pattern) || summaryLower.includes(pattern)
+    );
+  }, []);
+
   // Use external insights if provided, otherwise use Dataverse data (NO sample data fallback)
+  // Optionally filter out activity-related insights
   const rawInsights: DataverseBusinessInsight[] = useMemo(() => {
+    let insights: DataverseBusinessInsight[];
     if (externalInsights && externalInsights.length > 0) {
-      return externalInsights;
+      insights = externalInsights;
+    } else {
+      // Return Dataverse insights only - no fallback to sample data
+      insights = dataverseInsights;
     }
-    // Return Dataverse insights only - no fallback to sample data
-    return dataverseInsights;
-  }, [externalInsights, dataverseInsights]);
+    
+    // Filter out activity-related insights if excludeActivityInsights is true
+    if (excludeActivityInsights) {
+      insights = insights.filter((insight: DataverseBusinessInsight) => !isActivityRelatedInsight(insight));
+    }
+    
+    return insights;
+  }, [externalInsights, dataverseInsights, excludeActivityInsights, isActivityRelatedInsight]);
 
   // Helper function to categorize insight text and generate appropriate title/icon
   const getCategoryInfo = useCallback((text: string, idx: number): { title: string; icon: React.ReactNode; type: 'info' | 'warning' | 'success'; rationale: string } => {
@@ -222,7 +261,7 @@ export function InsightCarousel({
       }
 
       // Determine the icon based on type
-      const typeLabel = BusinessInsightTypekeyToLabel[insight.typeKey as BusinessInsightTypekey];
+      const typeLabel = BusinessInsightTypeKeyToLabel[insight.typeKey as BusinessInsightTypeKey];
       const getIcon = () => {
         switch (typeLabel) {
           case 'warning': return <AlertTriangle className="w-4 h-4" />;
@@ -235,12 +274,12 @@ export function InsightCarousel({
       const cardType: 'info' | 'warning' | 'success' = typeLabel === 'warning' ? 'warning' : typeLabel === 'success' ? 'success' : 'info';
 
       // Build references from IDs
-      const isClientRef = insight.referencetypeKey === 'Referencetypekey0';
+      const isClientRef = insight.referencetypeKey === 'ReferencetypeKey0';
       const references: ReferenceRecord[] = referenceIds.map((id: string) => ({
         id,
         name: id, // In real usage, you'd resolve this to a name
         type: isClientRef ? 'client' as const : 'opportunity' as const,
-        route: isClientRef ? `/clients/${id}` : `/opportunities/${id}`,
+        route: isClientRef ? `/accounts/${id}` : `/opportunities/${id}`,
       }));
 
       // Use rationale from Dataverse if available, otherwise fall back to category-based rationale
@@ -513,30 +552,7 @@ export function InsightCarousel({
           {t('dailyBriefing', locale)}
         </p>
         <div className="flex items-center gap-1">
-          {/* Clear button - only show if there are insights and onClear is provided */}
-          {onClear && insightCards.length > 0 && (
-            <button
-              onClick={(e: React.MouseEvent) => {
-                e.stopPropagation();
-                if (!isClearing) onClear();
-              }}
-              disabled={isClearing}
-              className={cn(
-                'w-7 h-7 flex items-center justify-center rounded-full',
-                'hover:bg-destructive/10 active:bg-destructive/20 transition-colors',
-                'text-muted-foreground hover:text-destructive',
-                'disabled:opacity-50 disabled:cursor-not-allowed'
-              )}
-              aria-label={locale === 'zh-Hans' ? '清除历史洞察' : 'Clear all insights'}
-              title={locale === 'zh-Hans' ? (isClearing ? '正在清除...' : '清除历史洞察') : (isClearing ? 'Clearing...' : 'Clear all insights')}
-            >
-              {isClearing ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Trash2 className="w-4 h-4" />
-              )}
-            </button>
-          )}
+
           {isRefreshing ? (
             <div className="flex items-center gap-2 px-2 py-1">
               {/* Thinking dots based on user preference */}

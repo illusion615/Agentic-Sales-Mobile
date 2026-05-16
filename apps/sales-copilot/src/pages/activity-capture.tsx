@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom';
 import { motion } from 'motion/react';
 import {
   ArrowLeft,
@@ -19,12 +19,21 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { useUser } from '@/hooks/use-user';
 import { useAccountList } from '@/generated/hooks/use-account';
-import { useCreateActivity, useActivityList, useUpdateActivity } from '@/generated/hooks/use-activity';
+import { useCreateActivity, useActivity, useUpdateActivity } from '@/generated/hooks/use-activity';
 import { useOpportunityList, useCreateOpportunity, useUpdateOpportunity } from '@/generated/hooks/use-opportunity';
+import { useContactList } from '@/generated/hooks/use-contact';
+import { useWithAISummaryTrigger } from '@/hooks/use-ai-summary-trigger';
 import { getLocale, t, type Locale, getLLMConfig, getAgentFramework } from '@/lib/i18n';
 import { invokeFlowForLLM } from '@/services/power-automate-service';
 import { getCopilotConfig } from '@/services/copilot-service';
 import { useCopilot } from '@/contexts/copilot-context';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 // Check if AI assistant is configured based on selected agent framework
 function isAIAssistantConfigured(): boolean {
@@ -49,27 +58,47 @@ export default function ActivityCapturePage() {
   const navigate = useNavigate();
   const { accountId } = useParams<{ accountId: string }>();
   const [searchParams] = useSearchParams();
+  const location = useLocation();
   const editActivityId = searchParams.get('edit');
   const isEditMode = !!editActivityId;
+  
+  // Get draft data from navigation state (from FormCard modify button)
+  // Use useRef to capture the initial draft data on mount - this prevents losing data
+  // when React Query causes re-renders as data loads
+  const draftDataRef = useRef<Record<string, unknown> | undefined>(
+    (location.state as { draftData?: Record<string, unknown> })?.draftData
+  );
+  const draftData = draftDataRef.current;
+  
+  // Debug: Log draft data on mount
+  useEffect(() => {
+    console.log('[ActivityCapture] Mounted with draftData:', draftData);
+  }, []);
   const { data: user } = useUser();
   const locale: Locale = getLocale();
   const copilotEnabled = isAIAssistantConfigured();
   const copilot = useCopilot();
 
-  // Data
+  // Data - use useActivity(id) for single record lookup instead of useActivityList().find()
   const { data: accounts = [] } = useAccountList();
-  const { data: activities = [], refetch: refetchActivities } = useActivityList();
+  const {
+    data: existingActivity,
+    isLoading: isLoadingActivity,
+    error: activityError,
+  } = useActivity(editActivityId || '');
   const { data: opportunities = [], refetch: refetchOpportunities } = useOpportunityList();
+  const { data: contacts = [] } = useContactList();
   const createActivity = useCreateActivity();
   const updateActivity = useUpdateActivity();
   const createOpportunity = useCreateOpportunity();
   const updateOpportunity = useUpdateOpportunity();
+  const { triggerForEntity } = useWithAISummaryTrigger();
 
   // Find account by param
   const account = accounts.find((a) => a.id === accountId);
 
-  // Find existing activity if in edit mode
-  const existingActivity = isEditMode ? activities.find((a) => a.id === editActivityId) : null;
+  // The canonical activity ID - always use this, never the URL param directly
+  const activityId = existingActivity?.id;
 
   // State
   const [isOffline] = useState(false);
@@ -79,8 +108,12 @@ export default function ActivityCapturePage() {
   // Form state
   const [formData, setFormData] = useState({
     title: '',
+    accountId: accountId || '',
     accountName: account?.name1 || '',
+    contactId: '',
     contactName: '',
+    opportunityId: '',
+    opportunityName: '',
     visitDate: new Date().toISOString().split('T')[0],
     visitType: 'client-visit',
     result: '',
@@ -108,24 +141,62 @@ export default function ActivityCapturePage() {
     };
   };
 
-  // Load existing activity data when in edit mode
+  // Load existing activity data when in edit mode or from draft data
   useEffect(() => {
+    // Priority 1: Draft data from Copilot FormCard (modify button)
+    if (draftData) {
+      setFormData({
+        title: (draftData.title as string) || '',
+        accountId: (draftData.accountId as string) || accountId || '',
+        accountName: (draftData.accountName as string) || account?.name1 || '',
+        contactId: (draftData.contactId as string) || '',
+        contactName: (draftData.contactName as string) || '',
+        opportunityId: (draftData.opportunityId as string) || '',
+        opportunityName: (draftData.opportunityName as string) || '',
+        visitDate: (draftData.scheduledDate as string)?.split('T')[0] || new Date().toISOString().split('T')[0],
+        visitType: (draftData.type as string) || 'client-visit',
+        result: (draftData.result as string) || '',
+        nextStep: (draftData.nextStep as string) || '',
+        opportunityIntent: (draftData.opportunityIntent as string) || '',
+      });
+      setIsAIFilled(true); // Mark as AI-filled since it came from Copilot
+      return;
+    }
+    
+    // Priority 2: Edit mode - load existing activity
     if (isEditMode && existingActivity) {
       const parsedNotes = parseNotesData(existingActivity.notes);
       setFormData({
         title: existingActivity.title || '',
+        accountId: existingActivity.account?.id || accountId || '',
         accountName: existingActivity.account?.name1 || account?.name1 || '',
-        contactName: parsedNotes.contactName,
+        contactId: existingActivity.contact?.id || '',
+        contactName: existingActivity.contact?.fullname || parsedNotes.contactName,
+        opportunityId: existingActivity.opportunity?.id || '',
+        opportunityName: existingActivity.opportunity?.name1 || '',
         visitDate: existingActivity.scheduleddate ? existingActivity.scheduleddate.split('T')[0] : new Date().toISOString().split('T')[0],
         visitType: 'client-visit',
         result: parsedNotes.result,
         nextStep: parsedNotes.nextStep,
         opportunityIntent: parsedNotes.opportunityIntent || existingActivity.opportunity?.name1 || '',
       });
-    } else if (account?.name1) {
-      setFormData((prev) => ({ ...prev, accountName: account.name1 }));
+    } else if (account?.name1 && accountId) {
+      // Priority 3: Account from URL param
+      setFormData((prev) => ({ ...prev, accountId, accountName: account.name1 }));
     }
-  }, [isEditMode, existingActivity, account]);
+  }, [draftData, isEditMode, existingActivity, account, accountId]);
+
+  // Filter contacts based on selected account
+  const filteredContacts = useMemo(() => {
+    if (!formData.accountId) return contacts;
+    return contacts.filter((c) => c.account?.id === formData.accountId);
+  }, [contacts, formData.accountId]);
+
+  // Filter opportunities based on selected account
+  const filteredOpportunities = useMemo(() => {
+    if (!formData.accountId) return opportunities;
+    return opportunities.filter((o) => o.account?.id === formData.accountId);
+  }, [opportunities, formData.accountId]);
 
   // Set copilot input placeholder and register form fill callback
   useEffect(() => {
@@ -306,42 +377,68 @@ Opportunity intent: ${activityData.opportunityIntent}`;
       return;
     }
 
+    // In edit mode, ensure activity exists
+    if (isEditMode && !activityId) {
+      toast.error(locale === 'zh-Hans' ? '活动记录未找到' : 'Activity record not found');
+      return;
+    }
+
     setIsProcessing(true);
 
     try {
       const title = formData.title || `${t('newVisitTitle', locale)} - ${formData.accountName || account?.name1 || 'Unknown'}`;
       const notes = `${formData.result}\n\nContact: ${formData.contactName}\nNext Step: ${formData.nextStep}\nOpportunity: ${formData.opportunityIntent}`;
       
-      // Save activity first
-      if (isEditMode && editActivityId) {
-        // Update existing activity
+      // Determine account and opportunity to save
+      const targetAccount = formData.accountId
+        ? accounts.find((a) => a.id === formData.accountId)
+        : accounts.find((a) => a.id === accountId);
+      
+      const targetOpportunity = formData.opportunityId
+        ? opportunities.find((o) => o.id === formData.opportunityId)
+        : null;
+      
+      // Find selected contact for lookup
+      const targetContact = formData.contactId
+        ? contacts.find((c) => c.id === formData.contactId)
+        : null;
+      
+      // Save activity
+      if (isEditMode && activityId) {
+        // Update existing activity - include account, contact, and opportunity
         await updateActivity.mutateAsync({
-          id: editActivityId,
+          id: activityId,
           changedFields: {
             title,
             scheduleddate: new Date(formData.visitDate).toISOString(),
             notes,
+            // Update account lookup
+            ...(targetAccount ? { account: { id: targetAccount.id, name1: targetAccount.name1 } } : { account: undefined }),
+            // Update contact lookup
+            ...(targetContact ? { contact: { id: targetContact.id, fullname: targetContact.fullname } } : { contact: undefined }),
+            // Update opportunity lookup
+            ...(targetOpportunity ? { opportunity: { id: targetOpportunity.id, name1: targetOpportunity.name1 } } : { opportunity: undefined }),
           },
         });
         toast.success(locale === 'zh-Hans' ? '活动已更新' : 'Activity updated');
       } else {
         // Create new activity
-        // Create new activity with proper account lookup
-        const targetAccount = accounts.find((a) => a.id === accountId || a.name1 === formData.accountName);
         await createActivity.mutateAsync({
           title,
-          typeKey: 'Typekey0', // visit
-          draftstatusKey: 'Draftstatuskey1', // confirmed
-          ownerid: user?.objectId || 'demo-user-id',
+          typeKey: 'TypeKey0', // visit
+          draftstatusKey: 'DraftstatusKey1', // confirmed
+          ownerid: user?.objectId || '',
           scheduleddate: new Date(formData.visitDate).toISOString(),
           notes,
-          // Set account lookup if we found a matching account
-          ...(targetAccount && { account: { id: targetAccount.id, name1: targetAccount.name1 } }),
+          // Set account lookup if selected
+          ...(targetAccount ? { account: { id: targetAccount.id, name1: targetAccount.name1 } } : {}),
+          // Set contact lookup if selected
+          ...(targetContact ? { contact: { id: targetContact.id, fullname: targetContact.fullname } } : {}),
+          // Set opportunity lookup if selected
+          ...(targetOpportunity ? { opportunity: { id: targetOpportunity.id, name1: targetOpportunity.name1 } } : {}),
         });
-        toast.success(t('activityConfirmed', locale));
+        toast.success(locale === 'zh-Hans' ? '活动已保存' : 'Activity saved');
       }
-
-      await refetchActivities();
 
       // Analyze for potential opportunities (only for new activities)
       if (!isEditMode && copilotEnabled) {
@@ -351,12 +448,12 @@ Opportunity intent: ${activityData.opportunityIntent}`;
         
         if (oppAnalysis?.hasOpportunity) {
           const stageKeyMap: Record<string, string> = {
-            prospecting: 'Stagekey0',
-            qualification: 'Stagekey1',
-            proposal: 'Stagekey2',
-            negotiation: 'Stagekey3',
-            won: 'Stagekey4',
-            lost: 'Stagekey5',
+            prospecting: 'StageKey0',
+            qualification: 'StageKey1',
+            proposal: 'StageKey2',
+            negotiation: 'StageKey3',
+            won: 'StageKey4',
+            lost: 'StageKey5',
           };
 
           if (oppAnalysis.matchingOpportunityId) {
@@ -368,7 +465,7 @@ Opportunity intent: ${activityData.opportunityIntent}`;
                 changedFields: {
                   lastaction: formData.result,
                   confidence: oppAnalysis.confidence,
-                  ...(oppAnalysis.stage && { stageKey: stageKeyMap[oppAnalysis.stage] as 'Stagekey0' | 'Stagekey1' | 'Stagekey2' | 'Stagekey3' | 'Stagekey4' | 'Stagekey5' }),
+                  ...(oppAnalysis.stage && { stageKey: stageKeyMap[oppAnalysis.stage] as 'StageKey0' | 'StageKey1' | 'StageKey2' | 'StageKey3' | 'StageKey4' | 'StageKey5' }),
                   ...(oppAnalysis.expectedCloseDate && { expectedclosedate: oppAnalysis.expectedCloseDate }),
                 },
               });
@@ -378,18 +475,20 @@ Opportunity intent: ${activityData.opportunityIntent}`;
                   : `Updated opportunity: ${existingOpp.name1}`
               );
             }
-          } else {
-            // Create new opportunity
-            const targetAccount = accounts.find((a) => a.id === accountId || a.name1 === formData.accountName);
+          } else if (!formData.opportunityId) {
+            // Only create new opportunity if none was selected
+            const targetAccount = formData.accountId
+              ? accounts.find((a) => a.id === formData.accountId)
+              : accounts.find((a) => a.id === accountId);
             if (targetAccount) {
               await createOpportunity.mutateAsync({
                 name1: oppAnalysis.opportunityName || `${formData.accountName} - ${formData.opportunityIntent || 'New Opportunity'}`,
                 // Set account lookup - required field
                 account: { id: targetAccount.id, name1: targetAccount.name1 },
                 totalamount: oppAnalysis.totalAmount || 0,
-                stageKey: (stageKeyMap[oppAnalysis.stage || 'prospecting'] || 'Stagekey0') as 'Stagekey0' | 'Stagekey1' | 'Stagekey2' | 'Stagekey3' | 'Stagekey4' | 'Stagekey5',
+                stageKey: (stageKeyMap[oppAnalysis.stage || 'prospecting'] || 'StageKey0') as 'StageKey0' | 'StageKey1' | 'StageKey2' | 'StageKey3' | 'StageKey4' | 'StageKey5',
                 confidence: oppAnalysis.confidence || 50,
-                ownerid: user?.objectId || 'demo-user-id',
+                ownerid: user?.objectId || '',
                 lastaction: formData.result,
                 ...(oppAnalysis.expectedCloseDate && { expectedclosedate: oppAnalysis.expectedCloseDate }),
               });
@@ -404,7 +503,8 @@ Opportunity intent: ${activityData.opportunityIntent}`;
         }
       }
 
-      navigate(isEditMode ? `/activities/${editActivityId}` : '/home');
+      // Navigate back - use the canonical activity ID
+      navigate(isEditMode && activityId ? `/activities/${activityId}` : '/home');
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : 'Failed to save activity');
     } finally {
@@ -412,16 +512,70 @@ Opportunity intent: ${activityData.opportunityIntent}`;
     }
   };
 
-  // Discard and go back
-  // Discard and go back
+  // Discard and go back - use the canonical activity ID
   const handleDiscard = () => {
-    navigate(isEditMode && editActivityId ? `/activities/${editActivityId}` : '/home');
+    navigate(isEditMode && activityId ? `/activities/${activityId}` : '/home');
   };
 
   // Page title based on mode
   const pageTitle = isEditMode
     ? (locale === 'zh-Hans' ? '编辑活动' : 'Edit Activity')
     : t('newVisitTitle', locale);
+
+  // Show loading state in edit mode while waiting for activity data
+  if (isEditMode && isLoadingActivity) {
+    return (
+      <div className="h-screen flex flex-col bg-background overflow-hidden">
+        <header className="fixed top-0 left-0 right-0 z-40 glass-surface border-b border-border/50 safe-area-top">
+          <div className="flex items-center justify-between h-14 px-4">
+            <button
+              onClick={() => navigate('/')}
+              className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-muted active:bg-muted/80 transition-colors"
+              aria-label="Back"
+            >
+              <ArrowLeft className="w-5 h-5 text-foreground" />
+            </button>
+            <h1 className="text-title text-foreground">{locale === 'zh-Hans' ? '加载中...' : 'Loading...'}</h1>
+            <div className="w-10" />
+          </div>
+        </header>
+        <main className="flex-1 pt-14 flex items-center justify-center">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        </main>
+      </div>
+    );
+  }
+
+  // Show error state if activity not found in edit mode
+  if (isEditMode && !isLoadingActivity && !existingActivity) {
+    return (
+      <div className="h-screen flex flex-col bg-background overflow-hidden">
+        <header className="fixed top-0 left-0 right-0 z-40 glass-surface border-b border-border/50 safe-area-top">
+          <div className="flex items-center justify-between h-14 px-4">
+            <button
+              onClick={() => navigate('/')}
+              className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-muted active:bg-muted/80 transition-colors"
+              aria-label="Back"
+            >
+              <ArrowLeft className="w-5 h-5 text-foreground" />
+            </button>
+            <h1 className="text-title text-foreground">{locale === 'zh-Hans' ? '未找到' : 'Not Found'}</h1>
+            <div className="w-10" />
+          </div>
+        </header>
+        <main className="flex-1 pt-14 flex flex-col items-center justify-center text-center px-4">
+          <p className="text-lg font-medium text-foreground">{locale === 'zh-Hans' ? '活动记录未找到' : 'Activity not found'}</p>
+          <p className="text-sm text-muted-foreground mt-2">{locale === 'zh-Hans' ? '该记录可能已被删除' : 'This record may have been deleted'}</p>
+          <button
+            onClick={() => navigate('/activities')}
+            className="mt-4 px-4 py-2 rounded-lg bg-primary text-primary-foreground"
+          >
+            {locale === 'zh-Hans' ? '返回活动列表' : 'Back to Activities'}
+          </button>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen flex flex-col bg-background overflow-hidden">
@@ -511,18 +665,39 @@ Opportunity intent: ${activityData.opportunityIntent}`;
                 <Building2 className="w-4 h-4" />
                 {t('account', locale)}
               </label>
-              <input
-                type="text"
-                value={formData.accountName}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  setFormData((prev) => ({ ...prev, accountName: e.target.value }))
-                }
-                className={cn(
-                  "w-full px-3 py-2.5 rounded-lg bg-muted/50 border text-foreground placeholder:text-muted-foreground/50 outline-none focus:border-primary/50 transition-colors",
-                  isAIFilled && formData.accountName ? "border-emerald-500/50" : "border-border/30"
-                )}
-                placeholder={locale === 'zh-Hans' ? '客户名称' : 'Account name'}
-              />
+              <Select
+                value={formData.accountId || 'none'}
+                onValueChange={(val: string) => {
+                  const selectedAccount = accounts.find((a) => a.id === val);
+                  setFormData((prev) => ({
+                    ...prev,
+                    accountId: val === 'none' ? '' : val,
+                    accountName: selectedAccount?.name1 || '',
+                    // Reset contact and opportunity when account changes
+                    contactId: '',
+                    contactName: '',
+                    opportunityId: '',
+                    opportunityName: '',
+                  }));
+                }}
+              >
+                <SelectTrigger
+                  className={cn(
+                    "w-full rounded-lg bg-muted/50 border text-foreground",
+                    isAIFilled && formData.accountId ? "border-emerald-500/50" : "border-border/30"
+                  )}
+                >
+                  <SelectValue placeholder={locale === 'zh-Hans' ? '选择客户' : 'Select account'} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">{filteredContacts.length === 0 ? (locale === 'zh-Hans' ? '暂无联系人数据' : 'No contacts available') : (locale === 'zh-Hans' ? '不选择' : 'None')}</SelectItem>
+                  {accounts.filter((a) => a.id).map((acc) => (
+                    <SelectItem key={acc.id} value={acc.id}>
+                      {acc.name1}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Contact */}
@@ -531,18 +706,76 @@ Opportunity intent: ${activityData.opportunityIntent}`;
                 <User className="w-4 h-4" />
                 {t('contact', locale)}
               </label>
-              <input
-                type="text"
-                value={formData.contactName}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  setFormData((prev) => ({ ...prev, contactName: e.target.value }))
-                }
-                className={cn(
-                  "w-full px-3 py-2.5 rounded-lg bg-muted/50 border text-foreground placeholder:text-muted-foreground/50 outline-none focus:border-primary/50 transition-colors",
-                  isAIFilled && formData.contactName ? "border-emerald-500/50" : "border-border/30"
-                )}
-                placeholder={locale === 'zh-Hans' ? '联系人' : 'Contact person'}
-              />
+              <Select
+                value={formData.contactId || 'none'}
+                onValueChange={(val: string) => {
+                  const selectedContact = contacts.find((c) => c.id === val);
+                  setFormData((prev) => ({
+                    ...prev,
+                    contactId: val === 'none' ? '' : val,
+                    contactName: selectedContact?.fullname || '',
+                  }));
+                }}
+              >
+                <SelectTrigger
+                  className={cn(
+                    "w-full rounded-lg bg-muted/50 border text-foreground",
+                    isAIFilled && formData.contactId ? "border-emerald-500/50" : "border-border/30"
+                  )}
+                >
+                  <SelectValue placeholder={locale === 'zh-Hans' ? '选择联系人' : 'Select contact'} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">{filteredContacts.length === 0 ? (locale === 'zh-Hans' ? '暂无联系人数据' : 'No contacts available') : (locale === 'zh-Hans' ? '不选择' : 'None')}</SelectItem>
+                  {filteredContacts.filter((c) => c.id).map((contact) => (
+                    <SelectItem key={contact.id} value={contact.id}>
+                      <div className="flex flex-col items-start text-left">
+                        <span>{contact.fullname}</span>
+                        {contact.title && <span className="text-xs text-muted-foreground">{contact.title}</span>}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Opportunity */}
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-helper text-muted-foreground">
+                <Target className="w-4 h-4" />
+                {locale === 'zh-Hans' ? '关联商机' : 'Related Opportunity'}
+              </label>
+              <Select
+                value={formData.opportunityId || 'none'}
+                onValueChange={(val: string) => {
+                  const selectedOpp = opportunities.find((o) => o.id === val);
+                  setFormData((prev) => ({
+                    ...prev,
+                    opportunityId: val === 'none' ? '' : val,
+                    opportunityName: selectedOpp?.name1 || '',
+                  }));
+                }}
+              >
+                <SelectTrigger
+                  className={cn(
+                    "w-full rounded-lg bg-muted/50 border text-foreground",
+                    isAIFilled && formData.opportunityId ? "border-emerald-500/50" : "border-border/30"
+                  )}
+                >
+                  <SelectValue placeholder={locale === 'zh-Hans' ? '选择商机（可选）' : 'Select opportunity (optional)'} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">{filteredOpportunities.length === 0 ? (locale === 'zh-Hans' ? '暂无商机数据' : 'No opportunities available') : (locale === 'zh-Hans' ? '不选择' : 'None')}</SelectItem>
+                  {filteredOpportunities.filter((o) => o.id).map((opp) => (
+                    <SelectItem key={opp.id} value={opp.id}>
+                      <div className="flex flex-col items-start text-left">
+                        <span>{opp.name1}</span>
+                        {opp.totalamount && <span className="text-xs text-muted-foreground">¥{opp.totalamount.toLocaleString()}</span>}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Visit Date */}
@@ -603,25 +836,27 @@ Opportunity intent: ${activityData.opportunityIntent}`;
               />
             </div>
 
-            {/* Opportunity Intent */}
-            <div className="space-y-2">
-              <label className="flex items-center gap-2 text-helper text-muted-foreground">
-                <Target className="w-4 h-4" />
-                {t('opportunityIntent', locale)}
-              </label>
-              <input
-                type="text"
-                value={formData.opportunityIntent}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  setFormData((prev) => ({ ...prev, opportunityIntent: e.target.value }))
-                }
-                className={cn(
-                  "w-full px-3 py-2.5 rounded-lg bg-muted/50 border text-foreground placeholder:text-muted-foreground/50 outline-none focus:border-primary/50 transition-colors",
-                  isAIFilled && formData.opportunityIntent ? "border-emerald-500/50" : "border-border/30"
-                )}
-                placeholder={locale === 'zh-Hans' ? '商机/意向' : 'Opportunity/Intent'}
-              />
-            </div>
+            {/* Opportunity Intent (text input for new opportunities) */}
+            {!formData.opportunityId && (
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-helper text-muted-foreground">
+                  <Target className="w-4 h-4" />
+                  {t('opportunityIntent', locale)}
+                </label>
+                <input
+                  type="text"
+                  value={formData.opportunityIntent}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setFormData((prev) => ({ ...prev, opportunityIntent: e.target.value }))
+                  }
+                  className={cn(
+                    "w-full px-3 py-2.5 rounded-lg bg-muted/50 border text-foreground placeholder:text-muted-foreground/50 outline-none focus:border-primary/50 transition-colors",
+                    isAIFilled && formData.opportunityIntent ? "border-emerald-500/50" : "border-border/30"
+                  )}
+                  placeholder={locale === 'zh-Hans' ? '商机/意向（AI可自动创建商机）' : 'Opportunity/Intent (AI can auto-create)'}
+                />
+              </div>
+            )}
 
             {/* Action Buttons */}
             <div className="flex gap-3 pt-2">

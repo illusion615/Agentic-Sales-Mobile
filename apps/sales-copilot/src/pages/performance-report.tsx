@@ -20,8 +20,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useActivityList } from '@/generated/hooks/use-activity';
 import { useAccountList } from '@/generated/hooks/use-account';
-import { OpportunityStagekeyToLabel } from '@/generated/models/opportunity-model';
-import type { Opportunity, OpportunityStagekey } from '@/generated/models/opportunity-model';
+import { OpportunityStageKeyToLabel } from '@/generated/models/opportunity-model';
+import type { Opportunity, OpportunityStageKey } from '@/generated/models/opportunity-model';
 import type { Activity } from '@/generated/models/activity-model';
 import type { Account } from '@/generated/models/account-model';
 import { getLocale } from '@/lib/i18n';
@@ -39,11 +39,7 @@ const itemVariants = {
   show: { opacity: 1, y: 0, transition: { duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] } },
 } as const;
 
-function formatCurrency(value: number, locale: string): string {
-  if (locale === 'zh-Hans') {
-    if (value >= 10000) return `¥${(value / 10000).toFixed(1)}万`;
-    return `¥${value.toLocaleString()}`;
-  }
+function formatCurrency(value: number): string {
   if (value >= 1000) return `$${(value / 1000).toFixed(0)}K`;
   return `$${value.toLocaleString()}`;
 }
@@ -107,13 +103,13 @@ export default function PerformanceReportPage() {
 
   // Calculate performance metrics
   const wonDeals = opportunities.filter(
-    (opp: Opportunity) => OpportunityStagekeyToLabel[opp.stageKey] === 'won'
+    (opp: Opportunity) => OpportunityStageKeyToLabel[opp.stageKey] === 'won'
   );
   const lostDeals = opportunities.filter(
-    (opp: Opportunity) => OpportunityStagekeyToLabel[opp.stageKey] === 'lost'
+    (opp: Opportunity) => OpportunityStageKeyToLabel[opp.stageKey] === 'lost'
   );
   const activeDeals = opportunities.filter(
-    (opp: Opportunity) => !['won', 'lost'].includes(OpportunityStagekeyToLabel[opp.stageKey])
+    (opp: Opportunity) => !['won', 'lost'].includes(OpportunityStageKeyToLabel[opp.stageKey])
   );
 
   const totalWonValue = wonDeals.reduce((sum: number, opp: Opportunity) => sum + (opp.totalamount || 0), 0);
@@ -123,7 +119,7 @@ export default function PerformanceReportPage() {
     : 0;
 
   // Simulated targets (would come from settings/backend in real app)
-  const monthlyTarget = 1500000; // ¥150万
+  const monthlyTarget = 1500000; // $1.5M
   const activityTarget = 20;
   const performancePercent = Math.round((totalWonValue / monthlyTarget) * 100);
   const activityPercent = Math.round((activities.length / activityTarget) * 100);
@@ -174,7 +170,7 @@ export default function PerformanceReportPage() {
               </h2>
               <p className="text-sm text-muted-foreground">
                 {locale === 'zh-Hans' ? '目标: ' : 'Target: '}
-                {formatCurrency(monthlyTarget, locale)}
+                {formatCurrency(monthlyTarget)}
               </p>
             </div>
             <ProgressRing progress={performancePercent} />
@@ -189,7 +185,7 @@ export default function PerformanceReportPage() {
                 </span>
               </div>
               <p className="text-xl font-bold text-foreground">
-                {formatCurrency(totalWonValue, locale)}
+                {formatCurrency(totalWonValue)}
               </p>
             </div>
             <div className="glass-card p-3" style={{ borderRadius: 12 }}>
@@ -200,7 +196,7 @@ export default function PerformanceReportPage() {
                 </span>
               </div>
               <p className="text-xl font-bold text-foreground">
-                {formatCurrency(totalPipelineValue, locale)}
+                {formatCurrency(totalPipelineValue)}
               </p>
             </div>
           </div>
@@ -342,7 +338,7 @@ export default function PerformanceReportPage() {
                               {opp.name1}
                             </span>
                             <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400 ml-2">
-                              {formatCurrency(opp.totalamount, locale)}
+                              {formatCurrency(opp.totalamount)}
                             </span>
                           </div>
                         </div>
@@ -369,11 +365,11 @@ export default function PerformanceReportPage() {
                                 {opp.name1}
                               </span>
                               <span className="text-xs text-muted-foreground">
-                                {OpportunityStagekeyToLabel[opp.stageKey]} • {opp.confidence || 0}%
+                                {OpportunityStageKeyToLabel[opp.stageKey]} • {opp.confidence || 0}%
                               </span>
                             </div>
                             <span className="text-sm font-semibold text-foreground ml-2">
-                              {formatCurrency(opp.totalamount, locale)}
+                              {formatCurrency(opp.totalamount)}
                             </span>
                           </div>
                         </div>

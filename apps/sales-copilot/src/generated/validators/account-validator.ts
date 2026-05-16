@@ -7,7 +7,7 @@ export const AccountSchema = z.object({
   id: z.string().uuid(),
   name1: z.string().min(1, { message: "Name is required" }),
   address: z.string().optional(),
-  creditstatusKey: z.enum(['Creditstatuskey0', 'Creditstatuskey1', 'Creditstatuskey2']).optional(),
+  creditstatusKey: z.enum(['CreditstatusKey0', 'CreditstatusKey1', 'CreditstatusKey2']).optional(),
   email: z.string().email().optional(),
   industry: z.string().optional(),
   lastcontactedon: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/, "DateTime must be in ISO format").optional(),
@@ -16,10 +16,10 @@ export const AccountSchema = z.object({
   longitude: z.number().optional(),
   notes: z.string().optional(),
   ownerid: z.string().min(1, { message: "Owner ID is required" }),
-  paymentstatusKey: z.enum(['Paymentstatuskey0', 'Paymentstatuskey1', 'Paymentstatuskey2']).optional(),
+  paymentstatusKey: z.enum(['PaymentstatusKey0', 'PaymentstatusKey1', 'PaymentstatusKey2']).optional(),
   phone: z.string().optional(),
-  regionKey: z.enum(['Regionkey0', 'Regionkey1', 'Regionkey2', 'Regionkey3']).optional(),
-  tierKey: z.enum(['Tierkey0', 'Tierkey1', 'Tierkey2', 'Tierkey3']).optional(),
+  regionKey: z.enum(['RegionKey0', 'RegionKey1', 'RegionKey2', 'RegionKey3']).optional(),
+  tierKey: z.enum(['TierKey0', 'TierKey1', 'TierKey2', 'TierKey3']).optional(),
 });
 
 /**

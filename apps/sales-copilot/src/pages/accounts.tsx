@@ -1,129 +1,302 @@
+import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { Building2, Phone, Mail, ChevronRight } from 'lucide-react';
+import { Building2, Phone, ChevronRight, AlertTriangle, Search, Users } from 'lucide-react';
 import { MobileLayout } from '@/components/mobile-layout';
-import { GlassListItem } from '@/components/glass-card';
-
-// Placeholder data - will be replaced with Dataverse data
-const accounts = [
-  {
-    id: '1',
-    name: '华为技术有限公司',
-    industry: '信息技术',
-    phone: '+86 755-2878-0000',
-    email: 'contact@huawei.com',
-    status: 'active',
-  },
-  {
-    id: '2',
-    name: '阿里巴巴集团',
-    industry: '电子商务',
-    phone: '+86 571-8502-2088',
-    email: 'contact@alibaba.com',
-    status: 'active',
-  },
-  {
-    id: '3',
-    name: '腾讯科技',
-    industry: '互联网',
-    phone: '+86 755-8601-3388',
-    email: 'contact@tencent.com',
-    status: 'prospect',
-  },
-  {
-    id: '4',
-    name: '字节跳动',
-    industry: '互联网',
-    phone: '+86 10-5765-8888',
-    email: 'contact@bytedance.com',
-    status: 'active',
-  },
-];
+import { cn } from '@/lib/utils';
+import { useAccountList } from '@/generated/hooks/use-account';
+import { useContactList } from '@/generated/hooks/use-contact';
+import { useQueryClient } from '@tanstack/react-query';
+import { AccountTierKeyToLabel, AccountRegionKeyToLabel } from '@/generated/models/account-model';
+import type { Account, AccountTierKey, AccountRegionKey } from '@/generated/models/account-model';
+import type { Contact } from '@/generated/models/contact-model';
+import { getRegionEnglish } from '@/lib/display-labels';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
+import { useCopilot } from '@/contexts/copilot-context';
+import { getLocale } from '@/lib/i18n';
+import { PullToRefresh } from '@/components/pull-to-refresh';
 
 const containerVariants = {
   hidden: { opacity: 0 },
   show: {
     opacity: 1,
-    transition: {
-      staggerChildren: 0.06,
-    },
+    transition: { staggerChildren: 0.05 },
   },
 } as const;
 
 const itemVariants = {
-  hidden: { opacity: 0, x: -20 },
-  show: { opacity: 1, x: 0 },
+  hidden: { opacity: 0, y: 12 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] } },
 } as const;
 
-export default function AccountsPage() {
+function getDaysSinceContact(dateStr?: string): number {
+  if (!dateStr) return 999;
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffTime = Math.abs(now.getTime() - date.getTime());
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+}
+
+function getContactStatus(daysSince: number): { label: string; color: string; isAtRisk: boolean } {
+  if (daysSince <= 7) return { label: 'Recent', color: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400', isAtRisk: false };
+  if (daysSince <= 14) return { label: 'Active', color: 'bg-blue-500/10 text-blue-600 dark:text-blue-400', isAtRisk: false };
+  if (daysSince <= 30) return { label: 'Cooling', color: 'bg-amber-500/10 text-amber-600 dark:text-amber-400', isAtRisk: false };
+  return { label: 'At Risk', color: 'bg-rose-500/10 text-rose-600 dark:text-rose-400', isAtRisk: true };
+}
+
+export default function ClientsPage() {
+  const navigate = useNavigate();
+  const [searchQuery, setSearchQuery] = useState('');
+  const locale = getLocale();
+
+  // Copilot context for agent awareness
+  const copilot = useCopilot();
+  const [tierFilter, setTierFilter] = useState<string>('all');
+  const [showAtRiskOnly, setShowAtRiskOnly] = useState(false);
+
+  // Fetch from Dataverse only
+  const { data: accounts = [], isLoading: isLoadingAccounts } = useAccountList();
+  const { data: contacts = [] } = useContactList();
+  const queryClient = useQueryClient();
+
+  // Debug logging for account IDs
+  useEffect(() => {
+    if (accounts.length > 0) {
+      console.log('[AccountsList] Accounts loaded:', accounts.map((a: Account) => ({
+        id: a.id,
+        name: a.name1,
+        hasId: !!a.id,
+      })));
+    }
+  }, [accounts]);
+
+  // Pull to refresh handler
+  const handleRefresh = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['account-list'] }),
+      queryClient.invalidateQueries({ queryKey: ['contact-list'] }),
+    ]);
+  }, [queryClient]);
+
+  // Helper to get contacts by account ID
+  const getContactsByAccountId = (accountId: string): Contact[] => {
+    return contacts.filter((c: Contact) => c.account?.id === accountId);
+  };
+
+  // Enrich accounts with contact status
+  const enrichedAccounts = useMemo(() => {
+    return accounts.map((account: Account) => {
+      const daysSince = getDaysSinceContact(account.lastcontactedon || account.lastinteractiondate);
+      const contactStatus = getContactStatus(daysSince);
+      const accountContacts = getContactsByAccountId(account.id);
+      return { ...account, daysSince, contactStatus, contactCount: accountContacts.length };
+    });
+  }, [accounts, contacts]);
+
+  // Apply filters
+  const filteredAccounts = useMemo(() => {
+    return enrichedAccounts.filter((account) => {
+      // Search filter
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        const matchesName = account.name1?.toLowerCase().includes(query);
+        const matchesIndustry = account.industry?.toLowerCase().includes(query);
+        if (!matchesName && !matchesIndustry) return false;
+      }
+      // Tier filter
+      if (tierFilter !== 'all' && String(account.tierKey) !== tierFilter) return false;
+      // At risk filter
+      if (showAtRiskOnly && !account.contactStatus.isAtRisk) return false;
+      return true;
+    });
+  }, [enrichedAccounts, searchQuery, tierFilter, showAtRiskOnly]);
+
+  // Stats
+  const totalClients = accounts.length;
+  const atRiskCount = enrichedAccounts.filter((a) => a.contactStatus.isAtRisk).length;
+  const contactedThisWeek = enrichedAccounts.filter((a) => a.daysSince <= 7).length;
+
+  // Set page context for Copilot agent awareness
+  useEffect(() => {
+    copilot.setPageContext({
+      currentPage: locale === 'zh-Hans' ? '客户列表' : 'Accounts List',
+      summary: locale === 'zh-Hans'
+        ? `客户列表: 共${totalClients}个客户，${atRiskCount}个需要跟进，${contactedThisWeek}个本周已联系`
+        : `Accounts list: ${totalClients} total accounts, ${atRiskCount} at risk, ${contactedThisWeek} contacted this week`,
+      pageData: {
+        totalAccounts: totalClients,
+        atRiskCount,
+        contactedThisWeek,
+        currentFilter: tierFilter,
+        showAtRiskOnly,
+        searchQuery,
+        displayedCount: filteredAccounts.length,
+      },
+    });
+    
+    return () => {
+      copilot.setPageContext(null);
+    };
+  }, [totalClients, atRiskCount, contactedThisWeek, tierFilter, showAtRiskOnly, searchQuery, filteredAccounts.length, locale, copilot.setPageContext]);
+
+  if (isLoadingAccounts) {
+    return (
+      <MobileLayout title="Client Coverage">
+        <div className="flex items-center justify-center h-64">
+          <div className="text-muted-foreground">Loading...</div>
+        </div>
+      </MobileLayout>
+    );
+  }
+
   return (
-    <MobileLayout title="客户管理">
-      <motion.div
-        variants={containerVariants}
-        initial="hidden"
-        animate="show"
-        className="space-y-3 py-4"
-      >
-        {/* Stats bar */}
+    <MobileLayout title="Client Coverage">
+      <PullToRefresh onRefresh={handleRefresh} className="flex-1 overflow-y-auto pb-32">
         <motion.div
-          variants={itemVariants}
-          className="flex items-center justify-between text-helper text-muted-foreground mb-2"
+          variants={containerVariants}
+          initial="hidden"
+          animate="show"
+          className="space-y-4 py-4"
         >
-          <span>共 {accounts.length} 个客户</span>
-          <span className="text-[#0D8F8C]">语音查询可用</span>
-        </motion.div>
-
-        {/* Account list */}
-        {accounts.map((account, index: number) => (
-          <motion.div key={account.id} variants={itemVariants}>
-            <GlassListItem>
-              <div className="flex items-center gap-3">
-                {/* Avatar */}
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#0D8F8C] to-[#14B8B4] flex items-center justify-center flex-shrink-0">
-                  <Building2 className="w-6 h-6 text-white" />
-                </div>
-
-                {/* Info */}
-                <div className="flex-1 min-w-0">
-                  <h3 className="text-title text-foreground truncate">
-                    {account.name}
-                  </h3>
-                  <p className="text-helper text-muted-foreground">
-                    {account.industry}
-                  </p>
-                  <div className="flex items-center gap-3 mt-1">
-                    <span className="flex items-center gap-1 text-helper text-muted-foreground">
-                      <Phone className="w-3 h-3" />
-                      <span className="truncate max-w-[100px]">
-                        {account.phone}
-                      </span>
-                    </span>
-                  </div>
-                </div>
-
-                {/* Status & Arrow */}
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <span
-                    className={`w-2 h-2 rounded-full ${
-                      account.status === 'active'
-                        ? 'bg-[#0D8F8C]'
-                        : 'bg-primary'
-                    }`}
-                  />
-                  <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                </div>
-              </div>
-            </GlassListItem>
+          {/* Stats Summary */}
+          <motion.div variants={itemVariants} className="grid grid-cols-3 gap-2">
+            <div className="glass-card p-3 text-center" style={{ borderRadius: 16 }}>
+              <p className="text-2xl font-bold text-foreground">{totalClients}</p>
+              <p className="text-xs text-muted-foreground">Total</p>
+            </div>
+            <div className="glass-card p-3 text-center" style={{ borderRadius: 16 }}>
+              <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{contactedThisWeek}</p>
+              <p className="text-xs text-muted-foreground">This Week</p>
+            </div>
+            <div className="glass-card p-3 text-center" style={{ borderRadius: 16 }}>
+              <p className="text-2xl font-bold text-rose-600 dark:text-rose-400">{atRiskCount}</p>
+              <p className="text-xs text-muted-foreground">At Risk</p>
+            </div>
           </motion.div>
-        ))}
 
-        {/* Voice hint */}
-        <motion.div
-          variants={itemVariants}
-          className="text-center text-helper text-muted-foreground pt-6"
-        >
-          <p>说 "查找华为" 快速搜索客户</p>
+          {/* Search & Filters */}
+          <motion.div variants={itemVariants} className="space-y-2">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                placeholder="Search clients..."
+                value={searchQuery}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
+                className="pl-9 h-10 bg-muted/50 border-0"
+              />
+            </div>
+            <div className="flex gap-2">
+              <Select value={tierFilter} onValueChange={setTierFilter}>
+                <SelectTrigger className="flex-1 h-9 bg-muted/50 border-0">
+                  <SelectValue placeholder="Tier" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Tiers</SelectItem>
+                  {Object.entries(AccountTierKeyToLabel).map(([key, label]) => (
+                    <SelectItem key={key} value={key}>{label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                variant={showAtRiskOnly ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setShowAtRiskOnly(!showAtRiskOnly)}
+                className={cn(
+                  'gap-1.5 h-9',
+                  showAtRiskOnly && 'bg-rose-500 hover:bg-rose-600 text-white border-0'
+                )}
+              >
+                <AlertTriangle className="w-3.5 h-3.5" />
+                At Risk
+              </Button>
+            </div>
+          </motion.div>
+
+          {/* Client List */}
+          <motion.div variants={itemVariants} className="space-y-2">
+            {filteredAccounts.length === 0 ? (
+              <Empty className="py-12">
+                <EmptyHeader>
+                  <EmptyTitle>No clients found</EmptyTitle>
+                  <EmptyDescription>
+                    {accounts.length === 0 
+                      ? 'Add clients in Dataverse to see them here'
+                      : 'Try adjusting your search or filters'
+                    }
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            ) : (
+              filteredAccounts.map((account) => (
+                <motion.div
+                  key={account.id}
+                  variants={itemVariants}
+                  className="glass-card p-3 cursor-pointer hover:bg-muted/50 transition-colors"
+                  style={{ borderRadius: 16 }}
+                  onClick={() => navigate(`/accounts/${account.id}`)}
+                >
+                  <div className="flex items-start gap-3">
+                    {/* Avatar */}
+                    <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-primary/80 to-primary flex items-center justify-center flex-shrink-0">
+                      <Building2 className="w-5 h-5 text-primary-foreground" />
+                    </div>
+
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <h3 className="text-sm font-medium text-foreground truncate flex-1">
+                          {account.name1}
+                        </h3>
+                        {account.tierKey && (
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">
+                            {AccountTierKeyToLabel[account.tierKey as AccountTierKey]}
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mb-1.5">
+                        {account.industry || 'Uncategorized'}
+                        {account.regionKey && ` • ${getRegionEnglish(AccountRegionKeyToLabel[account.regionKey as AccountRegionKey])}`}
+                      </p>
+                      <div className="flex items-center gap-3 text-xs">
+                        <span className={cn('px-1.5 py-0.5 rounded-md text-[10px] font-medium', account.contactStatus.color)}>
+                          {account.contactStatus.isAtRisk && <AlertTriangle className="w-2.5 h-2.5 inline mr-0.5" />}
+                          {account.daysSince}d ago
+                        </span>
+                        {account.phone && (
+                          <span className="flex items-center gap-1 text-muted-foreground">
+                            <Phone className="w-3 h-3" />
+                            <span className="truncate max-w-[80px]">{account.phone}</span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Arrow */}
+                    <ChevronRight className="w-4 h-4 text-muted-foreground/50 flex-shrink-0 mt-1" />
+                  </div>
+                </motion.div>
+              ))
+            )}
+          </motion.div>
+
+          {/* Footer hint */}
+          {filteredAccounts.length > 0 && (
+            <motion.div variants={itemVariants} className="text-center text-xs text-muted-foreground py-2">
+              Showing {filteredAccounts.length} of {totalClients} clients
+            </motion.div>
+          )}
         </motion.div>
-      </motion.div>
+      </PullToRefresh>
     </MobileLayout>
   );
 }

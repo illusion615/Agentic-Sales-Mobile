@@ -7,14 +7,15 @@ export const ActivitySchema = z.object({
   id: z.string().uuid(),
   title: z.string().min(1, { message: "Title is required" }),
   account: z.object({ id: z.string().uuid(), name1: z.string() }).optional(),
+  contact: z.object({ id: z.string().uuid(), fullname: z.string() }).optional(),
   createdon: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/, "DateTime must be in ISO format").optional(),
-  draftstatusKey: z.enum(['Draftstatuskey0', 'Draftstatuskey1', 'Draftstatuskey2', 'Draftstatuskey3']),
+  draftstatusKey: z.enum(['DraftstatusKey0', 'DraftstatusKey1', 'DraftstatusKey2', 'DraftstatusKey3']),
   notes: z.string().optional(),
   opportunity: z.object({ id: z.string().uuid(), name1: z.string() }).optional(),
-  outcomeKey: z.enum(['Outcomekey0', 'Outcomekey1', 'Outcomekey2', 'Outcomekey3', 'Outcomekey4']).optional(),
+  outcomeKey: z.enum(['OutcomeKey0', 'OutcomeKey1', 'OutcomeKey2', 'OutcomeKey3', 'OutcomeKey4']).optional(),
   ownerid: z.string().min(1, { message: "Owner ID is required" }),
   scheduleddate: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/, "DateTime must be in ISO format").min(1, { message: "Scheduled Date is required" }),
-  typeKey: z.enum(['Typekey0', 'Typekey1', 'Typekey2', 'Typekey3', 'Typekey4']),
+  typeKey: z.enum(['TypeKey0', 'TypeKey1', 'TypeKey2', 'TypeKey3', 'TypeKey4']),
 });
 
 /**

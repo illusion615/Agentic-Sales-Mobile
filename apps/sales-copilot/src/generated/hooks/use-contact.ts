@@ -32,6 +32,7 @@ export function useContact(id: string) {
 
 /**
  * Create a new Contact record.
+ * @remarks Form validation: use CreateContactSchema with zodResolver for type-safe create forms
  */
 export function useCreateContact() {
   const client = useQueryClient();
@@ -45,6 +46,7 @@ export function useCreateContact() {
 
 /**
  * Update an existing Contact record.
+ * @remarks Form validation: use UpdateContactSchema.partial().omit({ id: true }) with zodResolver for edit forms (matches changedFields input)
  */
 export function useUpdateContact() {
   const client = useQueryClient();
@@ -79,3 +81,6 @@ export function useDeleteContact() {
 
 /** Data source type for this table — drives InMemoryDataBanner visibility. */
 export const Contact_DATA_SOURCE_TYPE = 'Dataverse' as const;
+
+export { ContactSchema, CreateContactSchema, UpdateContactSchema } from "../validators/contact-validator";
+export type { ContactInput, CreateContactInput, UpdateContactInput } from "../validators/contact-validator";

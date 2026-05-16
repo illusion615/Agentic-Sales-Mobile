@@ -23,7 +23,7 @@ import { cn } from '@/lib/utils';
 import { useUser } from '@/hooks/use-user';
 import { useAccountList } from '@/generated/hooks/use-account';
 import { useCreateActivity } from '@/generated/hooks/use-activity';
-import { getCopilotConfig, sendMessage as sendCopilotMessage, getOrCreateConversation, pollMessages, type ConversationInfo } from '@/services/copilot-service';
+import { getCopilotConfig } from '@/services/copilot-service';
 import { getLocale, getLLMConfig, generateVoiceSummary, type Locale } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -31,20 +31,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Calendar as CalendarComponent } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-
-// Extracted activity data from natural language
-interface ExtractedVisitData {
-  accountId?: string;
-  accountName?: string;
-  contactName?: string;
-  visitDate?: Date;
-  visitType?: 'in-person' | 'phone' | 'video' | 'email';
-  summary?: string;
-  outcome?: string;
-  nextSteps?: string;
-  opportunitySignal?: string;
-  confidence: number;
-}
+import { useCopilot, type ExtractedVisitData } from '@/contexts/copilot-context';
 
 // Form state for manual editing
 interface VisitFormData {
@@ -284,15 +271,37 @@ export default function VisitLogPage() {
 
   // Refs
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const copilotConversationRef = useRef<ConversationInfo | null>(null);
-  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Cleanup on unmount
+  // Copilot context
+  const copilot = useCopilot();
+
+  // Set page context for Copilot
   useEffect(() => {
+    const selectedAccount = accounts.find((a) => a.id === formData.accountId);
+    copilot.setPageContext({
+      currentPage: locale === 'zh-Hans' ? '记录拜访' : 'Visit Log',
+      summary: locale === 'zh-Hans'
+        ? `正在记录拜访。模式: ${inputMode === 'copilot' ? 'AI助手' : '手动填写'}，状态: ${flowState}，${selectedAccount ? `客户: ${selectedAccount.name1}` : '未选择客户'}`
+        : `Logging a visit. Mode: ${inputMode === 'copilot' ? 'AI Assistant' : 'Manual Entry'}, State: ${flowState}, ${selectedAccount ? `Account: ${selectedAccount.name1}` : 'No account selected'}`,
+      pageData: {
+        inputMode,
+        flowState,
+        selectedAccountId: formData.accountId || null,
+        selectedAccountName: selectedAccount?.name1 || null,
+        contactName: formData.contactName || null,
+        visitDate: formData.visitDate.toISOString(),
+        visitType: formData.visitType,
+        hasSummary: !!formData.summary,
+        hasOutcome: !!formData.outcome,
+        hasNextSteps: !!formData.nextSteps,
+        extractedConfidence: extractedData?.confidence || null,
+      },
+    });
+
     return () => {
-      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+      copilot.setPageContext(null);
     };
-  }, []);
+  }, [inputMode, flowState, formData, extractedData?.confidence, accounts, locale, copilot.setPageContext]);
 
   // Find account by name (for AI extraction)
   const findAccountByName = useCallback((name: string) => {
@@ -381,79 +390,13 @@ Return ONLY JSON format, no other text. If a field cannot be extracted from the 
     }
   }, [locale, findAccountByName]);
 
-  // Extract data using Copilot Studio
+  // Extract data using Copilot Studio - delegates to context for Direct Line session management
   const extractWithCopilot = useCallback(async (text: string): Promise<ExtractedVisitData | null> => {
     if (!copilotConfig) return null;
 
-    try {
-      const conversation = await getOrCreateConversation(copilotConfig);
-      copilotConversationRef.current = conversation;
-
-      // Send extraction request
-      const extractionPrompt = locale === 'zh-Hans'
-        ? `请从以下拜访描述中提取信息，以JSON格式返回：客户名称(accountName)、联系人(contactName)、拜访日期(visitDate)、拜访类型(visitType)、摘要(summary)、结果(outcome)、后续计划(nextSteps)、商机信号(opportunitySignal)、置信度(confidence)。\n\n描述：${text}`
-        : `Please extract information from the following visit description and return in JSON format: account name (accountName), contact (contactName), visit date (visitDate), visit type (visitType), summary, outcome, next steps (nextSteps), opportunity signal (opportunitySignal), confidence (0-100).\n\nDescription: ${text}`;
-
-      await sendCopilotMessage(conversation, user?.objectId || 'anonymous', extractionPrompt);
-
-      // Poll for response
-      let watermark: string | undefined;
-      let attempts = 0;
-      const maxAttempts = 20;
-
-      while (attempts < maxAttempts) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        const { activities, watermark: newWatermark } = await pollMessages(conversation, watermark);
-        watermark = newWatermark;
-
-        const botMessages = activities.filter((a) => a.type === 'message' && a.from === 'bot' && a.text);
-        
-        if (botMessages.length > 0) {
-          const responseText = botMessages[botMessages.length - 1].text || '';
-          
-          // Try to parse JSON from response
-          try {
-            let jsonStr = responseText;
-            if (jsonStr.includes('{')) {
-              jsonStr = jsonStr.substring(jsonStr.indexOf('{'));
-              if (jsonStr.includes('}')) {
-                jsonStr = jsonStr.substring(0, jsonStr.lastIndexOf('}') + 1);
-              }
-            }
-            
-            const parsed = JSON.parse(jsonStr);
-            const matchedAccount = parsed.accountName ? findAccountByName(parsed.accountName) : undefined;
-
-            return {
-              accountId: matchedAccount?.id,
-              accountName: parsed.accountName,
-              contactName: parsed.contactName,
-              visitDate: parsed.visitDate ? new Date(parsed.visitDate) : new Date(),
-              visitType: parsed.visitType,
-              summary: parsed.summary,
-              outcome: parsed.outcome,
-              nextSteps: parsed.nextSteps,
-              opportunitySignal: parsed.opportunitySignal,
-              confidence: parsed.confidence || 75,
-            };
-          } catch {
-            // If JSON parsing fails, create basic extraction
-            return {
-              summary: responseText,
-              visitDate: new Date(),
-              confidence: 50,
-            };
-          }
-        }
-        attempts++;
-      }
-
-      return null;
-    } catch (error) {
-      console.error('Copilot extraction failed:', error);
-      return null;
-    }
-  }, [copilotConfig, user, locale, findAccountByName]);
+    // Delegate Direct Line orchestration to the centralized context
+    return copilot.extractVisitData(text, findAccountByName);
+  }, [copilotConfig, copilot, findAccountByName]);
 
   // Process natural language input
   const processInput = useCallback(async () => {
@@ -520,9 +463,9 @@ Return ONLY JSON format, no other text. If a field cannot be extracted from the 
       
       await createActivity.mutateAsync({
         title: `${t('title', locale)} - ${selectedAccount?.name1 || formData.contactName || 'Visit'}`,
-        typeKey: 'Typekey0', // visit type
-        draftstatusKey: 'Draftstatuskey1', // confirmed
-        ownerid: user?.objectId || 'demo-user-id',
+        typeKey: 'TypeKey0', // visit type
+        draftstatusKey: 'DraftstatusKey1', // confirmed
+        ownerid: user?.objectId || '',
         scheduleddate: formData.visitDate.toISOString(),
         notes: [
           formData.summary,

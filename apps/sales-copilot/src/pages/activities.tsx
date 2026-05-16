@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef } from 'react';
+import { useMemo, useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -14,13 +14,18 @@ import {
   ChevronLeft,
 } from 'lucide-react';
 import { MobileLayout } from '@/components/mobile-layout';
+import { FloatingQuickActions } from '@/components/floating-quick-actions';
 import { GlassCard, GlassListItem } from '@/components/glass-card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useActivityList } from '@/generated/hooks/use-activity';
-import { ActivityTypekeyToLabel, ActivityDraftstatuskeyToLabel } from '@/generated/models/activity-model';
-import type { Activity as DataverseActivity, ActivityTypekey, ActivityDraftstatuskey } from '@/generated/models/activity-model';
+import { useQueryClient } from '@tanstack/react-query';
+import { ActivityTypeKeyToLabel, ActivityDraftstatusKeyToLabel } from '@/generated/models/activity-model';
+import type { Activity as DataverseActivity, ActivityTypeKey, ActivityDraftstatusKey } from '@/generated/models/activity-model';
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
+import { useCopilot } from '@/contexts/copilot-context';
+import { getLocale } from '@/lib/i18n';
+import { PullToRefresh } from '@/components/pull-to-refresh';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -88,10 +93,10 @@ function isToday(dateStr: string): boolean {
 
 function ActivityItem({ activity }: { activity: DataverseActivity }) {
   const navigate = useNavigate();
-  const typeLabel = ActivityTypekeyToLabel[activity.typeKey];
+  const typeLabel = ActivityTypeKeyToLabel[activity.typeKey];
   const Icon = activityIcons[typeLabel] || CheckSquare;
   const color = activityColors[typeLabel] || 'bg-muted';
-  const statusLabel = ActivityDraftstatuskeyToLabel[activity.draftstatusKey];
+  const statusLabel = ActivityDraftstatusKeyToLabel[activity.draftstatusKey];
   const isCompleted = statusLabel === 'completed';
 
   return (
@@ -147,15 +152,27 @@ export default function ActivitiesPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const initialView = searchParams.get('view') as ViewMode | null;
+  const initialDateParam = searchParams.get('date');
+  const initialDate = initialDateParam ? new Date(initialDateParam + 'T00:00:00') : new Date();
   const [viewMode, setViewMode] = useState<ViewMode>(initialView && ['day', 'week', 'month'].includes(initialView) ? initialView : 'day');
-  const [currentDate, setCurrentDate] = useState(new Date());
+  const [currentDate, setCurrentDate] = useState(initialDate);
   const [swipeDirection, setSwipeDirection] = useState<'left' | 'right' | null>(null);
+  const locale = getLocale();
+
+  // Copilot context for agent awareness
+  const copilot = useCopilot();
   const dragStartX = useRef<number>(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  const queryClient = useQueryClient();
   const { data: activities = [], isLoading } = useActivityList({
     orderBy: ['scheduleddate desc'],
   });
+
+  // Pull to refresh handler
+  const handleRefresh = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: ['activity-list'] });
+  }, [queryClient]);
 
   // Filter activities based on view mode and current date
   const filteredActivities = useMemo(() => {
@@ -190,8 +207,32 @@ export default function ActivitiesPage() {
   }, [filteredActivities]);
 
   const pendingCount = filteredActivities.filter(
-    (a: DataverseActivity) => ActivityDraftstatuskeyToLabel[a.draftstatusKey] !== 'completed'
+    (a: DataverseActivity) => ActivityDraftstatusKeyToLabel[a.draftstatusKey] !== 'completed'
   ).length;
+
+  // Set page context for Copilot agent awareness
+  useEffect(() => {
+    copilot.setPageContext({
+      currentPage: locale === 'zh-Hans' ? '活动列表' : 'Activities List',
+      summary: locale === 'zh-Hans'
+        ? `活动列表: ${viewMode === 'day' ? '今日' : viewMode === 'week' ? '本周' : '本月'}共${filteredActivities.length}个活动，${pendingCount}个待完成`
+        : `Activities list: ${filteredActivities.length} activities in ${viewMode} view, ${pendingCount} pending`,
+      pageData: {
+        viewMode,
+        currentDate: currentDate.toISOString(),
+        totalActivities: filteredActivities.length,
+        pendingCount,
+        activitiesByDate: Object.keys(activitiesByDate).map((dateKey) => ({
+          date: dateKey,
+          count: activitiesByDate[dateKey].length,
+        })),
+      },
+    });
+    
+    return () => {
+      copilot.setPageContext(null);
+    };
+  }, [viewMode, currentDate, filteredActivities.length, pendingCount, activitiesByDate, locale, copilot.setPageContext]);
 
   // Navigation functions
   const goBack = () => {
@@ -307,7 +348,7 @@ export default function ActivitiesPage() {
         </DropdownMenu>
       }
     >
-      <div className="flex-1 overflow-y-auto pb-40">
+      <PullToRefresh onRefresh={handleRefresh} className="flex-1 overflow-y-auto pb-40">
         <div className="py-4 space-y-4">
           {/* Navigation Header */}
           <div className="flex items-center justify-between px-1">
@@ -409,7 +450,7 @@ export default function ActivitiesPage() {
                             </div>
                             <div className="space-y-1">
                               {dayActivities.slice(0, 3).map((activity: DataverseActivity) => {
-                                const typeLabel = ActivityTypekeyToLabel[activity.typeKey];
+                                const typeLabel = ActivityTypeKeyToLabel[activity.typeKey];
                                 const color = activityColors[typeLabel] || 'bg-muted';
                                 return (
                                   <div
@@ -464,7 +505,7 @@ export default function ActivitiesPage() {
                             </div>
                             <div className="space-y-1">
                               {dayActivities.slice(0, 4).map((activity: DataverseActivity) => {
-                                const typeLabel = ActivityTypekeyToLabel[activity.typeKey];
+                                const typeLabel = ActivityTypeKeyToLabel[activity.typeKey];
                                 const color = activityColors[typeLabel] || 'bg-muted';
                                 return (
                                   <div
@@ -530,7 +571,7 @@ export default function ActivitiesPage() {
                             {dayActivities.length > 0 && (
                               <div className="flex gap-0.5 mt-0.5">
                                 {dayActivities.slice(0, 3).map((activity: DataverseActivity, idx: number) => {
-                                  const typeLabel = ActivityTypekeyToLabel[activity.typeKey];
+                                  const typeLabel = ActivityTypeKeyToLabel[activity.typeKey];
                                   const color = activityColors[typeLabel] || 'bg-muted';
                                   return (
                                     <div
@@ -551,20 +592,18 @@ export default function ActivitiesPage() {
             </AnimatePresence>
           </div>
         </div>
-      </div>
+      </PullToRefresh>
 
-      {/* Quick Action - Log New Activity - positioned above GlobalCopilot */}
-      <div className="fixed bottom-20 left-0 right-0 z-40 px-4 pointer-events-none">
-        <div className="flex justify-end pointer-events-auto">
-          <Button
-            className="gap-2 rounded-full shadow-lg"
-            onClick={() => navigate('/activity-capture')}
-          >
-            <Plus className="w-4 h-4" />
-            Log New Activity
-          </Button>
-        </div>
-      </div>
+      <FloatingQuickActions
+        actions={[
+          {
+            id: 'log-activity',
+            icon: Plus,
+            label: 'Log New Activity',
+            onClick: () => navigate('/activity-capture'),
+          },
+        ]}
+      />
     </MobileLayout>
   );
 }
