@@ -592,7 +592,14 @@ export async function executeFunction(
         if (args.confidence !== undefined) oppChanges.confidence = args.confidence as number;
         if (args.expectedCloseDate) oppChanges.expectedclosedate = args.expectedCloseDate as string;
         if (args.lastAction) oppChanges.lastaction = args.lastAction as string;
-        
+
+        // When stage transitions to a terminal state (won/lost), stamp closedon
+        // with the current time so dashboards (Q Perf, etc.) attribute the deal
+        // to the correct quarter. Caller-provided closedon wins if supplied.
+        if (oppChanges.stageKey === 'StageKey4' || oppChanges.stageKey === 'StageKey5') {
+          oppChanges.closedon = (args.closedon as string) || new Date().toISOString();
+        }
+
         if (Object.keys(oppChanges).length === 0) {
           return { success: false, error: '没有提供要更新的字段 / No fields to update' };
         }

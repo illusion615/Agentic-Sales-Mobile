@@ -630,17 +630,15 @@ export default function HomeDashboard() {
     const quarterEnd = new Date(today.getFullYear(), (currentQuarter + 1) * 3, 0, 23, 59, 59, 999);
     
     // Won opportunities this quarter.
-    // Only `closedon` (the actual close date) is meaningful for win attribution.
-    // `expectedclosedate` is a planned future date that does NOT update when the
-    // stage flips to won, so using it as a fallback misroutes current wins into
-    // future quarters (e.g. an opp won today with planned close in July gets
-    // dropped from Q2 even though the cash hit this quarter). If `closedon` is
-    // missing or invalid, assume the win happened recently → count it.
+    // Strictly attribute by `closedon` (actual close date). Any won opp without
+    // `closedon` is a data bug at write time — fix it in updateOpportunity, do
+    // NOT silently absorb it here, otherwise the same opp would be counted in
+    // every quarter forever.
     const wonOpportunities = opportunities.filter((o: Opportunity) => {
       if (!isWonStage(o.stageKey)) return false;
-      if (!o.closedon) return true;
+      if (!o.closedon) return false;
       const d = new Date(o.closedon);
-      if (Number.isNaN(d.getTime())) return true;
+      if (Number.isNaN(d.getTime())) return false;
       return d >= quarterStart && d <= quarterEnd;
     });
     const quarterlyWonAmount = wonOpportunities.reduce((sum: number, o: Opportunity) => sum + (o.totalamount || 0), 0);
