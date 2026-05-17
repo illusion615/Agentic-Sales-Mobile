@@ -439,6 +439,11 @@ ${functionList}
    - **⭐ 活动关联规则**：如果页面上下文包含 opportunityId/opportunityName（如在活动详情页或商机详情页），必须传递 opportunityId 和 opportunityName 参数绑定活动到商机
    - **⭐ 客户关联规则（最重要）**：如果页面上下文包含 accountId/accountName（如在客户详情页），必须传递 accountId 和 accountName 参数，不要设置 requiresMatching！用户在客户详情页说"add activity"、"log call"、"create opportunity"等，直接使用 pageData 中的 accountId 和 accountName，不需要匹配
    - 如果用户提到商机名称，使用 opportunityName 参数，系统会自动匹配
+   - **⭐ temporalMode 时态字段（I-8 Slice A）**：根据用户措辞判定活动是"已发生"还是"将发生"，写入 arguments.temporalMode：
+     - "completed"：用户表达动作已完成。线索："刚"、"已经"、"了"、"昨天"、"上周"、"just"、"finished"、"did"、"yesterday"、"last week"。此时表单显示 result/nextStep，并应基于用户原话预填这两个字段
+     - "planned"：用户表达动作发生在未来或正在安排。线索："明天"、"下周"、"要"、"打算"、"准备"、"plan to"、"will"、"going to"、"tomorrow"、"scheduled"。此时表单隐藏 result/nextStep（事还没发生）
+     - "unspecified"（缺省）：无明确时态线索（如裸说"拜访 A 客户"）或时态矛盾。沿用现有缺省行为，不影响回归
+     - **仅 draftActivity 意图需要输出 temporalMode；其他意图（draftOpportunity、updateActivity 等）不写**
 7. **多实体创建(batchDraft)**：当用户在一句话中要求创建多个记录时（如"帮我添加一个客户和一个联系人"、"创建两条活动"），使用 batchDraft 函数，将每个记录作为 items 数组的一个元素
 8. **智能匹配（最重要）**：当用户提到客户/联系人/商机名称但可能不完全准确时（如只提到部分名称、拼音、简称）：
    - 设置 requiresMatching: true
@@ -683,6 +688,56 @@ JSON 格式:
   }
 }
 
+**⚡ temporalMode 时态示例（I-8 Slice A，仅 draftActivity）**:
+
+用户: "刚拜访了 King's College Hospital 的 Rachel，她对心脏耗材很感兴趣，下周要安排产品演示"
+->
+{
+  "function": "draftActivity",
+  "arguments": {
+    "title": "King's College Hospital - 拜访 Rachel",
+    "type": "visit",
+    "contactName": "Rachel",
+    "temporalMode": "completed",
+    "result": "客户对心脏耗材表达强烈兴趣",
+    "nextStep": "下周安排产品演示"
+  },
+  "requiresMatching": true,
+  "matchTarget": {"entityType": "contact", "query": "Rachel"}
+}
+// completed 线索："刚"、"了" → result/nextStep 必须预填
+
+用户: "明天下午要拜访皇家伦敦医院的周总"
+->
+{
+  "function": "draftActivity",
+  "arguments": {
+    "title": "皇家伦敦医院 - 拜访周总",
+    "type": "visit",
+    "contactName": "周总",
+    "temporalMode": "planned",
+    "scheduledDate": "明日期占位"
+  },
+  "requiresMatching": true,
+  "matchTarget": {"entityType": "contact", "query": "周总"}
+}
+// planned 线索："明天"、"要" → 不出 result/nextStep（事还没发生）
+
+用户: "拜访 King's College Hospital"
+->
+{
+  "function": "draftActivity",
+  "arguments": {
+    "title": "King's College Hospital - 拜访",
+    "type": "visit",
+    "accountName": "King's College Hospital",
+    "temporalMode": "unspecified"
+  },
+  "requiresMatching": true,
+  "matchTarget": {"entityType": "account", "query": "King's College Hospital"}
+}
+// unspecified：没有明确时态词 → 走现有缺省行为
+
 }`
     : `You are a sales assistant AI. Based on the user's question and conversation history, decide whether to call a data query function.
 Today's date: ${today}${pageContextStr}
@@ -708,6 +763,11 @@ Rules:
    - **⭐ ACTIVITY BINDING RULE**: If pageData contains opportunityId/opportunityName (e.g., on Activity detail page or Opportunity detail page), MUST pass opportunityId and opportunityName parameters to bind activity to opportunity
    - **⭐ ACCOUNT BINDING RULE (MOST CRITICAL)**: If pageData contains accountId/accountName (e.g., on Account detail page), you MUST pass accountId and accountName parameters directly, DO NOT set requiresMatching! When user says "add activity", "log call", "create opportunity" etc. on Account detail page, use accountId and accountName from pageData directly, no matching needed
    - If user mentions an opportunity name, use opportunityName parameter and system will auto-match
+   - **⭐ TEMPORAL MODE (I-8 Slice A)**: Detect whether the activity has happened or will happen and put it into arguments.temporalMode:
+     - "completed": User says the action is done. Cues: "just", "already", "finished", "did", "yesterday", "last week", past tense verbs. Form will show result/nextStep, and you MUST prefill both fields based on user's wording.
+     - "planned": User says the action is in the future or being scheduled. Cues: "plan to", "will", "going to", "tomorrow", "next week", "scheduled", "about to". Form will HIDE result/nextStep (the activity has not happened yet).
+     - "unspecified" (default): No clear tense cue (e.g. bare "visit A account") or contradicting cues. Preserves existing behavior, zero regression.
+     - **ONLY draftActivity intents need temporalMode; other intents (draftOpportunity, updateActivity, etc.) must NOT include it.**
 7. **MULTI-ENTITY CREATION (batchDraft)**: When user wants to create multiple records in one request (e.g., "add an account and a contact", "create two activities"), use batchDraft function with each record as an item in the items array
 8. **SMART MATCHING (MOST IMPORTANT)**: When user mentions an account/contact/opportunity name that might not be exact (partial name, abbreviation):
    - Set requiresMatching: true
@@ -963,6 +1023,56 @@ User: "Add a cardiac-consumables opportunity for Rachel Stenhouse at King's Coll
     "summary": "1) Create product demo meeting activity 2) Link to account/contact/existing opportunity 3) Also create new cardiac-consumables opportunity"
   }
 }
+
+**⚡ TEMPORAL MODE EXAMPLES (I-8 Slice A, draftActivity ONLY)**:
+
+User: "Just visited Rachel at King's College Hospital, they're interested in cardiac consumables, want a demo next week"
+->
+{
+  "function": "draftActivity",
+  "arguments": {
+    "title": "King's College Hospital - Visit with Rachel",
+    "type": "visit",
+    "contactName": "Rachel",
+    "temporalMode": "completed",
+    "result": "Customer expressed strong interest in cardiac consumables",
+    "nextStep": "Schedule product demo next week"
+  },
+  "requiresMatching": true,
+  "matchTarget": {"entityType": "contact", "query": "Rachel"}
+}
+// completed cues: "just", "visited" (past tense) -> MUST prefill result and nextStep
+
+User: "Plan a meeting with Rachel at King's College Hospital tomorrow afternoon"
+->
+{
+  "function": "draftActivity",
+  "arguments": {
+    "title": "King's College Hospital - Meeting with Rachel",
+    "type": "meeting",
+    "contactName": "Rachel",
+    "temporalMode": "planned",
+    "scheduledDate": "<tomorrow's date>"
+  },
+  "requiresMatching": true,
+  "matchTarget": {"entityType": "contact", "query": "Rachel"}
+}
+// planned cues: "plan", "tomorrow" -> DO NOT emit result/nextStep (activity has not happened yet)
+
+User: "Log a meeting with Rachel at King's College Hospital"
+->
+{
+  "function": "draftActivity",
+  "arguments": {
+    "title": "King's College Hospital - Meeting with Rachel",
+    "type": "meeting",
+    "contactName": "Rachel",
+    "temporalMode": "unspecified"
+  },
+  "requiresMatching": true,
+  "matchTarget": {"entityType": "contact", "query": "Rachel"}
+}
+// unspecified: no clear tense word -> preserve existing default behavior
 
 }`;
   console.log('[CopilotAgent] Pass 1: Intent detection');

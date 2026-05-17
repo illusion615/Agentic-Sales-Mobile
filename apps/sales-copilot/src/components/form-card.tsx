@@ -381,23 +381,27 @@ function ActivityFormCard({ data, formData, setFormData, onConfirm, onCancel, is
           accountId={formData.accountId as string}
           locale={locale}
         />
-        <EditableField 
-          icon={FileText} 
-          label={locale === 'zh-Hans' ? '结果' : 'Result'} 
-          value={formData.result as string}
-          onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, result: v }))}
-          type="textarea"
-          placeholder={locale === 'zh-Hans' ? '输入活动结果' : 'Enter activity result'}
-        />
-
-        <EditableField 
-          icon={TrendingUp} 
-          label={locale === 'zh-Hans' ? '下一步' : 'Next Step'} 
-          value={formData.nextStep as string}
-          onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, nextStep: v }))}
-          type="textarea"
-          placeholder={locale === 'zh-Hans' ? '输入下一步计划' : 'Enter next step'}
-        />
+        {/* I-8 Slice A: hide result/nextStep when activity is planned (event hasn't happened) */}
+        {formData.temporalMode !== 'planned' && (
+          <>
+            <EditableField 
+              icon={FileText} 
+              label={locale === 'zh-Hans' ? '结果' : 'Result'} 
+              value={formData.result as string}
+              onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, result: v }))}
+              type="textarea"
+              placeholder={locale === 'zh-Hans' ? '输入活动结果' : 'Enter activity result'}
+            />
+            <EditableField 
+              icon={TrendingUp} 
+              label={locale === 'zh-Hans' ? '下一步' : 'Next Step'} 
+              value={formData.nextStep as string}
+              onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, nextStep: v }))}
+              type="textarea"
+              placeholder={locale === 'zh-Hans' ? '输入下一步计划' : 'Enter next step'}
+            />
+          </>
+        )}
       </div>
 
       <div className="flex gap-2 pt-2">
@@ -923,11 +927,21 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
         if (formData.notes) notesParts.push(formData.notes as string);
         if (formData.result) notesParts.push(`结果: ${formData.result}`);
         if (formData.nextStep) notesParts.push(`下一步: ${formData.nextStep}`);
-        
+
+        // I-8 Slice A: map temporalMode -> draftstatusKey
+        // planned   -> Confirmed (open activity scheduled in the future)
+        // completed -> Completed (activity already happened)
+        // unspecified / undefined -> Draft (zero-regression default)
+        const temporalMode = formData.temporalMode as 'planned' | 'completed' | 'unspecified' | undefined;
+        const draftstatusKey: ActivityDraftstatusKey =
+          temporalMode === 'completed' ? 'DraftstatusKey2'
+          : temporalMode === 'planned' ? 'DraftstatusKey1'
+          : 'DraftstatusKey0';
+
         const createInput: Omit<Activity, 'id'> = {
           title: formData.title as string || '',
           typeKey,
-          draftstatusKey: 'DraftstatusKey0' as ActivityDraftstatusKey,
+          draftstatusKey,
           ownerid: user?.objectId || 'unknown',
           scheduleddate: formData.scheduledDate as string || new Date().toISOString(),
           notes: notesParts.join(' | ') || '',
