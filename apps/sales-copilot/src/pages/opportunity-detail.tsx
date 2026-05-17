@@ -496,7 +496,7 @@ export default function OpportunityDetailPage() {
                       {formatDate(opportunity.expectedclosedate)}
                     </span>
                   </div>
-                  {opportunity.closedon && (
+                  {(opportunity.closedon || opportunity.stageKey === 'StageKey4' || opportunity.stageKey === 'StageKey5') && (
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-muted-foreground flex items-center gap-2">
                         <CheckCircle2 className="w-4 h-4" />
