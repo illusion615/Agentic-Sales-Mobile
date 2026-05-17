@@ -50,7 +50,7 @@ export interface UKAccountData {
     role: string;
   };
   
-  // Opportunity
+  // Opportunity (primary, used for the scheduled next activity binding)
   opportunity: {
     name: string;
     stage: OpportunityStageKey;
@@ -60,6 +60,18 @@ export interface UKAccountData {
     expectedCloseDate?: string;
     closedOn?: string;
   };
+
+  // Extra opportunities on the same account (no auto-activity is generated for these).
+  // Used when an account has parallel deals under different product lines.
+  additionalOpportunities?: Array<{
+    name: string;
+    stage: OpportunityStageKey;
+    amount: number;
+    currency: string;
+    confidence: number;
+    expectedCloseDate?: string;
+    closedOn?: string;
+  }>;
 }
 
 export const ukTestData: UKAccountData[] = [
@@ -218,6 +230,19 @@ export const ukTestData: UKAccountData[] = [
       confidence: 70,
       expectedCloseDate: '2026-06-01',
     },
+    additionalOpportunities: [
+      {
+        // Parallel deal — used by demo Item 6 (OR equipment procurement).
+        // Earlier stage / lower confidence than the lab automation upgrade
+        // so the pipeline view shows two distinct opps for the same account.
+        name: 'KCH Operating Room Equipment Procurement',
+        stage: 'StageKey2', // proposal
+        amount: 520000,
+        currency: 'GBP',
+        confidence: 60,
+        expectedCloseDate: '2026-09-30',
+      },
+    ],
   },
   {
     name: 'University Hospitals Birmingham NHS Foundation Trust',
@@ -336,25 +361,35 @@ export function getContactCreatePayloads(ownerId: string) {
 }
 
 /**
- * Converts UK test data to Opportunity create payloads
+ * Converts UK test data to Opportunity create payloads.
+ * Emits the primary opportunity plus any `additionalOpportunities` defined on
+ * the account, so a single account can have multiple parallel deals.
  */
 export function getOpportunityCreatePayloads(ownerId: string) {
-  return ukTestData.map((data) => {
+  return ukTestData.flatMap((data) => {
     const accountId = generateUUID(`account-${data.name}`);
-    
-    return {
-      id: generateUUID(`opp-${data.opportunity.name}`),
-      name1: data.opportunity.name,
+
+    const toPayload = (opp: UKAccountData['opportunity']) => ({
+      id: generateUUID(`opp-${opp.name}`),
+      name1: opp.name,
       account: { id: accountId, name1: data.name },
-      stageKey: data.opportunity.stage,
-      totalamount: data.opportunity.amount,
-      confidence: data.opportunity.confidence,
-      expectedclosedate: data.opportunity.expectedCloseDate,
-      closedon: data.opportunity.closedOn,
-      lastaction: `${data.opportunity.currency} ${data.opportunity.amount.toLocaleString()}`,
+      stageKey: opp.stage,
+      totalamount: opp.amount,
+      confidence: opp.confidence,
+      expectedclosedate: opp.expectedCloseDate,
+      closedon: opp.closedOn,
+      lastaction: `${opp.currency} ${opp.amount.toLocaleString()}`,
       ownerid: ownerId,
       confidencetrendKey: 'ConfidencetrendKey2' as OpportunityConfidencetrendKey, // flat
-    };
+    });
+
+    const payloads = [toPayload(data.opportunity)];
+    if (data.additionalOpportunities?.length) {
+      for (const extra of data.additionalOpportunities) {
+        payloads.push(toPayload(extra));
+      }
+    }
+    return payloads;
   });
 }
 
@@ -390,9 +425,12 @@ export function getTestDataSummary() {
   return {
     totalAccounts: ukTestData.length,
     totalContacts: ukTestData.reduce((sum, d) => sum + 1 + (d.secondaryContact ? 1 : 0), 0),
-    totalOpportunities: ukTestData.length,
+    totalOpportunities: ukTestData.reduce((sum, d) => sum + 1 + (d.additionalOpportunities?.length || 0), 0),
     totalActivities: ukTestData.length,
-    totalPipelineValue: ukTestData.reduce((sum, d) => sum + d.opportunity.amount, 0),
+    totalPipelineValue: ukTestData.reduce(
+      (sum, d) => sum + d.opportunity.amount + (d.additionalOpportunities?.reduce((s, o) => s + o.amount, 0) || 0),
+      0,
+    ),
     wonDeals: ukTestData.filter((d) => d.opportunity.stage === 'StageKey4').length,
     overdueFollowUps: ukTestData.filter((d) => new Date(d.nextActivityDate) < new Date('2026-05-11')).length,
   };

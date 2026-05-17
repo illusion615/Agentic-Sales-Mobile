@@ -153,7 +153,14 @@ async function fallbackToCopilotStudio(
   userQuery: string,
   locale: string,
   startTime: number,
-  context: { userId?: string; userEmail?: string; sessionRefs?: DirectLineSessionRefs },
+  context: {
+    userId?: string;
+    userEmail?: string;
+    sessionRefs?: DirectLineSessionRefs;
+    // Forwarded so Copilot Studio sees page/account/product/dialog context.
+    pageContext?: { currentPage?: string; summary?: string; pageData?: unknown };
+    conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  },
   onProgress?: (progress: ThinkingProgress) => void
 ): Promise<AgentResponse> {
   console.log('[FALLBACK_CS] ENTER fallbackToCopilotStudio, userQuery=', userQuery);
@@ -178,7 +185,13 @@ async function fallbackToCopilotStudio(
     const result = await executeFunction(
       'queryCopilotStudio',
       { query: userQuery },
-      { userId: context.userId, userEmail: context.userEmail },
+      {
+        userId: context.userId,
+        userEmail: context.userEmail,
+        pageContext: context.pageContext,
+        conversationHistory: context.conversationHistory,
+        locale,
+      },
       context.sessionRefs
     );
     console.log('[FALLBACK_CS] executeFunction returned:', JSON.stringify(result).slice(0, 500));
@@ -375,12 +388,30 @@ export async function processMessage(
   }
 
   // ===== Product Knowledge Fast-Path: Route directly to Copilot Studio =====
-  // When user is on Product Center or Product Detail page and asks product-related questions,
-  // bypass LLM intent detection and route directly to Copilot Studio for better accuracy
+  // Boss directive (2026-05-17): ALL product-knowledge queries must go to
+  // Copilot Studio, never Dataverse. The fast-path here bypasses LLM intent
+  // detection for two reliable cases:
+  //   1) User is on a Product page (Product Center / Product Detail) — any
+  //      product-shaped question is overwhelmingly product knowledge.
+  //   2) User is anywhere else but uses *strong* product-knowledge language
+  //      (specifications / features / SKUs / manual / datasheet / how does it
+  //      work). Weak words like "product" alone are NOT enough off the product
+  //      page, because "list products with opportunities" is Dataverse, not CS.
+  // Outside these two cases we let the LLM decide — it has the same routing
+  // instructions in its system prompt and will pick `queryCopilotStudio` when
+  // appropriate; either way the executor passes pageContext + dialog history
+  // to CS via the cs-context-builder.
   const isProductPage = context.pageContext?.currentPage === 'Product Center' || 
                         context.pageContext?.currentPage === 'Product Detail';
-  const productKeywords = /product|feature|specification|spec|function|advantage|benefit|comparison|compare|usage|how to use|what is|tell me about|explain|details|产品|功能|规格|参数|优势|特点|对比|使用|介绍|说明/i;
-  const isProductKnowledgeQuery = isProductPage && productKeywords.test(userMessage);
+  // Soft keywords: enough on a product page where the user is clearly talking
+  // about the product they're looking at.
+  const productSoftKeywords = /product|feature|specification|spec|function|advantage|benefit|comparison|compare|usage|how to use|what is|tell me about|explain|details|产品|功能|规格|参数|优势|特点|对比|使用|介绍|说明/i;
+  // Strong keywords: knowledge-base phrasing that's ambiguous nowhere — these
+  // route to CS even off the product page (e.g. user asks "what does the SKU
+  // X1 spec sheet say about IP rating" from the Home page).
+  const productStrongKeywords = /specification sheet|spec sheet|datasheet|data sheet|user manual|product manual|technical manual|ip rating|certification|fda |ce mark|warranty|service interval|maintenance interval|how (does|do) (it|they|this product) work|what (does|is) (the )?(sku|model|product)\s+[A-Z0-9-]+|规格书|技术手册|用户手册|产品手册|说明书|认证|保修/i;
+  const isProductKnowledgeQuery = isProductPage && productSoftKeywords.test(userMessage);
+  const isStrongProductKnowledge = productStrongKeywords.test(userMessage);
   
   // Also check for queries referencing current product context
   const pageData = context.pageContext?.pageData as { productName?: string; productId?: string } | undefined;
@@ -389,21 +420,25 @@ export async function processMessage(
     (userMessage.toLowerCase().includes(currentProductName.toLowerCase()) || 
      /this product|this one|it|its|这个产品|它的|这个/i.test(userMessage));
   
-  if (isProductKnowledgeQuery || (isProductPage && referencesCurrentProduct)) {
-    console.log('[CopilotAgent] Product page detected, routing to Copilot Studio for product knowledge');
+  if (isProductKnowledgeQuery || (isProductPage && referencesCurrentProduct) || isStrongProductKnowledge) {
+    console.log('[CopilotAgent] Product knowledge query detected, routing to Copilot Studio',
+      { isProductPage, isStrongProductKnowledge, referencesCurrentProduct });
     
-    // Build a more context-aware query for Copilot Studio
-    let enhancedQuery = userMessage;
-    if (currentProductName && !userMessage.toLowerCase().includes(currentProductName.toLowerCase())) {
-      // Add product name context if user referenced "this product" or similar
-      enhancedQuery = `${currentProductName}: ${userMessage}`;
-    }
-    
+    // We intentionally pass the user message VERBATIM. The cs-context-builder
+    // inside function-executor now layers in page / product / account / dialog
+    // context so CS sees a single self-contained payload — no need to fold the
+    // product name into the query string here.
     return await fallbackToCopilotStudio(
-      enhancedQuery,
+      userMessage,
       context.locale || getLocale(),
       startTime,
-      { userId: context.userId, userEmail: context.userEmail, sessionRefs: context.sessionRefs },
+      {
+        userId: context.userId,
+        userEmail: context.userEmail,
+        sessionRefs: context.sessionRefs,
+        pageContext: context.pageContext,
+        conversationHistory: history,
+      },
       onProgress
     );
   }
@@ -478,6 +513,7 @@ ${functionList}
      - 系统会按顺序逐个 fuzzyMatch，自动把上一步解析到的 ID 注入下一步
 9. **创建新记录前必须检查重复**：用户说"添加客户XXX"、"添加联系人xxx"时，先设置 requiresMatching，如果找到高置信匹配则提示可能重复
 10. **⭐ 多意图智能提取（关键能力）**：当用户描述一个完整的业务场景时，要识别其中隐含的多个意图并全部提取：
+   - **⚠️ 硬性规则：过去时活动 + 未来时计划同时出现 = 必须拆成 2 个 draftActivity**。例如"刚拜访了 XX 医院讨论了 OR 设备采购预算 50 万英镑，下周二再来一次给临床团队演示" → 主活动 draftActivity(completed visit, 含本次会议要点)，additionalActions:[draftActivity(planned follow-up, scheduledStart=下周二, type=Demo), draftOpportunity(若按 Rule 6 confidence≥40)]。**不要**把下周二的演示折叠进主活动的 nextStep 字段——用户给出了明确日期就必须独立成单。
    - **活动记录**：用户描述的拜访/通话/会议本身 → draftActivity
    - **商机发现**：用户提到的商业机会（如"他们要招标"、"有采购需求"、"要引进新设备"） → draftOpportunity (additionalActions)
    - **后续跟进**：用户提到的下一步计划（如"下周要演示产品"、"需要安排跟进"） → draftActivity (additionalActions)
@@ -828,6 +864,7 @@ Rules:
      - System resolves each step in sequence and auto-injects the resolved ID of earlier steps into later ones
 9. **CHECK FOR DUPLICATES BEFORE CREATING**: When user says "add account XXX", "add contact XXX", first set requiresMatching to check for potential duplicates
 10. **⭐ MULTI-INTENT INTELLIGENT EXTRACTION (KEY CAPABILITY)**: When user describes a complete business scenario, identify and extract ALL implicit intents:
+   - **⚠️ HARD RULE — past-tense activity + future-tense plan in the same message = ALWAYS 2 separate draftActivity calls.** Example: "I just visited XX Hospital and discussed OR equipment procurement with a £500K budget. I'll come back next Tuesday to demo for the clinical team." → main = draftActivity(completed visit with discussion notes), additionalActions = [draftActivity(planned follow-up, scheduledStart=next Tuesday, type=Demo), draftOpportunity(if Rule 6 confidence≥40)]. **Do NOT** fold the next-Tuesday demo into the main activity's nextStep field — when the user supplies a concrete date it MUST be its own activity card.
    - **Activity Record**: The visit/call/meeting itself that user is describing → draftActivity
    - **Opportunity Discovery**: Business opportunities mentioned (e.g., "they will bid", "have procurement needs", "want new equipment") → draftOpportunity (additionalActions)
    - **Follow-up Planning**: Next steps user mentions (e.g., "introduce product next week", "need to schedule follow-up") → draftActivity (additionalActions)
@@ -1193,7 +1230,13 @@ User: "Log a meeting with Rachel at King's College Hospital"
       userMessage,
       context.locale || getLocale(),
       startTime,
-      { userId: context.userId, userEmail: context.userEmail, sessionRefs: context.sessionRefs },
+      {
+        userId: context.userId,
+        userEmail: context.userEmail,
+        sessionRefs: context.sessionRefs,
+        pageContext: context.pageContext,
+        conversationHistory: history,
+      },
       onProgress
     );
   }
@@ -1219,7 +1262,13 @@ User: "Log a meeting with Rachel at King's College Hospital"
       userMessage,
       context.locale || getLocale(),
       startTime,
-      { userId: context.userId, userEmail: context.userEmail, sessionRefs: context.sessionRefs },
+      {
+        userId: context.userId,
+        userEmail: context.userEmail,
+        sessionRefs: context.sessionRefs,
+        pageContext: context.pageContext,
+        conversationHistory: history,
+      },
       onProgress
     );
   }
@@ -1231,7 +1280,13 @@ User: "Log a meeting with Rachel at King's College Hospital"
       (intent.arguments?.query as string) || userMessage,
       context.locale || getLocale(),
       startTime,
-      { userId: context.userId, userEmail: context.userEmail, sessionRefs: context.sessionRefs },
+      {
+        userId: context.userId,
+        userEmail: context.userEmail,
+        sessionRefs: context.sessionRefs,
+        pageContext: context.pageContext,
+        conversationHistory: history,
+      },
       onProgress
     );
   }
@@ -1563,10 +1618,20 @@ User: "Log a meeting with Rachel at King's College Hospital"
   
   let functionResult;
   try {
+    // Always forward pageContext + conversationHistory + locale so that
+    // queryCopilotStudio (and any future context-sensitive function) sees the
+    // same situational data the LLM used. Other functions ignore the extras.
     functionResult = await executeFunction(
       intent.function,
       intent.arguments || {},
-      { userId: context.userId, userEmail: context.userEmail }
+      {
+        userId: context.userId,
+        userEmail: context.userEmail,
+        pageContext: context.pageContext,
+        conversationHistory: context.conversationHistory,
+        locale: context.locale,
+      },
+      context.sessionRefs
     );
     console.log('[CopilotAgent] Function result:', functionResult);
   } catch (execError) {
@@ -1602,7 +1667,13 @@ User: "Log a meeting with Rachel at King's College Hospital"
         userMessage,
         context.locale || getLocale(),
         startTime,
-        { userId: context.userId, userEmail: context.userEmail, sessionRefs: context.sessionRefs },
+        {
+          userId: context.userId,
+          userEmail: context.userEmail,
+          sessionRefs: context.sessionRefs,
+          pageContext: context.pageContext,
+          conversationHistory: context.conversationHistory || [],
+        },
         onProgress
       );
     }

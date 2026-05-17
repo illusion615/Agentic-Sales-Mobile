@@ -15,6 +15,7 @@ import type { Contact } from '@/generated/models/contact-model';
 import { calculateEnhancedMatchScore, getConfidenceLevel, type EnhancedMatchScore } from './agent-utils';
 import { touchAccountLastContacted } from './account-touch';
 import { queryClient } from './query-client';
+import { buildCSQuery } from './cs-context-builder';
 
 /**
  * Escape special characters for OData queries
@@ -139,7 +140,20 @@ const activityStatusLabelToKey: Record<string, ActivityDraftstatusKey> = {
 export async function executeFunction(
   functionName: string,
   args: Record<string, unknown>,
-  context: { userId?: string; userEmail?: string },
+  context: {
+    userId?: string;
+    userEmail?: string;
+    /** Forwarded from copilot-agent so Copilot Studio queries can carry page/account/product context. */
+    pageContext?: {
+      currentPage?: string;
+      summary?: string;
+      pageData?: unknown;
+    };
+    /** Recent dialog turns; CS uses these to resolve pronouns ("this product", "that one"). */
+    conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+    /** Locale for the CS context header. */
+    locale?: string;
+  },
   sessionRefs?: DirectLineSessionRefs
 ): Promise<FunctionCallResult> {
   console.log('[FN] ENTER executeFunction, name=' + functionName + ', args=' + JSON.stringify(args));
@@ -839,7 +853,19 @@ export async function executeFunction(
         const query = args.query as string;
         console.log('[CS] ENTER queryCopilotStudio, query=' + query);
         if (!query) return { success: false, error: '缺少 query 参数' };
-        
+
+        // Enrich the user query with page/account/product/dialog context so
+        // Copilot Studio can disambiguate intent (boss directive 2026-05-17).
+        // Boss explicitly required: "需要传给 copilot studio 的内容需要带上足够其判断的上下文".
+        const enrichedQuery = buildCSQuery({
+          userQuery: query,
+          locale: context.locale,
+          pageContext: context.pageContext,
+          conversationHistory: context.conversationHistory,
+          user: { id: context.userId, email: context.userEmail },
+        });
+        console.log('[CS] enriched query length:', enrichedQuery.length, 'preview:', enrichedQuery.slice(0, 200));
+
         // Get Copilot Studio endpoint from settings (uses 'copilot-studio-config' key)
         const settingsRaw = localStorage.getItem('copilot-studio-config');
         console.log('[CS] settings raw from localStorage:', settingsRaw);
@@ -954,7 +980,7 @@ export async function executeFunction(
             
             // === SEND MESSAGE ===
             const senderId = 'sales-copilot-user';
-            console.log('[CS] Sending message to bot, senderId:', senderId, ', text:', query);
+            console.log('[CS] Sending message to bot, senderId:', senderId, ', text length:', enrichedQuery.length);
             const sendResponse = await fetch(
               `https://directline.botframework.com/v3/directline/conversations/${conversationId}/activities`,
               {
@@ -965,7 +991,7 @@ export async function executeFunction(
                 },
                 body: JSON.stringify({
                   type: 'message',
-                  text: query,
+                  text: enrichedQuery,
                 }),
               }
             );
@@ -1429,9 +1455,44 @@ export async function executeFunction(
         const topLevelAccountId = args.accountId as string | undefined;
         const topLevelAccountName = args.accountName as string | undefined;
         console.log('[batchDraft] topLevelAccountId:', topLevelAccountId, 'topLevelAccountName:', topLevelAccountName);
+
+        // ---- Per-item account fuzzy match (Item 5 fix) ----
+        // The LLM often emits a batch like:
+        //   [{type:'activity', data:{accountName:'Manchester University NHS Foundation Trust'}},
+        //    {type:'activity', data:{accountName:'Oxford University Hospitals'}}, ...]
+        // with NO accountId on each item AND no top-level account. The form
+        // cards then can't link to a real account. Here we fuzzy-resolve each
+        // item's accountName → accountId once, sharing a single AccountService
+        // fetch across the loop.
+        let allAccountsCache: Account[] | null = null;
+        const resolveAccountIdByName = async (name: string): Promise<string | undefined> => {
+          if (!name) return undefined;
+          if (!allAccountsCache) {
+            try {
+              allAccountsCache = await AccountService.getAll();
+            } catch (err) {
+              console.warn('[batchDraft] AccountService.getAll failed during fuzzy match:', err);
+              allAccountsCache = [];
+            }
+          }
+          let bestId: string | undefined;
+          let bestScore = 0;
+          for (const a of allAccountsCache) {
+            const candidateName = a.name1 || '';
+            if (!candidateName) continue;
+            const s = calculateEnhancedMatchScore(name, candidateName);
+            if (s.score > bestScore) {
+              bestScore = s.score;
+              bestId = a.id;
+            }
+          }
+          // 70 = "high confidence" in agent-utils — same threshold the single
+          // fuzzyMatchAccount tool uses to auto-pick without disambiguation.
+          return bestScore >= 70 ? bestId : undefined;
+        };
         
         // Process each item and return batch form card data
-        const formCards = items.map((item: { type: string; data: Record<string, unknown> }, index: number) => {
+        const formCards = await Promise.all(items.map(async (item: { type: string; data: Record<string, unknown> }, index: number) => {
           const itemType = item.type || 'activity';
           const itemData = { ...(item.data || {}) };
           
@@ -1443,6 +1504,17 @@ export async function executeFunction(
             if (!itemData.accountName && topLevelAccountName) {
               itemData.accountName = topLevelAccountName;
             }
+            // Fuzzy-resolve when we still have a name but no id (the common
+            // weekly-plan / batch-create case).
+            if (!itemData.accountId && typeof itemData.accountName === 'string' && itemData.accountName) {
+              const resolved = await resolveAccountIdByName(itemData.accountName);
+              if (resolved) {
+                itemData.accountId = resolved;
+                console.log('[batchDraft] item', index, 'fuzzy-matched accountName "' + itemData.accountName + '" -> accountId', resolved);
+              } else {
+                console.log('[batchDraft] item', index, 'no high-confidence account match for "' + itemData.accountName + '"');
+              }
+            }
           }
           console.log('[batchDraft] item', index, 'type:', itemType, 'accountId:', itemData.accountId, 'accountName:', itemData.accountName);
           
@@ -1452,7 +1524,7 @@ export async function executeFunction(
             data: itemData,
             batchIndex: index,
           };
-        });
+        }));
 
         // Weekly-plan dedup: if any activity item collides with an existing
         // activity on the same account + same calendar day, attach a

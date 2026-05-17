@@ -465,11 +465,11 @@ export const availableFunctions: FunctionDefinition[] = [
   {
     name: 'queryCopilotStudio',
     displayName: { 'zh-Hans': '产品知识查询', 'en-US': 'Product Knowledge Query' },
-    description: '查询产品信息、产品知识库、产品FAQ等。当用户询问产品相关问题时调用此函数，将查询发送到 Copilot Studio 获取答案。Query product information, product knowledge base, product FAQ. Call this function when user asks product-related questions.',
+    description: 'ALL product knowledge queries route here — features, specifications, parameters, technical principles, usage instructions, FAQ, troubleshooting, model comparisons, certifications, warranty, manuals. The runtime auto-prepends page / account / product / dialog context to the payload before sending to Copilot Studio, so just pass the user\'s ORIGINAL question verbatim in `query`. Only resolve pronouns ("this product" → actual product name) when the referent is unambiguous; otherwise leave it for CS. Do NOT use this for queries about CRM records (opportunities, customers, activities) — those go to Dataverse functions. 所有产品知识相关问题（功能、规格、参数、原理、使用方法、FAQ、故障排查、型号对比、认证、保修、手册）都走此函数到 Copilot Studio。运行时会自动附加页面/客户/产品/对话上下文，把用户原始问题原样传入 `query` 即可。',
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: '用户的产品相关问题 / User\'s product-related question' },
+        query: { type: 'string', description: '用户的产品相关问题（原文，不要改写）/ User\'s product-related question (verbatim, do not paraphrase)' },
       },
       required: ['query'],
     },
@@ -479,7 +479,7 @@ export const availableFunctions: FunctionDefinition[] = [
   {
     name: 'externalKnowledgeQuery',
     displayName: { 'zh-Hans': '外部知识查询', 'en-US': 'External Knowledge Query' },
-    description: '当用户询问通用产品知识、规格参数、技术原理、行业知识、公司外部信息等本地 Dataverse 数据库没有覆盖的内容时调用。注意："产品知识查询"(queryCopilotStudio)仅当用户问的是本系统已有产品记录的关联数据时使用；任何关于产品的通用介绍、规格参数、原理说明都应使用此函数。Query external knowledge sources when user asks about general product knowledge, specifications, technical principles, industry information, or any content not covered by local Dataverse. Note: Use "queryCopilotStudio" only for product RECORDS in this system; any general product introductions, specs, or principles should use this function.',
+    description: 'Non-product external knowledge: industry trends, regulations, competitor news, general business knowledge — anything not covered by local Dataverse AND not about the company\'s own products. For PRODUCT knowledge (features, specs, manuals, comparisons, principles, FAQ), use `queryCopilotStudio` instead. 与产品无关的外部知识：行业趋势、法规、竞争对手新闻、通用商业知识。产品本身的知识（功能、规格、手册、对比、原理、FAQ）请用 `queryCopilotStudio`。',
     parameters: {
       type: 'object',
       properties: {
