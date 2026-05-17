@@ -445,6 +445,17 @@ ${functionList}
      - "planned"：用户表达动作发生在未来或正在安排。线索："明天"、"下周"、"要"、"打算"、"准备"、"plan to"、"will"、"going to"、"tomorrow"、"scheduled"。此时表单隐藏 result/nextStep（事还没发生）
      - "unspecified"（缺省）：无明确时态线索（如裸说"拜访 A 客户"）或时态矛盾。沿用现有缺省行为，不影响回归
      - **仅 draftActivity 意图需要输出 temporalMode；其他意图（draftOpportunity、updateActivity 等）不写**
+   - **⭐ 商机自动建议阈值（I-8 Slice B-1 混合方案，最高优先级，覆盖第 12.B 节）**：当 temporalMode="completed" 且用户原话中包含商机相关线索时，**先自评一个 confidence（0-100）**，再决定是否输出 additionalActions 商机。**这是输出 draftOpportunity 作为 additionalAction 的唯一路径**：
+     - 自评公式（同类不累加，封顶 100）：amount=30, timeline=20, product=20, strongIntent=20, weakIntent=10
+     - 信号定义：amount（金额/预算，如 80万、£800K）、timeline（时间窗，如 Q3、下半年、by year-end）、product（具体产品或品类）、strongIntent（强意向，如 wants demo、requested quote、让我们出方案）、weakIntent（弱意向，如 interested、感兴趣、looking at）
+     - **confidence < 40：不要输出 additionalActions:[{"function":"draftOpportunity"}]**，避免污染 pipeline（用户只是闲聊提到，不足以自动建商机）
+     - **confidence >= 40：必须输出 additionalActions:[{"function":"draftOpportunity", "arguments":{ ...常规字段, _signals:[{type, quote}...], _confidence: N }}]**
+       - 常规字段照旧：name、accountName、amount、stage（通常 qualification）、expectedCloseDate、lastAction 等
+       - **_signals 和 _confidence 是强制字段**——前端会读取它们渲染表单顶部的"为什么推荐"解释条。忘记输出等于这条 additionalAction 不合规，前端无法展示理由。
+       - signals.type 只能是上面 5 种；quote 必须是用户原话的简短片段（≤20 字），用来作为 chip 上的引用
+       - 至少 1 条 signal，最多 5 条；如果某种类型在原话中没出现，就不要硬加
+     - **仅在 temporalMode="completed" 时考虑**；planned/unspecified 永远不要自动建议商机
+     - **示例（用户："刚见完 Rachel，他们想买心脏耗材，预算 80 万 Q3"）**：additionalActions:[{"function":"draftOpportunity","arguments":{"_signals":[{"type":"amount","quote":"预算 80 万"},{"type":"timeline","quote":"Q3"},{"type":"product","quote":"心脏耗材"},{"type":"strongIntent","quote":"他们想买"}],"_confidence":90,"name":"King's College Hospital - 心脏耗材","accountName":"King's College Hospital","amount":800000,"stage":"qualification","expectedCloseDate":"2026-09-30","lastAction":"客户表达采购意向，预算 80 万 Q3 落地"}}]
 7. **多实体创建(batchDraft)**：当用户在一句话中要求创建多个记录时（如"帮我添加一个客户和一个联系人"、"创建两条活动"），使用 batchDraft 函数，将每个记录作为 items 数组的一个元素
 8. **智能匹配（最重要）**：当用户提到客户/联系人/商机名称但可能不完全准确时（如只提到部分名称、拼音、简称）：
    - 设置 requiresMatching: true
@@ -494,6 +505,7 @@ ${functionList}
    - 提到预算/金额（"预算200万"、"项目约50万"）
    - 提到决策时间/招标计划（"Q3决策"、"下月招标"）
    - 对产品表达强烈兴趣（"很感兴趣"、"想深入了解"）
+   - **⚠️ 强制走 Rule 6 流程**：先按 Rule 6 的"商机自动建议阈值"公式自评 confidence，**只有 ≥40 才输出**，且 arguments 必须包含 _signals + _confidence 两个字段。否则不要输出 draftOpportunity additionalAction。
 
    **C. 跟进计划（提取为 additionalActions: draftActivity）：**
    - 下次拜访/会议（"下周二再去"、"周五开会"）
@@ -770,6 +782,17 @@ Rules:
      - "planned": User says the action is in the future or being scheduled. Cues: "plan to", "will", "going to", "tomorrow", "next week", "scheduled", "about to". Form will HIDE result/nextStep (the activity has not happened yet).
      - "unspecified" (default): No clear tense cue (e.g. bare "visit A account") or contradicting cues. Preserves existing behavior, zero regression.
      - **ONLY draftActivity intents need temporalMode; other intents (draftOpportunity, updateActivity, etc.) must NOT include it.**
+   - **⭐ OPPORTUNITY AUTO-SUGGEST THRESHOLD (I-8 Slice B-1 hybrid, HIGHEST PRIORITY, OVERRIDES Section 12.B)**: When temporalMode="completed" AND the user's wording contains opportunity cues, **first self-assess a confidence (0-100)**, then decide whether to emit a draftOpportunity additionalAction. **This is the ONLY allowed path for emitting draftOpportunity as an additionalAction**:
+     - Self-score formula (same type does NOT double-count, capped at 100): amount=30, timeline=20, product=20, strongIntent=20, weakIntent=10
+     - Signal definitions: amount (budget figure, e.g. 800K, £500K, 80万), timeline (Q3, next quarter, by year-end, 下半年), product (specific product / category, e.g. cardiac consumables), strongIntent (wants demo, requested quote, evaluating vendors, 让我们出方案), weakIntent (interested, curious, looking at, 感兴趣)
+     - **confidence < 40: do NOT emit additionalActions:[{"function":"draftOpportunity"}]** — user merely chatted, not enough to auto-create an opp (avoids pipeline pollution)
+     - **confidence >= 40: you MUST emit additionalActions:[{"function":"draftOpportunity", "arguments":{ ...normal fields, _signals:[{type, quote}...], _confidence: N }}]**
+       - Normal fields as usual: name, accountName, amount, stage (usually qualification), expectedCloseDate, lastAction, etc.
+       - **_signals and _confidence are REQUIRED fields** — the front-end reads them to render the "Why this was suggested" header on top of the opportunity form. Omitting them means this additionalAction is malformed and the user loses the explanation panel.
+       - signals.type must be one of the five above; quote MUST be a short fragment from the user's original wording (≤20 chars) used verbatim as the chip caption
+       - Provide at least 1 signal, at most 5; do NOT fabricate a signal type that is absent from the user's wording
+     - **Only consider this when temporalMode="completed"**; for planned/unspecified do NOT auto-suggest an opp
+     - **Example (user: "Just met with Rachel at King's College Hospital, they're keen on cardiac consumables and budget is around 800K for Q3")**: additionalActions:[{"function":"draftOpportunity","arguments":{"_signals":[{"type":"amount","quote":"budget is around 800K"},{"type":"timeline","quote":"for Q3"},{"type":"product","quote":"cardiac consumables"},{"type":"strongIntent","quote":"they're keen on"}],"_confidence":90,"name":"King's College Hospital - Cardiac Consumables","accountName":"King's College Hospital","amount":800000,"stage":"qualification","expectedCloseDate":"2026-09-30","lastAction":"Customer expressed strong interest, budget ~800K for Q3"}}]
 7. **MULTI-ENTITY CREATION (batchDraft)**: When user wants to create multiple records in one request (e.g., "add an account and a contact", "create two activities"), use batchDraft function with each record as an item in the items array
 8. **SMART MATCHING (MOST IMPORTANT)**: When user mentions an account/contact/opportunity name that might not be exact (partial name, abbreviation):
    - Set requiresMatching: true
@@ -819,6 +842,7 @@ Rules:
    - Mentions budget/amount ("budget is 2M", "project around 500K")
    - Mentions decision timeline/bidding plan ("decision in Q3", "bidding next month")
    - Expresses strong interest in product ("very interested", "wants to know more")
+   - **⚠️ MUST go through Rule 6 flow**: first self-score the confidence per the OPPORTUNITY AUTO-SUGGEST THRESHOLD formula in Rule 6, **only emit when >=40**, and arguments MUST include the _signals and _confidence fields. Otherwise do NOT emit a draftOpportunity additionalAction.
 
    **C. Follow-up Plans (extract as additionalActions: draftActivity):**
    - Next visit/meeting mentioned ("I'll go again next Tuesday", "meeting on Friday")

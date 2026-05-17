@@ -7,7 +7,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { Check, X, Calendar, User, Building2, Phone, Mail, MapPin, DollarSign, TrendingUp, FileText, Tag, ChevronRight, ChevronDown, Target } from 'lucide-react';
+import { Check, X, Calendar, User, Building2, Phone, Mail, MapPin, DollarSign, TrendingUp, FileText, Tag, ChevronRight, ChevronDown, Target, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -435,6 +435,69 @@ function ActivityFormCard({ data, formData, setFormData, onConfirm, onCancel, is
   );
 }
 
+// I-8 Slice B-1 hybrid: tiny header that explains WHY the LLM auto-suggested
+// this opportunity (signals + confidence). Renders only when _signals are
+// present in formData (i.e. the opp came from a completed-activity narrative).
+function OpportunitySignalsHeader({ formData, locale }: {
+  formData: Record<string, unknown>;
+  locale: Locale;
+}) {
+  const signals = formData._signals as Array<{ type: 'amount'|'timeline'|'product'|'strongIntent'|'weakIntent'; quote: string }> | undefined;
+  const confidence = formData._signalConfidence as number | undefined;
+  if (!signals || !Array.isArray(signals) || signals.length === 0) return null;
+  const score = Math.max(0, Math.min(100, Number(confidence) || 0));
+  // Tier mapping mirrors confidence.ts: >=70 high (green), >=40 medium (amber)
+  const tier: 'high' | 'medium' | 'low' = score >= 70 ? 'high' : score >= 40 ? 'medium' : 'low';
+  const dotsFilled = Math.round(score / 20);
+  const tierColor =
+    tier === 'high' ? 'text-green-600 bg-green-500/10 border-green-500/30'
+    : tier === 'medium' ? 'text-amber-600 bg-amber-500/10 border-amber-500/30'
+    : 'text-muted-foreground bg-muted/30 border-border';
+  const dotColor =
+    tier === 'high' ? 'bg-green-500'
+    : tier === 'medium' ? 'bg-amber-500'
+    : 'bg-muted-foreground/40';
+  const typeLabel = (t: string) => {
+    if (locale === 'zh-Hans') {
+      return ({ amount: '金额', timeline: '时间', product: '产品', strongIntent: '强意向', weakIntent: '弱意向' } as Record<string, string>)[t] || t;
+    }
+    return ({ amount: 'Amount', timeline: 'Timeline', product: 'Product', strongIntent: 'Strong intent', weakIntent: 'Interest' } as Record<string, string>)[t] || t;
+  };
+  return (
+    <div className={`rounded-lg border px-3 py-2 mb-2 ${tierColor}`}>
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="flex items-center gap-1.5">
+          <Sparkles className="w-3.5 h-3.5" />
+          <span className="text-xs font-medium">
+            {locale === 'zh-Hans' ? '为什么推荐' : 'Why this was suggested'}
+          </span>
+        </div>
+        <div className="flex items-center gap-1">
+          {[0, 1, 2, 3, 4].map((i) => (
+            <span
+              key={i}
+              className={`w-1.5 h-1.5 rounded-full ${i < dotsFilled ? dotColor : 'bg-muted-foreground/20'}`}
+            />
+          ))}
+          <span className="text-[10px] font-semibold ml-1 opacity-80">{score}</span>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {signals.map((s, i) => (
+          <span
+            key={i}
+            className="inline-flex items-center gap-1 rounded-md bg-background/60 px-1.5 py-0.5 text-[10px] border border-border/40"
+            title={s.quote}
+          >
+            <span className="font-medium">{typeLabel(s.type)}</span>
+            <span className="italic opacity-75 max-w-[140px] truncate">“{s.quote}”</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // Opportunity Form Card
 function OpportunityFormCard({ data, formData, setFormData, onConfirm, onCancel, isConfirming, locale }: {
   data: Record<string, unknown>;
@@ -470,6 +533,8 @@ function OpportunityFormCard({ data, formData, setFormData, onConfirm, onCancel,
           <span className="text-xs text-muted-foreground">{stageLabel}</span>
         </div>
       </div>
+
+      <OpportunitySignalsHeader formData={formData} locale={locale} />
 
       <div className="bg-muted/30 rounded-lg p-3 space-y-1">
         <EditableField 

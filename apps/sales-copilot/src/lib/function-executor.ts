@@ -453,6 +453,13 @@ export async function executeFunction(
             confidence: args.confidence as number || 50,
             expectedCloseDate: args.expectedCloseDate as string || '',
             lastAction: args.lastAction as string || '',
+            // I-8 Slice B-1 hybrid: when the LLM auto-suggests this opp from a
+            // completed-activity narrative, it attaches _signals + _confidence
+            // (renamed here to _signalConfidence to avoid collision with the
+            // existing close-probability `confidence` field). Form-card reads
+            // these to render a "Why this was suggested" header. Not persisted.
+            _signals: args._signals,
+            _signalConfidence: args._confidence,
           },
         };
         return {
