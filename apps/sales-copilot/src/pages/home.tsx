@@ -630,16 +630,16 @@ export default function HomeDashboard() {
     const quarterEnd = new Date(today.getFullYear(), (currentQuarter + 1) * 3, 0, 23, 59, 59, 999);
     
     // Won opportunities this quarter.
-    // Some "won" records in the back end ship without `closedon` populated
-    // (the field is optional), which used to silently drop them from the KPI.
-    // Fall back through `closedon → expectedclosedate → createdon`, and if
-    // none are present treat the record as in-quarter so genuinely won deals
-    // never disappear from the dashboard.
+    // Only `closedon` (the actual close date) is meaningful for win attribution.
+    // `expectedclosedate` is a planned future date that does NOT update when the
+    // stage flips to won, so using it as a fallback misroutes current wins into
+    // future quarters (e.g. an opp won today with planned close in July gets
+    // dropped from Q2 even though the cash hit this quarter). If `closedon` is
+    // missing or invalid, assume the win happened recently → count it.
     const wonOpportunities = opportunities.filter((o: Opportunity) => {
       if (!isWonStage(o.stageKey)) return false;
-      const dateStr = o.closedon || o.expectedclosedate || o.createdon;
-      if (!dateStr) return true;
-      const d = new Date(dateStr);
+      if (!o.closedon) return true;
+      const d = new Date(o.closedon);
       if (Number.isNaN(d.getTime())) return true;
       return d >= quarterStart && d <= quarterEnd;
     });
