@@ -12,6 +12,7 @@ import {
   Plus,
   LayoutGrid,
   ChevronLeft,
+  Sparkles,
 } from 'lucide-react';
 import { MobileLayout } from '@/components/mobile-layout';
 import { FloatingQuickActions } from '@/components/floating-quick-actions';
@@ -20,7 +21,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useActivityList } from '@/generated/hooks/use-activity';
 import { useQueryClient } from '@tanstack/react-query';
-import { ActivityTypeKeyToLabel, ActivityDraftstatusKeyToLabel } from '@/generated/models/activity-model';
+import { ActivityTypeKeyToLabel, ActivityDraftstatusKeyToLabel, ActivityOutcomeKeyToLabel } from '@/generated/models/activity-model';
 import type { Activity as DataverseActivity, ActivityTypeKey, ActivityDraftstatusKey } from '@/generated/models/activity-model';
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
 import { useCopilot } from '@/contexts/copilot-context';
@@ -212,6 +213,23 @@ export default function ActivitiesPage() {
 
   // Set page context for Copilot agent awareness
   useEffect(() => {
+    // For Day View only, ship a rich per-activity payload so the agent can
+    // narrate a daily report without an extra fetch. Other views stay light.
+    const dayActivitiesPayload = viewMode === 'day'
+      ? filteredActivities.map((a: DataverseActivity) => ({
+          id: a.id,
+          title: a.title,
+          type: ActivityTypeKeyToLabel[a.typeKey],
+          status: ActivityDraftstatusKeyToLabel[a.draftstatusKey],
+          outcome: a.outcomeKey ? ActivityOutcomeKeyToLabel[a.outcomeKey] : undefined,
+          scheduledAt: a.scheduleddate,
+          accountName: a.account?.name1,
+          contactName: a.contact?.fullname,
+          opportunityName: a.opportunity?.name1,
+          notes: a.notes ? String(a.notes).slice(0, 200) : undefined,
+        }))
+      : undefined;
+
     copilot.setPageContext({
       currentPage: locale === 'zh-Hans' ? '活动列表' : 'Activities List',
       summary: locale === 'zh-Hans'
@@ -226,6 +244,7 @@ export default function ActivitiesPage() {
           date: dateKey,
           count: activitiesByDate[dateKey].length,
         })),
+        ...(dayActivitiesPayload ? { dayActivities: dayActivitiesPayload } : {}),
       },
     });
     
@@ -323,6 +342,18 @@ export default function ActivitiesPage() {
     month: 'Month',
   };
 
+  // Open Copilot with a pre-canned daily-report ask. The Day View pageContext
+  // already includes per-activity titles, statuses, outcomes, account/contact/
+  // opportunity links, and notes, so the agent has full context to narrate.
+  const handleGenerateDailyReport = () => {
+    const dateLabel = format(currentDate, 'yyyy-MM-dd');
+    const prompt = locale === 'zh-Hans'
+      ? `生成 ${dateLabel} 的工作日报：根据当前页面上的任务列表（含完成状态、结果、关联的客户/联系人/商机、备注），输出四个部分：1）今日完成情况；2）关键成果（推动了哪些商机或客户）；3）未完成任务与原因；4）明日建议。`
+      : `Generate a daily report for ${dateLabel}: use the task list currently on this page (statuses, outcomes, linked accounts/contacts/opportunities, notes) and produce four sections: 1) today's completion; 2) key wins (which opportunities or accounts moved forward); 3) pending tasks and why; 4) suggestions for tomorrow.`;
+    copilot.openPanel(true);
+    copilot.sendMessage(prompt);
+  };
+
   return (
     <MobileLayout
       title="Activities"
@@ -371,10 +402,23 @@ export default function ActivitiesPage() {
                 {pendingCount} {pendingCount === 1 ? 'task' : 'tasks'} pending
               </p>
             </div>
-            <div className="w-12 h-12 rounded-full accent-gradient flex items-center justify-center">
-              <span className="text-white text-xl font-bold">
-                {pendingCount}
-              </span>
+            <div className="flex items-center gap-2">
+              {viewMode === 'day' && (
+                <button
+                  type="button"
+                  onClick={handleGenerateDailyReport}
+                  aria-label={locale === 'zh-Hans' ? '生成今日工作日报' : 'Generate daily report'}
+                  title={locale === 'zh-Hans' ? '生成今日工作日报' : 'Generate daily report'}
+                  className="h-9 w-9 rounded-full bg-primary/10 text-primary hover:bg-primary/20 transition-colors flex items-center justify-center"
+                >
+                  <Sparkles className="w-4 h-4" />
+                </button>
+              )}
+              <div className="w-12 h-12 rounded-full accent-gradient flex items-center justify-center">
+                <span className="text-white text-xl font-bold">
+                  {pendingCount}
+                </span>
+              </div>
             </div>
           </GlassCard>
 

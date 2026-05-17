@@ -90,6 +90,11 @@ interface KPICardsProps {
   onCalendarDayClick?: (date: Date) => void;
   // Callback when clicking on overdue count in header
   onProcessOverdue?: () => void;
+  // Optional controlled state for the activity-insights sheet (so an external
+  // trigger such as the home-header bell can open it). When provided, these
+  // override the internal state; otherwise the component manages it itself.
+  insightsSheetOpen?: boolean;
+  onInsightsSheetOpenChange?: (open: boolean) => void;
 }
 
 
@@ -171,7 +176,7 @@ function ProgressRingWithValue({
   );
 }
 
-export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityInsights = [], allActivities = [], onCalendarDayClick, onProcessOverdue }: KPICardsProps) {
+export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityInsights = [], allActivities = [], onCalendarDayClick, onProcessOverdue, insightsSheetOpen: insightsSheetOpenProp, onInsightsSheetOpenChange }: KPICardsProps) {
   const locale = getLocale();
 
   const [rescheduleSheetOpen, setRescheduleSheetOpen] = useState(false);
@@ -184,7 +189,12 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
   const [showCelebration, setShowCelebration] = useState(false);
   const [prevOverdueCount, setPrevOverdueCount] = useState<number | null>(null);
   const [agendaExpanded, setAgendaExpanded] = useState(true);
-  const [insightsSheetOpen, setInsightsSheetOpen] = useState(false);
+  const [insightsSheetOpenInternal, setInsightsSheetOpenInternal] = useState(false);
+  const insightsSheetOpen = insightsSheetOpenProp ?? insightsSheetOpenInternal;
+  const setInsightsSheetOpen = (open: boolean) => {
+    if (onInsightsSheetOpenChange) onInsightsSheetOpenChange(open);
+    else setInsightsSheetOpenInternal(open);
+  };
   const [insightsSheetIndex, setInsightsSheetIndex] = useState(0);
   const constraintsRef = useRef<HTMLDivElement>(null);
 
@@ -714,24 +724,9 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
                     </p>
                   </div>
                 </div>
-                {/* Right side: Insights button + Overdue button (if any) + Total activities */}
+                {/* Right side: Overdue button only. Insights moved to header
+                    bell; total activities are already shown on Momentum. */}
                 <div className="flex items-center gap-2">
-                  {/* Insights button - only shown if there are insights */}
-                  {parsedActivityInsights.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={(e: React.MouseEvent) => {
-                        e.stopPropagation();
-                        setInsightsSheetIndex(0);
-                        setInsightsSheetOpen(true);
-                      }}
-                      className="flex items-center gap-1 px-2 py-1 rounded-full bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
-                    >
-                      <Sparkles className="w-3 h-3" />
-                      <span className="text-xs font-medium">{parsedActivityInsights.length}</span>
-                    </button>
-                  )}
-                  {/* Overdue button - clickable, only shown if there are overdue items */}
                   {overdueCount > 0 && (
                     <button
                       type="button"
@@ -749,11 +744,6 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
                       <span className="text-xs font-medium">{overdueCount} {locale === 'zh-Hans' ? '逾期' : 'overdue'}</span>
                     </button>
                   )}
-                  {/* Total activities */}
-                  <div className="text-right">
-                    <p className="text-lg font-bold text-foreground">{calendarMonthData.totalActivities}</p>
-                    <p className="text-[10px] text-muted-foreground">{locale === 'zh-Hans' ? '活动总数' : 'Total'}</p>
-                  </div>
                 </div>
               </div>
               
@@ -1296,7 +1286,7 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
             <SheetTitle className="flex items-center justify-between">
               <span className="flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-primary" />
-                {locale === 'zh-Hans' ? '活动洞察' : 'Activity Insights'}
+                {locale === 'zh-Hans' ? '洞察' : 'Insights'}
               </span>
               {parsedActivityInsights.length > 1 && (
                 <span className="text-sm font-normal text-muted-foreground">

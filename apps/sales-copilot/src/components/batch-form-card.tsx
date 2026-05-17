@@ -115,6 +115,9 @@ export function BatchFormCard({ messageId, batchFormCards, onStatusChange }: Bat
         {batchFormCards.items.map((item, index) => {
           const isExpanded = expandedIndex === index;
           const status = itemStatuses[index] || 'pending';
+          const duplicateOf = (item.data as Record<string, unknown>)._duplicateOf as
+            | { existingId?: string; subject?: string; scheduleddate?: string }
+            | undefined;
           
           return (
             <div key={`${messageId}-batch-${index}`} className="bg-background/50">
@@ -137,6 +140,18 @@ export function BatchFormCard({ messageId, batchFormCards, onStatusChange }: Bat
                   <span className="text-sm text-foreground">
                     {(item.data.name || item.data.title || item.data.fullName || `#${index + 1}`) as string}
                   </span>
+                  {duplicateOf && (
+                    <span
+                      className="px-2 py-0.5 rounded text-[11px] font-medium bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300"
+                      title={
+                        duplicateOf.subject
+                          ? `${duplicateOf.subject}${duplicateOf.scheduleddate ? ' · ' + duplicateOf.scheduleddate.slice(0, 10) : ''}`
+                          : ''
+                      }
+                    >
+                      {locale === 'zh-Hans' ? '可能重复' : 'Possible duplicate'}
+                    </span>
+                  )}
                   {status === 'confirmed' && (
                     <Check className="w-4 h-4 text-green-600" />
                   )}

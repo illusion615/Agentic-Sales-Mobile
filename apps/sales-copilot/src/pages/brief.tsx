@@ -72,6 +72,10 @@ export default function BriefMePage() {
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const chapterStartTimeRef = useRef<number>(0);
   const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
+  // Per-chapter speech-segment queue. Incremented on every cancel/new chapter
+  // so an old chained onend cannot resume after the user paused or skipped.
+  const chapterRunIdRef = useRef<number>(0);
+  const pauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   // Get today's briefing
   const briefing = useMemo(() => {
@@ -146,79 +150,113 @@ export default function BriefMePage() {
     return findMatchingSystemVoice(selectedVoiceId, locale);
   }, [locale]);
   
-  // Speak current chapter content using TTS
-  const speakChapter = useCallback((item: BriefingItem) => {
-    // Cancel any ongoing speech
-    window.speechSynthesis.cancel();
-    
-    if (!voicesReady) {
-      toast.error(locale === 'zh-Hans' ? '语音引擎正在加载...' : 'Voice engine loading...');
-      return;
-    }
-    
-    // Use script field if available (more detailed narration), otherwise fall back to headline + summary
-    let speechText: string;
-    if (item.script) {
-      speechText = getText(item.script, locale);
-    } else {
-      // Fallback: build speech from headline + summary + bullets
-      speechText = getText(item.headline, locale);
-      speechText += '。 ' + getText(item.summary, locale);
-      
-      if (item.bullets && item.bullets.length > 0) {
-        item.bullets.forEach((bullet) => {
-          speechText += '。 ' + getText(bullet, locale);
-        });
-      }
-      
-      if (item.context) {
-        speechText += '。 ' + getText(item.context, locale);
-      }
-    }
-    
-    const utterance = new SpeechSynthesisUtterance(speechText);
-    utterance.lang = locale === 'zh-Hans' ? 'zh-CN' : 'en-US';
-    utterance.rate = playbackRate;
-    utterance.pitch = 1;
-    
-    const voice = getSystemVoice();
-    if (voice) {
-      utterance.voice = voice;
-    }
-    
-    utteranceRef.current = utterance;
-    chapterStartTimeRef.current = Date.now();
-    
-    utterance.onstart = () => {
-      setIsSpeaking(true);
+  // Build paragraph-level segments for the current chapter so TTS has real
+  // breathing room between thoughts. Browser SpeechSynthesis treats one
+  // utterance as one breath; splitting + queuing gives ~paragraph rhythm.
+  const buildSegments = useCallback((item: BriefingItem): string[] => {
+    const out: string[] = [];
+    const push = (s: string) => {
+      const t = s.trim();
+      if (t) out.push(t);
     };
-    
-    utterance.onend = () => {
+
+    if (item.script) {
+      const raw = getText(item.script, locale);
+      // 1) split on hard newlines first (authored paragraph breaks)
+      const paragraphs = raw.split(/\n+/).map((p) => p.trim()).filter(Boolean);
+      paragraphs.forEach((p) => {
+        // 2) for very long paragraphs (> 90 chars), further split on
+        //    sentence terminators so listener still gets pauses
+        if (p.length <= 90) {
+          push(p);
+          return;
+        }
+        const sentences = p.split(/(?<=[。！？.!?])\s+/).filter(Boolean);
+        // group every 2 sentences into one segment to avoid being too choppy
+        for (let i = 0; i < sentences.length; i += 2) {
+          push(sentences.slice(i, i + 2).join(' '));
+        }
+      });
+    } else {
+      push(getText(item.headline, locale));
+      push(getText(item.summary, locale));
+      if (item.bullets && item.bullets.length > 0) {
+        item.bullets.forEach((b) => push(getText(b, locale)));
+      }
+      if (item.context) push(getText(item.context, locale));
+    }
+    return out.length > 0 ? out : [getText(item.headline, locale)];
+  }, [locale]);
+
+  // Pause between paragraphs (ms). Stays at ~350ms even at higher rates so
+  // the listener actually hears the break.
+  const SEGMENT_PAUSE_MS = 350;
+
+  // Speak one segment, then schedule the next. Aborts cleanly when
+  // chapterRunIdRef changes (cancel/new chapter/rate change).
+  const speakSegment = useCallback((segments: string[], index: number, runId: number) => {
+    if (runId !== chapterRunIdRef.current) return;
+    if (index >= segments.length) {
+      // Whole chapter finished
       setIsSpeaking(false);
       utteranceRef.current = null;
-      
-      // Auto-advance to next chapter if still playing
       if (isPlaying && currentIndex < items.length - 1) {
         setCurrentIndex((prev) => prev + 1);
       } else if (currentIndex === items.length - 1) {
-        // Reached the end
         setIsPlaying(false);
       }
+      return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(segments[index]);
+    utterance.lang = locale === 'zh-Hans' ? 'zh-CN' : 'en-US';
+    utterance.rate = playbackRate;
+    utterance.pitch = 1;
+    const voice = getSystemVoice();
+    if (voice) utterance.voice = voice;
+
+    utterance.onstart = () => {
+      if (runId !== chapterRunIdRef.current) return;
+      setIsSpeaking(true);
     };
-    
+    utterance.onend = () => {
+      if (runId !== chapterRunIdRef.current) return;
+      // Insert a real pause between paragraphs before the next utterance.
+      pauseTimerRef.current = setTimeout(() => {
+        speakSegment(segments, index + 1, runId);
+      }, SEGMENT_PAUSE_MS);
+    };
     utterance.onerror = (e) => {
-      // 'canceled' and 'interrupted' are normal when switching chapters or speed
-      if (e.error === 'canceled' || e.error === 'interrupted') {
-        return;
-      }
+      if (e.error === 'canceled' || e.error === 'interrupted') return;
       console.error('Speech error:', e);
       setIsSpeaking(false);
       utteranceRef.current = null;
       toast.error(locale === 'zh-Hans' ? '语音播放失败' : 'Speech playback failed');
     };
-    
+    utteranceRef.current = utterance;
     window.speechSynthesis.speak(utterance);
-  }, [voicesReady, locale, playbackRate, getSystemVoice, isPlaying, currentIndex, items.length]);
+  }, [locale, playbackRate, getSystemVoice, isPlaying, currentIndex, items.length]);
+
+  // Speak current chapter content using TTS, paragraph by paragraph.
+  const speakChapter = useCallback((item: BriefingItem) => {
+    // Abort anything currently queued, then start a fresh run.
+    window.speechSynthesis.cancel();
+    if (pauseTimerRef.current) {
+      clearTimeout(pauseTimerRef.current);
+      pauseTimerRef.current = null;
+    }
+    chapterRunIdRef.current += 1;
+    const runId = chapterRunIdRef.current;
+
+    if (!voicesReady) {
+      toast.error(locale === 'zh-Hans' ? '语音引擎正在加载...' : 'Voice engine loading...');
+      return;
+    }
+
+    const segments = buildSegments(item);
+    chapterStartTimeRef.current = Date.now();
+    speakSegment(segments, 0, runId);
+  }, [voicesReady, locale, buildSegments, speakSegment]);
   
   // Auto-play on mount when data is ready
   const hasAutoPlayed = useRef(false);
@@ -237,7 +275,12 @@ export default function BriefMePage() {
   // Start/stop playback
   const togglePlayback = useCallback(() => {
     if (isPlaying) {
-      // Pause
+      // Pause: bump the run id so any queued segment-chain aborts, then cancel.
+      chapterRunIdRef.current += 1;
+      if (pauseTimerRef.current) {
+        clearTimeout(pauseTimerRef.current);
+        pauseTimerRef.current = null;
+      }
       window.speechSynthesis.cancel();
       setIsPlaying(false);
       setIsSpeaking(false);

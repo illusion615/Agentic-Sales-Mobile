@@ -13,6 +13,7 @@ import type { Opportunity, OpportunityStageKey } from '@/generated/models/opport
 import type { Activity, ActivityTypeKey, ActivityDraftstatusKey } from '@/generated/models/activity-model';
 import type { Contact } from '@/generated/models/contact-model';
 import { calculateEnhancedMatchScore, getConfidenceLevel, type EnhancedMatchScore } from './agent-utils';
+import { queryClient } from './query-client';
 
 /**
  * Escape special characters for OData queries
@@ -1436,6 +1437,53 @@ export async function executeFunction(
             batchIndex: index,
           };
         });
+
+        // Weekly-plan dedup: if any activity item collides with an existing
+        // activity on the same account + same calendar day, attach a
+        // _duplicateOf hint so the form card can warn the user. Reads the
+        // already-fetched list from the query cache; if the cache is empty
+        // we skip silently (no extra round trip).
+        try {
+          const cachedLists = queryClient
+            .getQueriesData<Activity[]>({ queryKey: ['activity-list'] })
+            .map(([, data]) => data)
+            .filter((d): d is Activity[] => Array.isArray(d));
+          const existing: Activity[] = cachedLists.flat();
+          if (existing.length > 0) {
+            const dayOf = (iso: unknown): string => {
+              if (typeof iso !== 'string' || !iso) return '';
+              return iso.slice(0, 10);
+            };
+            for (const card of formCards) {
+              if (card.type !== 'activity') continue;
+              const itemAccountId = card.data.accountId as string | undefined;
+              const itemAccountName = card.data.accountName as string | undefined;
+              const itemDay = dayOf(card.data.scheduleddate ?? card.data.scheduledAt);
+              if (!itemDay) continue;
+              const match = existing.find((a) => {
+                if (dayOf(a.scheduleddate) !== itemDay) return false;
+                if (itemAccountId && a.account?.id === itemAccountId) return true;
+                if (
+                  !itemAccountId &&
+                  itemAccountName &&
+                  a.account?.name1 &&
+                  a.account.name1.toLowerCase() === itemAccountName.toLowerCase()
+                )
+                  return true;
+                return false;
+              });
+              if (match) {
+                (card.data as Record<string, unknown>)._duplicateOf = {
+                  existingId: match.id,
+                  subject: match.title,
+                  scheduleddate: match.scheduleddate,
+                };
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('[batchDraft] dedup skipped:', err);
+        }
         
         return {
           success: true,

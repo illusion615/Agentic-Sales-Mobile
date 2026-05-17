@@ -32,6 +32,9 @@ import {
 
 // Greeting pattern for detecting simple greetings that don't need Copilot Studio
 const GREETING_PATTERN = /^(hi|hello|hey|你好|您好|嗨|早上好|下午好|晚上好|good\s*(morning|afternoon|evening))\b/i;
+// Phrases that ask the agent to produce a narrative report from the current
+// page data. When matched, a non-empty directResponse is allowed through.
+const DAILY_REPORT_PATTERN = /daily\s*report|today'?s?\s*report|工作日报|今日日报|今天的报告|生成今日|生成[\u4e00-\u9fa5]*?报/i;
 
 export interface ThinkingProgress {
   stage: 'intent' | 'executing' | 'generating' | 'matching';
@@ -362,11 +365,11 @@ export async function processMessage(
     if (isZh) {
       pageContextStr = `\n\n当前页面: ${currentPage}`;
       if (summary) pageContextStr += `\n页面摘要: ${summary}`;
-      if (pageData) pageContextStr += `\n页面数据: ${JSON.stringify(pageData, null, 2).slice(0, 2000)}`;
+      if (pageData) pageContextStr += `\n页面数据: ${JSON.stringify(pageData, null, 2).slice(0, 4000)}`;
     } else {
       pageContextStr = `\n\nCurrent page: ${currentPage}`;
       if (summary) pageContextStr += `\nPage summary: ${summary}`;
-      if (pageData) pageContextStr += `\nPage data: ${JSON.stringify(pageData, null, 2).slice(0, 2000)}`;
+      if (pageData) pageContextStr += `\nPage data: ${JSON.stringify(pageData, null, 2).slice(0, 4000)}`;
     }
   }
 
@@ -457,6 +460,11 @@ ${functionList}
      - **仅在 temporalMode="completed" 时考虑**；planned/unspecified 永远不要自动建议商机
      - **示例（用户："刚见完 Rachel，他们想买心脏耗材，预算 80 万 Q3"）**：additionalActions:[{"function":"draftOpportunity","arguments":{"_signals":[{"type":"amount","quote":"预算 80 万"},{"type":"timeline","quote":"Q3"},{"type":"product","quote":"心脏耗材"},{"type":"strongIntent","quote":"他们想买"}],"_confidence":90,"name":"King's College Hospital - 心脏耗材","accountName":"King's College Hospital","amount":800000,"stage":"qualification","expectedCloseDate":"2026-09-30","lastAction":"客户表达采购意向，预算 80 万 Q3 落地"}}]
 7. **多实体创建(batchDraft)**：当用户在一句话中要求创建多个记录时（如"帮我添加一个客户和一个联系人"、"创建两条活动"），使用 batchDraft 函数，将每个记录作为 items 数组的一个元素
+7.B **周计划/排期(batchDraft + activity items)**：当用户说"排一下下周"、"帮我做下周计划"、"plan my week"、"安排下周三天的拜访" 等周计划意图时：
+   - 用 batchDraft，每个计划项作为一个 type:"activity" item
+   - 每个 item.data 至少包含：title（如"拜访 King's College"）、type（visit/call/meeting/email）、scheduleddate（ISO 字符串，按用户提到的日期推算；如未指定则按下周一开始顺次往后排）、accountName（如果用户点名了客户）
+   - 如果用户点名联系人/商机，使用 contactName / opportunityName 字段，并设置 resolutions 让系统做模糊匹配
+   - **不要担心重复**：系统会自动检测同账户同一天的已存在活动并在表单卡上提示用户，由用户决定是否提交
 8. **智能匹配（最重要）**：当用户提到客户/联系人/商机名称但可能不完全准确时（如只提到部分名称、拼音、简称）：
    - 设置 requiresMatching: true
    - 设置 matchTarget: { entityType: 'account|contact|opportunity', query: '用户提到的名称' }
@@ -522,6 +530,14 @@ ${functionList}
    - 对于 draftActivity：会议细节、讨论要点、客户反馈等
    - 示例：用户说 "Royal London Hospital, part of Barts Health NHS Trust, 员工 17000 人，年营收 18 亿"
      -> name="Royal London Hospital", industry="Healthcare", notes="Part of Barts Health NHS Trust. 17,000 employees. Annual revenue £1.8 billion."
+14.B ⭐ **生成工作日报（Daily Report Mode）**：当用户说“生成今日工作日报” / “生成某某日期的工作日报” / “daily report” / “today's report” 且当前页面是活动列表（pageData.viewMode === 'day' 且 pageData.dayActivities 存在）时：
+   - **不调用任何函数**，输出 {"function": null, "directResponse": "<叙述式报告>", "intentLabel": "工作日报"}
+   - directResponse 必须是 Markdown，包含**四个二级标题**，顺序固定：
+     1. "## 今日完成" —— 按 type 分类统计完成/总数，比如 "Visits 2/3 · Meetings 1/1 · Calls 0/1"
+     2. "## 关键成果" —— 列出推动了哪些 opportunity/account（用 opportunityName/accountName + outcome/notes 推出“赢在哪里”），每项一句话
+     3. "## 未完成与原因" —— 列 pending/draft 状态的 task，按 outcome 推测原因（拖延/人员变动/无联系人等）
+     4. "## 明日建议" —— 2–3 条可执行动作，优先点名带 strongIntent 但还没推进的 account/opp
+   - 只能使用 pageData.dayActivities 里的信息，不要虚构。如果 dayActivities 为空数组，directResponse 输出一句“今日无记录，无法生成报告”即可。
 15. 严格输出 JSON，不要任何解释、markdown、代码块
 16. 你的所有回复必须使用中文
 13. 你的所有回复必须使用中文
@@ -794,6 +810,11 @@ Rules:
      - **Only consider this when temporalMode="completed"**; for planned/unspecified do NOT auto-suggest an opp
      - **Example (user: "Just met with Rachel at King's College Hospital, they're keen on cardiac consumables and budget is around 800K for Q3")**: additionalActions:[{"function":"draftOpportunity","arguments":{"_signals":[{"type":"amount","quote":"budget is around 800K"},{"type":"timeline","quote":"for Q3"},{"type":"product","quote":"cardiac consumables"},{"type":"strongIntent","quote":"they're keen on"}],"_confidence":90,"name":"King's College Hospital - Cardiac Consumables","accountName":"King's College Hospital","amount":800000,"stage":"qualification","expectedCloseDate":"2026-09-30","lastAction":"Customer expressed strong interest, budget ~800K for Q3"}}]
 7. **MULTI-ENTITY CREATION (batchDraft)**: When user wants to create multiple records in one request (e.g., "add an account and a contact", "create two activities"), use batchDraft function with each record as an item in the items array
+7.B **WEEKLY PLAN (batchDraft + activity items)**: When user asks to plan a week / schedule visits across days (e.g., "plan my week", "set up next week", "schedule three visits next week", "排下周计划"):
+   - Use batchDraft with each planned task as one type:"activity" item
+   - Each item.data should include: title (e.g. "Visit King's College"), type (visit/call/meeting/email), scheduleddate (ISO string; if user gave a day use it, otherwise spread across Mon–Fri of next week), accountName when the user named an account
+   - If user named a contact or opportunity, use contactName / opportunityName and add resolutions so the system fuzzy-matches them
+   - **Do not worry about duplicates**: the system auto-detects same-account same-day overlaps with existing activities and warns the user on the batch form; the user decides whether to submit
 8. **SMART MATCHING (MOST IMPORTANT)**: When user mentions an account/contact/opportunity name that might not be exact (partial name, abbreviation):
    - Set requiresMatching: true
    - Set matchTarget: { entityType: 'account|contact|opportunity', query: 'name user mentioned' }
@@ -859,6 +880,14 @@ Rules:
    - For draftActivity: meeting details, discussion points, customer feedback, etc.
    - Example: User says "create account: Royal London Hospital, part of Barts Health NHS Trust, 17000 employees, annual revenue £1.8 billion, major trauma centre, specialist in cardiac care and trauma surgery"
      -> name="Royal London Hospital", industry="Healthcare", notes="Part of Barts Health NHS Trust. 17,000 employees. Annual revenue £1.8 billion. Major trauma centre for North East London. Specialist services in cardiac care, trauma surgery, haemophilia, and renal medicine."
+14.B ⭐ DAILY REPORT MODE: When the user asks for a daily report (phrases like "generate daily report", "today's report", "daily report for <date>") AND the current page is the activities Day View (pageData.viewMode === day and pageData.dayActivities is present):
+   - Do NOT call any function. Return {"function": null, "directResponse": "<narrative report>", "intentLabel": "Daily Report"}
+   - directResponse MUST be Markdown with EXACTLY four H2 sections in this order:
+     1. ## Today's Completion — group by activity type and report done/total, e.g. "Visits 2/3 · Meetings 1/1 · Calls 0/1"
+     2. ## Key Wins — list which opportunities/accounts advanced today (use opportunityName / accountName + outcome / notes to infer the win), one short sentence per item
+     3. ## Pending and Why — list pending/draft tasks and infer the reason from outcome (rescheduled, no contact, blocker, etc.)
+     4. ## Tomorrow's Suggestions — 2 to 3 concrete next steps, prioritise accounts/opps that showed strong intent today but did not advance
+   - Use ONLY data from pageData.dayActivities; do not fabricate. If dayActivities is empty, return a single line: "No activities recorded today — nothing to report."
 15. Output strict JSON only, no explanations, no markdown, no code blocks
 16. All your responses must be in English
 
@@ -1172,7 +1201,7 @@ User: "Log a meeting with Rachel at King's College Hospital"
   if (!intent.function) {
     // If it's a simple greeting, return the direct response
     const directResp = intent.directResponse || '';
-    if (directResp && GREETING_PATTERN.test(userMessage.trim())) {
+    if (directResp && (GREETING_PATTERN.test(userMessage.trim()) || DAILY_REPORT_PATTERN.test(userMessage))) {
       return {
         success: true,
         content: directResp,

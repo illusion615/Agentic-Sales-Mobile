@@ -31,7 +31,8 @@ import {
 import { DynamicDataRenderer, tryParseJson } from '@/components/dynamic-data-renderer';
 import { FormCard } from '@/components/form-card';
 import { RecordListCard } from '@/components/record-list-card';
-import { InsightCarousel, isActivityRelatedInsightUtil } from '@/components/insight-carousel';
+// InsightCarousel removed from home page (insights are now shown inside the
+// bell-triggered Insights sheet). Keep the path available via brief-me page.
 import { KPICards, type KPIData, type AgendaItem, type AtRiskClient } from '@/components/kpi-card';
 import { MarkdownRenderer } from '@/components/markdown-renderer';
 import type { BusinessInsight } from '@/generated/models/business-insight-model';
@@ -361,6 +362,9 @@ export default function HomeDashboard() {
   const [playingInlineId, setPlayingInlineId] = useState<string | null>(null);
   const [isCreatingConversation, setIsCreatingConversation] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
+  // Bell icon now opens the unified insights sheet (KPICards owns the JSX,
+  // we just control open state from here so the bell can trigger it).
+  const [insightsSheetOpen, setInsightsSheetOpen] = useState(false);
   const [isRefreshingInsight, setIsRefreshingInsight] = useState(false);
   const [insightRefreshStatus, setInsightRefreshStatus] = useState<string>('');
   // Pull-to-refresh state
@@ -452,10 +456,8 @@ export default function HomeDashboard() {
   const deleteBusinessInsight = useDeleteBusinessInsight();
   const updateActivity = useUpdateActivity();
 
-  // Filter activity-related insights to display in KPICards
-  const activityRelatedInsights = useMemo(() => {
-    return businessInsights.filter((insight: BusinessInsight) => isActivityRelatedInsightUtil(insight));
-  }, [businessInsights]);
+  // Activity-related filtering removed: the unified Insights sheet now shows
+  // all business insights regardless of reference type.
 
   const userId = user?.objectId;
 
@@ -627,11 +629,19 @@ export default function HomeDashboard() {
     const quarterStart = new Date(today.getFullYear(), currentQuarter * 3, 1);
     const quarterEnd = new Date(today.getFullYear(), (currentQuarter + 1) * 3, 0, 23, 59, 59, 999);
     
-    // Won opportunities this quarter
+    // Won opportunities this quarter.
+    // Some "won" records in the back end ship without `closedon` populated
+    // (the field is optional), which used to silently drop them from the KPI.
+    // Fall back through `closedon → expectedclosedate → createdon`, and if
+    // none are present treat the record as in-quarter so genuinely won deals
+    // never disappear from the dashboard.
     const wonOpportunities = opportunities.filter((o: Opportunity) => {
       if (!isWonStage(o.stageKey)) return false;
-      const closedDate = o.closedon ? new Date(o.closedon) : null;
-      return closedDate && closedDate >= quarterStart && closedDate <= quarterEnd;
+      const dateStr = o.closedon || o.expectedclosedate || o.createdon;
+      if (!dateStr) return true;
+      const d = new Date(dateStr);
+      if (Number.isNaN(d.getTime())) return true;
+      return d >= quarterStart && d <= quarterEnd;
     });
     const quarterlyWonAmount = wonOpportunities.reduce((sum: number, o: Opportunity) => sum + (o.totalamount || 0), 0);
     const quarterlyWonCount = wonOpportunities.length;
@@ -2558,16 +2568,22 @@ ${agentResponse}`;
               >
                 <BookOpen className="w-5 h-5 text-foreground" />
               </button>
-              {/* Notification Icon */}
+              {/* Notification Icon -- now opens the unified insights sheet.
+                  Badge shows the total count of active business insights. */}
               <div className="relative inline-flex">
                 <button
-                  onClick={() => setNotificationOpen(!notificationOpen)}
+                  onClick={() => setInsightsSheetOpen(true)}
                   className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-muted/50 active:bg-muted transition-colors relative"
-                  aria-label={locale === 'zh-Hans' ? '通知' : 'Notifications'}
+                  aria-label={locale === 'zh-Hans' ? '洞察' : 'Insights'}
                 >
                   <Bell className="w-5 h-5 text-foreground" />
-                  {/* Unread badge */}
-                  <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-background" />
+                  {businessInsights.length > 0 && (
+                    <span
+                      className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 inline-flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold border-2 border-background"
+                    >
+                      {businessInsights.length > 99 ? '99+' : businessInsights.length}
+                    </span>
+                  )}
                 </button>
               </div>
               {/* Settings with Connection Status */}
@@ -2603,8 +2619,10 @@ ${agentResponse}`;
               onNavigate={navigate}
               onMarkDone={handleMarkOverdueDone}
               onReschedule={handleRescheduleOverdue}
-              activityInsights={activityRelatedInsights}
+              activityInsights={businessInsights}
               allActivities={activities}
+              insightsSheetOpen={insightsSheetOpen}
+              onInsightsSheetOpenChange={setInsightsSheetOpen}
               onCalendarDayClick={(date: Date) => {
                 // Navigate to activities page with day view and selected date
                 // Use local date components to avoid timezone offset issues with toISOString()
@@ -2617,27 +2635,8 @@ ${agentResponse}`;
             />
           </motion.div>
 
-          {/* Daily Briefing Carousel */}
-          <motion.div variants={itemVariants} className="w-full"  style={{ borderRadius: 20 }}>
-            <InsightCarousel
-              customInsightText={customInsightText}
-              kpiData={{
-                followUpsToday: kpiData.agendaItems.length,
-                closingThisWeek: kpiData.closingThisWeek,
-                atRiskCount: kpiData.clientsAtRisk,
-                pendingFollowUpCount: kpiData.clientsAtRisk,
-                performancePercent: Math.round((kpiData.activitiesThisWeek / kpiData.weeklyTarget) * 100),
-              }}
-              isRefreshing={isRefreshingInsight}
-              refreshingStatus={insightRefreshStatus}
-              onRefresh={handleRefreshInsight}
-
-              onViewDetails={() => navigate('/brief-me')}
-              isVoicePlaying={briefMeIsPlaying}
-              voiceCurrentIndex={briefMeCurrentIndex}
-              excludeActivityInsights={true}
-            />
-          </motion.div>
+          {/* Daily Briefing carousel removed: all insights are now consolidated
+              into the bell-triggered Insights sheet inside KPICards. */}
 
 
         </motion.div>
