@@ -104,6 +104,13 @@ export interface ChatMessage {
     pendingIntent?: {
       function: string;
       arguments: Record<string, unknown>;
+      // I-3 Slice 1: remaining resolution chain to walk after this step is resolved.
+      // Slice 2 will consume this to trigger the next fuzzyMatch call.
+      remainingResolutions?: Array<{
+        entityType: 'account' | 'contact' | 'opportunity' | 'activity';
+        query: string;
+        scopeBy?: 'account' | 'opportunity';
+      }>;
     };
   };
   // Clarification question for ambiguous inputs

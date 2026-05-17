@@ -113,6 +113,12 @@ interface IntentResult extends Partial<ValidatedIntentResult> {
     entityType: 'account' | 'contact' | 'opportunity' | 'activity';
     query: string;
   };
+  // I-3 Slice 1: ordered resolution chain. When present, supersedes matchTarget.
+  resolutions?: Array<{
+    entityType: 'account' | 'contact' | 'opportunity' | 'activity';
+    query: string;
+    scopeBy?: 'account' | 'opportunity';
+  }>;
   multiIntentAnalysis?: {
     hasMultipleIntents: boolean;
     summary?: string;
@@ -989,9 +995,16 @@ User: "Contact: Dr. Priya Sharma, Chief Medical Officer at Royal London Hospital
   }
 
   // ===== Smart Matching: Pre-check for entity matching before draft functions =====
-  if (intent.requiresMatching && intent.matchTarget) {
-    const { entityType, query } = intent.matchTarget;
-    console.log('[CopilotAgent] Smart matching required:', entityType, query);
+  // I-3 Slice 1: Normalize `matchTarget` (legacy single-target) into `resolutions[]` chain.
+  // Slice 1 still processes only the FIRST item — Slice 2 will introduce the serial loop.
+  if (intent.requiresMatching && (intent.resolutions?.length || intent.matchTarget)) {
+    const normalizedResolutions = intent.resolutions?.length
+      ? intent.resolutions
+      : [{ entityType: intent.matchTarget!.entityType, query: intent.matchTarget!.query }];
+    const currentResolution = normalizedResolutions[0];
+    const remainingResolutions = normalizedResolutions.slice(1); // reserved for Slice 2 cascade
+    const { entityType, query } = currentResolution;
+    console.log('[CopilotAgent] Smart matching required:', entityType, query, '| chain length:', normalizedResolutions.length, '| remaining after this:', remainingResolutions.length);
     console.log('[CopilotAgent] intent.arguments before matching:', JSON.stringify(intent.arguments, null, 2));
     
     // Notify progress: matching phase started
@@ -1193,6 +1206,8 @@ User: "Contact: Dr. Priya Sharma, Chief Medical Officer at Royal London Hospital
                   return {
                     function: intent.function,
                     arguments: intent.arguments,
+                    // I-3 Slice 1: carry remaining queue for Slice 2's cascade logic.
+                    remainingResolutions: remainingResolutions.length > 0 ? remainingResolutions : undefined,
                   };
                 })(),
               },
@@ -1238,6 +1253,8 @@ User: "Contact: Dr. Priya Sharma, Chief Medical Officer at Royal London Hospital
                   function: intent.function as string,
                   arguments: (intent.arguments || {}) as Record<string, unknown>,
                 },
+                // I-3 Slice 1: carry remaining queue + resolvedSoFar for Slice 2's cascade.
+                remainingResolutions: remainingResolutions.length > 0 ? remainingResolutions : undefined,
               },
               latencyMs: Date.now() - startTime,
               thinkingSteps: [

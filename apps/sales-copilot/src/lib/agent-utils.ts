@@ -7,16 +7,32 @@ import { z } from 'zod';
 
 // ========== Intent Result Schema with Zod Validation ==========
 
+// I-3 Stage 2: ResolutionItem — describes ONE entity that needs to be resolved.
+// `resolutions[]` upgrades the single `matchTarget` into an ordered chain so the
+// agent can serially resolve account → contact → opportunity → activity, with
+// each later step optionally scoped by an earlier resolved entity.
+export const ResolutionItemSchema = z.object({
+  entityType: z.enum(['account', 'contact', 'opportunity', 'activity']),
+  query: z.string(),
+  // Optional dependency: this resolution should be scoped by the named already-resolved entity.
+  // e.g. contact resolution `scopeBy: 'account'` means filter contacts within the resolved account.
+  scopeBy: z.enum(['account', 'opportunity']).optional(),
+});
+export type ResolutionItem = z.infer<typeof ResolutionItemSchema>;
+
 export const IntentResultSchema = z.object({
   function: z.string().nullable(),
   arguments: z.record(z.string(), z.unknown()).optional(),
   directResponse: z.string().optional(),
   confidence: z.number().min(0).max(100).optional(),
   requiresMatching: z.boolean().optional(),
+  // Legacy single-target — kept for backward compat; agent normalizes into resolutions[].
   matchTarget: z.object({
     entityType: z.enum(['account', 'contact', 'opportunity', 'activity']),
     query: z.string(),
   }).optional(),
+  // I-3: ordered list of entities to resolve in sequence.
+  resolutions: z.array(ResolutionItemSchema).optional(),
   additionalActions: z.array(z.object({
     function: z.string(),
     arguments: z.record(z.string(), z.unknown()),
@@ -710,6 +726,10 @@ export const AwaitingClarificationSchema = z.object({
     function: z.string(),
     arguments: z.record(z.string(), z.unknown()),
   }),
+  // I-3 Slice 1: carry the remaining resolution queue (entities still to resolve after this blocker is cleared)
+  // and the IDs of entities already resolved earlier in the chain (so the next step can scope by them).
+  remainingResolutions: z.array(ResolutionItemSchema).optional(),
+  resolvedSoFar: z.record(z.string(), z.string()).optional(),
 });
 export type AwaitingClarification = z.infer<typeof AwaitingClarificationSchema>;
 
