@@ -445,6 +445,11 @@ ${functionList}
    - 设置 matchTarget: { entityType: 'account|contact|opportunity', query: '用户提到的名称' }
    - **注意**：创建活动时，entityType 必须是 'account'（查找客户），不要用 'activity'
    - 系统会先查找匹配记录，再决定是使用已有记录还是创建新记录
+   - **⭐ 多实体解析链路（resolutions[]，I-3）**：当用户在一句话里同时点名了多个需要匹配的实体（如「给国王学院医院的 Rachel Stenhouse 加一个心脏耗材的商机」同时点了客户+联系人+商机），不要用 matchTarget，而是用 resolutions 数组按顺序排列每一步：
+     - 顺序固定为：account → contact → opportunity → activity
+     - 每个元素：{ entityType, query, scopeBy? }；scopeBy 表示「在哪个已解析实体的范围内查找」（如 contact/opportunity 通常 scopeBy:'account'）
+     - 设置 requiresMatching: true；matchTarget 可以省略（向后兼容时也可保留为 resolutions[0]）
+     - 系统会按顺序逐个 fuzzyMatch，自动把上一步解析到的 ID 注入下一步
 9. **创建新记录前必须检查重复**：用户说"添加客户XXX"、"添加联系人xxx"时，先设置 requiresMatching，如果找到高置信匹配则提示可能重复
 10. **⭐ 多意图智能提取（关键能力）**：当用户描述一个完整的业务场景时，要识别其中隐含的多个意图并全部提取：
    - **活动记录**：用户描述的拜访/通话/会议本身 → draftActivity
@@ -504,7 +509,7 @@ ${functionList}
 13. 你的所有回复必须使用中文
 
 JSON 格式:
-{"function": "函数名或null", "arguments": {参数对象}, "requiresMatching": true/false, "matchTarget": {"entityType": "...", "query": "..."}, "additionalActions": [{"function": "...", "arguments": {...}, "reason": "提取原因"}], "multiIntentAnalysis": {"hasMultipleIntents": true/false, "summary": "..."}}
+{"function": "函数名或null", "arguments": {参数对象}, "requiresMatching": true/false, "matchTarget": {"entityType": "...", "query": "..."}, "resolutions": [{"entityType": "...", "query": "...", "scopeBy": "account|opportunity"}], "additionalActions": [{"function": "...", "arguments": {...}, "reason": "提取原因"}], "multiIntentAnalysis": {"hasMultipleIntents": true/false, "summary": "..."}}
 
 示例:
 用户: "今天有什么安排？" -> {"function": "getTodayActivities", "arguments": {}}
@@ -645,6 +650,39 @@ JSON 格式:
   "matchTarget": {"entityType": "account", "query": "\u7687\u5bb6\u4f26\u6566\u533b\u9662"}
 }
 
+**多实体解析链示例 (resolutions[], I-3)**:
+用户: "给国王学院医院的 Rachel Stenhouse 加一个心脏耗材的商机,金额80万,关联到下个月的产品演示会议"
+->
+{
+  "function": "draftActivity",
+  "arguments": {
+    "title": "产品演示会议",
+    "type": "meeting",
+    "scheduledDate": "下个月日期占位"
+  },
+  "requiresMatching": true,
+  "resolutions": [
+    {"entityType": "account", "query": "国王学院医院"},
+    {"entityType": "contact", "query": "Rachel Stenhouse", "scopeBy": "account"},
+    {"entityType": "opportunity", "query": "心脏耗材", "scopeBy": "account"}
+  ],
+  "additionalActions": [
+    {
+      "function": "draftOpportunity",
+      "arguments": {
+        "name": "国王学院医院 - 心脏耗材",
+        "amount": 800000,
+        "stage": "qualification"
+      },
+      "reason": "用户明确提到新商机：心脏耗材80万"
+    }
+  ],
+  "multiIntentAnalysis": {
+    "hasMultipleIntents": true,
+    "summary": "1) 创建产品演示会议活动 2) 关联到客户/联系人/已有商机 3) 同时新建心脏耗材商机"
+  }
+}
+
 }`
     : `You are a sales assistant AI. Based on the user's question and conversation history, decide whether to call a data query function.
 Today's date: ${today}${pageContextStr}
@@ -676,6 +714,11 @@ Rules:
    - Set matchTarget: { entityType: 'account|contact|opportunity', query: 'name user mentioned' }
    - **IMPORTANT**: When creating activities, entityType MUST be 'account' (to find the customer), NOT 'activity'
    - System will first find matches, then decide whether to use existing record or create new
+   - **⭐ MULTI-ENTITY RESOLUTION CHAIN (resolutions[], I-3)**: When the user names multiple entities to match in a single sentence (e.g., "add a cardiac-consumables opportunity for Rachel Stenhouse at King's College Hospital" mentions account + contact + opportunity at once), do NOT use matchTarget — use a "resolutions" array listing each step in order:
+     - Fixed order: account → contact → opportunity → activity
+     - Each item: { entityType, query, scopeBy? }; scopeBy indicates the parent scope to look within (contact/opportunity typically scopeBy:'account')
+     - Set requiresMatching: true; matchTarget can be omitted (or kept identical to resolutions[0] for backward compat)
+     - System resolves each step in sequence and auto-injects the resolved ID of earlier steps into later ones
 9. **CHECK FOR DUPLICATES BEFORE CREATING**: When user says "add account XXX", "add contact XXX", first set requiresMatching to check for potential duplicates
 10. **⭐ MULTI-INTENT INTELLIGENT EXTRACTION (KEY CAPABILITY)**: When user describes a complete business scenario, identify and extract ALL implicit intents:
    - **Activity Record**: The visit/call/meeting itself that user is describing → draftActivity
@@ -734,7 +777,7 @@ Rules:
 16. All your responses must be in English
 
 JSON format:
-{"function": "functionName or null", "arguments": {parameter object}, "requiresMatching": true/false, "matchTarget": {"entityType": "...", "query": "..."}, "additionalActions": [{"function": "...", "arguments": {...}, "reason": "extraction reason"}], "multiIntentAnalysis": {"hasMultipleIntents": true/false, "summary": "..."}}
+{"function": "functionName or null", "arguments": {parameter object}, "requiresMatching": true/false, "matchTarget": {"entityType": "...", "query": "..."}, "resolutions": [{"entityType": "...", "query": "...", "scopeBy": "account|opportunity"}], "additionalActions": [{"function": "...", "arguments": {...}, "reason": "extraction reason"}], "multiIntentAnalysis": {"hasMultipleIntents": true/false, "summary": "..."}}
 
 Examples:
 User: "Change this opportunity amount to 1.5M" -> {"function": "updateOpportunity", "arguments": {"amount": 1500000}}
@@ -886,6 +929,39 @@ User: "Contact: Dr. Priya Sharma, Chief Medical Officer at Royal London Hospital
   },
   "requiresMatching": true,
   "matchTarget": {"entityType": "account", "query": "Royal London Hospital"}
+}
+
+**MULTI-ENTITY RESOLUTION CHAIN EXAMPLE (resolutions[], I-3)**:
+User: "Add a cardiac-consumables opportunity for Rachel Stenhouse at King's College Hospital, 800K amount, link it to next month's product demo meeting"
+->
+{
+  "function": "draftActivity",
+  "arguments": {
+    "title": "Product Demo Meeting",
+    "type": "meeting",
+    "scheduledDate": "next-month-placeholder"
+  },
+  "requiresMatching": true,
+  "resolutions": [
+    {"entityType": "account", "query": "King's College Hospital"},
+    {"entityType": "contact", "query": "Rachel Stenhouse", "scopeBy": "account"},
+    {"entityType": "opportunity", "query": "cardiac consumables", "scopeBy": "account"}
+  ],
+  "additionalActions": [
+    {
+      "function": "draftOpportunity",
+      "arguments": {
+        "name": "King's College Hospital - Cardiac Consumables",
+        "amount": 800000,
+        "stage": "qualification"
+      },
+      "reason": "User explicitly mentioned new opportunity: cardiac consumables, 800K"
+    }
+  ],
+  "multiIntentAnalysis": {
+    "hasMultipleIntents": true,
+    "summary": "1) Create product demo meeting activity 2) Link to account/contact/existing opportunity 3) Also create new cardiac-consumables opportunity"
+  }
 }
 
 }`;

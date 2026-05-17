@@ -15,7 +15,7 @@ import {
 import { getLocale, getLLMConfig, getSimulateStreaming, type Locale } from '@/lib/i18n';
 import { toast } from 'sonner';
 import { processMessage, type ThinkingProgress } from '@/lib/copilot-agent';
-import type { AwaitingClarification } from '@/lib/agent-utils';
+import type { AwaitingClarification, ResolutionItem } from '@/lib/agent-utils';
 import { extractVisitDataFromText, type ExtractedVisitData } from '@/lib/visit-extraction';
 
 // Re-export ExtractedVisitData for consumers that import from context
@@ -1764,7 +1764,180 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       const fnDisplayName = getDisplayName(pendingIntent.function, locale === 'zh-Hans' ? 'zh-Hans' : 'en-US');
       const isDraftFunction = ['draftActivity', 'draftOpportunity', 'draftAccount', 'draftContact'].includes(pendingIntent.function);
       const isBatchDraft = pendingIntent.function === 'batchDraft';
-      
+
+      // I-3 Slice 3: Walk remaining resolution chain before executing the final draft.
+      // For each remaining ResolutionItem: scopeBy-inject, run fuzzyMatch, then:
+      //   - single >90% high-conf → auto-inject into args + continue
+      //   - multi/medium-high-conf → render matchSelection card (with shortened queue) + stop
+      //   - no high-conf (draft only) → render awaiting-clarification card + stop
+      const remainingResolutions = (pendingIntent as { remainingResolutions?: ResolutionItem[] }).remainingResolutions;
+      if ((isDraftFunction || isBatchDraft) && remainingResolutions && remainingResolutions.length > 0) {
+        console.log('[CopilotContext] I-3 cascade: walking', remainingResolutions.length, 'remaining resolutions');
+        const resolvedSoFar: Record<string, string> = {};
+        resolvedSoFar[entityType] = selectedRecord.id;
+        if (entityType === 'contact' && selectedRecord.accountId) resolvedSoFar.account = selectedRecord.accountId;
+        if (updatedArguments.accountId && !resolvedSoFar.account) resolvedSoFar.account = updatedArguments.accountId as string;
+        if (updatedArguments.contactId && !resolvedSoFar.contact) resolvedSoFar.contact = updatedArguments.contactId as string;
+        if (updatedArguments.opportunityId && !resolvedSoFar.opportunity) resolvedSoFar.opportunity = updatedArguments.opportunityId as string;
+
+        let cascadeBlocked = false;
+        for (let i = 0; i < remainingResolutions.length; i++) {
+          const item = remainingResolutions[i];
+          const remainingAfter = remainingResolutions.slice(i + 1);
+
+          // scopeBy injection from accumulated resolvedSoFar
+          if (item.scopeBy && resolvedSoFar[item.scopeBy]) {
+            updatedArguments[`${item.scopeBy}Id`] = resolvedSoFar[item.scopeBy];
+            console.log('[CopilotContext] cascade scopeBy inject:', `${item.scopeBy}Id=${resolvedSoFar[item.scopeBy]}`);
+          }
+
+          const matchFn = item.entityType === 'account' ? 'fuzzyMatchAccount' :
+                          item.entityType === 'contact' ? 'fuzzyMatchContact' :
+                          item.entityType === 'activity' ? 'fuzzyMatchActivity' :
+                          'fuzzyMatchOpportunity';
+
+          let matchResult;
+          try {
+            matchResult = await executeFunction(
+              matchFn,
+              { query: item.query, accountId: updatedArguments.accountId as string | undefined },
+              { userId: user?.objectId, userEmail: user?.userPrincipalName }
+            );
+          } catch (err) {
+            console.warn('[CopilotContext] cascade match error, skipping step:', err);
+            continue;
+          }
+
+          if (!matchResult.success || !matchResult.data) {
+            console.warn('[CopilotContext] cascade match unsuccessful, skipping step');
+            continue;
+          }
+
+          const matchData = matchResult.data as {
+            matches: Array<{ id: string; name: string; score: number; matchType: 'exact' | 'contains' | 'fuzzy'; accountId?: string; accountName?: string; subtitle?: string }>;
+          };
+          const highConf = matchData.matches.filter((m) => m.score >= 70);
+
+          // Auto-inject single very-high-confidence match
+          if (highConf.length === 1 && highConf[0].score > 90) {
+            const m = highConf[0];
+            if (item.entityType === 'account') {
+              updatedArguments.accountId = m.id;
+              updatedArguments.accountName = m.name;
+              resolvedSoFar.account = m.id;
+            } else if (item.entityType === 'contact') {
+              updatedArguments.contactId = m.id;
+              updatedArguments.contactName = m.name;
+              if (m.accountId) {
+                updatedArguments.accountId = m.accountId;
+                if (m.accountName) updatedArguments.accountName = m.accountName;
+                resolvedSoFar.account = m.accountId;
+              }
+              resolvedSoFar.contact = m.id;
+            } else if (item.entityType === 'opportunity') {
+              updatedArguments.opportunityId = m.id;
+              updatedArguments.opportunityName = m.name;
+              resolvedSoFar.opportunity = m.id;
+            } else if (item.entityType === 'activity') {
+              updatedArguments.activityId = m.id;
+              resolvedSoFar.activity = m.id;
+            }
+            console.log('[CopilotContext] cascade auto-injected', item.entityType, m.name);
+            continue;
+          }
+
+          // Multiple high-conf OR single 70-90 → blocking matchSelection card
+          if (highConf.length > 0) {
+            const lowConf = matchData.matches.filter((m) => m.score < 70 && m.score >= 20);
+            const newPendingIntent = {
+              function: pendingIntent.function,
+              arguments: { ...updatedArguments },
+              ...(remainingAfter.length > 0 ? { remainingResolutions: remainingAfter } : {}),
+            };
+            const entityLabel = item.entityType === 'account' ? (locale === 'zh-Hans' ? '客户' : 'account') :
+                                item.entityType === 'contact' ? (locale === 'zh-Hans' ? '联系人' : 'contact') :
+                                item.entityType === 'activity' ? (locale === 'zh-Hans' ? '活动' : 'activity') :
+                                (locale === 'zh-Hans' ? '商机' : 'opportunity');
+            setMessages((prev) => prev.map((msg) => {
+              if (msg.id !== thinkingMsgId) return msg;
+              return {
+                ...msg,
+                type: 'agent' as const,
+                content: locale === 'zh-Hans'
+                  ? `找到 ${highConf.length} 个匹配的${entityLabel}，请选择：`
+                  : `Found ${highConf.length} matching ${entityLabel}(s). Please select:`,
+                isThinking: false,
+                thinkingSteps: [
+                  { stage: 'matching' as const, status: 'completed' as const, label: locale === 'zh-Hans' ? `继续解析「${item.query}」` : `Continuing resolution for "${item.query}"` },
+                ],
+                matchSelection: {
+                  entityType: item.entityType,
+                  query: item.query,
+                  matches: highConf,
+                  lowConfidenceMatches: lowConf,
+                  confidence: 'high' as const,
+                  pendingIntent: newPendingIntent,
+                },
+              };
+            }));
+            cascadeBlocked = true;
+            break;
+          }
+
+          // No high-conf for draft → awaiting-clarification card
+          const topCandidates = matchData.matches.slice(0, 3).map((m) => ({
+            id: m.id,
+            name: m.name,
+            score: m.score,
+            subtitle: m.accountName,
+          }));
+          const pendingKind: 'contact' | 'account' | 'opportunity' =
+            item.entityType === 'activity' ? 'opportunity' : (item.entityType as 'contact' | 'account' | 'opportunity');
+          const kindLabel = pendingKind === 'contact' ? (locale === 'zh-Hans' ? '联系人' : 'contact') :
+                            pendingKind === 'account' ? (locale === 'zh-Hans' ? '客户' : 'account') :
+                            (locale === 'zh-Hans' ? '商机' : 'opportunity');
+          const ac: AwaitingClarification = {
+            kind: 'awaiting-clarification',
+            pendingResolutions: [{
+              id: 'pr-' + Date.now(),
+              kind: pendingKind,
+              query: item.query,
+              candidates: topCandidates,
+              status: 'pending',
+            }],
+            originalIntent: {
+              function: pendingIntent.function,
+              arguments: { ...updatedArguments },
+            },
+            ...(remainingAfter.length > 0 ? { remainingResolutions: remainingAfter } : {}),
+            ...(Object.keys(resolvedSoFar).length > 0 ? { resolvedSoFar: { ...resolvedSoFar } } : {}),
+          };
+          setMessages((prev) => prev.map((msg) => {
+            if (msg.id !== thinkingMsgId) return msg;
+            return {
+              ...msg,
+              type: 'awaiting-clarification' as const,
+              content: locale === 'zh-Hans'
+                ? `未找到与「${item.query}」匹配的${kindLabel}。回复"新建"以新建，或回复其他名称重新搜索，或回复"跳过"以不关联。`
+                : `No ${kindLabel} matches "${item.query}". Reply "create" to create one, another name to retry, or "skip" to omit.`,
+              isThinking: false,
+              thinkingSteps: [
+                { stage: 'matching' as const, status: 'completed' as const, label: locale === 'zh-Hans' ? `未找到「${item.query}」匹配` : `No match for "${item.query}"` },
+              ],
+              awaitingClarification: ac,
+            };
+          }));
+          cascadeBlocked = true;
+          break;
+        }
+
+        if (cascadeBlocked) {
+          setIsSending(false);
+          return;
+        }
+        console.log('[CopilotContext] cascade exhausted, final args:', JSON.stringify(updatedArguments, null, 2));
+      }
+
       if (isBatchDraft) {
         // For batch draft, execute and show batch form cards
         const functionResult = await executeFunction(
