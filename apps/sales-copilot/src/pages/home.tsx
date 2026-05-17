@@ -523,19 +523,40 @@ export default function HomeDashboard() {
       return closeDate && closeDate <= weekEnd;
     }).length;
 
-    // Client coverage - contacted within last 7 days
+    // Client coverage - contacted within last 7 days.
+    // `account.lastcontactedon` is not reliably maintained when activities are
+    // created/completed, so derive the effective last-contact date per account
+    // from the activity log (max scheduleddate among activities tied to that
+    // account) and merge with `lastcontactedon` as a fallback.
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const fourteenDaysAgo = new Date();
+    fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+
+    const lastActivityByAccount = new Map<string, Date>();
+    for (const a of activities) {
+      const accId = a.account?.id;
+      if (!accId || !a.scheduleddate) continue;
+      const d = new Date(a.scheduleddate);
+      if (Number.isNaN(d.getTime())) continue;
+      const prev = lastActivityByAccount.get(accId);
+      if (!prev || d > prev) lastActivityByAccount.set(accId, d);
+    }
+    const effectiveLastContact = (a: Account): Date | null => {
+      const fromActivity = a.id ? lastActivityByAccount.get(a.id) : undefined;
+      const fromField = a.lastcontactedon ? new Date(a.lastcontactedon) : null;
+      if (fromActivity && fromField) return fromActivity > fromField ? fromActivity : fromField;
+      return fromActivity || fromField || null;
+    };
+
     const clientsTouchedThisWeek = accounts.filter((a: Account) => {
-      const lastContact = a.lastcontactedon ? new Date(a.lastcontactedon) : null;
+      const lastContact = effectiveLastContact(a);
       return lastContact && lastContact >= sevenDaysAgo;
     }).length;
 
     // Clients at risk - not contacted in 14+ days
-    const fourteenDaysAgo = new Date();
-    fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
     const clientsAtRiskFiltered = accounts.filter((a: Account) => {
-      const lastContact = a.lastcontactedon ? new Date(a.lastcontactedon) : null;
+      const lastContact = effectiveLastContact(a);
       return !lastContact || lastContact < fourteenDaysAgo;
     });
     const clientsAtRisk = clientsAtRiskFiltered.length;

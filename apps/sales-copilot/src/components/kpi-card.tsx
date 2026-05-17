@@ -554,7 +554,7 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
               <p className="text-[10px] text-muted-foreground leading-tight truncate">
                 {locale === 'zh-Hans' ? '季度业绩' : 'Q Perf.'}
               </p>
-              <p className="text-base font-bold text-foreground leading-tight truncate">
+              <p className="text-sm font-bold text-foreground leading-tight whitespace-nowrap">
                 {formatCurrencyValue(data.quarterlyWonAmount)}
               </p>
             </div>
