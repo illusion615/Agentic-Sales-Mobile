@@ -188,7 +188,7 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
   const [overdueCurrentIndex, setOverdueCurrentIndex] = useState(0);
   const [showCelebration, setShowCelebration] = useState(false);
   const [prevOverdueCount, setPrevOverdueCount] = useState<number | null>(null);
-  const [agendaExpanded, setAgendaExpanded] = useState(true);
+  const [agendaExpanded, setAgendaExpanded] = useState(false);
   const [insightsSheetOpenInternal, setInsightsSheetOpenInternal] = useState(false);
   const insightsSheetOpen = insightsSheetOpenProp ?? insightsSheetOpenInternal;
   const setInsightsSheetOpen = (open: boolean) => {
@@ -531,8 +531,8 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
           style={{ borderRadius: 20 }}
           onClick={() => onNavigate('/opportunity-review')}
         >
-          {/* Header with progress ring */}
-          <div className="flex items-center gap-2 mb-2">
+          {/* Row 1: progress ring (left) + status tag (right) */}
+          <div className="flex items-center justify-between gap-2 mb-2">
             {(() => {
               const quarterlyProgress = data.quarterlyTarget > 0 ? Math.round((data.quarterlyWonAmount / data.quarterlyTarget) * 100) : 0;
               const getQuarterlyColor = () => {
@@ -550,16 +550,39 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
                 />
               );
             })()}
-            <div className="flex-1 min-w-0 overflow-hidden">
-              <p className="text-[10px] text-muted-foreground leading-tight truncate">
-                {locale === 'zh-Hans' ? '季度业绩' : 'Q Perf.'}
-              </p>
-              <p className="text-sm font-bold text-foreground leading-tight whitespace-nowrap">
-                {formatCurrencyValue(data.quarterlyWonAmount)}
-              </p>
-            </div>
+            {(() => {
+              const progress = data.quarterlyTarget > 0 ? Math.round((data.quarterlyWonAmount / data.quarterlyTarget) * 100) : 0;
+              if (progress >= 100) {
+                return (
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 whitespace-nowrap">
+                    🎉 {locale === 'zh-Hans' ? '已达成' : 'Achieved'}
+                  </span>
+                );
+              } else if (progress >= 70) {
+                return (
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 whitespace-nowrap">
+                    {locale === 'zh-Hans' ? '接近目标' : 'On Track'}
+                  </span>
+                );
+              } else {
+                return (
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-primary/10 text-primary whitespace-nowrap">
+                    {locale === 'zh-Hans' ? '努力中' : 'In Progress'}
+                  </span>
+                );
+              }
+            })()}
           </div>
-          
+
+          {/* Row 2: label */}
+          <p className="text-[10px] text-muted-foreground leading-tight">
+            {locale === 'zh-Hans' ? '季度业绩' : 'Q Perf.'}
+          </p>
+          {/* Row 3: value */}
+          <p className="text-lg font-bold text-foreground leading-tight whitespace-nowrap mb-2">
+            {formatCurrencyValue(data.quarterlyWonAmount)}
+          </p>
+
           {/* Target and progress */}
           <div className="space-y-1">
             <div className="flex items-center justify-between text-[10px]">
@@ -571,32 +594,6 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
               <span className="text-foreground/80 font-medium">{data.quarterlyWonCount}/{data.quarterlyTotalCount}</span>
             </div>
           </div>
-          
-          {/* Status badge */}
-          <div className="mt-2">
-            {(() => {
-              const progress = data.quarterlyTarget > 0 ? Math.round((data.quarterlyWonAmount / data.quarterlyTarget) * 100) : 0;
-              if (progress >= 100) {
-                return (
-                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
-                    🎉 {locale === 'zh-Hans' ? '已达成' : 'Achieved'}
-                  </span>
-                );
-              } else if (progress >= 70) {
-                return (
-                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300">
-                    {locale === 'zh-Hans' ? '接近目标' : 'On Track'}
-                  </span>
-                );
-              } else {
-                return (
-                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-primary/10 text-primary">
-                    {locale === 'zh-Hans' ? '努力中' : 'In Progress'}
-                  </span>
-                );
-              }
-            })()}
-          </div>
         </motion.div>
         
         {/* Client Coverage */}
@@ -606,8 +603,8 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
           style={{ borderRadius: 20 }}
           onClick={() => onNavigate('/accounts')}
         >
-          {/* Header with progress ring */}
-          <div className="flex items-center gap-2 mb-2">
+          {/* Row 1: progress ring (left) + status tag (right) */}
+          <div className="flex items-center justify-between gap-2 mb-2">
             <ProgressRingWithValue
               progress={coverageProgress}
               value={`${coverageProgress}%`}
@@ -615,16 +612,38 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
               strokeWidth={3}
               colorClass={getCoverageColor()}
             />
-            <div className="flex-1 min-w-0">
-              <p className="text-[10px] text-muted-foreground leading-tight">
-                {locale === 'zh-Hans' ? '客户覆盖' : 'Coverage'}
-              </p>
-              <p className="text-base font-bold text-foreground leading-tight">
-                {data.clientsTouchedThisWeek}/{data.totalClients}
-              </p>
-            </div>
+            {(() => {
+              if (coverageProgress >= 80) {
+                return (
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 whitespace-nowrap">
+                    {locale === 'zh-Hans' ? '充分' : 'Strong'}
+                  </span>
+                );
+              } else if (coverageProgress >= 50) {
+                return (
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 whitespace-nowrap">
+                    {locale === 'zh-Hans' ? '一般' : 'OK'}
+                  </span>
+                );
+              } else {
+                return (
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 whitespace-nowrap">
+                    {locale === 'zh-Hans' ? '偏低' : 'Low'}
+                  </span>
+                );
+              }
+            })()}
           </div>
-          
+
+          {/* Row 2: label */}
+          <p className="text-[10px] text-muted-foreground leading-tight">
+            {locale === 'zh-Hans' ? '客户覆盖' : 'Coverage'}
+          </p>
+          {/* Row 3: value */}
+          <p className="text-lg font-bold text-foreground leading-tight whitespace-nowrap mb-2">
+            {data.clientsTouchedThisWeek}/{data.totalClients}
+          </p>
+
           {/* At risk clients list */}
           {data.clientsAtRiskList.length > 0 && (
             <div className="space-y-0.5">
@@ -650,8 +669,8 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
           style={{ borderRadius: 20 }}
           onClick={() => onNavigate('/activities?view=week')}
         >
-          {/* Header with progress ring */}
-          <div className="flex items-center gap-2 mb-2">
+          {/* Row 1: progress ring (left) + status tag (right) */}
+          <div className="flex items-center justify-between gap-2 mb-2">
             <ProgressRingWithValue
               progress={Math.min(momentumProgress, 100)}
               value={`${Math.min(momentumProgress, 100)}%`}
@@ -659,16 +678,31 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
               strokeWidth={3}
               colorClass={getMomentumColor()}
             />
-            <div className="flex-1 min-w-0">
-              <p className="text-[10px] text-muted-foreground leading-tight">
-                {locale === 'zh-Hans' ? '本周动力' : 'Momentum'}
-              </p>
-              <p className="text-base font-bold text-foreground leading-tight">
-                {data.activitiesThisWeek}/{data.weeklyTarget}
-              </p>
-            </div>
+            <span className={cn(
+              "inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium whitespace-nowrap",
+              momentumProgress >= 100
+                ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                : momentumProgress >= 70
+                  ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
+                  : 'bg-violet-50 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300'
+            )}>
+              {momentumProgress >= 100
+                ? (locale === 'zh-Hans' ? '🎉 达成' : '🎉 Hit!')
+                : momentumProgress >= 70
+                  ? (locale === 'zh-Hans' ? '接近' : 'Close')
+                  : (locale === 'zh-Hans' ? '加油' : 'Go!')}
+            </span>
           </div>
-          
+
+          {/* Row 2: label */}
+          <p className="text-[10px] text-muted-foreground leading-tight">
+            {locale === 'zh-Hans' ? '本周动力' : 'Momentum'}
+          </p>
+          {/* Row 3: value */}
+          <p className="text-lg font-bold text-foreground leading-tight whitespace-nowrap mb-2">
+            {data.activitiesThisWeek}/{data.weeklyTarget}
+          </p>
+
           {/* Activity breakdown */}
           <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
             <div className="flex items-center gap-0.5">
@@ -680,21 +714,6 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
               <span>{data.callCount}</span>
             </div>
           </div>
-          
-          {/* Status text */}
-          <p className={cn(
-            "text-[10px] font-medium mt-1",
-            momentumProgress >= 100 ? 'text-emerald-600 dark:text-emerald-400' :
-            momentumProgress >= 70 ? 'text-amber-600 dark:text-amber-400' :
-            'text-violet-600 dark:text-violet-400'
-          )}>
-            {momentumProgress >= 100 
-              ? (locale === 'zh-Hans' ? '🎉 达成!' : '🎉 Hit!')
-              : momentumProgress >= 70
-              ? (locale === 'zh-Hans' ? '接近' : 'Close')
-              : (locale === 'zh-Hans' ? '加油' : 'Go!')
-            }
-          </p>
         </motion.div>
       </div>
 
