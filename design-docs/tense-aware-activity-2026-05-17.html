@@ -387,97 +387,74 @@ IntentResultSchema = z.object({
       <section class="section" id="slice-b">
         <div class="section-head">
           <div>
-            <span class="kicker">03 / Slice B · 商机自动发现</span>
-            <h2>activity 保存后追加一张三选一卡片，把对话信号沉淀为 pipeline</h2>
-            <p>触发条件双重收紧：① temporalMode=completed；② 置信度打分 ≥ 40。两者都不满足时静默，符合"AI 不强制参与"。</p>
+            <span class="kicker">03 / Slice B · 商机自动发现（混合方案，已交付）</span>
+            <h2>不加新点击：商机表单直接出现，顶部用一条 "为什么推荐" 解释信号</h2>
+            <p>放弃原 Detection Card（三按钮）方案——它会强制用户多点一次。改成走现有 batchDraft 通路：LLM 自评分 &lt; 40 静默；≥ 40 直接把 New Opportunity 表单挂进 batch，表单顶部加一条信号说明面板（绿/黄 取自 design system）。</p>
           </div>
         </div>
 
         <details open>
           <summary>
-            <span class="summary-left"><span class="severity low">Schema</span><strong>activityDraft 新增 discoveredOpportunity</strong></span>
+            <span class="summary-left"><span class="severity low">Schema</span><strong>无新 schema：信号挂在 draftOpportunity arguments 顶层</strong></span>
             <span class="summary-arrow">+</span>
           </summary>
           <div class="body">
-<pre class="code">const OpportunitySignalSchema = z.object({
-  type: z.enum(['amount', 'timeline', 'product', 'strongIntent', 'weakIntent']),
-  quote: z.string(),  // 用户原话片段，给用户解释为什么被识别
-});
-
-const DiscoveredOpportunitySchema = z.object({
-  productHint: z.string().optional(),
-  estimatedAmount: z.number().optional(),
-  estimatedCurrency: z.string().optional(),
-  timeline: z.string().optional(),
-  signals: z.array(OpportunitySignalSchema),   // 至少 1 个
-});
-
-ActivityDraftSchema = z.object({
-  // ...existing
-  discoveredOpportunity: DiscoveredOpportunitySchema.optional(),
-});
+            <p>LLM 在 <span class="inline-code">additionalActions[draftOpportunity].arguments</span> 顶层注入两个临时字段，仅在 UI 渲染时使用，不写入 CRM：</p>
+<pre class="code">// 由 Rule 6 prompt 约束 LLM 输出，没有 zod schema 强校验
+{
+  intent: 'draftOpportunity',
+  arguments: {
+    name, accountName, productName, estimatedValue, ...,
+    _signals: [{ type: 'amount' | 'timeline' | 'product'
+                     | 'strongIntent' | 'weakIntent',
+                  quote: string  /* 用户原话片段 */ }],
+    _confidence: number  // LLM 自评分 0–100
+  }
+}
 </pre>
-            <p>不在 schema 里存置信度，置信度由 Context 端从 signals 数组计算，可调阈值不需要改 schema。</p>
+            <p><strong>function-executor.ts</strong> 把这两个字段透传到 <span class="inline-code">formCardData.data._signals</span> 与 <span class="inline-code">_signalConfidence</span>（重命名避免与表单已有的 close-probability <span class="inline-code">confidence</span> 冲突）。<span class="inline-code">createOpportunity.mutateAsync</span> 用显式字段列表，不会把这两个临时字段持久化。</p>
           </div>
         </details>
 
         <details>
           <summary>
-            <span class="summary-left"><span class="severity medium">UX</span><strong>检测卡（三按钮）形态</strong></span>
+            <span class="summary-left"><span class="severity medium">UX</span><strong>实际渲染形态：信号说明 + 标准表单</strong></span>
             <span class="summary-arrow">+</span>
           </summary>
           <div class="body">
-            <div class="mock">┌─ Potential Opportunity Detected ───────┐
-│ Confidence: ●●●○○  72% (Medium)        │
-│ Signals: "interested in cardiac        │
-│   consumables" • "demo next week"      │
-│   • "budget ~800K"                     │
+            <div class="mock">┌─ New Opportunity ──────────────────────┐
+│ ✨ Why this was suggested              │
+│    ●●●●● 90  [Amount "500K"]           │
+│              [Timeline "Q4"]           │
+│              [Strong intent "buy"]     │
+│              [Product "ICU monitors"]  │
 │ ─────────────────────────────────────  │
-│ Account:   King's College Hospital     │
-│ Product:   Cardiac Consumables         │
-│ Est.Amt:   £800,000                    │
-│ Timeline:  Q3                          │
-│ Contact:   Rachel Stenhouse            │
+│ Name:       ICU Monitors Q4 ...        │
+│ Account:    Manchester University NHS  │
+│ Product:    ICU Monitors               │
+│ Est. Value: £500,000                   │
+│ Close Date: 2026-12-31                 │
 │ ─────────────────────────────────────  │
-│ Open opps on this account: 2           │  ← 仅 >0 时显示
-│                                        │
-│  [Skip]  [Attach to existing]          │
-│          [Create new]                  │
+│              [Confirm]  [Cancel]       │
 └────────────────────────────────────────┘</div>
-            <p style="margin-top:0.6rem;">置信度可视化用 5 格圆点 + 百分比 + 等级三元呈现，颜色取自 design system：High=good、Medium=warn、Low=info。</p>
+            <p style="margin-top:0.6rem;">信号面板：Sparkles 图标 + 双语标题（"Why this was suggested" / "为什么推荐"）+ 5 格圆点（按分数/20 取整填充）+ 数字分数 + chips（类型标签 + 斜体原话引号）。色板：≥70 绿、≥40 黄、&lt;40 灰（&lt;40 实际不出表单）。</p>
           </div>
         </details>
 
         <details>
           <summary>
-            <span class="summary-left"><span class="severity medium">交互</span><strong>三个按钮的行为分支</strong></span>
+            <span class="summary-left"><span class="severity medium">交互</span><strong>对比：原 Detection Card vs 混合方案</strong></span>
             <span class="summary-arrow">+</span>
           </summary>
           <div class="body">
             <table class="compare">
-              <thead><tr><th>按钮</th><th>启用条件</th><th>点击后</th></tr></thead>
+              <thead><tr><th>维度</th><th>原方案（检测卡）</th><th>混合方案（已交付）</th></tr></thead>
               <tbody>
-                <tr>
-                  <td><strong>Skip</strong></td>
-                  <td>永远启用</td>
-                  <td>卡关闭，pendingIntent 清空。activity 已保存，不回滚。</td>
-                </tr>
-                <tr>
-                  <td><strong>Attach to existing</strong></td>
-                  <td>该 account 名下至少 1 条 status≠Closed 的 opp</td>
-                  <td>
-                    弹 <strong>Select Opportunity 卡</strong>（复用 I-3 Resolution Card 样式），列出 open opps；
-                    用户点选 → 把 activity.regardingOpportunityId 更新为该 opp.id（一次 PATCH）→ 完成。
-                  </td>
-                </tr>
-                <tr>
-                  <td><strong>Create new</strong></td>
-                  <td>永远启用</td>
-                  <td>
-                    弹标准 New Opportunity 表单卡，预填 product/amount/timeline/account/contact；
-                    用户 Confirm → 创建 opp + 同时 PATCH activity.regardingOpportunityId。
-                  </td>
-                </tr>
+                <tr><td>新增点击</td><td>+1（Skip / Attach / Create new）</td><td>0（直接进表单 Confirm）</td></tr>
+                <tr><td>Skip 路径</td><td>显式按钮</td><td>表单 Cancel 即可</td></tr>
+                <tr><td>Attach to existing</td><td>需要 B-2 单独切片</td><td>暂未实现（待 B-2）</td></tr>
+                <tr><td>信号可见性</td><td>卡顶部</td><td>表单顶部，常驻直至 Confirm/Cancel</td></tr>
+                <tr><td>置信度计算</td><td>Context 端按权重表打分</td><td>LLM 在 prompt 里自评（更灵活，能识别多语言/隐喻）</td></tr>
               </tbody>
             </table>
           </div>
@@ -489,27 +466,25 @@ ActivityDraftSchema = z.object({
             <span class="summary-arrow">+</span>
           </summary>
           <div class="body">
-            <p>用户："Just visited Rachel at King's College Hospital, they're interested in cardiac consumables, want a demo next week, budget around 800K for Q3."</p>
+            <p>用户："Just visited Sarah at Manchester University NHS Foundation Trust, they want to buy ICU monitors, budget around 500K for Q4."</p>
             <div class="flow-list">
-              <div class="flow-item"><div class="flow-index">1</div><div><strong>Agent classify</strong><p>intent=Draft Activity · temporalMode=completed · resolutions=[account, contact] · discoveredOpportunity={signals:[amount,timeline,product,strongIntent], productHint, amount, timeline}</p></div></div>
-              <div class="flow-item"><div class="flow-index">2</div><div><strong>Context cascade (I-3)</strong><p>串行解析 account → contact，全单条匹配 → auto-inject 到表单。</p></div></div>
-              <div class="flow-item"><div class="flow-index">3</div><div><strong>Activity Form 卡</strong><p>显示完整字段，含 LLM 预填的 Result 与 Next Step。用户 Confirm → 写入 CRM，status=completed。</p></div></div>
-              <div class="flow-item"><div class="flow-index">4</div><div><strong>触发判定</strong><p>activity 保存成功 onFulfill 钩子：检查 activityDraft.discoveredOpportunity？计算置信度？≥40 → 进 5。</p></div></div>
-              <div class="flow-item"><div class="flow-index">5</div><div><strong>查询同账户 open opps</strong><p>异步 fetch open opportunities by accountId，决定 Attach 按钮是否启用。</p></div></div>
-              <div class="flow-item"><div class="flow-index">6</div><div><strong>追加 Detection 卡</strong><p>在 chat timeline 末尾插一条 message。用户点击三按钮之一 → 分支处理。</p></div></div>
+              <div class="flow-item"><div class="flow-index">1</div><div><strong>Agent classify</strong><p>intent=Draft Activity · temporalMode=completed · additionalActions=[draftOpportunity]，LLM 自评分 90（amount 30 + timeline 20 + product 20 + strongIntent 20）→ ≥40 才允许输出，并把 _signals + _confidence 强制塞进 arguments。</p></div></div>
+              <div class="flow-item"><div class="flow-index">2</div><div><strong>Context cascade (I-3)</strong><p>串行解析 account → contact，全单条匹配 → auto-inject 到 activity 表单。</p></div></div>
+              <div class="flow-item"><div class="flow-index">3</div><div><strong>Batch Draft 卡</strong><p>activity tab + opportunity tab 一起渲染；opportunity 表单顶部出现 "Why this was suggested" 绿条 + 90 分 + 4 个 chip（含用户原话引号）。</p></div></div>
+              <div class="flow-item"><div class="flow-index">4</div><div><strong>用户 Confirm</strong><p>activity 与 opportunity 各自写入 CRM。_signals 与 _signalConfidence 仅在 UI 层使用，不持久化。</p></div></div>
             </div>
+            <p style="margin-top:0.6rem;">弱信号 "Had a quick chat with Rachel at King's College Hospital, she's interested in our products" → LLM 自评 30（weakIntent 10 + product 20）&lt; 40 → 完全不输出 draftOpportunity，只走 Draft Activity 单 intent。E2E 已验证。</p>
           </div>
         </details>
 
         <details>
           <summary>
-            <span class="summary-left"><span class="severity low">切片</span><strong>B-1 与 B-2 的拆分理由</strong></span>
+            <span class="summary-left"><span class="severity low">切片</span><strong>B-1（已交付）与 B-2（待办）的拆分</strong></span>
             <span class="summary-arrow">+</span>
           </summary>
           <div class="body">
-            <p><strong>Slice B-1</strong>：schema + 检测卡 + Skip / Create new 两个按钮 + 置信度算法。不查询 open opps，Attach 按钮始终禁用并显示提示"feature coming"。</p>
-            <p><strong>Slice B-2</strong>：补 Attach to existing 按钮 + Select Opportunity 卡 + open opps 查询路径。</p>
-            <p>B-1 与 B-2 解耦的原因：B-2 引入新的数据访问路径（按 account 查询 open opps），如果与检测卡逻辑一起做，调试与回归测试都难以独立。</p>
+            <p><strong>Slice B-1（混合方案，已交付 commit <span class="inline-code">41d3e7d</span>）</strong>：copilot-agent.ts Rule 6 + Section 12.B（中英双语）约束 LLM 自评分 + 强制 _signals/_confidence；function-executor.ts 透传；form-card.tsx 新增 <span class="inline-code">OpportunitySignalsHeader</span> 子组件。强弱信号双 E2E 全部通过。</p>
+            <p><strong>Slice B-2（待办）</strong>：补 Attach to existing 路径。需要按 account 查询 open opps 的新数据访问，以及在 batch 表单顶部加 "Attach to existing" 链接（点击后切换到 Select Opportunity 卡，跳过 Create new 分支）。</p>
           </div>
         </details>
       </section>
@@ -518,9 +493,9 @@ ActivityDraftSchema = z.object({
       <section class="section" id="confidence">
         <div class="section-head">
           <div>
-            <span class="kicker">04 / 置信度算法</span>
-            <h2>LLM 输出信号，Context 端打分，让阈值可调可测</h2>
-            <p>LLM 只负责"指认"信号（type + quote），不负责评分。Context 端按权重表线性累加，超阈值就弹卡。</p>
+            <span class="kicker">04 / 置信度算法（已改为 LLM 自评分）</span>
+            <h2>权重表写进 prompt，LLM 一次性识别 + 评分 + 决定是否输出</h2>
+            <p>原方案让 LLM 只指认信号、Context 端打分。实施时发现：① 多打一次 prompt 浪费 token；② 权重表硬编码很难覆盖中英文+隐喻+多语种表达。改为把权重表写进 copilot-agent.ts Rule 6，LLM 一次性产出 type+quote+总分，&lt;40 直接不输出 draftOpportunity additionalAction。</p>
           </div>
         </div>
 
@@ -528,16 +503,19 @@ ActivityDraftSchema = z.object({
           <table class="compare">
             <thead><tr><th>信号类型</th><th>权重</th><th>识别线索举例</th></tr></thead>
             <tbody>
-              <tr><td><span class="inline-code">amount</span></td><td>+30</td><td>£800K · 80万 · half a million</td></tr>
-              <tr><td><span class="inline-code">timeline</span></td><td>+20</td><td>Q3 · next quarter · 下半年 · by year-end</td></tr>
-              <tr><td><span class="inline-code">product</span></td><td>+20</td><td>具体产品/品类名称（与产品目录字典匹配可加权）</td></tr>
-              <tr><td><span class="inline-code">strongIntent</span></td><td>+20</td><td>wants demo · requested quote · evaluating vendors · 让我们出方案</td></tr>
+              <tr><td><span class="inline-code">amount</span></td><td>+30</td><td>£800K · 80万 · half a million · budget around 500K</td></tr>
+              <tr><td><span class="inline-code">timeline</span></td><td>+20</td><td>Q3 · next quarter · 下半年 · by year-end · for Q4</td></tr>
+              <tr><td><span class="inline-code">product</span></td><td>+20</td><td>具体产品/品类名称（ICU monitors、cardiac consumables）</td></tr>
+              <tr><td><span class="inline-code">strongIntent</span></td><td>+20</td><td>want to buy · wants demo · requested quote · evaluating vendors · 让我们出方案</td></tr>
               <tr><td><span class="inline-code">weakIntent</span></td><td>+10</td><td>interested · curious · looking at · 感兴趣</td></tr>
             </tbody>
           </table>
           <p style="color:var(--muted); margin-top:0.7rem;">
-            <strong>分级</strong>：≥70=High（绿）· 40–69=Medium（黄）· &lt;40=不弹卡（静默）。
-            阈值常量在 <span class="inline-code">copilot-context.tsx</span> 顶部声明，调阈值不动 schema 不动 prompt。
+            <strong>评分规则</strong>：按 type 去重后求和，cap 100。<strong>分级</strong>：≥70 高（绿）· 40–69 中（黄）· &lt;40 静默（不进 additionalActions）。
+            阈值调节直接改 prompt 文本即可，权重表也只在 prompt 里，没有运行时常量需要维护。
+          </p>
+          <p style="color:var(--muted); margin-top:0.4rem;">
+            <strong>LLM 失守怎么办</strong>：Rule 6 用 "HIGHEST PRIORITY / MANDATORY" 强约束，Section 12.B 加 cross-ref 让它走 Rule 6 流程。E2E 已验证强弱两端表现稳定。若线上回归出现 &lt;40 仍然输出的情况，下一步在 function-executor.ts 加入 defensive drop（读 _confidence，&lt;40 则丢弃 draftOpportunity），但目前不预先加，避免遮蔽 prompt 问题。
           </p>
         </div>
       </section>
@@ -546,37 +524,26 @@ ActivityDraftSchema = z.object({
       <section class="section" id="schema">
         <div class="section-head">
           <div>
-            <span class="kicker">05 / Schema 变更汇总</span>
-            <h2>所有新字段都是 optional，旧消息历史与 Vibe 后端无需迁移</h2>
+            <span class="kicker">05 / Schema 变更汇总（实际）</span>
+            <h2>仅 Slice A 的 temporalMode 入 zod schema；Slice B 走 prompt 约束，零 schema 改动</h2>
           </div>
         </div>
 
         <div class="panel" style="margin-top:0.8rem;">
-<pre class="code">// agent-utils.ts
+<pre class="code">// agent-utils.ts（Slice A）
 const TemporalModeSchema = z.enum(['planned', 'completed', 'unspecified']);
-
-const OpportunitySignalSchema = z.object({
-  type: z.enum(['amount', 'timeline', 'product', 'strongIntent', 'weakIntent']),
-  quote: z.string(),
-});
-
-const DiscoveredOpportunitySchema = z.object({
-  productHint: z.string().optional(),
-  estimatedAmount: z.number().optional(),
-  estimatedCurrency: z.string().optional(),
-  timeline: z.string().optional(),
-  signals: z.array(OpportunitySignalSchema),
-});
-
-// 现有 schema 增量
 IntentResultSchema = IntentResultSchema.extend({
   temporalMode: TemporalModeSchema.optional(),
 });
 
-ActivityDraftSchema = ActivityDraftSchema.extend({
-  discoveredOpportunity: DiscoveredOpportunitySchema.optional(),
-});
+// Slice B：没有 zod schema 改动。LLM 在 draftOpportunity.arguments
+// 顶层注入临时字段，由 prompt Rule 6 约束格式：
+//   _signals: Array&lt;{ type, quote }&gt;
+//   _confidence: number 0–100
+// function-executor.ts 把它们透传到 formCardData.data._signals 与
+// _signalConfidence；OpportunityFormCard 不会持久化它们。
 </pre>
+          <p style="color:var(--muted); margin-top:0.6rem;">放弃 <span class="inline-code">DiscoveredOpportunitySchema</span> 的原因：原方案预设 activity 嵌套 opportunity，但实际 LLM 走的是 <span class="inline-code">additionalActions[draftOpportunity]</span> 这条已有通路，平铺更自然且无需迁移历史消息。</p>
         </div>
       </section>
 
@@ -602,17 +569,17 @@ ActivityDraftSchema = ActivityDraftSchema.extend({
           <div class="phase">
             <div class="phase-idx">B-1</div>
             <div>
-              <strong>Slice B-1 · 商机检测卡（Skip + Create new）</strong>
-              <p style="margin:0; color:var(--muted);">discoveredOpportunity schema + Rule 10 prompt（信号识别）+ 置信度算法 + 检测卡组件 + 两按钮分支。Attach 按钮 disabled。</p>
-              <div class="tag-row"><span class="tag">opportunity-detection-card.tsx</span><span class="tag">confidence.ts (new)</span></div>
+              <strong>Slice B-1 · 混合方案（已交付 commit 41d3e7d）</strong>
+              <p style="margin:0; color:var(--muted);">Rule 6 + Section 12.B 双语 prompt 约束 LLM 自评分 + 强制 _signals/_confidence；function-executor 透传；form-card 加 OpportunitySignalsHeader。零新增点击，强弱信号双 E2E 通过。</p>
+              <div class="tag-row"><span class="tag">copilot-agent.ts</span><span class="tag">function-executor.ts</span><span class="tag">form-card.tsx</span></div>
             </div>
-            <span class="phase-tag">~1 day</span>
+            <span class="phase-tag">done</span>
           </div>
           <div class="phase">
             <div class="phase-idx">B-2</div>
             <div>
-              <strong>Slice B-2 · Attach to existing 路径</strong>
-              <p style="margin:0; color:var(--muted);">按 account 查询 open opps · Select Opportunity 卡（复用 Resolution Card 样式）· PATCH activity.regardingOpportunityId。</p>
+              <strong>Slice B-2 · Attach to existing 路径（待办）</strong>
+              <p style="margin:0; color:var(--muted);">按 account 查询 open opps · Select Opportunity 卡（复用 Resolution Card 样式）· 把 activity.regardingOpportunityId 指向选中的 opp。需要决定挂载位置：opp 表单顶部 link 还是 activity 表单 "Regarding" 字段下方的提示。</p>
               <div class="tag-row"><span class="tag">opportunity-lookup.ts</span><span class="tag">resolution-card.tsx (扩展)</span></div>
             </div>
             <span class="phase-tag">~1 day</span>
