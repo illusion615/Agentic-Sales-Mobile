@@ -428,6 +428,9 @@ export async function executeFunction(
             opportunityId: args.opportunityId as string || '',
             opportunityName: args.opportunityName as string || '',
             notes: args.notes as string || '',
+            // I-8 Slice A: carry temporal tense from LLM into form state so
+            // ActivityFormCard can show/hide result/nextStep and derive draftstatusKey.
+            temporalMode: args.temporalMode as string || '',
           },
         };
         return {

@@ -433,6 +433,7 @@ ${functionList}
    - 示例(在 Product Detail 页面, productName="UltraVision X1"): "tell me about its specifications" -> {"function": "queryCopilotStudio", "arguments": {"query": "UltraVision X1 specifications"}}
 5. 对于天气、通用常识等超出本地数据范围的问题，使用 "externalKnowledgeQuery"
 6. **活动拟定(draftActivity)重要规则**：当用户说"计划新活动"、"记录拜访"、"添加活动"、"创建活动"、"log activity"等：
+   - **⚠️ 强制：arguments 必须包含 temporalMode 字段**，三选一："completed"/"planned"/"unspecified"。详见下面的 temporalMode 子项。该字段决定表单结构（是否显示 result/nextStep）与最终活动状态，省略会导致回归 bug。
    - **必须使用 draftActivity 函数**，不要使用 createActivity。draftActivity 会显示草稿表单让用户确认后再保存
    - 必须结合页面上下文生成有意义的标题，包含客户名称+主题/产品
    - 禁止使用"客户拜访"、"电话沟通"、"会议"等泛泛标题
@@ -757,6 +758,7 @@ Rules:
    - Example (on Product Detail page, productName="UltraVision X1"): "tell me about its specifications" -> {"function": "queryCopilotStudio", "arguments": {"query": "UltraVision X1 specifications"}}
 5. For weather, general knowledge, etc., use "externalKnowledgeQuery"
 6. **ACTIVITY DRAFT RULES (draftActivity)**: When user says "plan activity", "record visit", "add activity", "create activity", "log activity", "schedule meeting" etc.:
+   - **⚠️ MANDATORY: arguments MUST include the temporalMode field**, one of "completed" / "planned" / "unspecified". See the TEMPORAL MODE sub-item below for cue lists. This field drives form rendering (show/hide result/nextStep) and the final activity status; omitting it is a regression bug.
    - **ALWAYS use draftActivity function**, never use createActivity. draftActivity shows a draft form for user to review and confirm before saving
    - MUST generate meaningful title using page context, including account name + topic/product
    - NEVER use generic titles like "Customer Visit", "Phone Call", "Meeting"
