@@ -17,6 +17,7 @@ import { invokeFlowForLLM } from '@/services/power-automate-service';
 import { getLLMConfig, getLocale } from '@/lib/i18n';
 import { getFunctionListForPrompt, getDisplayName } from './function-registry';
 import { executeFunction, type DirectLineSessionRefs } from './function-executor';
+import { ActivityTypeKeyToLabel, type ActivityTypeKey } from '@/generated/models/activity-model';
 import { 
   parseAndValidateIntent,
   isCircuitBreakerOpen, 
@@ -2017,12 +2018,17 @@ Please provide a brief summary and analysis, do not list individual records.`;
     } else if (fnName?.includes('Activit') || fnName === 'getTodayActivities' || fnName === 'getUpcomingActivities') {
       recordList = {
         type: 'activity',
-        records: resultData.map((item: Record<string, unknown>) => ({
-          id: String(item.id || ''),
-          title: String(item.title || ''),
-          subtitle: String(item.type || item.typeKey || ''),
-          meta: item.scheduleddate ? new Date(String(item.scheduleddate)).toLocaleDateString() : '',
-        })),
+        records: resultData.map((item: Record<string, unknown>) => {
+          const rawType = String(item.type || item.typeKey || '');
+          const typeLabel = ActivityTypeKeyToLabel[rawType as ActivityTypeKey] || rawType;
+          const dateStr = (item.scheduledDate || item.scheduleddate) as string | undefined;
+          return {
+            id: String(item.id || ''),
+            title: String(item.title || ''),
+            subtitle: typeLabel,
+            meta: dateStr ? new Date(String(dateStr)).toLocaleDateString() : '',
+          };
+        }),
         title: isZh ? '活动列表' : 'Activities',
       };
     }
