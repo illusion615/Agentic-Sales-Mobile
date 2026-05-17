@@ -554,20 +554,20 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
               const progress = data.quarterlyTarget > 0 ? Math.round((data.quarterlyWonAmount / data.quarterlyTarget) * 100) : 0;
               if (progress >= 100) {
                 return (
-                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 whitespace-nowrap">
+                  <span className="inline-flex shrink-0 items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300" style={{ whiteSpace: 'nowrap' }}>
                     🎉 {locale === 'zh-Hans' ? '已达成' : 'Achieved'}
                   </span>
                 );
               } else if (progress >= 70) {
                 return (
-                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 whitespace-nowrap">
+                  <span className="inline-flex shrink-0 items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" style={{ whiteSpace: 'nowrap' }}>
                     {locale === 'zh-Hans' ? '接近目标' : 'On Track'}
                   </span>
                 );
               } else {
                 return (
-                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-primary/10 text-primary whitespace-nowrap">
-                    {locale === 'zh-Hans' ? '努力中' : 'In Progress'}
+                  <span className="inline-flex shrink-0 items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-primary/10 text-primary" style={{ whiteSpace: 'nowrap' }}>
+                    {locale === 'zh-Hans' ? '进行中' : 'Active'}
                   </span>
                 );
               }
@@ -576,7 +576,7 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
 
           {/* Row 2: label */}
           <p className="text-[10px] text-muted-foreground leading-tight">
-            {locale === 'zh-Hans' ? '季度业绩' : 'Q Perf.'}
+            {locale === 'zh-Hans' ? '季度业绩完成率' : 'Quarterly Performance'}
           </p>
           {/* Row 3: value */}
           <p className="text-lg font-bold text-foreground leading-tight whitespace-nowrap mb-2">

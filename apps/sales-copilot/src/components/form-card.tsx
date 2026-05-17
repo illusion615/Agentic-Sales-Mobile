@@ -28,6 +28,7 @@ import { useCreateOpportunity } from '@/generated/hooks/use-opportunity';
 import { useCreateAccount, useAccountList } from '@/generated/hooks/use-account';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useContactList } from '@/generated/hooks/use-contact';
+import { touchAccountLastContacted } from '@/lib/account-touch';
 import type { Activity, ActivityTypeKey, ActivityDraftstatusKey } from '@/generated/models/activity-model';
 import type { Opportunity, OpportunityStageKey } from '@/generated/models/opportunity-model';
 import type { Account, AccountRegionKey, AccountTierKey } from '@/generated/models/account-model';
@@ -1015,6 +1016,10 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
           ...(targetContact && { contact: { id: targetContact.id, fullname: targetContact.fullname } }),
         };
         const createdActivity = await createActivity.mutateAsync(createInput);
+        // Bump account's last-contacted timestamp so dashboards stay accurate.
+        if (targetAccount?.id) {
+          await touchAccountLastContacted(targetAccount.id, createInput.scheduleddate);
+        }
         setCreatedRecordId(createdActivity.id);
         createdRecordIdRef.current = createdActivity.id;
         // Pass the created record ID to persist it in session storage

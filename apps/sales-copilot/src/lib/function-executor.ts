@@ -13,6 +13,7 @@ import type { Opportunity, OpportunityStageKey } from '@/generated/models/opport
 import type { Activity, ActivityTypeKey, ActivityDraftstatusKey } from '@/generated/models/activity-model';
 import type { Contact } from '@/generated/models/contact-model';
 import { calculateEnhancedMatchScore, getConfidenceLevel, type EnhancedMatchScore } from './agent-utils';
+import { touchAccountLastContacted } from './account-touch';
 import { queryClient } from './query-client';
 
 /**
@@ -704,7 +705,15 @@ export async function executeFunction(
         
         await ActivityService.update(targetId, sanitizeForOData(actChanges));
         const updatedActivity = await ActivityService.get(targetId);
-        
+
+        // Writeback: any activity update against an account counts as a touch,
+        // so dashboards (Coverage, At-Risk) stay accurate. Use scheduleddate if
+        // available, else now. Always invalidate account-list cache.
+        const touchedAccountId = updatedActivity?.account?.id;
+        if (touchedAccountId) {
+          await touchAccountLastContacted(touchedAccountId, updatedActivity?.scheduleddate);
+        }
+
         return {
           success: true,
           data: {
@@ -712,7 +721,7 @@ export async function executeFunction(
             activity: updatedActivity,
             updatedFields: Object.keys(actChanges),
           },
-          invalidateQueries: ['activity-list'],
+          invalidateQueries: touchedAccountId ? ['activity-list', 'account-list'] : ['activity-list'],
         };
       }
 

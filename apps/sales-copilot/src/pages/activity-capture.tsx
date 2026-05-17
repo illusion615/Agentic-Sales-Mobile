@@ -23,6 +23,7 @@ import { useCreateActivity, useActivity, useUpdateActivity } from '@/generated/h
 import { useOpportunityList, useCreateOpportunity, useUpdateOpportunity } from '@/generated/hooks/use-opportunity';
 import { useContactList } from '@/generated/hooks/use-contact';
 import { useWithAISummaryTrigger } from '@/hooks/use-ai-summary-trigger';
+import { touchAccountLastContacted } from '@/lib/account-touch';
 import { getLocale, t, type Locale, getLLMConfig, getAgentFramework } from '@/lib/i18n';
 import { invokeFlowForLLM } from '@/services/power-automate-service';
 import { getCopilotConfig } from '@/services/copilot-service';
@@ -420,6 +421,9 @@ Opportunity intent: ${activityData.opportunityIntent}`;
             ...(targetOpportunity ? { opportunity: { id: targetOpportunity.id, name1: targetOpportunity.name1 } } : { opportunity: undefined }),
           },
         });
+        if (targetAccount?.id) {
+          await touchAccountLastContacted(targetAccount.id, new Date(formData.visitDate).toISOString());
+        }
         toast.success(locale === 'zh-Hans' ? '活动已更新' : 'Activity updated');
       } else {
         // Create new activity
@@ -437,6 +441,9 @@ Opportunity intent: ${activityData.opportunityIntent}`;
           // Set opportunity lookup if selected
           ...(targetOpportunity ? { opportunity: { id: targetOpportunity.id, name1: targetOpportunity.name1 } } : {}),
         });
+        if (targetAccount?.id) {
+          await touchAccountLastContacted(targetAccount.id, new Date(formData.visitDate).toISOString());
+        }
         toast.success(locale === 'zh-Hans' ? '活动已保存' : 'Activity saved');
       }
 
