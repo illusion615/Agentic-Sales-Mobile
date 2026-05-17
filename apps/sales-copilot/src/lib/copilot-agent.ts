@@ -995,17 +995,35 @@ User: "Contact: Dr. Priya Sharma, Chief Medical Officer at Royal London Hospital
   }
 
   // ===== Smart Matching: Pre-check for entity matching before draft functions =====
-  // I-3 Slice 1: Normalize `matchTarget` (legacy single-target) into `resolutions[]` chain.
-  // Slice 1 still processes only the FIRST item — Slice 2 will introduce the serial loop.
+  // I-3 Slice 2: serial resolution chain. Walks `resolutions[]` (or the legacy single
+  // `matchTarget` wrapped into a one-element array). Each iteration may:
+  //   - auto-inject a resolved ID into intent.arguments (silent) and continue,
+  //   - or block by returning a selection card / awaiting-clarification, carrying
+  //     `remainingResolutions` + `resolvedSoFar` so Context cascade (Slice 3) can resume.
   if (intent.requiresMatching && (intent.resolutions?.length || intent.matchTarget)) {
     const normalizedResolutions = intent.resolutions?.length
       ? intent.resolutions
       : [{ entityType: intent.matchTarget!.entityType, query: intent.matchTarget!.query }];
-    const currentResolution = normalizedResolutions[0];
-    const remainingResolutions = normalizedResolutions.slice(1); // reserved for Slice 2 cascade
-    const { entityType, query } = currentResolution;
-    console.log('[CopilotAgent] Smart matching required:', entityType, query, '| chain length:', normalizedResolutions.length, '| remaining after this:', remainingResolutions.length);
-    console.log('[CopilotAgent] intent.arguments before matching:', JSON.stringify(intent.arguments, null, 2));
+    const resolvedSoFar: Record<string, string> = {};
+    let blockingResponse: AgentResponse | null = null;
+    console.log('[CopilotAgent] Resolution chain length:', normalizedResolutions.length);
+
+    for (let _resIdx = 0; _resIdx < normalizedResolutions.length; _resIdx++) {
+      const currentResolution = normalizedResolutions[_resIdx];
+      const remainingResolutions = normalizedResolutions.slice(_resIdx + 1);
+      const { entityType, query } = currentResolution;
+
+      // I-3 Slice 2: scopeBy injection — if this step depends on an earlier-resolved entity,
+      // inject that entity's ID into intent.arguments BEFORE the fuzzy match so the match
+      // call can scope its search (e.g. find contact within the resolved account).
+      if (currentResolution.scopeBy && resolvedSoFar[currentResolution.scopeBy]) {
+        const scopeKey = `${currentResolution.scopeBy}Id`;
+        intent.arguments = { ...(intent.arguments || {}), [scopeKey]: resolvedSoFar[currentResolution.scopeBy] };
+        console.log(`[CopilotAgent] Scope injection: ${scopeKey}=${resolvedSoFar[currentResolution.scopeBy]} for ${entityType} resolution`);
+      }
+
+      console.log('[CopilotAgent] Smart matching step', _resIdx + 1, 'of', normalizedResolutions.length, ':', entityType, query, '| remaining after this:', remainingResolutions.length);
+      console.log('[CopilotAgent] intent.arguments before matching:', JSON.stringify(intent.arguments, null, 2));
     
     // Notify progress: matching phase started
     if (onProgress) {
@@ -1056,7 +1074,7 @@ User: "Contact: Dr. Priya Sharma, Chief Medical Officer at Royal London Hospital
             const highConfAccountMatches = matchData.matches.filter((m: { score: number }) => m.score >= 70);
             // Only show selection if there are actual high-confidence matches to display
             if (highConfAccountMatches.length > 0) {
-              return {
+              blockingResponse = {
                 success: true,
                 content: isZh 
                   ? `找到 ${highConfAccountMatches.length} 个可能匹配的客户，请确认是否使用已有记录，还是创建新客户：`
@@ -1073,6 +1091,7 @@ User: "Contact: Dr. Priya Sharma, Chief Medical Officer at Royal London Hospital
                   { stage: 'matching', status: 'completed', label: isZh ? `找到 ${highConfAccountMatches.length} 个匹配客户` : `Found ${highConfAccountMatches.length} matching account${highConfAccountMatches.length === 1 ? '' : 's'}` },
                 ],
               };
+              break;
             } else {
               // No high-confidence account matches - proceed directly to create new account
               console.log('[CopilotAgent] No high-confidence account matches, proceeding to create new account');
@@ -1085,7 +1104,7 @@ User: "Contact: Dr. Priya Sharma, Chief Medical Officer at Royal London Hospital
             // Only show selection if there are actual high-confidence matches to display
             if (highConfActivityMatches.length > 0) {
               // Show selection card for potential duplicate activity
-              return {
+              blockingResponse = {
                 success: true,
                 content: isZh 
                   ? `发现 ${highConfActivityMatches.length} 个可能重复的活动记录。您可以选择编辑已有记录，或创建新活动：`
@@ -1106,6 +1125,7 @@ User: "Contact: Dr. Priya Sharma, Chief Medical Officer at Royal London Hospital
                   { stage: 'matching', status: 'completed', label: isZh ? `发现 ${highConfActivityMatches.length} 个类似活动` : `Found ${highConfActivityMatches.length} similar activit${highConfActivityMatches.length === 1 ? 'y' : 'ies'}` },
                 ],
               };
+              break;
             } else {
               // No high-confidence activity matches - proceed directly to create new activity
               console.log('[CopilotAgent] No high-confidence activity matches, proceeding to create new activity');
@@ -1119,6 +1139,7 @@ User: "Contact: Dr. Priya Sharma, Chief Medical Officer at Royal London Hospital
               accountId: matchData.exactMatch.id,
               accountName: matchData.exactMatch.name,
             };
+            resolvedSoFar.account = matchData.exactMatch.id;
             console.log('[CopilotAgent] Injected matched account into draft:', matchData.exactMatch.name);
             // Continue to execute the draft function with the correct account data
           }
@@ -1134,6 +1155,8 @@ User: "Contact: Dr. Priya Sharma, Chief Medical Officer at Royal London Hospital
               accountId: contactMatch.accountId || (intent.arguments?.accountId as string) || '',
               accountName: contactMatch.accountName || (intent.arguments?.accountName as string) || '',
             };
+            resolvedSoFar.contact = contactMatch.id;
+            if (contactMatch.accountId) resolvedSoFar.account = contactMatch.accountId;
             console.log('[CopilotAgent] Injected matched contact with account into draft:', contactMatch.name, 'account:', contactMatch.accountName);
             // Continue to execute the draft function with the correct contact data
           }
@@ -1157,6 +1180,7 @@ User: "Contact: Dr. Priya Sharma, Chief Medical Officer at Royal London Hospital
                 accountId: autoMatch.id,
                 accountName: autoMatch.name,
               };
+              resolvedSoFar.account = autoMatch.id;
             } else if (entityType === 'contact') {
               // For contact match, also inject the contact's account information
               intent.arguments = {
@@ -1167,6 +1191,8 @@ User: "Contact: Dr. Priya Sharma, Chief Medical Officer at Royal London Hospital
                 accountId: (autoMatch as { accountId?: string }).accountId || (intent.arguments?.accountId as string) || '',
                 accountName: (autoMatch as { accountName?: string }).accountName || (intent.arguments?.accountName as string) || '',
               };
+              resolvedSoFar.contact = autoMatch.id;
+              if ((autoMatch as { accountId?: string }).accountId) resolvedSoFar.account = (autoMatch as { accountId?: string }).accountId!;
               console.log(`[CopilotAgent] Injected contact with account info:`, {
                 contactId: autoMatch.id,
                 contactName: autoMatch.name,
@@ -1179,13 +1205,14 @@ User: "Contact: Dr. Priya Sharma, Chief Medical Officer at Royal London Hospital
                 opportunityId: autoMatch.id,
                 opportunityName: autoMatch.name,
               };
+              resolvedSoFar.opportunity = autoMatch.id;
             }
             console.log(`[CopilotAgent] Injected auto-matched ${entityType} into draft:`, autoMatch.name);
             // Continue to execute the draft function with the matched entity data
           } else {
             // Multiple matches or single match with score <= 90, show selection card
             console.log('[CopilotAgent] Showing selection card for', highConfidenceMatches.length, 'high-confidence matches');
-            return {
+            blockingResponse = {
               success: true,
               content: isZh 
                 ? `找到 ${highConfidenceMatches.length} 个高置信度匹配的${entityType === 'account' ? '客户' : entityType === 'contact' ? '联系人' : entityType === 'activity' ? '活动' : '商机'}，请选择一个：`
@@ -1206,7 +1233,7 @@ User: "Contact: Dr. Priya Sharma, Chief Medical Officer at Royal London Hospital
                   return {
                     function: intent.function,
                     arguments: intent.arguments,
-                    // I-3 Slice 1: carry remaining queue for Slice 2's cascade logic.
+                    // I-3 Slice 2: carry remaining queue for Context cascade.
                     remainingResolutions: remainingResolutions.length > 0 ? remainingResolutions : undefined,
                   };
                 })(),
@@ -1217,6 +1244,7 @@ User: "Contact: Dr. Priya Sharma, Chief Medical Officer at Royal London Hospital
                 { stage: 'matching', status: 'completed', label: isZh ? `找到 ${highConfidenceMatches.length} 个高置信度匹配` : `Found ${highConfidenceMatches.length} high-confidence matches` },
               ],
             };
+            break;
           }
         } else {
           const isDraftFn = typeof intent.function === 'string' && intent.function.startsWith('draft');
@@ -1241,7 +1269,7 @@ User: "Contact: Dr. Priya Sharma, Chief Medical Officer at Royal London Hospital
               ? `未找到与 "${query}" 匹配的${kindZh}。回复"新建"以新建，或回复其他名称重新搜索，或回复"跳过"以不关联。`
               : `No ${pendingKind} matches "${query}". Reply "create", or reply with another name, or "skip".`;
             console.log('[CopilotAgent] I-2 awaiting-clarification:', pendingKind, query);
-            return {
+            blockingResponse = {
               success: true,
               content: fallback,
               functionCalled: matchFunctionName,
@@ -1253,8 +1281,9 @@ User: "Contact: Dr. Priya Sharma, Chief Medical Officer at Royal London Hospital
                   function: intent.function as string,
                   arguments: (intent.arguments || {}) as Record<string, unknown>,
                 },
-                // I-3 Slice 1: carry remaining queue + resolvedSoFar for Slice 2's cascade.
+                // I-3 Slice 2: carry remaining queue + resolvedSoFar for Context cascade.
                 remainingResolutions: remainingResolutions.length > 0 ? remainingResolutions : undefined,
+                resolvedSoFar: Object.keys(resolvedSoFar).length > 0 ? { ...resolvedSoFar } : undefined,
               },
               latencyMs: Date.now() - startTime,
               thinkingSteps: [
@@ -1262,6 +1291,7 @@ User: "Contact: Dr. Priya Sharma, Chief Medical Officer at Royal London Hospital
                 { stage: 'matching', status: 'completed', label: isZh ? `未找到 ${kindZh} 匹配，等待用户决断` : `No ${pendingKind} match, awaiting user` },
               ],
             };
+            break;
           }
           // No high-confidence matches, proceed with creating new record
           console.log('[CopilotAgent] No high-confidence matches, proceeding with function execution');
@@ -1272,6 +1302,11 @@ User: "Contact: Dr. Priya Sharma, Chief Medical Officer at Royal London Hospital
       }
     } catch (matchError) {
       console.warn('[CopilotAgent] Matching error, proceeding without match:', matchError);
+    }
+    } // end for-loop over normalizedResolutions
+
+    if (blockingResponse) {
+      return blockingResponse;
     }
   }
 
