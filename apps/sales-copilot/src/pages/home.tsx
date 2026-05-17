@@ -2574,8 +2574,13 @@ ${agentResponse}`;
           animate="show"
           className="space-y-5 py-2 pt-6"
         >
-          {/* Greeting Header */}
-          <motion.div variants={itemVariants} className="flex items-center justify-between">
+          {/* Greeting Header — sticky so it stays pinned while the page scrolls.
+              -mx-4 px-4 extends the frosted background to the full width of <main>
+              (which itself has px-4). z-30 keeps it above scrolling cards. */}
+          <motion.div
+            variants={itemVariants}
+            className="sticky top-0 z-30 -mx-4 px-4 py-2 flex items-center justify-between bg-background/80 backdrop-blur-md border-b border-border/40"
+          >
             <HomeHeaderWidgetDisplay locale={locale} widget={homeHeaderWidget} kpiData={kpiData} />
             {/* Notification & Settings Icons */}
             <div className="flex items-center gap-1">
