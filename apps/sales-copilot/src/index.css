@@ -233,6 +233,25 @@ html.light {
     height: 100%;
     overflow: hidden;
   }
+
+  /*
+   * iOS auto-zoom-on-focus fix.
+   * iOS Safari ignores `user-scalable=no` for input focus and force-zooms the
+   * viewport whenever the focused input has a computed font-size < 16px. The
+   * zoom shifts the layout under the keyboard, the focused control scrolls
+   * out of view, and the focus is effectively lost.
+   * Forcing >=16px on all form controls is the only reliable way to suppress
+   * that zoom. We override the Tailwind text-sm (14px) the Copilot composer
+   * uses on mobile only — desktop keeps the original sizing.
+   */
+  @media (max-width: 768px) {
+    input,
+    textarea,
+    select,
+    [contenteditable="true"] {
+      font-size: 16px !important;
+    }
+  }
 }
 
 /* ========================================
