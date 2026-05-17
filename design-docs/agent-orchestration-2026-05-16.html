@@ -2392,15 +2392,15 @@
 
           <div class="cap-row">
             <div class="cap-name">澄清 / 追问<span class="cap-sub">缺信息时阻塞继续</span></div>
-            <div><span class="cov cov-missing">缺失</span></div>
-            <div class="cap-mech">仅靠 LLM 自然语言在 <span class="inline-code">directResponse</span> 中追问，无独立状态机；matching score 全部 &lt; 70 或无候选时走 3c 分支默认静默创建新记录。<div class="code-line">copilot-agent.ts:1196 No high-confidence matches</div><div class="code-line">copilot-agent.ts:1201 no-match 默认继续</div></div>
-            <div class="cap-gap">不存在 <span class="inline-code">awaiting-clarification</span> 阶段；模型可能一边追问一边生成草稿，造成“追问 + 草稿并存”的混合态。<span class="issue-tag p0">I-2</span></div>
+            <div><span class="cov cov-full">已闭环</span></div>
+            <div class="cap-mech">显式 <span class="inline-code">awaiting-clarification</span> 阻塞态已落地：matching score 全部 &lt; 70 或无候选时返回 <span class="inline-code">awaitingClarification</span> 结构，Context 渲染 Unified Resolution Card（无匹配 → 橙色空状态 + Create / Search / Skip）。<div class="code-line">copilot-agent.ts:1187 lowConfidenceMatches</div><div class="code-line">copilot-context.tsx createEntityForResolution / skipResolutionAndDraft / refreshResolution</div></div>
+            <div class="cap-gap">2026-05-17 update：<span class="issue-tag p0">I-2</span> 已解决。统一卡片驱动 awaiting-clarification 与 match-selection 两种消息；Skip 走「剥实体参数 → 出空 lookup 表单」路径，沿用 form-card 收口。</div>
           </div>
 
           <div class="cap-row">
-            <div class="cap-name">候选选择回填<span class="cap-sub">match-selection → continuePendingAction</span></div>
+            <div class="cap-name">候选选择回填<span class="cap-sub">Unified Resolution Card → continuePendingAction</span></div>
             <div><span class="cov cov-partial">部分</span></div>
-            <div class="cap-mech"><strong>仅 3b 分支需要</strong>（多候选 / 70–90 区间 / draftAccount · draftActivity 重复防护）。命中后 Context 渲染 match-selection 消息；用户点击后 <span class="inline-code">continuePendingAction</span> 用所选 ID 补齐参数并 finalize。3a 静默注入与 3c 静默创建跳过本步。<div class="code-line">copilot-context.tsx:1391 continuePendingAction</div></div>
+            <div class="cap-mech">match-selection 与 awaiting-clarification 两种消息共用 <span class="inline-code">MatchSelectionCard</span>：高置信折叠 / 低置信折叠（20–70）/「Search other」内联搜索经 <span class="inline-code">refreshResolution</span> 原地变形 / Skip 走 <span class="inline-code">skipResolutionAndDraft</span>。点击候选触发 <span class="inline-code">continuePendingAction</span> 补齐参数并 finalize。<div class="code-line">copilot-context.tsx:1391 continuePendingAction</div><div class="code-line">match-selection-card.tsx Unified Resolution Card</div></div>
             <div class="cap-gap">骨架按“一次解析 → 一次 finalize”设计；无法串行消化“先 contact、再 opportunity”等多步解析；pendingIntent 只存于 React state，刷新即丢。<span class="issue-tag p1">I-3 衔接</span> <span class="issue-tag p2">I-7</span></div>
           </div>
 
@@ -2998,15 +2998,17 @@
           <article class="phase-row">
             <div class="phase-index">1</div>
             <div class="phase-body">
-              <div class="phase-top"><strong>P0 · 显式澄清状态</strong><span class="phase-label">Stage 1 · 修 I-2</span></div>
-              <p>引入 <span class="inline-code">awaiting-clarification</span> 一阶状态。匹配置信不足或无候选时，主链路进入阻塞，UI 强制收集用户决断后再继续。</p>
+              <div class="phase-top"><strong>P0 · 显式澄清状态 — 已落地</strong><span class="phase-label">Stage 1 · 修 I-2 · 2026-05-17 closed</span></div>
+              <p>引入 <span class="inline-code">awaiting-clarification</span> 一阶状态。匹配置信不足或无候选时，主链路进入阻塞，UI 强制收集用户决断后再继续。<strong>后续合并：</strong>ClarificationCard 与 MatchSelectionCard 合并为 Unified Resolution Card，单一组件驱动 4 种形态（无匹配空状态 / 低置信折叠 / 高置信选择 / Search other 原地变形）。</p>
               <ul class="phase-points">
-                <li>在 ChatMessage 类型中加阻塞态及关联 pendingResolution</li>
-                <li>在 Context 调度处增加：阻塞态时不再触发后续 executeFunction</li>
+                <li>ChatMessage.matchSelection.matches[] 扩展 accountId / accountName；新增 lowConfidenceMatches[]（score 20–70）</li>
+                <li>Context 新增 <span class="inline-code">createEntityForResolution</span> / <span class="inline-code">skipResolutionAndDraft</span> / <span class="inline-code">refreshResolution</span> 三个 useCallback</li>
+                <li>copilot-panel.tsx awaiting-clarification 分支经 adapter 路由到统一卡片；clarification-card.tsx 已删除</li>
               </ul>
               <div class="phase-anchors">
-                <div class="code-line">copilot-context.tsx:1009 / 1391</div>
-                <div class="code-line">copilot-agent.ts:1201 no-match 分支</div>
+                <div class="code-line">match-selection-card.tsx (Unified Resolution Card)</div>
+                <div class="code-line">copilot-context.tsx createEntityForResolution / skipResolutionAndDraft / refreshResolution</div>
+                <div class="code-line">copilot-agent.ts:1187 lowConfidenceMatches</div>
               </div>
             </div>
           </article>

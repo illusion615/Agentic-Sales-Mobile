@@ -9,7 +9,6 @@ import { DynamicDataRenderer, tryParseJson } from '@/components/dynamic-data-ren
 import { FormCard } from '@/components/form-card';
 import { BatchFormCard } from '@/components/batch-form-card';
 import { MatchSelectionCard } from '@/components/match-selection-card';
-import { ClarificationCard } from '@/components/clarification-card';
 import { MarkdownContent } from '@/components/markdown-content';
 import { RecordListCard } from '@/components/record-list-card';
 import { AdditionalIntentsCard } from '@/components/additional-intents-card';
@@ -42,7 +41,9 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
 
     startNewConversation,
     continuePendingAction,
-    createNewFromIntent,
+    createEntityForResolution,
+    skipResolutionAndDraft,
+    refreshResolution,
     pageContext,
     setPageContext,
     clarificationSuggestions,
@@ -370,25 +371,49 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
                         : `Selected: ${record.name}`);
                     }}
                     onContinueWithSelection={(record, pendingIntent) => {
-                      // Continue with the pending action using the selected record
                       continuePendingAction(
                         record,
                         pendingIntent,
                         message.matchSelection?.entityType || 'account'
                       );
                     }}
-                    onCreateNew={(pendingIntent) => {
-                      // Create new record without using any existing match
-                      createNewFromIntent(pendingIntent);
+                    onCreateEntity={(pendingIntent, entityKind, queryName) => {
+                      createEntityForResolution(pendingIntent, entityKind, queryName, message.id);
+                    }}
+                    onSkip={(pendingIntent, entityKind) => {
+                      skipResolutionAndDraft(pendingIntent, entityKind, message.id);
+                    }}
+                    onSearchOther={(newQuery, entityType, pendingIntent) => {
+                      refreshResolution(message.id, newQuery, entityType, pendingIntent);
                     }}
                   />
                 </div>
               )}
 
-              {/* Awaiting-clarification: render as ClarificationCard with action buttons (Create / Search other / Skip) */}
+              {/* Awaiting-clarification: adapt pendingResolutions[0] → matchSelection-shape and render via MatchSelectionCard */}
               {message.type === 'awaiting-clarification' && message.awaitingClarification && !message.isThinking && !message.isStreaming && (() => {
                 const pr = message.awaitingClarification.pendingResolutions[0];
                 if (!pr) return null;
+                const entityType: 'account' | 'contact' | 'opportunity' = pr.kind;
+                const adapted = {
+                  entityType,
+                  query: pr.query,
+                  // Awaiting-clarification path = 0 high-confidence matches by definition
+                  matches: [],
+                  // Surface the candidates the agent stashed (top-3 from fuzzyMatch, all <70 by construction) as low-confidence
+                  lowConfidenceMatches: pr.candidates.map((c) => ({
+                    id: c.id,
+                    name: c.name,
+                    subtitle: c.subtitle,
+                    score: c.score,
+                    matchType: 'fuzzy' as const,
+                  })),
+                  confidence: 'none' as const,
+                  pendingIntent: {
+                    function: message.awaitingClarification.originalIntent.function,
+                    arguments: message.awaitingClarification.originalIntent.arguments,
+                  },
+                };
                 return (
                   <div className="max-w-full">
                     {message.thinkingSteps && message.thinkingSteps.length > 0 && (
@@ -408,11 +433,22 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
                         </div>
                       </details>
                     )}
-                    <ClarificationCard
+                    <MatchSelectionCard
                       messageId={message.id}
-                      pendingKind={pr.kind}
-                      queryName={pr.query}
+                      matchSelection={adapted}
                       resolved={message.resolutionState === 'resolved'}
+                      onContinueWithSelection={(record, pendingIntent) => {
+                        continuePendingAction(record, pendingIntent, entityType);
+                      }}
+                      onCreateEntity={(pendingIntent, entityKind, queryName) => {
+                        createEntityForResolution(pendingIntent, entityKind, queryName, message.id);
+                      }}
+                      onSkip={(pendingIntent, entityKind) => {
+                        skipResolutionAndDraft(pendingIntent, entityKind, message.id);
+                      }}
+                      onSearchOther={(newQuery, et, pendingIntent) => {
+                        refreshResolution(message.id, newQuery, et, pendingIntent);
+                      }}
                     />
                   </div>
                 );

@@ -85,6 +85,18 @@ export interface ChatMessage {
       subtitle?: string;
       score: number;
       matchType: 'exact' | 'contains' | 'fuzzy';
+      accountId?: string;
+      accountName?: string;
+    }>;
+    // Low-confidence matches (<70) for the "Show more" collapsible
+    lowConfidenceMatches?: Array<{
+      id: string;
+      name: string;
+      subtitle?: string;
+      score: number;
+      matchType: 'exact' | 'contains' | 'fuzzy';
+      accountId?: string;
+      accountName?: string;
     }>;
     confidence: 'high' | 'medium' | 'low' | 'none';
     pendingAction?: string;
@@ -214,6 +226,29 @@ interface CopilotContextValue {
   
   // Create new record from intent (skip match selection)
   createNewFromIntent: (
+    pendingIntent: { function: string; arguments: Record<string, unknown> }
+  ) => Promise<void>;
+
+  // Unified resolution: chain-create the missing entity (e.g. open a draftContact form, then resume the parked main intent)
+  createEntityForResolution: (
+    pendingIntent: { function: string; arguments: Record<string, unknown> },
+    entityKind: 'contact' | 'account' | 'opportunity',
+    queryName: string,
+    blockedMsgId?: string
+  ) => Promise<void>;
+
+  // Unified resolution: strip the unresolved entity from the args and open the main draft form so the user can pick in-form
+  skipResolutionAndDraft: (
+    pendingIntent: { function: string; arguments: Record<string, unknown> },
+    entityKind: 'contact' | 'account' | 'opportunity',
+    blockedMsgId?: string
+  ) => Promise<void>;
+
+  // Unified resolution: re-run fuzzy match with a new query and patch the existing message's matchSelection in place
+  refreshResolution: (
+    messageId: string,
+    newQuery: string,
+    entityType: 'account' | 'contact' | 'opportunity' | 'activity',
     pendingIntent: { function: string; arguments: Record<string, unknown> }
   ) => Promise<void>;
   
@@ -1343,7 +1378,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             // Create a match-selection message for fuzzy matching
             setIsSending(false);
             const matchResult = response.functionResult as { 
-              matches: Array<{ id: string; name: string; industry?: string; title?: string; score: number; matchType: 'exact' | 'contains' | 'fuzzy' }>; 
+              matches: Array<{ id: string; name: string; industry?: string; title?: string; score: number; matchType: 'exact' | 'contains' | 'fuzzy'; accountId?: string; accountName?: string }>; 
+              lowConfidenceMatches?: Array<{ id: string; name: string; industry?: string; title?: string; score: number; matchType: 'exact' | 'contains' | 'fuzzy'; accountId?: string; accountName?: string }>;
               confidence: 'high' | 'medium' | 'low' | 'none'; 
               needsConfirmation: boolean; 
               exactMatch?: { id: string; name: string };
@@ -1381,6 +1417,17 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                     subtitle: m.industry || m.title,
                     score: m.score,
                     matchType: m.matchType,
+                    accountId: m.accountId,
+                    accountName: m.accountName,
+                  })),
+                  lowConfidenceMatches: matchResult.lowConfidenceMatches?.map((m) => ({
+                    id: m.id,
+                    name: m.name,
+                    subtitle: m.industry || m.title,
+                    score: m.score,
+                    matchType: m.matchType,
+                    accountId: m.accountId,
+                    accountName: m.accountName,
                   })),
                   confidence: matchResult.confidence,
                   // Pass pendingIntent so UI can continue after user selects a match
@@ -2047,7 +2094,196 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     }
   }, [user, locale]);
 
-  // Update form card status in a message (for persisting confirmed/modified state)
+  // Unified resolution — chain-create: spawn a draft form for the missing entity, park the original intent,
+  // then resume it via completeParkedIntentWithNewContact after the user saves the new entity.
+  // Mirrors the gate's create branch (sendMessage 'create' path) so button clicks bypass text-token matching.
+  const createEntityForResolution = useCallback(async (
+    pendingIntent: { function: string; arguments: Record<string, unknown> },
+    entityKind: 'contact' | 'account' | 'opportunity',
+    queryName: string,
+    blockedMsgId?: string
+  ) => {
+    // Mark the source message resolved so the card freezes
+    if (blockedMsgId) {
+      setMessages((prev) => prev.map((m) => m.id === blockedMsgId ? { ...m, resolutionState: 'resolved' as const } : m));
+    }
+
+    if (entityKind === 'contact') {
+      // Park the original intent; resumed by completeParkedIntentWithNewContact after the contact is saved
+      parkedIntentRef.current = {
+        function: pendingIntent.function,
+        arguments: pendingIntent.arguments,
+        pendingKind: 'contact',
+        blockedMsgId: blockedMsgId || '',
+      };
+      const contactDraftMsg: ChatMessage = {
+        id: `msg-${Date.now()}-contact-draft`,
+        type: 'form-card',
+        role: 'assistant',
+        content: locale === 'zh-Hans'
+          ? '新建联系人，保存后将自动关联到本次活动'
+          : 'Create a new contact — it will be linked to this activity automatically after save',
+        functionCalled: 'createContact',
+        functionDisplayName: locale === 'zh-Hans' ? '新建联系人' : 'New Contact',
+        timestamp: new Date().toISOString(),
+        formCard: {
+          type: 'contact',
+          isNew: true,
+          data: {
+            fullName: queryName,
+            accountName: (pendingIntent.arguments.accountName as string | undefined) ?? '',
+          },
+          status: 'pending',
+        },
+      };
+      setMessages((prev) => [...prev, contactDraftMsg]);
+      return;
+    }
+
+    // account / opportunity chain-create is Stage 5 — for now, show a stub and fall through to skip
+    const kindZh = entityKind === 'account' ? '客户' : '商机';
+    setMessages((prev) => [...prev, {
+      id: `msg-${Date.now()}-stage5`,
+      type: 'agent',
+      role: 'assistant',
+      content: locale === 'zh-Hans'
+        ? `ℹ️ 新建${kindZh}功能即将开放（Stage 5），本次先跳过${kindZh}关联。`
+        : `ℹ️ Creating new ${entityKind} is coming soon (Stage 5). Skipping ${entityKind} link for now.`,
+      agentName: 'System',
+      timestamp: new Date().toISOString(),
+    }]);
+    // Fall through: run the main draft with the entity stripped
+    await skipResolutionAndDraftImpl(pendingIntent, entityKind);
+  }, [user, locale]);
+
+  // Unified resolution — skip: strip the unresolved entity from args and run the original draft directly.
+  // The resulting form-card has an empty lookup for the skipped entity so the user can pick it in-form.
+  // Mirrors the gate's skip branch.
+  const skipResolutionAndDraftImpl = async (
+    pendingIntent: { function: string; arguments: Record<string, unknown> },
+    entityKind: 'contact' | 'account' | 'opportunity'
+  ) => {
+    const strippedArgs: Record<string, unknown> = { ...pendingIntent.arguments };
+    if (entityKind === 'contact') { delete strippedArgs.contactId; delete strippedArgs.contactName; }
+    else if (entityKind === 'account') { delete strippedArgs.accountId; delete strippedArgs.accountName; }
+    else if (entityKind === 'opportunity') { delete strippedArgs.opportunityId; delete strippedArgs.opportunityName; }
+
+    setIsSending(true);
+    try {
+      const { executeFunction } = await import('@/lib/function-executor');
+      const { getDisplayName } = await import('@/lib/function-registry');
+      const fnResult = await executeFunction(
+        pendingIntent.function,
+        strippedArgs,
+        { userId: user?.objectId, userEmail: user?.userPrincipalName },
+      );
+      const fnDisplay = getDisplayName(pendingIntent.function, locale === 'zh-Hans' ? 'zh-Hans' : 'en-US');
+
+      if (fnResult.success && fnResult.data) {
+        const formData = fnResult.data as { type: string; isNew: boolean; data: Record<string, unknown> };
+        setMessages((prev) => [...prev, {
+          id: `msg-${Date.now()}-form`,
+          type: 'form-card',
+          role: 'assistant',
+          content: locale === 'zh-Hans' ? '请确认以下信息' : 'Please confirm the following information',
+          functionCalled: pendingIntent.function,
+          functionDisplayName: fnDisplay,
+          timestamp: new Date().toISOString(),
+          formCard: {
+            type: formData.type as 'activity' | 'opportunity' | 'account' | 'contact',
+            isNew: formData.isNew,
+            data: formData.data,
+            status: 'pending',
+          },
+        }]);
+      } else {
+        setMessages((prev) => [...prev, {
+          id: `msg-${Date.now()}-err`,
+          type: 'agent',
+          role: 'assistant',
+          content: locale === 'zh-Hans' ? `❌ 操作失败: ${fnResult.error}` : `❌ Error: ${fnResult.error}`,
+          agentName: 'System',
+          timestamp: new Date().toISOString(),
+        }]);
+      }
+    } catch (err) {
+      console.error('[CopilotContext] skipResolutionAndDraft error:', err);
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const skipResolutionAndDraft = useCallback(async (
+    pendingIntent: { function: string; arguments: Record<string, unknown> },
+    entityKind: 'contact' | 'account' | 'opportunity',
+    blockedMsgId?: string
+  ) => {
+    if (blockedMsgId) {
+      setMessages((prev) => prev.map((m) => m.id === blockedMsgId ? { ...m, resolutionState: 'resolved' as const } : m));
+    }
+    await skipResolutionAndDraftImpl(pendingIntent, entityKind);
+  }, [user, locale]);
+
+  // Unified resolution — search other: re-run fuzzyMatch with a new query and patch matchSelection in place.
+  // Used by the "Search other" inline input on the resolution card.
+  const refreshResolution = useCallback(async (
+    messageId: string,
+    newQuery: string,
+    entityType: 'account' | 'contact' | 'opportunity' | 'activity',
+    pendingIntent: { function: string; arguments: Record<string, unknown> }
+  ) => {
+    const trimmed = newQuery.trim();
+    if (!trimmed) return;
+    const matchFnName = entityType === 'account' ? 'fuzzyMatchAccount'
+      : entityType === 'contact' ? 'fuzzyMatchContact'
+      : entityType === 'activity' ? 'fuzzyMatchActivity'
+      : 'fuzzyMatchOpportunity';
+    try {
+      const { executeFunction } = await import('@/lib/function-executor');
+      const result = await executeFunction(
+        matchFnName,
+        { query: trimmed, accountId: pendingIntent.arguments?.accountId as string | undefined },
+        { userId: user?.objectId, userEmail: user?.userPrincipalName },
+      );
+      if (!result.success || !result.data) return;
+      const matchData = result.data as {
+        matches: Array<{ id: string; name: string; subtitle?: string; industry?: string; title?: string; score: number; matchType: 'exact' | 'contains' | 'fuzzy'; accountId?: string; accountName?: string }>;
+        confidence: 'high' | 'medium' | 'low' | 'none';
+      };
+      const normalize = (m: typeof matchData.matches[number]) => ({
+        id: m.id,
+        name: m.name,
+        subtitle: m.subtitle || m.industry || m.title || m.accountName,
+        score: m.score,
+        matchType: m.matchType,
+        accountId: m.accountId,
+        accountName: m.accountName,
+      });
+      const highMatches = matchData.matches.filter((m) => m.score >= 70).map(normalize);
+      const lowMatches = matchData.matches.filter((m) => m.score < 70 && m.score >= 20).map(normalize);
+
+      setMessages((prev) => prev.map((msg) => {
+        if (msg.id !== messageId) return msg;
+        // Convert awaiting-clarification messages into match-selection on refresh so the card driver is uniform.
+        return {
+          ...msg,
+          type: 'match-selection' as const,
+          awaitingClarification: undefined,
+          resolutionState: undefined,
+          matchSelection: {
+            entityType,
+            query: trimmed,
+            matches: highMatches,
+            lowConfidenceMatches: lowMatches,
+            confidence: matchData.confidence,
+            pendingIntent,
+          },
+        };
+      }));
+    } catch (err) {
+      console.error('[CopilotContext] refreshResolution error:', err);
+    }
+  }, [user]);
   const updateFormCardStatus = useCallback((
     messageId: string,
     status: 'pending' | 'confirmed' | 'modified',
@@ -2118,6 +2354,9 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     directLineSessionRefs,
     continuePendingAction,
     createNewFromIntent,
+    createEntityForResolution,
+    skipResolutionAndDraft,
+    refreshResolution,
     updateFormCardStatus,
     rollbackToMessage,
     clarificationSuggestions,
@@ -2149,6 +2388,9 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     directLineSessionRefs,
     continuePendingAction,
     createNewFromIntent,
+    createEntityForResolution,
+    skipResolutionAndDraft,
+    refreshResolution,
     updateFormCardStatus,
     clarificationSuggestions,
     setClarificationSuggestions,

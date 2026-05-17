@@ -1183,6 +1183,8 @@ User: "Contact: Dr. Priya Sharma, Chief Medical Officer at Royal London Hospital
                 ...matchData,
                 // Only include high-confidence matches
                 matches: highConfidenceMatches,
+                // Surface low-confidence (20-70) for the card's "Show more" fold-out
+                lowConfidenceMatches: matchData.matches.filter((m: { score: number }) => m.score < 70 && m.score >= 20),
                 // Pass entity type so UI knows how to handle selection
                 entityType,
                 // Pass original intent so UI can continue after selection
