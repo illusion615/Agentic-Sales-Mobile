@@ -25,16 +25,15 @@ import type { Opportunity, OpportunityStageKey } from '@/generated/models/opport
 import type { Account } from '@/generated/models/account-model';
 import type { CopilotConversation } from '@/generated/models/copilot-conversation-model';
 import { OpportunityStageKeyToLabel, ActivityDraftstatusKeyToLabel, ActivityTypeKeyToLabel } from '@/generated/models';
-import {
-  getCopilotConfig,
-} from '@/services/copilot-service';
+import { useCopilotConfigured } from '@/hooks/use-copilot-configured';
+import { useFirstMount } from '@/hooks/use-first-mount';
 import { DynamicDataRenderer, tryParseJson } from '@/components/dynamic-data-renderer';
 import { FormCard } from '@/components/form-card';
 import { RecordListCard } from '@/components/record-list-card';
 // InsightCarousel removed from home page (insights are now shown inside the
 // bell-triggered Insights sheet). Keep the path available via brief-me page.
 import { KPICards, type KPIData, type AgendaItem, type AtRiskClient } from '@/components/kpi-card';
-import { MarkdownRenderer } from '@/components/markdown-renderer';
+import { MarkdownContent } from '@/components/markdown-content';
 import type { BusinessInsight } from '@/generated/models/business-insight-model';
 import { useCopilot, type ChatMessage } from '@/contexts/copilot-context';
 
@@ -247,7 +246,7 @@ function isWonStage(stageKey: OpportunityStageKey): boolean {
   return OpportunityStageKeyToLabel[stageKey] === 'won';
 }
 
-// MarkdownContent removed - now using shared MarkdownRenderer component
+// Uses shared MarkdownContent component from @/components/markdown-content
 
 // Stage Progress Component for Opportunity Cards
 const stages = ['Qualify', 'Develop', 'Propose', 'Close'];
@@ -423,10 +422,10 @@ export default function HomeDashboard() {
   const { data: user } = useUser();
   const locale: Locale = useLocale();
   
-  // Check if copilot is configured (either Copilot Studio or BYOM)
-  const copilotStudioConfig = getCopilotConfig();
-  const llmConfigCheck = getLLMConfig();
-  const isCopilotConfigured = !!copilotStudioConfig?.tokenEndpoint || (!!llmConfigCheck?.enabled && !!llmConfigCheck?.endpoint);
+  // Check if copilot is configured (either Copilot Studio or BYOM) — reactive to async settings hydration
+  const isCopilotConfigured = useCopilotConfigured();
+  const firstMount = useFirstMount('home');
+
   const thinkingDotStyle: ThinkingDotStyle = getThinkingDotStyle();
 
   // Shared copilot context - use context's messages and sendMessage
@@ -2278,7 +2277,7 @@ ${agentResponse}`;
                         <DynamicDataRenderer content={message.content} />
                       ) : (
                         /* Render as markdown text */
-                        <MarkdownRenderer content={message.content} className={cn('text-foreground', getChatFontClass())} />
+                        <MarkdownContent content={message.content} className={cn('text-foreground', getChatFontClass())} />
                       )}
                       
                       {/* Sources */}
@@ -2570,7 +2569,7 @@ ${agentResponse}`;
         )}
         <motion.div
           variants={containerVariants}
-          initial="hidden"
+          initial={firstMount ? 'hidden' : false}
           animate="show"
           className="space-y-5 pb-2"
         >

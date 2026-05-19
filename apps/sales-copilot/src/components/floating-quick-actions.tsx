@@ -1,8 +1,8 @@
 import { motion, AnimatePresence } from 'motion/react';
 import { useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
-import { getCopilotInAllScreens, getLLMConfig } from '@/lib/i18n';
-import { getCopilotConfig } from '@/services/copilot-service';
+import { getCopilotInAllScreens } from '@/lib/i18n';
+import { useCopilotConfigured } from '@/hooks/use-copilot-configured';
 import type { LucideIcon } from 'lucide-react';
 
 export interface QuickAction {
@@ -31,10 +31,8 @@ export function FloatingQuickActions({
 }: FloatingQuickActionsProps) {
   const location = useLocation();
   
-  // Check if copilot bar would be visible (same logic as GlobalCopilot)
-  const copilotConfig = getCopilotConfig();
-  const llmConfig = getLLMConfig();
-  const isCopilotConfigured = !!copilotConfig?.tokenEndpoint || (!!llmConfig?.enabled && !!llmConfig?.endpoint);
+  // Check if copilot bar would be visible (same logic as GlobalCopilot, reactive to settings hydration)
+  const isCopilotConfigured = useCopilotConfigured();
   const isHomePage = location.pathname === '/' || location.pathname === '/home';
   const isSettingsPage = location.pathname === '/settings';
   const copilotEnabled = getCopilotInAllScreens();

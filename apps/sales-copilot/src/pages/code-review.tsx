@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { getLocale } from '@/lib/i18n';
+import { useFirstMount } from '@/hooks/use-first-mount';
 
 
 const containerVariants = {
@@ -46,6 +47,7 @@ interface DuplicatedPattern {
 export default function CodeReviewPage() {
   const navigate = useNavigate();
   const locale = getLocale();
+  const firstMount = useFirstMount('code-review');
   const [copied, setCopied] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
   const [reportContent, setReportContent] = useState<string>('');
@@ -412,7 +414,7 @@ export default function CodeReviewPage() {
         <div className="px-4 py-6">
           <motion.div
             variants={containerVariants}
-            initial="hidden"
+            initial={firstMount ? 'hidden' : false}
             animate="show"
             className="space-y-4 pb-8"
           >

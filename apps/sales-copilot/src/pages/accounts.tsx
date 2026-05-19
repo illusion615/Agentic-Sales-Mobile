@@ -25,6 +25,7 @@ import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/u
 import { useCopilot } from '@/contexts/copilot-context';
 import { getLocale } from '@/lib/i18n';
 import { PullToRefresh } from '@/components/pull-to-refresh';
+import { useFirstMount } from '@/hooks/use-first-mount';
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -56,6 +57,7 @@ function getContactStatus(daysSince: number): { label: string; color: string; is
 
 export default function ClientsPage() {
   const navigate = useNavigate();
+  const firstMount = useFirstMount('accounts');
   const [searchQuery, setSearchQuery] = useState('');
   const locale = getLocale();
 
@@ -164,7 +166,7 @@ export default function ClientsPage() {
       <PullToRefresh onRefresh={handleRefresh} className="flex-1 overflow-y-auto pb-32">
         <motion.div
           variants={containerVariants}
-          initial="hidden"
+          initial={firstMount ? 'hidden' : false}
           animate="show"
           className="space-y-4 py-4"
         >

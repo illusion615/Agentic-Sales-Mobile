@@ -56,6 +56,7 @@ import { getLocale, t } from '@/lib/i18n';
 import { FloatingQuickActions } from '@/components/floating-quick-actions';
 import { useCopilot } from '@/contexts/copilot-context';
 import { PullToRefresh } from '@/components/pull-to-refresh';
+import { useFirstMount } from '@/hooks/use-first-mount';
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -149,6 +150,7 @@ function StageProgress({ stageKey, confidence }: { stageKey: OpportunityStageKey
 export default function OpportunityDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const firstMount = useFirstMount(`opportunity-detail:${id ?? ''}`);
   const [searchParams] = useSearchParams();
   const isEditMode = searchParams.get('edit') === 'true';
   const [activeTab, setActiveTab] = useState('overview');
@@ -336,7 +338,7 @@ export default function OpportunityDetailPage() {
       <PullToRefresh onRefresh={handleRefresh} className="flex-1 overflow-y-auto">
         <motion.div
           variants={containerVariants}
-          initial="hidden"
+          initial={firstMount ? 'hidden' : false}
           animate="show"
           className="px-4 pb-40"
         >

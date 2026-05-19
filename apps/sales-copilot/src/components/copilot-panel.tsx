@@ -12,6 +12,7 @@ import { MatchSelectionCard } from '@/components/match-selection-card';
 import { MarkdownContent } from '@/components/markdown-content';
 import { RecordListCard } from '@/components/record-list-card';
 import { AdditionalIntentsCard } from '@/components/additional-intents-card';
+import { FrameShadowViewer } from '@/components/frame-shadow-viewer';
 import { toast } from 'sonner';
 
 
@@ -77,6 +78,9 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
   
   // Context chips that user can dismiss
   const [dismissedContexts, setDismissedContexts] = useState<Set<string>>(new Set());
+
+  // Frame shadow viewer overlay (\u65b9\u6848 3 \u00b7 Phase 1)
+  const [frameViewerOpen, setFrameViewerOpen] = useState(false);
   
   // Clear dismissed contexts when page context changes
   useEffect(() => {
@@ -811,6 +815,7 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
   // Full screen overlay mode
   if (mode === 'overlay' && isFullScreen) {
     return (
+      <>
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -831,6 +836,15 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
             <span className="text-sm font-medium text-foreground">Ask Copilot</span>
             {isConnected && <span className="w-2 h-2 bg-green-500 rounded-full" />}
             {isConnecting && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
+            <button
+              type="button"
+              onClick={() => setFrameViewerOpen(true)}
+              className="ml-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold text-orange-700 bg-orange-100 hover:bg-orange-200 transition-colors"
+              title={locale === 'zh-Hans' ? 'Frame 影子模式 · 销售专家思考记录' : 'Frame shadow mode · sales-coach reasoning log'}
+              aria-label="Frame shadow log"
+            >
+              F
+            </button>
           </div>
           <button
             onClick={() => startNewConversation()}
@@ -892,6 +906,8 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
           {renderInputArea()}
         </div>
       </motion.div>
+      <FrameShadowViewer open={frameViewerOpen} onClose={() => setFrameViewerOpen(false)} locale={locale} />
+      </>
     );
   }
 
@@ -958,6 +974,15 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
                   <span className="text-sm font-medium text-foreground">Ask Copilot</span>
                   {isConnected && <span className="w-2 h-2 bg-green-500 rounded-full" />}
                   {isConnecting && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
+                  <button
+                    type="button"
+                    onClick={() => setFrameViewerOpen(true)}
+                    className="ml-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold text-orange-700 bg-orange-100 hover:bg-orange-200 transition-colors"
+                    title={locale === 'zh-Hans' ? 'Frame 影子模式 · 销售专家思考记录' : 'Frame shadow mode · sales-coach reasoning log'}
+                    aria-label="Frame shadow log"
+                  >
+                    F
+                  </button>
                 </div>
                 <div className="flex items-center gap-1">
                   <button
@@ -1021,6 +1046,7 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
             </motion.div>
           </>
         )}
+        <FrameShadowViewer open={frameViewerOpen} onClose={() => setFrameViewerOpen(false)} locale={locale} />
       </AnimatePresence>
     );
   }
@@ -1030,6 +1056,7 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
     <div className="flex flex-col h-full">
       {renderMessages()}
       {renderInputArea()}
+      <FrameShadowViewer open={frameViewerOpen} onClose={() => setFrameViewerOpen(false)} locale={locale} />
     </div>
   );
 }

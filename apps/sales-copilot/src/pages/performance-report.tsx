@@ -25,6 +25,7 @@ import type { Opportunity, OpportunityStageKey } from '@/generated/models/opport
 import type { Activity } from '@/generated/models/activity-model';
 import type { Account } from '@/generated/models/account-model';
 import { getLocale } from '@/lib/i18n';
+import { useFirstMount } from '@/hooks/use-first-mount';
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -95,6 +96,7 @@ function ProgressRing({ progress, size = 80, strokeWidth = 6 }: { progress: numb
 export default function PerformanceReportPage() {
   const navigate = useNavigate();
   const locale = getLocale();
+  const firstMount = useFirstMount('performance-report');
   const [activeTab, setActiveTab] = useState('overview');
 
   const { data: opportunities = [] } = useOpportunityList();
@@ -153,7 +155,7 @@ export default function PerformanceReportPage() {
 
       <motion.div
         variants={containerVariants}
-        initial="hidden"
+        initial={firstMount ? 'hidden' : false}
         animate="show"
         className="px-4 pb-8"
       >

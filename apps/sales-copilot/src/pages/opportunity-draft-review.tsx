@@ -47,6 +47,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { format } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useFirstMount } from '@/hooks/use-first-mount';
 
 // i18n translations
 const translations = {
@@ -405,6 +406,7 @@ export default function OpportunityDraftReviewPage() {
   const [searchParams] = useSearchParams();
   const activityIdFromQuery = searchParams.get('activityId');
   const finalActivityId = activityId || activityIdFromQuery || '';
+  const firstMount = useFirstMount(`opportunity-draft-review:${finalActivityId}`);
 
   const locale: Locale = getLocale();
   const { data: user } = useUser();
@@ -692,7 +694,7 @@ export default function OpportunityDraftReviewPage() {
             <motion.div
               key="content"
               variants={containerVariants}
-              initial="hidden"
+              initial={firstMount ? 'hidden' : false}
               animate="show"
               className="space-y-4 py-4"
             >

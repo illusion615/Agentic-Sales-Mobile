@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Sparkles, RefreshCw, ChevronDown, ChevronUp, AlertCircle, Clock, CheckCircle2, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { GlassCard } from './glass-card';
-import { MarkdownRenderer } from './markdown-renderer';
+import { MarkdownContent } from './markdown-content';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import type { AISummary } from '@/generated/models/ai-summary-model';
@@ -201,7 +201,7 @@ export function AISummaryCard({
             <div className="pt-4 mt-4 border-t border-border/50 space-y-4">
               {/* Summary */}
               <div>
-                <MarkdownRenderer
+                <MarkdownContent
                   content={summary.summary || ''}
                   className="text-sm text-foreground leading-relaxed"
                 />
@@ -213,7 +213,7 @@ export function AISummaryCard({
                   <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
                     {locale === 'zh-Hans' ? '建议行动' : 'Suggested Actions'}
                   </h4>
-                  <MarkdownRenderer
+                  <MarkdownContent
                     content={summary.actionItems || ''}
                     className="text-sm text-foreground leading-relaxed"
                   />

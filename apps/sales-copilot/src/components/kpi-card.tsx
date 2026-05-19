@@ -637,7 +637,7 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
 
           {/* Row 2: label */}
           <p className="text-[10px] text-muted-foreground leading-tight">
-            {locale === 'zh-Hans' ? '客户覆盖' : 'Coverage'}
+            {locale === 'zh-Hans' ? '客户覆盖' : 'Client Coverage'}
           </p>
           {/* Row 3: value */}
           <p className="text-lg font-bold text-foreground leading-tight whitespace-nowrap mb-2">
@@ -673,7 +673,7 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
           <div className="flex items-center justify-between gap-2 mb-2">
             <ProgressRingWithValue
               progress={Math.min(momentumProgress, 100)}
-              value={`${Math.min(momentumProgress, 100)}%`}
+              value={`${momentumProgress}%`}
               size={40}
               strokeWidth={3}
               colorClass={getMomentumColor()}
@@ -696,7 +696,7 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
 
           {/* Row 2: label */}
           <p className="text-[10px] text-muted-foreground leading-tight">
-            {locale === 'zh-Hans' ? '本周动力' : 'Momentum'}
+            {locale === 'zh-Hans' ? '本周动力' : 'Weekly Momentum'}
           </p>
           {/* Row 3: value */}
           <p className="text-lg font-bold text-foreground leading-tight whitespace-nowrap mb-2">
@@ -771,7 +771,7 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
                 {/* Weekday headers */}
                 <div className="grid grid-cols-7 gap-0.5 mb-1">
                   {(locale === 'zh-Hans' ? ['日', '一', '二', '三', '四', '五', '六'] : ['S', 'M', 'T', 'W', 'T', 'F', 'S']).map((day: string, i: number) => (
-                    <div key={i} className="text-center text-[9px] text-muted-foreground font-medium">{day}</div>
+                    <div key={i} className="text-center text-[11px] text-muted-foreground font-medium">{day}</div>
                   ))}
                 </div>
                 {/* Calendar days */}
@@ -784,7 +784,7 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
                     
                     // Empty cells for days before the 1st
                     for (let i = 0; i < firstDayOfWeek; i++) {
-                      days.push(<div key={`empty-${i}`} className="h-6" />);
+                      days.push(<div key={`empty-${i}`} className="h-8" />);
                     }
                     
                     // Days of the month
@@ -799,7 +799,7 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
                         <div
                           key={day}
                           className={cn(
-                            'h-6 flex flex-col items-center justify-center rounded relative cursor-pointer hover:bg-muted transition-colors',
+                            'h-8 flex flex-col items-center justify-center rounded relative cursor-pointer hover:bg-muted transition-colors',
                             isToday && 'bg-primary/20 ring-1 ring-primary',
                             hasActivities && !isToday && 'bg-muted/50'
                           )}
@@ -811,7 +811,7 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
                           }}
                         >
                           <span className={cn(
-                            'text-[10px] leading-none',
+                            'text-[13px] leading-none',
                             isToday ? 'font-bold text-primary' : 'text-foreground'
                           )}>{day}</span>
                           {/* Activity type dots */}

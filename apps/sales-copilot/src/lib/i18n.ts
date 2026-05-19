@@ -385,14 +385,27 @@ const fontSizeClasses = {
   },
 } as const;
 
+// Root font-size in px per UI size — scales ALL rem-based sizes
+// (including Tailwind text-xs/sm/base/lg) so the setting actually
+// propagates to every page, not just `.text-title/.text-body/.text-helper`.
+const rootFontSizePx = {
+  small: '14px',
+  medium: '16px',
+  large: '18px',
+} as const;
+
 // Apply font size CSS variables to the document
 export function applyFontSizeToDocument(config: FontSizeConfig): void {
   const root = document.documentElement;
   const uiSizes = fontSizeValues[config.ui];
-  
+
   root.style.setProperty('--scm-font-title', uiSizes.title);
   root.style.setProperty('--scm-font-body', uiSizes.body);
   root.style.setProperty('--scm-font-helper', uiSizes.helper);
+
+  // Scale the entire UI by adjusting the root font-size, so every
+  // rem-based size (including Tailwind utilities) follows the setting.
+  root.style.fontSize = rootFontSizePx[config.ui];
 }
 
 // Initialize font size from localStorage (call on app startup)
@@ -1492,9 +1505,7 @@ export type TranslationKey = keyof typeof translations['zh-Hans'];
 export function getLocale(): Locale {
   const saved = localStorage.getItem('locale');
   if (saved === 'en-US' || saved === 'zh-Hans') return saved;
-  // Default based on browser language
-  const browserLang = navigator.language;
-  if (browserLang.startsWith('zh')) return 'zh-Hans';
+  // Default to English regardless of browser language
   return 'en-US';
 }
 

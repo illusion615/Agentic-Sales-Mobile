@@ -6,6 +6,7 @@ import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useAccountList } from '@/generated/hooks/use-account';
 import { useUser } from '@/hooks/use-user';
 import { getLocale, type Locale } from '@/lib/i18n';
+import { useFirstMount } from '@/hooks/use-first-mount';
 import { OpportunityStageKeyToLabel, type OpportunityStageKey } from '@/generated/models/opportunity-model';
 import type { Opportunity } from '@/generated/models/opportunity-model';
 
@@ -39,6 +40,7 @@ function isClosedStage(stageKey: OpportunityStageKey): boolean {
 export default function OpportunityReviewPage() {
   const navigate = useNavigate();
   const locale: Locale = getLocale();
+  const firstMount = useFirstMount('opportunity-review');
   const { data: user } = useUser();
   const { data: opportunities = [] } = useOpportunityList();
 
@@ -92,7 +94,7 @@ export default function OpportunityReviewPage() {
       <main className="flex-1 pt-14 px-4 overflow-y-auto scrollbar-hide safe-area-top">
         <motion.div
           variants={containerVariants}
-          initial="hidden"
+          initial={firstMount ? 'hidden' : false}
           animate="show"
           className="space-y-3 py-4 pb-safe"
         >

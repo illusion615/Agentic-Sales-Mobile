@@ -13,6 +13,7 @@ import type { Activity, ActivityTypeKeyToLabel } from '@/generated/models/activi
 import { imageFallbackByCategory, type ImageFallbackCategory } from '@/lib/product-images';
 import { useCopilot } from '@/contexts/copilot-context';
 import { getLocale } from '@/lib/i18n';
+import { useFirstMount } from '@/hooks/use-first-mount';
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -77,6 +78,7 @@ function getDraftStatusLabel(statusKey: string): string {
 export default function ProductDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const firstMount = useFirstMount(`product-detail:${id ?? ''}`);
 
   const { data: products = [], isLoading: productsLoading } = useProductList();
   const { data: accounts = [] } = useAccountList();
@@ -185,7 +187,7 @@ export default function ProductDetailPage() {
       <div className="flex-1 overflow-y-auto pb-24">
         <motion.div
           variants={containerVariants}
-          initial="hidden"
+          initial={firstMount ? 'hidden' : false}
           animate="show"
           className="space-y-4 py-4"
         >

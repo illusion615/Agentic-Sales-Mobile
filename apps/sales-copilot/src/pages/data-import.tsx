@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useUser } from '@/hooks/use-user';
+import { useFirstMount } from '@/hooks/use-first-mount';
 import { useCreateAccount } from '@/generated/hooks/use-account';
 import { useCreateContact } from '@/generated/hooks/use-contact';
 import { useCreateOpportunity } from '@/generated/hooks/use-opportunity';
@@ -42,6 +43,7 @@ const itemVariants = {
 
 export default function DataImportPage() {
   const navigate = useNavigate();
+  const firstMount = useFirstMount('data-import');
   const { data: user } = useUser();
   const [isImporting, setIsImporting] = useState(false);
   const [importStatus, setImportStatus] = useState<{
@@ -246,7 +248,7 @@ export default function DataImportPage() {
       <motion.div
         className="p-4 space-y-4"
         variants={containerVariants}
-        initial="hidden"
+        initial={firstMount ? 'hidden' : false}
         animate="show"
       >
         {/* Summary Card */}

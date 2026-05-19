@@ -30,6 +30,7 @@ import {
   type PendingResolution,
   type ResolutionCandidate,
 } from './agent-utils';
+import { runFrame, recordShadow, compareFrameVsLegacy } from './frame-shadow';
 
 // Greeting pattern for detecting simple greetings that don't need Copilot Studio
 const GREETING_PATTERN = /^(hi|hello|hey|你好|您好|嗨|早上好|下午好|晚上好|good\s*(morning|afternoon|evening))\b/i;
@@ -1215,6 +1216,42 @@ User: "Log a meeting with Rachel at King's College Hospital"
   console.log('[INTENT] Raw LLM response:', intentResponse.content);
   console.log('[INTENT] userQuery="' + userMessage + '" => function=' + (intent?.function || 'null') + ', args=' + JSON.stringify(intent?.arguments || {}));
 
+  // ===== Frame Shadow (方案 3 · Phase 1) =====
+  // Fire-and-forget: run the sales-coach Frame prompt in parallel, log the
+  // result alongside the legacy intent for boss-facing comparison. The Frame
+  // output is NOT used to make any production decision yet.
+  void (async () => {
+    try {
+      const frameOutcome = await runFrame({
+        userMessage,
+        pageContext: context.pageContext,
+        conversationHistory: history,
+        locale: isZh ? 'zh-Hans' : 'en',
+      });
+      const agreement = frameOutcome.success && frameOutcome.result
+        ? compareFrameVsLegacy(frameOutcome.result, intent?.function ?? null)
+        : undefined;
+      recordShadow({
+        ts: Date.now(),
+        userMessage,
+        page: context.pageContext?.currentPage,
+        frame: frameOutcome,
+        legacy: {
+          functionName: intent?.function ?? null,
+          requiresMatching: intent?.requiresMatching,
+          matchTargetEntity: intent?.matchTarget?.entityType,
+          resolutionsCount: intent?.resolutions?.length,
+          additionalActionsCount: intent?.additionalActions?.length,
+          confidence: intent?.confidence,
+          raw: (intentResponse.content || '').slice(0, 800),
+        },
+        agreement,
+      });
+    } catch (err) {
+      console.warn('[FrameShadow] background run failed:', err);
+    }
+  })();
+
   // Notify progress: intent detection completed
   const intentLabel = intent?.function 
     ? getDisplayName(intent.function, isZh ? 'zh-Hans' : 'en-US')
@@ -1940,6 +1977,35 @@ Please respond to the user in a friendly manner based on the error. Important ru
         totalIntents: additionalIntentsResult.items.length + 1,
         summary: intent.multiIntentAnalysis?.summary || '',
       },
+    };
+  }
+
+  // ===== Knowledge-query short-circuit (boss directive 2026-05-17) =====
+  // For Copilot Studio knowledge queries the function result already IS a
+  // fully-formed natural-language answer. Running Pass-2 on it rewrites the
+  // real answer into a generic "Found 1 record" meta-summary, which is wrong.
+  // Return the CS answer verbatim instead.
+  if (intent.function === 'queryCopilotStudio' || intent.function === 'externalKnowledgeQuery') {
+    const csData = functionResult.data as { answer?: string; source?: string } | undefined;
+    const csAnswer = (csData && typeof csData.answer === 'string' && csData.answer.trim().length > 0)
+      ? csData.answer
+      : (isZh ? '（Copilot Studio 未返回内容）' : '(Copilot Studio returned no content)');
+    if (onProgress) {
+      onProgress({ stage: 'generating', status: 'completed' });
+    }
+    return {
+      success: true,
+      content: csAnswer,
+      functionCalled: intent.function,
+      functionDisplayName: fnDisplayName,
+      functionResult: functionResult.data,
+      invalidateQueries: functionResult.invalidateQueries,
+      latencyMs: Date.now() - startTime,
+      thinkingSteps: [
+        { stage: 'intent', status: 'completed', label: isZh ? `意图识别：${intentLabel}` : `Intent: ${intentLabel}` },
+        { stage: 'executing', status: 'completed', label: isZh ? `Copilot Studio 已回复` : `Copilot Studio responded` },
+        { stage: 'generating', status: 'completed', label: isZh ? `返回原文` : `Return verbatim` },
+      ],
     };
   }
 

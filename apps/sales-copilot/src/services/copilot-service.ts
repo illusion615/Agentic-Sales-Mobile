@@ -57,6 +57,9 @@ export function getCopilotConfig(): CopilotConfig | null {
  */
 export function saveCopilotConfig(config: CopilotConfig): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('copilot-config-changed', { detail: config }));
+  }
 }
 
 /**
@@ -65,6 +68,9 @@ export function saveCopilotConfig(config: CopilotConfig): void {
 export function clearCopilotConfig(): void {
   localStorage.removeItem(STORAGE_KEY);
   localStorage.removeItem(CONVERSATION_KEY);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('copilot-config-changed', { detail: null }));
+  }
 }
 
 /**

@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { ArrowUp, X, Paperclip } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getLocale, getCopilotInAllScreens, getLLMConfig, getAgentFramework, type Locale } from '@/lib/i18n';
+import { useCopilotConfigured } from '@/hooks/use-copilot-configured';
 import { getCopilotConfig } from '@/services/copilot-service';
 import { toast } from 'sonner';
 import { useCopilot } from '@/contexts/copilot-context';
@@ -105,10 +106,8 @@ export function GlobalCopilot() {
 
 
 
-  // Check if AI assistant is configured for visibility
-  const copilotConfig = getCopilotConfig();
-  const llmConfig = getLLMConfig();
-  const isCopilotConfigured = !!copilotConfig?.tokenEndpoint || (!!llmConfig?.enabled && !!llmConfig?.endpoint);
+  // Check if AI assistant is configured for visibility (reactive to async settings hydration)
+  const isCopilotConfigured = useCopilotConfigured();
   const isHomePage = location.pathname === '/' || location.pathname === '/home';
   const isSettingsPage = location.pathname === '/settings';
   const shouldShowCopilot = !isSettingsPage && isCopilotConfigured && (isHomePage || enabled);

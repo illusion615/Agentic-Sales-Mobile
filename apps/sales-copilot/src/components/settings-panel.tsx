@@ -554,12 +554,12 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                     ) : appSettings.powerAutomateFlowUrl ? (
                       <>
                         <CheckCircle2 className="w-4 h-4 text-green-500" />
-                        <span className="text-xs text-green-500">{locale === 'zh-Hans' ? '已配置' : 'Configured'}</span>
+                        <span className="text-xs text-green-500">{locale === 'zh-Hans' ? '已连接' : 'Connected'}</span>
                       </>
                     ) : (
                       <>
                         <XCircle className="w-4 h-4 text-muted-foreground" />
-                        <span className="text-xs text-muted-foreground">{locale === 'zh-Hans' ? '未配置' : 'Not configured'}</span>
+                        <span className="text-xs text-muted-foreground">{locale === 'zh-Hans' ? '未连接' : 'Not connected'}</span>
                       </>
                     )}
                   </div>
@@ -577,12 +577,12 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                     ) : appSettings.copilotStudioTokenEndpoint ? (
                       <>
                         <CheckCircle2 className="w-4 h-4 text-green-500" />
-                        <span className="text-xs text-green-500">{locale === 'zh-Hans' ? '已配置' : 'Configured'}</span>
+                        <span className="text-xs text-green-500">{locale === 'zh-Hans' ? '已连接' : 'Connected'}</span>
                       </>
                     ) : (
                       <>
                         <XCircle className="w-4 h-4 text-muted-foreground" />
-                        <span className="text-xs text-muted-foreground">{locale === 'zh-Hans' ? '未配置' : 'Not configured'}</span>
+                        <span className="text-xs text-muted-foreground">{locale === 'zh-Hans' ? '未连接' : 'Not connected'}</span>
                       </>
                     )}
                   </div>

@@ -14,6 +14,7 @@ import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/u
 import { useCopilot } from '@/contexts/copilot-context';
 import { getLocale } from '@/lib/i18n';
 import { PullToRefresh } from '@/components/pull-to-refresh';
+import { useFirstMount } from '@/hooks/use-first-mount';
 
 const stageColors: Record<string, string> = {
   prospecting: 'bg-[#6366F1]',
@@ -59,6 +60,7 @@ function TrendIcon({ trendKey }: { trendKey?: OpportunityConfidencetrendKey }) {
 
 export default function OpportunitiesPage() {
   const navigate = useNavigate();
+  const firstMount = useFirstMount('opportunities');
 
   // Copilot context for agent awareness
   const copilot = useCopilot();
@@ -139,7 +141,7 @@ export default function OpportunitiesPage() {
       <PullToRefresh onRefresh={handleRefresh} className="flex-1 overflow-y-auto pb-32">
         <motion.div
           variants={containerVariants}
-          initial="hidden"
+          initial={firstMount ? 'hidden' : false}
           animate="show"
           className="space-y-6 py-4"
         >

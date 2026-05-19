@@ -2,6 +2,7 @@ import { useState, useCallback, useRef } from 'react';
 import { Mic } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/lib/utils';
+import { getLocale, type Locale } from '@/lib/i18n';
 
 interface VoiceMicButtonProps {
   onRecordStart?: () => void;
@@ -16,6 +17,7 @@ export function VoiceMicButton({
   onRecordCancel,
   className,
 }: VoiceMicButtonProps) {
+  const locale: Locale = getLocale();
   const [isRecording, setIsRecording] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -91,7 +93,9 @@ export function VoiceMicButton({
                 : 'glass-card text-foreground'
             )}
           >
-            {isCancelling ? '松开取消' : '上滑取消 · 正在录音...'}
+            {isCancelling
+              ? (locale === 'zh-Hans' ? '松开取消' : 'Release to cancel')
+              : (locale === 'zh-Hans' ? '上滑取消 · 正在录音...' : 'Slide up to cancel · Recording...')}
           </motion.div>
         )}
       </AnimatePresence>
@@ -144,7 +148,7 @@ export function VoiceMicButton({
             : 'accent-gradient'
         )}
         style={{ touchAction: 'none' }}
-        aria-label="按住录音"
+        aria-label={locale === 'zh-Hans' ? '按住录音' : 'Hold to record'}
       >
         <Mic
           className={cn(

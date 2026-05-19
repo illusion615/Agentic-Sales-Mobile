@@ -25,6 +25,7 @@ import { HAS_IN_MEMORY_TABLES, useProductList } from '@/generated/hooks';
 import type { Product } from '@/generated/models/product-model';
 import { imageFallbackByCategory, type ImageFallbackCategory } from '@/lib/product-images';
 import { useCopilot } from '@/contexts/copilot-context';
+import { useFirstMount } from '@/hooks/use-first-mount';
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -48,6 +49,7 @@ function getProductImage(product: Product): string {
 
 export default function ProductsPage() {
   const navigate = useNavigate();
+  const firstMount = useFirstMount('products');
   const { data: products = [], isLoading } = useProductList({
     orderBy: ['sortOrder asc'],
   });
@@ -207,7 +209,7 @@ export default function ProductsPage() {
 
         <motion.div
           variants={containerVariants}
-          initial="hidden"
+          initial={firstMount ? 'hidden' : false}
           animate="show"
           className="space-y-4">
 

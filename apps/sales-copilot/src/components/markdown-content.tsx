@@ -1,85 +1,99 @@
 import React from 'react';
+import { cn } from '@/lib/utils';
 
-export function MarkdownContent({ content }: { content: string }) {
+/**
+ * Unified Markdown renderer for the app (JSX, XSS-safe by React escaping).
+ * Supports: H1-H6, bold, italic, strike, inline & fenced code, blockquotes,
+ * GFM tables, nested ordered/unordered lists, task list checkboxes,
+ * inline links [text](url), autolinks <https://...>, reference-style links
+ * `[1]: url "title"` rendered as numbered citation chips, horizontal rules.
+ *
+ * IMPORTANT: This is the single markdown component for the app. Do NOT
+ * reintroduce a parallel renderer. Extend this file instead.
+ */
+export function MarkdownContent({ content, className }: { content: string; className?: string }) {
   if (!content) return null;
 
-  // Extract reference-style links like [1]: https://url.com "Title"
+  // Extract reference-style links: [1]: https://url.com "Title"
   const referencePattern = /^\[(\d+)\]:\s*(https?:\/\/[^\s]+)(?:\s+"([^"]+)")?\s*$/gm;
   const references: Map<string, { url: string; title?: string }> = new Map();
   let refMatch: RegExpExecArray | null;
-  
   while ((refMatch = referencePattern.exec(content)) !== null) {
     references.set(refMatch[1], { url: refMatch[2], title: refMatch[3] });
   }
-  
-  // Remove reference definitions from content for display
   const cleanedContent = content.replace(referencePattern, '').trim();
 
-  const renderInline = (text: string): React.ReactNode => {
-    // Handle inline links [text](url)
-    const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
-    // Handle citation markers like [1], [2] etc
-    const citationRegex = /\[(\d+)\]/g;
-    const parts: React.ReactNode[] = [];
-    let lastIndex = 0;
-    let keyIdx = 0;
-
-    // First pass: handle inline links
-    const textWithLinks: (string | React.ReactNode)[] = [];
-    let linkLastIndex = 0;
-    let linkMatch: RegExpExecArray | null;
-
-    while ((linkMatch = linkRegex.exec(text)) !== null) {
-      if (linkMatch.index > linkLastIndex) {
-        textWithLinks.push(text.slice(linkLastIndex, linkMatch.index));
-      }
-      textWithLinks.push(
-        <a
-          key={`link-${keyIdx++}`}
-          href={linkMatch[2]}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-primary underline underline-offset-2 hover:text-primary/80 transition-colors cursor-pointer"
-          onClick={(e: React.MouseEvent<HTMLAnchorElement>) => {
-            e.preventDefault();
-            e.stopPropagation();
-            window.open(linkMatch![2], '_blank', 'noopener,noreferrer');
-          }}
-        >
-          {linkMatch[1]}
-        </a>
-      );
-      linkLastIndex = linkMatch.index + linkMatch[0].length;
-    }
-    if (linkLastIndex < text.length) {
-      textWithLinks.push(text.slice(linkLastIndex));
-    }
-
-    // Second pass: handle citations and bold in remaining text parts
-    textWithLinks.forEach((part: string | React.ReactNode, partIdx: number) => {
-      if (typeof part !== 'string') {
-        parts.push(part);
-        return;
-      }
-
-      // Process citations in text
-      let citationLastIndex = 0;
-      let citationMatch: RegExpExecArray | null;
-      const citationParts: (string | React.ReactNode)[] = [];
-      
-      while ((citationMatch = citationRegex.exec(part)) !== null) {
-        const citationNum = citationMatch[1];
-        const ref = references.get(citationNum);
-        
-        if (citationMatch.index > citationLastIndex) {
-          citationParts.push(part.slice(citationLastIndex, citationMatch.index));
-        }
-        
-        if (ref) {
-          // Citation has a matching reference - make it a clickable link
-          citationParts.push(
+  // Inline renderer: handles links, citations, bold, italic, strike, inline code, autolinks
+  const renderInline = (text: string): React.ReactNode[] => {
+    // Tokenize using a master regex with named alternates.
+    // Order matters: code first (eats backticks), then links, autolinks, bold, italic, strike, citations.
+    const tokenRe = /(`[^`]+`)|(\[[^\]]+\]\([^)]+\))|(<https?:\/\/[^\s>]+>)|(\*\*[^*]+\*\*|__[^_]+__)|(~~[^~]+~~)|(\*[^*\n]+\*|_[^_\n]+_)|(\[\d+\])/g;
+    const out: React.ReactNode[] = [];
+    let lastIdx = 0;
+    let m: RegExpExecArray | null;
+    let key = 0;
+    while ((m = tokenRe.exec(text)) !== null) {
+      if (m.index > lastIdx) out.push(text.slice(lastIdx, m.index));
+      const tok = m[0];
+      if (m[1]) {
+        out.push(
+          <code key={`c-${key++}`} className="bg-muted/50 rounded px-1.5 py-0.5 text-xs font-mono">
+            {tok.slice(1, -1)}
+          </code>
+        );
+      } else if (m[2]) {
+        const linkMatch = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(tok);
+        if (linkMatch) {
+          const url = linkMatch[2];
+          out.push(
             <a
-              key={`cite-${partIdx}-${citationMatch.index}`}
+              key={`l-${key++}`}
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary underline underline-offset-2 hover:text-primary/80 transition-colors cursor-pointer"
+              onClick={(e: React.MouseEvent<HTMLAnchorElement>) => {
+                e.preventDefault();
+                e.stopPropagation();
+                window.open(url, '_blank', 'noopener,noreferrer');
+              }}
+            >
+              {linkMatch[1]}
+            </a>
+          );
+        }
+      } else if (m[3]) {
+        const url = tok.slice(1, -1);
+        out.push(
+          <a
+            key={`a-${key++}`}
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary underline underline-offset-2 hover:text-primary/80 transition-colors cursor-pointer"
+            onClick={(e: React.MouseEvent<HTMLAnchorElement>) => {
+              e.preventDefault();
+              e.stopPropagation();
+              window.open(url, '_blank', 'noopener,noreferrer');
+            }}
+          >
+            {url}
+          </a>
+        );
+      } else if (m[4]) {
+        const inner = tok.startsWith('**') ? tok.slice(2, -2) : tok.slice(2, -2);
+        out.push(<strong key={`b-${key++}`} className="font-semibold">{inner}</strong>);
+      } else if (m[5]) {
+        out.push(<del key={`s-${key++}`} className="text-muted-foreground">{tok.slice(2, -2)}</del>);
+      } else if (m[6]) {
+        out.push(<em key={`i-${key++}`}>{tok.slice(1, -1)}</em>);
+      } else if (m[7]) {
+        const num = tok.slice(1, -1);
+        const ref = references.get(num);
+        if (ref) {
+          out.push(
+            <a
+              key={`cite-${key++}`}
               href={ref.url}
               target="_blank"
               rel="noopener noreferrer"
@@ -91,132 +105,204 @@ export function MarkdownContent({ content }: { content: string }) {
               }}
               title={ref.title || ref.url}
             >
-              {citationNum}
+              {num}
             </a>
           );
         } else {
-          // Citation without reference - just highlight it
-          citationParts.push(
-            <span
-              key={`cite-${partIdx}-${citationMatch.index}`}
-              className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 mx-0.5 rounded bg-muted text-muted-foreground text-[11px] font-semibold align-baseline"
-            >
-              {citationNum}
+          out.push(
+            <span key={`cite-${key++}`} className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 mx-0.5 rounded bg-muted text-muted-foreground text-[11px] font-semibold align-baseline">
+              {num}
             </span>
           );
         }
-        
-        citationLastIndex = citationMatch.index + citationMatch[0].length;
       }
-      
-      if (citationLastIndex < part.length) {
-        citationParts.push(part.slice(citationLastIndex));
-      }
-      
-      // If no citations found, use original part
-      const partsToProcess = citationParts.length > 0 ? citationParts : [part];
-      
-      // Third pass: handle bold in text parts
-      partsToProcess.forEach((subPart: string | React.ReactNode, subIdx: number) => {
-        if (typeof subPart !== 'string') {
-          parts.push(subPart);
-          return;
-        }
-        
-        const boldParts = subPart.split(/(\*\*[^*]+\*\*)/g);
-        if (boldParts.length > 1) {
-          boldParts.forEach((bp: string, bpIdx: number) => {
-            if (bp.startsWith('**') && bp.endsWith('**')) {
-              parts.push(<strong key={`bold-${partIdx}-${subIdx}-${bpIdx}`} className="font-semibold">{bp.slice(2, -2)}</strong>);
-            } else if (bp) {
-              parts.push(bp);
-            }
-          });
-        } else if (subPart) {
-          parts.push(subPart);
-        }
-      });
-    });
+      lastIdx = m.index + tok.length;
+    }
+    if (lastIdx < text.length) out.push(text.slice(lastIdx));
+    return out;
+  };
 
-    return parts;
+  // Heading classes by level
+  const HEADING_CLS: Record<number, string> = {
+    1: 'font-bold text-foreground text-lg mt-4 mb-2',
+    2: 'font-semibold text-foreground text-base mt-4 mb-2',
+    3: 'font-semibold text-foreground mt-3 mb-2',
+    4: 'font-semibold text-foreground text-sm mt-3 mb-1',
+    5: 'font-semibold text-foreground text-xs mt-3 mb-1',
+    6: 'font-semibold text-foreground text-xs mt-3 mb-1',
   };
 
   const lines = cleanedContent.split('\n');
   const elements: React.ReactNode[] = [];
   let i = 0;
 
+  // Nested list renderer (shared by both bullet and numbered detection paths)
+  const renderListGroup = (
+    items: { indent: number; type: 'ul' | 'ol'; content: string }[],
+    startIdx: number,
+    parentIndent: number,
+    baseKey: string,
+  ): { node: React.ReactNode; endIdx: number } => {
+    const children: React.ReactNode[] = [];
+    let idx = startIdx;
+    const groupType = items[startIdx].type;
+    while (idx < items.length) {
+      const it = items[idx];
+      if (it.indent < parentIndent) break;
+      if (it.indent > parentIndent && children.length > 0) {
+        const { node: sub, endIdx } = renderListGroup(items, idx, it.indent, `${baseKey}-${idx}`);
+        const lastIdxLocal = children.length - 1;
+        const last = children[lastIdxLocal] as React.ReactElement<{ children: React.ReactNode }>;
+        children[lastIdxLocal] = (
+          <li key={last.key} className="ml-4 mb-1">
+            {last.props.children}
+            {sub}
+          </li>
+        );
+        idx = endIdx;
+      } else {
+        const taskMatch = /^\[( |x|X)\]\s+(.+)$/.exec(it.content);
+        const liContent = taskMatch ? (
+          <>
+            <input type="checkbox" disabled checked={taskMatch[1].toLowerCase() === 'x'} className="mr-1 align-middle" />
+            {renderInline(taskMatch[2])}
+          </>
+        ) : (
+          renderInline(it.content)
+        );
+        children.push(
+          <li key={`${baseKey}-li-${idx}`} className="ml-4 mb-1">
+            {liContent}
+          </li>
+        );
+        idx++;
+      }
+    }
+    const cls = groupType === 'ol'
+      ? 'list-decimal pl-5 mb-2 space-y-1'
+      : 'list-disc pl-4 mb-2 space-y-1';
+    const node = groupType === 'ol'
+      ? <ol key={`${baseKey}-ol`} className={cls}>{children}</ol>
+      : <ul key={`${baseKey}-ul`} className={cls}>{children}</ul>;
+    return { node, endIdx: idx };
+  };
+
   while (i < lines.length) {
     const line = lines[i];
-    
-    // Skip empty lines
-    if (!line.trim()) { 
-      i++; 
-      continue; 
+
+    if (!line.trim()) { i++; continue; }
+
+    // Fenced code block ```
+    if (/^```/.test(line.trim())) {
+      const codeLines: string[] = [];
+      i++;
+      while (i < lines.length && !/^```/.test(lines[i].trim())) {
+        codeLines.push(lines[i]);
+        i++;
+      }
+      if (i < lines.length) i++; // skip closing fence
+      elements.push(
+        <pre key={`pre-${i}`} className="bg-muted/50 rounded-md p-3 my-2 overflow-x-auto text-xs font-mono">
+          <code>{codeLines.join('\n')}</code>
+        </pre>
+      );
+      continue;
     }
-    
-    // Horizontal rule (--- or *** or ___)
+
+    // GFM table: current line is header row, next line is separator
+    if (/^\|.+\|\s*$/.test(line) && i + 1 < lines.length && /^\|[ :\-|]+\|\s*$/.test(lines[i + 1])) {
+      const headers = line.trim().slice(1, -1).split('|').map(c => c.trim());
+      i += 2; // consume header + separator
+      const bodyRows: string[][] = [];
+      while (i < lines.length && /^\|.+\|\s*$/.test(lines[i])) {
+        bodyRows.push(lines[i].trim().slice(1, -1).split('|').map(c => c.trim()));
+        i++;
+      }
+      elements.push(
+        <div key={`tbl-${i}`} className="my-2 overflow-x-auto">
+          <table className="w-full border-collapse text-xs">
+            <thead>
+              <tr>
+                {headers.map((h, hi) => (
+                  <th key={hi} className="border border-border px-2 py-1 text-left font-semibold">
+                    {renderInline(h)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {bodyRows.map((r, ri) => (
+                <tr key={ri}>
+                  {r.map((c, ci) => (
+                    <td key={ci} className="border border-border px-2 py-1 align-top">
+                      {renderInline(c)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      continue;
+    }
+
+    // Horizontal rule
     if (/^([-*_]){3,}\s*$/.test(line.trim())) {
       elements.push(<hr key={`hr-${i}`} className="my-4 border-border" />);
       i++;
       continue;
     }
-    
-    // Headings (# ## ###)
-    const h3Match = line.match(/^###\s+(.*)$/);
-    if (h3Match) {
+
+    // Headings H1-H6
+    const hMatch = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (hMatch) {
+      const level = hMatch[1].length;
+      const Tag = (`h${level}`) as keyof React.JSX.IntrinsicElements;
       elements.push(
-        <h3 key={`h3-${i}`} className="font-semibold text-foreground mt-3 mb-2">
-          {renderInline(h3Match[1])}
-        </h3>
+        React.createElement(
+          Tag,
+          { key: `h-${i}`, className: HEADING_CLS[level] },
+          renderInline(hMatch[2]),
+        )
       );
       i++;
       continue;
     }
-    
-    const h2Match = line.match(/^##\s+(.*)$/);
-    if (h2Match) {
+
+    // Blockquote
+    if (/^>\s?/.test(line)) {
+      const quoteLines: string[] = [];
+      while (i < lines.length && /^>\s?/.test(lines[i])) {
+        quoteLines.push(lines[i].replace(/^>\s?/, ''));
+        i++;
+      }
       elements.push(
-        <h2 key={`h2-${i}`} className="font-semibold text-foreground text-base mt-4 mb-2">
-          {renderInline(h2Match[1])}
-        </h2>
+        <blockquote key={`bq-${i}`} className="border-l-2 border-primary/50 pl-3 my-2 text-muted-foreground italic">
+          {renderInline(quoteLines.join(' '))}
+        </blockquote>
       );
-      i++;
       continue;
     }
-    
-    const h1Match = line.match(/^#\s+(.*)$/);
-    if (h1Match) {
-      elements.push(
-        <h1 key={`h1-${i}`} className="font-bold text-foreground text-lg mt-4 mb-2">
-          {renderInline(h1Match[1])}
-        </h1>
-      );
-      i++;
-      continue;
-    }
-    
-    // Check if this is a bullet list item (- or * followed by space)
-    const bulletMatch = line.match(/^(\s*)([-*])\s+(.*)$/);
-    if (bulletMatch) {
-      // Collect all consecutive bullet items at this level or deeper
-      const listItems: { indent: number; content: string }[] = [];
-      const baseIndent = bulletMatch[1].length;
-      
+
+    // Lists: detect contiguous block of ul (- *) or ol (1. 1) 1]) items
+    const listLineRe = /^(\s*)(?:([-*])|(\d+)[.)\]])\s+(.*)$/;
+    if (listLineRe.test(line)) {
+      const items: { indent: number; type: 'ul' | 'ol'; content: string }[] = [];
+      const baseIndent = (listLineRe.exec(line)![1] || '').length;
       while (i < lines.length) {
-        const currentLine = lines[i];
-        const currentBulletMatch = currentLine.match(/^(\s*)([-*])\s+(.*)$/);
-        
-        if (currentBulletMatch) {
-          const currentIndent = currentBulletMatch[1].length;
-          listItems.push({
-            indent: currentIndent,
-            content: currentBulletMatch[3]
+        const cur = lines[i];
+        const lm = listLineRe.exec(cur);
+        if (lm) {
+          items.push({
+            indent: lm[1].length,
+            type: lm[2] ? 'ul' : 'ol',
+            content: lm[4],
           });
           i++;
-        } else if (currentLine.trim() === '') {
-          // Empty line - check if list continues after
+        } else if (cur.trim() === '') {
           const nextNonEmpty = lines.slice(i + 1).find((l: string) => l.trim() !== '');
-          if (nextNonEmpty && /^\s*[-*]\s+/.test(nextNonEmpty)) {
+          if (nextNonEmpty && listLineRe.test(nextNonEmpty)) {
             i++;
             continue;
           } else {
@@ -226,105 +312,21 @@ export function MarkdownContent({ content }: { content: string }) {
           break;
         }
       }
-      
-      // Render nested list structure
-      const renderList = (items: { indent: number; content: string }[], startIdx: number, parentIndent: number): { element: React.ReactNode; endIdx: number } => {
-        const listElements: React.ReactNode[] = [];
-        let idx = startIdx;
-        
-        while (idx < items.length) {
-          const item = items[idx];
-          
-          if (item.indent < parentIndent) {
-            // This item belongs to a parent list
-            break;
-          } else if (item.indent > parentIndent && listElements.length > 0) {
-            // This is a nested item - create a sublist
-            const { element: subList, endIdx } = renderList(items, idx, item.indent);
-            // Append sublist to last item
-            const lastIdx = listElements.length - 1;
-            const lastItem = listElements[lastIdx] as React.ReactElement<{ children: React.ReactNode }>;
-            listElements[lastIdx] = (
-              <li key={lastItem.key} className="ml-4 mb-1">
-                {lastItem.props.children}
-                {subList}
-              </li>
-            );
-            idx = endIdx;
-          } else {
-            // Same level item
-            listElements.push(
-              <li key={`li-${elements.length}-${idx}`} className="ml-4 mb-1">
-                {renderInline(item.content)}
-              </li>
-            );
-            idx++;
-          }
-        }
-        
-        return {
-          element: <ul key={`ul-${elements.length}`} className="list-disc pl-4 mb-2 space-y-1">{listElements}</ul>,
-          endIdx: idx
-        };
-      };
-      
-      const { element } = renderList(listItems, 0, baseIndent);
-      elements.push(element);
+      const { node } = renderListGroup(items, 0, baseIndent, `lst-${elements.length}`);
+      elements.push(node);
       continue;
     }
-    
-    // Check if this is a numbered list item (1. or 1) followed by space)
-    const numberedMatch = line.match(/^(\s*)(\d+)[.)\]]\s+(.*)$/);
-    if (numberedMatch) {
-      // Collect all consecutive numbered items
-      const listItems: { indent: number; content: string }[] = [];
-      const baseIndent = numberedMatch[1].length;
-      
-      while (i < lines.length) {
-        const currentLine = lines[i];
-        const currentNumberedMatch = currentLine.match(/^(\s*)(\d+)[.)\]]\s+(.*)$/);
-        
-        if (currentNumberedMatch) {
-          const currentIndent = currentNumberedMatch[1].length;
-          listItems.push({
-            indent: currentIndent,
-            content: currentNumberedMatch[3]
-          });
-          i++;
-        } else if (currentLine.trim() === '') {
-          const nextNonEmpty = lines.slice(i + 1).find((l: string) => l.trim() !== '');
-          if (nextNonEmpty && /^\s*\d+[.)\]]\s+/.test(nextNonEmpty)) {
-            i++;
-            continue;
-          } else {
-            break;
-          }
-        } else {
-          break;
-        }
-      }
-      
-      // Render numbered list
-      const olElements = listItems.map((item: { indent: number; content: string }, idx: number) => (
-        <li key={`oli-${elements.length}-${idx}`} className="ml-4 mb-1">
-          {renderInline(item.content)}
-        </li>
-      ));
-      
-      elements.push(
-        <ol key={`ol-${elements.length}`} className="list-decimal pl-4 mb-2 space-y-1">
-          {olElements}
-        </ol>
-      );
-      continue;
-    }
-    
+
     // Regular paragraph
-    elements.push(<p key={`p-${i}`} className="mb-1 last:mb-0">{renderInline(line)}</p>);
+    elements.push(
+      <p key={`p-${i}`} className="mb-1 last:mb-0">
+        {renderInline(line)}
+      </p>
+    );
     i++;
   }
 
-  // Render reference links at the bottom if any exist
+  // Reference link footer
   const referenceElements: React.ReactNode[] = [];
   references.forEach((ref, key) => {
     referenceElements.push(
@@ -347,7 +349,7 @@ export function MarkdownContent({ content }: { content: string }) {
   });
 
   return (
-    <div className="markdown-content">
+    <div className={cn('markdown-content', className)}>
       {elements}
       {referenceElements.length > 0 && (
         <div className="mt-3 pt-2 border-t border-border/30 space-y-1">

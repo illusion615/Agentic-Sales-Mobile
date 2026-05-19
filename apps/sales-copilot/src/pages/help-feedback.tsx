@@ -31,6 +31,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useLocale, type Locale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { useFirstMount } from '@/hooks/use-first-mount';
 
 interface SkillGroup {
   id: string;
@@ -492,6 +493,7 @@ const itemVariants = {
 export default function HelpFeedbackPage() {
   const navigate = useNavigate();
   const locale = useLocale();
+  const firstMount = useFirstMount('help-feedback');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['accounts']));
   const [expandedSkills, setExpandedSkills] = useState<Set<string>>(new Set());
 
@@ -547,7 +549,7 @@ export default function HelpFeedbackPage() {
       <div className="flex-1 overflow-y-auto">
         <motion.div
           variants={containerVariants}
-          initial="hidden"
+          initial={firstMount ? 'hidden' : false}
           animate="show"
           className="p-4 space-y-4 pb-24"
         >
