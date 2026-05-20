@@ -23,6 +23,11 @@ export interface FetchModelsResult {
 }
 
 export async function fetchAvailableModels(config: LLMConfig): Promise<FetchModelsResult> {
+  // Power Automate uses SDK connector — model selection is handled in the flow
+  if (config.provider === 'power-automate') {
+    return { success: true, models: ['Power Automate Flow'] };
+  }
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort('timeout'), 5000); // 5 second timeout
   
@@ -704,9 +709,9 @@ export function getAgentFramework(): AgentFramework {
   if (saved && ['copilot-studio', 'local-agent'].includes(saved)) {
     return saved as AgentFramework;
   }
-  // Default to local-agent if BYOM is configured, otherwise copilot-studio
+  // Default to local-agent if LLM is configured (flow via SDK connector), otherwise copilot-studio
   const llmConfig = getLLMConfig();
-  if (llmConfig?.enabled && llmConfig?.endpoint) {
+  if (llmConfig?.enabled) {
     return 'local-agent';
   }
   return 'copilot-studio';
@@ -754,6 +759,18 @@ export async function testBYOMConnection(config: LLMConfig): Promise<BYOMTestRes
   const timeoutId = setTimeout(() => controller.abort('timeout'), 8000); // 8 second timeout
   
   try {
+    // Power Automate uses SDK connector — no endpoint needed
+    if (config.provider === 'power-automate') {
+      console.log('[BYOM Test] Power Automate Flow via SDK connector');
+      clearTimeout(timeoutId);
+      const result = await testFlowConnection();
+      if (result.success) {
+        return { success: true, latencyMs: result.latencyMs, modelInfo: 'Power Automate Flow' };
+      } else {
+        return { success: false, error: result.error || 'Flow test failed', latencyMs: result.latencyMs };
+      }
+    }
+
     if (!config.endpoint) {
       return { success: false, error: 'Endpoint is required' };
     }
@@ -832,25 +849,6 @@ export async function testBYOMConnection(config: LLMConfig): Promise<BYOMTestRes
       }
       
       return { success: true, latencyMs: Date.now() - startTime, modelInfo: config.deploymentName };
-    } else if (config.provider === 'power-automate') {
-      // Power Automate Flow: invoke the flow directly
-      console.log('[BYOM Test] Power Automate Flow URL:', config.endpoint);
-      
-      const result = await testFlowConnection(config.endpoint);
-      
-      if (result.success) {
-        return { 
-          success: true, 
-          latencyMs: result.latencyMs, 
-          modelInfo: 'Power Automate Flow' 
-        };
-      } else {
-        return { 
-          success: false, 
-          error: result.error || 'Flow test failed', 
-          latencyMs: result.latencyMs 
-        };
-      }
     } else if (config.provider === 'openai') {
       // OpenAI Compatible: /v1/chat/completions or /chat/completions
       if (!config.apiKey) return { success: false, error: 'API Key is required' };
@@ -1037,13 +1035,11 @@ export async function generateVoiceSummary(
       // Power Automate Flow: invoke the flow directly
       console.log('[Voice Summary] Using Power Automate Flow');
       
-      const result = await invokeFlowForLLM(config.endpoint, {
+      const result = await invokeFlowForLLM({
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt }
         ],
-        model: config.model,
-        deploymentName: config.deploymentName,
       });
       
       if (result.success && result.content) {

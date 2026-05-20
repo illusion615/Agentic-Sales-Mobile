@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 
 import { useUser } from '@/hooks/use-user';
 import { useAppSettings } from '@/hooks/use-app-settings';
-import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, setSelectedVoice, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getOrganizeInStructureCard, setOrganizeInStructureCard, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, setLLMConfig, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, type Locale, type VoiceOption, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type LLMConfig, type HomeHeaderWidget } from '@/lib/i18n';
+import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, setSelectedVoice, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getOrganizeInStructureCard, setOrganizeInStructureCard, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, type Locale, type VoiceOption, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget } from '@/lib/i18n';
 import { saveCopilotConfig } from '@/services/copilot-service';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -97,17 +97,6 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   useEffect(() => {
     // Only run when query has completed and we haven't loaded yet
     if (!isSettingsFetched || dbSettingsLoaded) return;
-    
-    // Initialize Power Automate Flow URL from database if available
-    if (appSettings.powerAutomateFlowUrl) {
-      // Save to localStorage for Copilot components to use
-      const config: LLMConfig = {
-        provider: 'power-automate',
-        endpoint: appSettings.powerAutomateFlowUrl,
-        enabled: true,
-      };
-      setLLMConfig(config);
-    }
     
     // Initialize Copilot Studio Token Endpoint from database if available
     if (appSettings.copilotStudioTokenEndpoint) {
@@ -540,29 +529,18 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
               {locale === 'zh-Hans' ? 'AI 助手配置' : 'AI Assistant Configuration'}
             </h3>
             <div className="glass-card p-4 space-y-3">
-              {/* Connection Status from Dataverse */}
+              {/* Connection Status */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Zap className="w-4 h-4 text-muted-foreground" />
                     <span className="text-sm font-medium">
-                      {locale === 'zh-Hans' ? 'Power Automate Flow' : 'Power Automate Flow'}
+                      {locale === 'zh-Hans' ? 'AI 助手 (Flow)' : 'AI Assistant (Flow)'}
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
-                    {isLoadingSettings ? (
-                      <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
-                    ) : appSettings.powerAutomateFlowUrl ? (
-                      <>
-                        <CheckCircle2 className="w-4 h-4 text-green-500" />
-                        <span className="text-xs text-green-500">{locale === 'zh-Hans' ? '已连接' : 'Connected'}</span>
-                      </>
-                    ) : (
-                      <>
-                        <XCircle className="w-4 h-4 text-muted-foreground" />
-                        <span className="text-xs text-muted-foreground">{locale === 'zh-Hans' ? '未连接' : 'Not connected'}</span>
-                      </>
-                    )}
+                    <CheckCircle2 className="w-4 h-4 text-green-500" />
+                    <span className="text-xs text-green-500">{locale === 'zh-Hans' ? '已集成' : 'Integrated'}</span>
                   </div>
                 </div>
                 <div className="flex items-center justify-between">
@@ -590,55 +568,36 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                 </div>
                 <p className="text-xs text-muted-foreground">
                   {locale === 'zh-Hans'
-                    ? '如需变更配置，请联系管理员'
-                    : 'Contact your administrator to change the connection.'}
+                    ? 'AI 助手已通过 Power Automate Flow 集成，Copilot Studio 需管理员配置'
+                    : 'AI assistant integrated via Power Automate Flow. Copilot Studio requires admin setup.'}
                 </p>
 
               </div>
 
               {/* Information Structure toggles */}
               <div className="pt-3 border-t border-border/30 space-y-2">
-                <div className={cn(
-                  'transition-opacity',
-                  !appSettings.powerAutomateFlowUrl && 'opacity-50'
-                )}>
-                  <SettingsItem
-                    icon={LayoutGrid}
-                    label={t('organizeInStructureCard', locale)}
-                    rightElement={
-                      <Switch
-                        checked={organizeInStructureCard}
-                        onCheckedChange={handleOrganizeInStructureCardChange}
-                        disabled={!appSettings.powerAutomateFlowUrl}
-                        className="data-[state=checked]:bg-primary"
-                      />
-                    }
-                  />
-                </div>
-                <div className={cn(
-                  'transition-opacity',
-                  !appSettings.powerAutomateFlowUrl && 'opacity-50'
-                )}>
-                  <SettingsItem
-                    icon={Speech}
-                    label={t('voiceSummary', locale)}
-                    rightElement={
-                      <Switch
-                        checked={voiceSummaryEnabled}
-                        onCheckedChange={handleVoiceSummaryEnabledChange}
-                        disabled={!appSettings.powerAutomateFlowUrl}
-                        className="data-[state=checked]:bg-primary"
-                      />
-                    }
-                  />
-                </div>
-                {!appSettings.powerAutomateFlowUrl && (
-                  <p className="text-xs text-muted-foreground/70 px-1 pt-1">
-                    {locale === 'zh-Hans'
-                      ? '需要配置 Power Automate Flow'
-                      : 'Requires Power Automate Flow configuration'}
-                  </p>
-                )}
+                <SettingsItem
+                  icon={LayoutGrid}
+                  label={t('organizeInStructureCard', locale)}
+                  rightElement={
+                    <Switch
+                      checked={organizeInStructureCard}
+                      onCheckedChange={handleOrganizeInStructureCardChange}
+                      className="data-[state=checked]:bg-primary"
+                    />
+                  }
+                />
+                <SettingsItem
+                  icon={Speech}
+                  label={t('voiceSummary', locale)}
+                  rightElement={
+                    <Switch
+                      checked={voiceSummaryEnabled}
+                      onCheckedChange={handleVoiceSummaryEnabledChange}
+                      className="data-[state=checked]:bg-primary"
+                    />
+                  }
+                />
               </div>
 
               {/* Display copilot in all screens toggle */}

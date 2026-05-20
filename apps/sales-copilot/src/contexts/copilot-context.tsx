@@ -1177,7 +1177,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     // Always use Power Automate Flow as the orchestrator for LLM function calling
     // Local agent processes data operations, Copilot Studio is available as a tool/function
     const llmConfig = getLLMConfig();
-      if (llmConfig?.enabled && llmConfig?.endpoint) {
+      if (llmConfig?.enabled) {
         // Create a thinking message that will be updated with progress
         const thinkingMsgId = `msg-${Date.now()}-thinking`;
         const thinkingMessage: ChatMessage = {
@@ -1606,15 +1606,15 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           }));
         }
     } else {
-      // Power Automate endpoint not configured
+      // LLM not enabled
       setIsSending(false);
       const notConfiguredMessage: ChatMessage = {
         id: `msg-${Date.now()}-system`,
         type: 'agent',
         role: 'assistant',
         content: locale === 'zh-Hans'
-          ? '⚠️ Power Automate Flow 端点尚未配置。请前往设置页面配置 LLM Function Calling 端点。'
-          : '⚠️ Power Automate Flow endpoint is not configured. Please go to Settings to configure your LLM Function Calling endpoint.',
+          ? '⚠️ AI 助手尚未启用。请稍候或刷新页面重试。'
+          : '⚠️ AI assistant is not enabled. Please wait or refresh the page.',
         agentName: 'System',
         timestamp: new Date().toISOString(),
       };

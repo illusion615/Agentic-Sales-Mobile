@@ -2,10 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { ArrowUp, X, Paperclip } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { getLocale, getCopilotInAllScreens, getLLMConfig, getAgentFramework, type Locale } from '@/lib/i18n';
+import { getLocale, getCopilotInAllScreens, type Locale } from '@/lib/i18n';
 import { useCopilotConfigured } from '@/hooks/use-copilot-configured';
-import { getCopilotConfig } from '@/services/copilot-service';
-import { toast } from 'sonner';
 import { useCopilot } from '@/contexts/copilot-context';
 import { CopilotPanel } from '@/components/copilot-panel';
 
@@ -123,57 +121,10 @@ export function GlobalCopilot() {
   };
 
   const handleInputFocus = () => {
-    // Check if AI assistant is configured based on selected framework
-    const framework = getAgentFramework();
-    if (framework === 'local-agent') {
-      const llm = getLLMConfig();
-      if (!llm?.enabled || !llm?.endpoint) {
-        toast.info(
-          locale === 'zh-Hans'
-            ? '请先在设置中配置 BYOM 端点'
-            : 'Please configure BYOM endpoint in Settings first'
-        );
-        return;
-      }
-    } else {
-      const config = getCopilotConfig();
-      if (!config?.tokenEndpoint) {
-        toast.info(
-          locale === 'zh-Hans'
-            ? '请先在设置中配置 Copilot Studio，或切换到本地轻量级框架'
-            : 'Please configure Copilot Studio in Settings, or switch to Local Lightweight Agent'
-        );
-        return;
-      }
-    }
-    // Open the copilot panel overlay
     openPanel();
   };
 
   const handleSendMessage = (text: string) => {
-    // Check if AI assistant is configured based on selected framework
-    const framework = getAgentFramework();
-    if (framework === 'local-agent') {
-      const llm = getLLMConfig();
-      if (!llm?.enabled || !llm?.endpoint) {
-        toast.info(
-          locale === 'zh-Hans'
-            ? '请先在设置中配置 BYOM 端点'
-            : 'Please configure BYOM endpoint in Settings first'
-        );
-        return;
-      }
-    } else {
-      const config = getCopilotConfig();
-      if (!config?.tokenEndpoint) {
-        toast.info(
-          locale === 'zh-Hans'
-            ? '请先在设置中配置 Copilot Studio，或切换到本地轻量级框架'
-            : 'Please configure Copilot Studio in Settings, or switch to Local Lightweight Agent'
-        );
-        return;
-      }
-    }
     // Open panel and send message
     openPanel();
     setInputValue(text);

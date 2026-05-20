@@ -9,7 +9,20 @@
     "planId": "",
     "projectId": "e3bc3760-89b8-4f31-87a6-6fbf8e983eff"
   },
-  "connectionReferences": {},
+  "connectionReferences": {
+    "89863882-49cb-4301-94d6-70f0c9e148bd": {
+      "id": "/providers/Microsoft.PowerApps/apis/shared_logicflows",
+      "displayName": "Logic flows",
+      "dataSources": [
+        "powerappsflow_llm"
+      ],
+      "workflowDetails": {
+        "workflowEntityId": "0c518b89-fe53-f111-a825-7ced8d3c7b0f",
+        "workflowDisplayName": "Power Apps Flow - LLM",
+        "workflowName": "c9412c8b-3ed4-4fa0-92a8-ea98ff6cca75"
+      }
+    }
+  },
   "databaseReferences": {
     "default.cds": {
       "state": "Configured",

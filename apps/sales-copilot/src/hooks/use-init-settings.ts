@@ -50,29 +50,20 @@ export function useInitSettings(): InitSettingsResult {
 
     console.log('[InitSettings] Initializing settings from Dataverse...');
 
-    // Check if any settings exist in Dataverse
-    const hasPowerAutomateConfig = !!appSettings.powerAutomateFlowUrl;
+    // Power Automate Flow is always available via SDK connector (no URL needed)
+    const hasPowerAutomateConfig = true;
     const hasCopilotConfig = !!appSettings.copilotStudioTokenEndpoint;
     
     hasPowerAutomateRef.current = hasPowerAutomateConfig;
     hasCopilotRef.current = hasCopilotConfig;
 
-    if (!hasPowerAutomateConfig && !hasCopilotConfig) {
-      console.log('[InitSettings] No AI settings configured in Dataverse. User needs to configure in Settings.');
-      statusRef.current = 'not-configured';
-      return;
-    }
-
-    // Initialize Power Automate Flow URL (save to localStorage only, no connection test)
-    if (hasPowerAutomateConfig && appSettings.powerAutomateFlowUrl) {
-      console.log('[InitSettings] Found Power Automate Flow URL in Dataverse');
-      const config: LLMConfig = {
-        provider: 'power-automate',
-        endpoint: appSettings.powerAutomateFlowUrl,
-        enabled: true,
-      };
-      setLLMConfig(config);
-    }
+    // Always enable LLM config — flow is baked in via SDK connector
+    console.log('[InitSettings] Power Automate Flow integrated via SDK connector');
+    const config: LLMConfig = {
+      provider: 'power-automate',
+      enabled: true,
+    };
+    setLLMConfig(config);
 
     // Initialize Copilot Studio Token Endpoint (save to localStorage only, no connection test)
     if (hasCopilotConfig && appSettings.copilotStudioTokenEndpoint) {

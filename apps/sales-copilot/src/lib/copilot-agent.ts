@@ -360,11 +360,11 @@ export async function processMessage(
     };
   }
 
-  if (!llmConfig?.enabled || !llmConfig?.endpoint) {
+  if (!llmConfig?.enabled) {
     return {
       success: false,
       content: '',
-      error: '请先到设置配置 BYOM 端点 / Please configure BYOM endpoint in Settings',
+      error: '请先到设置启用 AI 助手 / Please enable AI assistant in Settings',
       latencyMs: Date.now() - startTime,
     };
   }
@@ -1190,10 +1190,8 @@ User: "Log a meeting with Rachel at King's College Hospital"
   // Add current user message
   intentMessages.push({ role: 'user', content: userMessage });
 
-  const intentResponse = await invokeFlowForLLM(llmConfig.endpoint, {
+  const intentResponse = await invokeFlowForLLM({
     messages: intentMessages,
-    model: llmConfig.model,
-    deploymentName: llmConfig.deploymentName,
   });
 
   if (!intentResponse.success) {
@@ -1763,13 +1761,11 @@ Please respond to the user in a friendly manner based on the error. Important ru
 5. You must respond in English`;
     
     try {
-      const errorAnalysisResponse = await invokeFlowForLLM(llmConfig.endpoint, {
+      const errorAnalysisResponse = await invokeFlowForLLM({
         messages: [
           { role: 'system', content: errorAnalysisPrompt },
           { role: 'user', content: `请分析这个错误并给出友好的回复: ${errorMsg}` },
         ],
-        model: llmConfig.model,
-        deploymentName: llmConfig.deploymentName,
       });
       
       // Notify progress: error analysis completed
@@ -2061,13 +2057,11 @@ Please provide a brief summary and analysis, do not list individual records.`;
 
   let finalResponse;
   try {
-    finalResponse = await invokeFlowForLLM(llmConfig.endpoint, {
+    finalResponse = await invokeFlowForLLM({
       messages: [
         { role: 'system', content: responseSystemPrompt },
         { role: 'user', content: responseUserPrompt },
       ],
-      model: llmConfig.model,
-      deploymentName: llmConfig.deploymentName,
     });
     console.log('[CopilotAgent] Pass 2 response:', finalResponse.success, finalResponse.content?.slice(0, 100));
   } catch (pass2Error) {

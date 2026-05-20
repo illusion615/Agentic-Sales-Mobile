@@ -1,14 +1,13 @@
 /**
  * Power Automate Flow Service
- * Invokes Power Automate flows via HTTP trigger with sig= URL authentication
+ * Invokes the "Power Apps Flow - LLM" via SDK connector (shared_logicflows).
+ *
+ * Flow contract:
+ *   Input:  { text: string }          — the prompt text
+ *   Output: { output?: string }       — the AI-generated response
  */
 
-import { getContext } from '@microsoft/power-apps/app';
-
-export interface FlowLLMRequest {
-  userEmail: string;
-  userPrompt: string;
-}
+import { PowerAppsFlow_LLMService } from '@/generated/services/PowerAppsFlow_LLMService';
 
 export interface FlowLLMResponse {
   success: boolean;
@@ -18,81 +17,43 @@ export interface FlowLLMResponse {
 }
 
 /**
- * Get current user's email, with fallback
- */
-async function getUserEmail(fallbackEmail?: string): Promise<string> {
-  if (typeof window === 'undefined' || window.parent === window) {
-    return fallbackEmail || 'unknown';
-  }
-  try {
-    const context = await getContext();
-    return context.user.userPrincipalName || fallbackEmail || 'unknown';
-  } catch {
-    return fallbackEmail || 'unknown';
-  }
-}
-
-/**
- * Invoke a Power Automate flow with HTTP trigger (sig= URL authentication)
- * The flow endpoint should be configured as "Anyone with the link" with sig parameter
+ * Invoke the LLM flow via Power Platform connector.
+ *
+ * Callers pass a `messages` array (OpenAI chat format). This function
+ * serialises them into a single `text` string for the flow's Prompt input.
  */
 export async function invokeFlowForLLM(
-  flowEndpoint: string,
-  request: { messages: Array<{ role: string; content: string }>; model?: string; deploymentName?: string },
-  userEmailOverride?: string
+  request: { messages: Array<{ role: string; content: string }> },
 ): Promise<FlowLLMResponse> {
   const startTime = Date.now();
-  
+
   try {
-    const userEmail = await getUserEmail(userEmailOverride);
-    
-    // Build userPrompt from messages array
-    const userPrompt = request.messages
-      .map((m: { role: string; content: string }) => `${m.role}: ${m.content}`)
+    // Serialise messages → single prompt string
+    const text = request.messages
+      .map((m) => `${m.role}: ${m.content}`)
       .join('\n');
-    
-    console.log('[Power Automate] Invoking flow for user:', userEmail);
-    console.log('[Power Automate] Flow endpoint:', flowEndpoint);
-    
-    const response = await fetch(flowEndpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ userEmail, userPrompt }),
-    });
-    
+
+    console.log('[Power Automate] Invoking LLM flow via SDK connector, prompt length:', text.length);
+
+    const result = await PowerAppsFlow_LLMService.Run({ text });
     const latencyMs = Date.now() - startTime;
-    const responseText = await response.text();
-    
-    if (!response.ok) {
-      console.error('[Power Automate] Flow error:', response.status, responseText);
+
+    if (!result.success) {
+      console.error('[Power Automate] Flow SDK error:', result.error);
       return {
         success: false,
-        error: `Flow request failed: HTTP ${response.status} - ${responseText.slice(0, 500)}`,
+        error: result.error?.message ?? 'Flow invocation failed',
         latencyMs,
       };
     }
-    
-    console.log('[Power Automate] Flow response:', responseText.slice(0, 200));
-    
-    return {
-      success: true,
-      content: responseText,
-      latencyMs,
-    };
+
+    const content = result.data?.output ?? '';
+    console.log('[Power Automate] Flow response length:', content.length);
+
+    return { success: true, content, latencyMs };
   } catch (error: unknown) {
     const latencyMs = Date.now() - startTime;
     console.error('[Power Automate] Error:', error);
-    
-    if (error instanceof TypeError && error.message === 'Failed to fetch') {
-      return {
-        success: false,
-        error: 'Network error: Unable to reach Power Automate flow. Check the endpoint URL and your network connection.',
-        latencyMs,
-      };
-    }
-    
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error invoking flow',
@@ -102,20 +63,15 @@ export async function invokeFlowForLLM(
 }
 
 /**
- * Test connection to a Power Automate flow
+ * Quick connectivity test
  */
-export async function testFlowConnection(flowEndpoint: string): Promise<{
+export async function testFlowConnection(): Promise<{
   success: boolean;
   error?: string;
   latencyMs?: number;
 }> {
-  const result = await invokeFlowForLLM(flowEndpoint, {
+  const result = await invokeFlowForLLM({
     messages: [{ role: 'user', content: 'Hello' }],
   });
-  
-  return {
-    success: result.success,
-    error: result.error,
-    latencyMs: result.latencyMs,
-  };
+  return { success: result.success, error: result.error, latencyMs: result.latencyMs };
 }
