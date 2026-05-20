@@ -94,7 +94,7 @@ export function InsightCarousel({
 
   // Fetch business insights from Dataverse
   const { data: dataverseInsights = [] } = useBusinessInsightList({
-    filter: 'isactive eq true',
+    filter: 'isactive eq 1',
     orderBy: ['displayorder asc'],
   });
 

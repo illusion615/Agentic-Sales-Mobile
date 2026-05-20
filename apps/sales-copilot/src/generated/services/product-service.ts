@@ -2,7 +2,19 @@ import { Crf5c_productsService } from './Crf5c_productsService';
 import type { Crf5c_products } from '../models/Crf5c_productsModel';
 import type { IGetAllOptions } from '../models/CommonModels';
 import type { Product } from '../models/product-model';
-import { dvNum, numToDv } from './_adapter-utils';
+import { dvNum, numToDv, mapOptions } from './_adapter-utils';
+
+const FIELD_MAP: Record<string, string> = {
+  id: 'crf5c_productid',
+  productName: 'crf5c_productname',
+  category: 'crf5c_category',
+  featureHighlight: 'crf5c_featurehighlight',
+  imageURL: 'crf5c_imageurl',
+  productURL: 'crf5c_producturl',
+  sortOrder: 'crf5c_sortorder',
+  specification: 'crf5c_specification',
+  summary: 'crf5c_summary',
+};
 
 function fromDv(dv: Crf5c_products): Product {
   return {
@@ -55,7 +67,7 @@ export class ProductService {
   }
 
   static async getAll(options?: IGetAllOptions): Promise<Product[]> {
-    const result = await Crf5c_productsService.getAll(options);
+    const result = await Crf5c_productsService.getAll(mapOptions(options, FIELD_MAP) as any);
     if (!result.success) throw result.error;
     return (result.data ?? []).map(fromDv);
   }

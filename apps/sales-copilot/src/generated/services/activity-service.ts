@@ -2,7 +2,16 @@ import { Crf5c_activity1sService } from './Crf5c_activity1sService';
 import type { Crf5c_activity1s } from '../models/Crf5c_activity1sModel';
 import type { IGetAllOptions } from '../models/CommonModels';
 import type { Activity, ActivityDraftstatusKey, ActivityOutcomeKey, ActivityTypeKey } from '../models/activity-model';
-import { dvToKey, keyToDv } from './_adapter-utils';
+import { dvToKey, keyToDv, mapOptions } from './_adapter-utils';
+
+const FIELD_MAP: Record<string, string> = {
+  id: 'crf5c_activity1id',
+  title: 'crf5c_title',
+  createdon: 'crf5c_createdon',
+  notes: 'crf5c_notes',
+  ownerid: 'crf5c_ownerid',
+  scheduleddate: 'crf5c_scheduleddate',
+};
 
 function fromDv(dv: Crf5c_activity1s): Activity {
   const d = dv as Record<string, unknown>;
@@ -73,7 +82,7 @@ export class ActivityService {
   }
 
   static async getAll(options?: IGetAllOptions): Promise<Activity[]> {
-    const result = await Crf5c_activity1sService.getAll(options);
+    const result = await Crf5c_activity1sService.getAll(mapOptions(options, FIELD_MAP) as any);
     if (!result.success) throw result.error;
     return (result.data ?? []).map(fromDv);
   }

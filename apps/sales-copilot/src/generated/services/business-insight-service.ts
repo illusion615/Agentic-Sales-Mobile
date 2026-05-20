@@ -2,7 +2,21 @@ import { Crf5c_businessinsightsService } from './Crf5c_businessinsightsService';
 import type { Crf5c_businessinsights } from '../models/Crf5c_businessinsightsModel';
 import type { IGetAllOptions } from '../models/CommonModels';
 import type { BusinessInsight, BusinessInsightReferencetypeKey, BusinessInsightTypeKey } from '../models/business-insight-model';
-import { dvToKey, keyToDv, dvNum, numToDv } from './_adapter-utils';
+import { dvToKey, keyToDv, dvNum, numToDv, mapOptions } from './_adapter-utils';
+
+const FIELD_MAP: Record<string, string> = {
+  id: 'crf5c_businessinsightid',
+  title: 'crf5c_title',
+  detailsjson: 'crf5c_detailsjson',
+  displayorder: 'crf5c_displayorder',
+  generatedon: 'crf5c_generatedon',
+  isactive: 'crf5c_isactive',
+  ownerid: 'crf5c_ownerid',
+  rationale: 'crf5c_rationale',
+  referenceidsjson: 'crf5c_referenceidsjson',
+  summary: 'crf5c_summary',
+  validuntil: 'crf5c_validuntil',
+};
 
 function fromDv(dv: Crf5c_businessinsights): BusinessInsight {
   return {
@@ -63,7 +77,7 @@ export class BusinessInsightService {
   }
 
   static async getAll(options?: IGetAllOptions): Promise<BusinessInsight[]> {
-    const result = await Crf5c_businessinsightsService.getAll(options);
+    const result = await Crf5c_businessinsightsService.getAll(mapOptions(options, FIELD_MAP) as any);
     if (!result.success) throw result.error;
     return (result.data ?? []).map(fromDv);
   }

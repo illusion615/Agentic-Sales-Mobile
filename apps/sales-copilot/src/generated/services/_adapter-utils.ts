@@ -45,3 +45,41 @@ export function dvLookup(
 export function lookupBind(entitySet: string, id: string | undefined): string | null {
   return id ? `/${entitySet}(${id})` : null;
 }
+
+/**
+ * Map query options (select/orderBy/filter) from friendly field names to DV column names.
+ * The fieldMap maps friendly names → DV names.
+ */
+export function mapOptions(
+  opts: Record<string, unknown> | undefined,
+  fieldMap: Record<string, string>
+): Record<string, unknown> | undefined {
+  if (!opts) return opts;
+  const mapped = { ...opts };
+
+  // Map select field names
+  if (Array.isArray(mapped.select)) {
+    mapped.select = (mapped.select as string[]).map(f => fieldMap[f] ?? f);
+  }
+
+  // Map orderBy field names (format: "fieldName asc/desc")
+  if (Array.isArray(mapped.orderBy)) {
+    mapped.orderBy = (mapped.orderBy as string[]).map(expr => {
+      const [field, ...rest] = expr.split(' ');
+      const dvField = fieldMap[field] ?? field;
+      return rest.length ? `${dvField} ${rest.join(' ')}` : dvField;
+    });
+  }
+
+  // Map filter: replace known friendly names with DV names
+  if (typeof mapped.filter === 'string') {
+    let f = mapped.filter as string;
+    for (const [friendly, dv] of Object.entries(fieldMap)) {
+      // Word-boundary replacement to avoid partial matches
+      f = f.replace(new RegExp(`\\b${friendly}\\b`, 'g'), dv);
+    }
+    mapped.filter = f;
+  }
+
+  return mapped;
+}

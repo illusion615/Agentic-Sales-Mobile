@@ -450,7 +450,7 @@ export default function HomeDashboard() {
   const { data: conversations = [], isLoading: isLoadingConversations } = useCopilotConversationList();
   const updateConversation = useUpdateCopilotConversation();
   const createConversation = useCreateCopilotConversation();
-  const { data: businessInsights = [], refetch: refetchBusinessInsights, isLoading: isLoadingBusinessInsights } = useBusinessInsightList({ filter: 'isactive eq true', orderBy: ['displayorder asc'] });
+  const { data: businessInsights = [], refetch: refetchBusinessInsights, isLoading: isLoadingBusinessInsights } = useBusinessInsightList({ filter: 'isactive eq 1', orderBy: ['displayorder asc'] });
   const createBusinessInsight = useCreateBusinessInsight();
   const deleteBusinessInsight = useDeleteBusinessInsight();
   const updateActivity = useUpdateActivity();

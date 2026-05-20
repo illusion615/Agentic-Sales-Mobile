@@ -2,7 +2,20 @@ import { Crf5c_opportunity1sService } from './Crf5c_opportunity1sService';
 import type { Crf5c_opportunity1s } from '../models/Crf5c_opportunity1sModel';
 import type { IGetAllOptions } from '../models/CommonModels';
 import type { Opportunity, OpportunityConfidencetrendKey, OpportunityStageKey } from '../models/opportunity-model';
-import { dvToKey, keyToDv, dvNum, numToDv } from './_adapter-utils';
+import { dvToKey, keyToDv, dvNum, numToDv, mapOptions } from './_adapter-utils';
+
+const FIELD_MAP: Record<string, string> = {
+  id: 'crf5c_opportunity1id',
+  name1: 'crf5c_name',
+  blocker: 'crf5c_blocker',
+  closedon: 'crf5c_closedon',
+  confidence: 'crf5c_confidence',
+  createdon: 'crf5c_createdon',
+  expectedclosedate: 'crf5c_expectedclosedate',
+  lastaction: 'crf5c_lastaction',
+  ownerid: 'crf5c_ownerid',
+  totalamount: 'crf5c_totalamount',
+};
 
 function fromDv(dv: Crf5c_opportunity1s): Opportunity {
   const d = dv as Record<string, unknown>;
@@ -66,7 +79,7 @@ export class OpportunityService {
   }
 
   static async getAll(options?: IGetAllOptions): Promise<Opportunity[]> {
-    const result = await Crf5c_opportunity1sService.getAll(options);
+    const result = await Crf5c_opportunity1sService.getAll(mapOptions(options, FIELD_MAP) as any);
     if (!result.success) throw result.error;
     return (result.data ?? []).map(fromDv);
   }
