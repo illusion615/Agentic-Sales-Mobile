@@ -1,8 +1,8 @@
-import { getClient } from '../../../app-gen-sdk/data';
+import { getClient } from '@/lib/power-data';
 import type { Account } from '../models/account-model';
-import type { IOperationOptions } from '../../../app-gen-sdk/data/common/types';
+import type { IOperationOptions } from '@microsoft/power-apps/data';
 
-const DATA_SOURCE_NAME = 'Account';
+const DATA_SOURCE_NAME = 'crf5c_account1s';
 
 export class AccountService {
   static async create(record: Omit<Account, 'id'>): Promise<Account> {

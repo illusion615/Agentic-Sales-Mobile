@@ -1,8 +1,8 @@
-import { getClient } from '../../../app-gen-sdk/data';
+import { getClient } from '@/lib/power-data';
 import type { CopilotConversation } from '../models/copilot-conversation-model';
-import type { IOperationOptions } from '../../../app-gen-sdk/data/common/types';
+import type { IOperationOptions } from '@microsoft/power-apps/data';
 
-const DATA_SOURCE_NAME = 'CopilotConversation';
+const DATA_SOURCE_NAME = 'crf5c_copilotconversations';
 
 export class CopilotConversationService {
   static async create(record: Omit<CopilotConversation, 'id'>): Promise<CopilotConversation> {

@@ -1,8 +1,8 @@
-import { getClient } from '../../../app-gen-sdk/data';
+import { getClient } from '@/lib/power-data';
 import type { Contact } from '../models/contact-model';
-import type { IOperationOptions } from '../../../app-gen-sdk/data/common/types';
+import type { IOperationOptions } from '@microsoft/power-apps/data';
 
-const DATA_SOURCE_NAME = 'Contact';
+const DATA_SOURCE_NAME = 'crf5c_contacts';
 
 export class ContactService {
   static async create(record: Omit<Contact, 'id'>): Promise<Contact> {

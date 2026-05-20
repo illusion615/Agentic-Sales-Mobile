@@ -1,8 +1,8 @@
-import { getClient } from '../../../app-gen-sdk/data';
+import { getClient } from '@/lib/power-data';
 import type { Activity } from '../models/activity-model';
-import type { IOperationOptions } from '../../../app-gen-sdk/data/common/types';
+import type { IOperationOptions } from '@microsoft/power-apps/data';
 
-const DATA_SOURCE_NAME = 'Activity';
+const DATA_SOURCE_NAME = 'crf5c_activity1s';
 
 export class ActivityService {
   static async create(record: Omit<Activity, 'id'>): Promise<Activity> {

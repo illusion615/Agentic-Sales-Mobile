@@ -1,8 +1,8 @@
-import { getClient } from '../../../app-gen-sdk/data';
+import { getClient } from '@/lib/power-data';
 import type { Product } from '../models/product-model';
-import type { IOperationOptions } from '../../../app-gen-sdk/data/common/types';
+import type { IOperationOptions } from '@microsoft/power-apps/data';
 
-const DATA_SOURCE_NAME = 'Product';
+const DATA_SOURCE_NAME = 'crf5c_products';
 
 export class ProductService {
   static async create(record: Omit<Product, 'id'>): Promise<Product> {

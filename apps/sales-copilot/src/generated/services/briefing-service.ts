@@ -1,8 +1,8 @@
-import { getClient } from '../../../app-gen-sdk/data';
+import { getClient } from '@/lib/power-data';
 import type { Briefing } from '../models/briefing-model';
-import type { IOperationOptions } from '../../../app-gen-sdk/data/common/types';
+import type { IOperationOptions } from '@microsoft/power-apps/data';
 
-const DATA_SOURCE_NAME = 'Briefing';
+const DATA_SOURCE_NAME = 'crf5c_briefings';
 
 export class BriefingService {
   static async create(record: Omit<Briefing, 'id'>): Promise<Briefing> {

@@ -2,7 +2,6 @@ import { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { Provider as JotaiProvider } from 'jotai';
-import { initialize } from '@microsoft/power-apps/app';
 
 import Layout from '@/pages/_layout';
 import { queryClient } from '@/lib/query-client';
@@ -37,7 +36,6 @@ import HelpFeedbackPage from '@/pages/help-feedback';
 
 function App() {
   useEffect(() => {
-    initialize();
     // Initialize settings from localStorage
     initColorTheme();
     initFontSize();

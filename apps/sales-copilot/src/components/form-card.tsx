@@ -19,7 +19,6 @@ import { getLocale, type Locale } from '@/lib/i18n';
 import { formatCurrencyCompact } from '@/lib/format-currency';
 import { useCopilot } from '@/contexts/copilot-context';
 import { toast } from 'sonner';
-import { initialize } from '@microsoft/power-apps/app';
 import { format } from 'date-fns';
 
 // Hooks for creating records (use mutations for cache invalidation)
@@ -919,7 +918,6 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
     try {
       const { type } = formCard;
 
-      await initialize();
       if (type === 'activity') {
         // Create activity
         const typeKeyMap: Record<string, ActivityTypeKey> = {

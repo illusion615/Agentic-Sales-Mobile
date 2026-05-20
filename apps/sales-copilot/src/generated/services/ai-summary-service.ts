@@ -1,8 +1,8 @@
-import { getClient } from '../../../app-gen-sdk/data';
+import { getClient } from '@/lib/power-data';
 import type { AISummary } from '../models/ai-summary-model';
-import type { IOperationOptions } from '../../../app-gen-sdk/data/common/types';
+import type { IOperationOptions } from '@microsoft/power-apps/data';
 
-const DATA_SOURCE_NAME = 'AISummary';
+const DATA_SOURCE_NAME = 'crf5c_aisummaries';
 
 export class AISummaryService {
   static async create(record: Omit<AISummary, 'id'>): Promise<AISummary> {

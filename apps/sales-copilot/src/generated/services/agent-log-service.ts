@@ -1,8 +1,8 @@
-import { getClient } from '../../../app-gen-sdk/data';
+import { getClient } from '@/lib/power-data';
 import type { AgentLog } from '../models/agent-log-model';
-import type { IOperationOptions } from '../../../app-gen-sdk/data/common/types';
+import type { IOperationOptions } from '@microsoft/power-apps/data';
 
-const DATA_SOURCE_NAME = 'AgentLog';
+const DATA_SOURCE_NAME = 'crf5c_agentlogs';
 
 export class AgentLogService {
   static async create(record: Omit<AgentLog, 'id'>): Promise<AgentLog> {

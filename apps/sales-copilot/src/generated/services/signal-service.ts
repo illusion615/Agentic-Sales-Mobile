@@ -1,8 +1,8 @@
-import { getClient } from '../../../app-gen-sdk/data';
+import { getClient } from '@/lib/power-data';
 import type { Signal } from '../models/signal-model';
-import type { IOperationOptions } from '../../../app-gen-sdk/data/common/types';
+import type { IOperationOptions } from '@microsoft/power-apps/data';
 
-const DATA_SOURCE_NAME = 'Signal';
+const DATA_SOURCE_NAME = 'crf5c_signals';
 
 export class SignalService {
   static async create(record: Omit<Signal, 'id'>): Promise<Signal> {

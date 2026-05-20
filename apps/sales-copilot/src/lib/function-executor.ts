@@ -3,7 +3,6 @@
  * Executes functions based on LLM-generated function calls
  */
 
-import { initialize } from '@microsoft/power-apps/app';
 import { AccountService } from '@/generated/services/account-service';
 import { OpportunityService } from '@/generated/services/opportunity-service';
 import { ActivityService } from '@/generated/services/activity-service';
@@ -159,8 +158,6 @@ export async function executeFunction(
   console.log('[FN] ENTER executeFunction, name=' + functionName + ', args=' + JSON.stringify(args));
 
   try {
-    // Initialize Power Apps SDK before service calls
-    await initialize();
     switch (functionName) {
       // ===== Account Functions =====
       case 'searchAccounts': {

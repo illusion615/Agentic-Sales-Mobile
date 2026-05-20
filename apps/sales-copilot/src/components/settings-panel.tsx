@@ -128,6 +128,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
 
   // Load system voices
   useEffect(() => {
+    if (!('speechSynthesis' in window)) return;
     const loadVoices = () => {
       const voices = window.speechSynthesis.getVoices();
       if (voices.length > 0) {

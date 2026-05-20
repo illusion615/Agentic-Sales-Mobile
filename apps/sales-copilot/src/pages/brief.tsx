@@ -128,6 +128,10 @@ export default function BriefMePage() {
   
   // Load system TTS voices
   useEffect(() => {
+    if (!('speechSynthesis' in window)) {
+      setVoicesReady(false);
+      return;
+    }
     const loadVoices = () => {
       const voices = window.speechSynthesis.getVoices();
       if (voices.length > 0) {

@@ -21,6 +21,9 @@ export interface FlowLLMResponse {
  * Get current user's email, with fallback
  */
 async function getUserEmail(fallbackEmail?: string): Promise<string> {
+  if (typeof window === 'undefined' || window.parent === window) {
+    return fallbackEmail || 'unknown';
+  }
   try {
     const context = await getContext();
     return context.user.userPrincipalName || fallbackEmail || 'unknown';

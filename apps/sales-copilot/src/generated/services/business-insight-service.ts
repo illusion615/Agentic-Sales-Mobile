@@ -1,8 +1,8 @@
-import { getClient } from '../../../app-gen-sdk/data';
+import { getClient } from '@/lib/power-data';
 import type { BusinessInsight } from '../models/business-insight-model';
-import type { IOperationOptions } from '../../../app-gen-sdk/data/common/types';
+import type { IOperationOptions } from '@microsoft/power-apps/data';
 
-const DATA_SOURCE_NAME = 'BusinessInsight';
+const DATA_SOURCE_NAME = 'crf5c_businessinsights';
 
 export class BusinessInsightService {
   static async create(record: Omit<BusinessInsight, 'id'>): Promise<BusinessInsight> {

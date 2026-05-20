@@ -1,8 +1,8 @@
-import { getClient } from '../../../app-gen-sdk/data';
+import { getClient } from '@/lib/power-data';
 import type { Opportunity } from '../models/opportunity-model';
-import type { IOperationOptions } from '../../../app-gen-sdk/data/common/types';
+import type { IOperationOptions } from '@microsoft/power-apps/data';
 
-const DATA_SOURCE_NAME = 'Opportunity';
+const DATA_SOURCE_NAME = 'crf5c_opportunity1s';
 
 export class OpportunityService {
   static async create(record: Omit<Opportunity, 'id'>): Promise<Opportunity> {

@@ -1,8 +1,8 @@
-import { getClient } from '../../../app-gen-sdk/data';
+import { getClient } from '@/lib/power-data';
 import type { Task } from '../models/task-model';
-import type { IOperationOptions } from '../../../app-gen-sdk/data/common/types';
+import type { IOperationOptions } from '@microsoft/power-apps/data';
 
-const DATA_SOURCE_NAME = 'Task';
+const DATA_SOURCE_NAME = 'crf5c_tasks';
 
 export class TaskService {
   static async create(record: Omit<Task, 'id'>): Promise<Task> {
