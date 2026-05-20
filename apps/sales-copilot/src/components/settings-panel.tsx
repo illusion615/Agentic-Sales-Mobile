@@ -98,16 +98,9 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
     // Only run when query has completed and we haven't loaded yet
     if (!isSettingsFetched || dbSettingsLoaded) return;
     
-    // Initialize Copilot Studio Token Endpoint from database if available
-    if (appSettings.copilotStudioTokenEndpoint) {
-      // Save to copilot-studio-config for copilot panel to use
-      const copilotStudioConfig = {
-        enabled: true,
-        endpoint: appSettings.copilotStudioTokenEndpoint,
-      };
-      localStorage.setItem('copilot-studio-config', JSON.stringify(copilotStudioConfig));
-      // Also save to copilot-service config
-      saveCopilotConfig({ tokenEndpoint: appSettings.copilotStudioTokenEndpoint });
+    // Initialize Copilot Studio agent name (single config source via copilot-service)
+    if (appSettings.copilotStudioAgentName) {
+      saveCopilotConfig({ agentName: appSettings.copilotStudioAgentName });
     }
     
     setDbSettingsLoaded(true);
@@ -553,7 +546,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                   <div className="flex items-center gap-2">
                     {isLoadingSettings ? (
                       <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
-                    ) : appSettings.copilotStudioTokenEndpoint ? (
+                    ) : appSettings.copilotStudioAgentName ? (
                       <>
                         <CheckCircle2 className="w-4 h-4 text-green-500" />
                         <span className="text-xs text-green-500">{locale === 'zh-Hans' ? '已连接' : 'Connected'}</span>
@@ -568,8 +561,8 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                 </div>
                 <p className="text-xs text-muted-foreground">
                   {locale === 'zh-Hans'
-                    ? 'AI 助手已通过 Power Automate Flow 集成，Copilot Studio 需管理员配置'
-                    : 'AI assistant integrated via Power Automate Flow. Copilot Studio requires admin setup.'}
+                    ? 'AI 助手已通过 Power Platform 连接器集成（Flow + Copilot Studio）'
+                    : 'AI assistant integrated via Power Platform connectors (Flow + Copilot Studio).'}
                 </p>
 
               </div>

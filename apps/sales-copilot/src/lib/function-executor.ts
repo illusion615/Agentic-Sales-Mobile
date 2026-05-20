@@ -15,6 +15,8 @@ import { calculateEnhancedMatchScore, getConfidenceLevel, type EnhancedMatchScor
 import { touchAccountLastContacted } from './account-touch';
 import { queryClient } from './query-client';
 import { buildCSQuery } from './cs-context-builder';
+import { getCopilotConfig, saveCopilotConfig, isCopilotStudioAvailable, COPILOT_STUDIO_AGENT_NAME } from '@/services/copilot-service';
+import { MicrosoftCopilotStudioService } from '@/generated/services/MicrosoftCopilotStudioService';
 
 /**
  * Escape special characters for OData queries
@@ -47,23 +49,6 @@ function sanitizeForOData<T extends Record<string, unknown>>(obj: T): T {
     }
   }
   return sanitized as T;
-}
-
-// Direct Line session refs types (imported from context)
-export interface DirectLineTokenRef {
-  token: string;
-  expiresAt: number;
-}
-
-export interface DirectLineConversationRef {
-  conversationId: string;
-  streamUrl?: string;
-  watermark?: string;
-}
-
-export interface DirectLineSessionRefs {
-  tokenRef: React.MutableRefObject<DirectLineTokenRef | null>;
-  conversationRef: React.MutableRefObject<DirectLineConversationRef | null>;
 }
 
 export interface FunctionCallResult {
@@ -152,8 +137,7 @@ export async function executeFunction(
     conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
     /** Locale for the CS context header. */
     locale?: string;
-  },
-  sessionRefs?: DirectLineSessionRefs
+  }
 ): Promise<FunctionCallResult> {
   console.log('[FN] ENTER executeFunction, name=' + functionName + ', args=' + JSON.stringify(args));
 
@@ -845,7 +829,8 @@ export async function executeFunction(
         };
       }
 
-      // ===== Copilot Studio Tool =====
+      // ===== Copilot Studio Tool (via SDK Connector) =====
+      case 'externalKnowledgeQuery':
       case 'queryCopilotStudio': {
         const query = args.query as string;
         console.log('[CS] ENTER queryCopilotStudio, query=' + query);
@@ -853,7 +838,6 @@ export async function executeFunction(
 
         // Enrich the user query with page/account/product/dialog context so
         // Copilot Studio can disambiguate intent (boss directive 2026-05-17).
-        // Boss explicitly required: "需要传给 copilot studio 的内容需要带上足够其判断的上下文".
         const enrichedQuery = buildCSQuery({
           userQuery: query,
           locale: context.locale,
@@ -863,306 +847,57 @@ export async function executeFunction(
         });
         console.log('[CS] enriched query length:', enrichedQuery.length, 'preview:', enrichedQuery.slice(0, 200));
 
-        // Get Copilot Studio endpoint from settings (uses 'copilot-studio-config' key)
-        const settingsRaw = localStorage.getItem('copilot-studio-config');
-        console.log('[CS] settings raw from localStorage:', settingsRaw);
-        const parsedSettings = settingsRaw ? JSON.parse(settingsRaw) : {};
-        const tokenEndpoint = parsedSettings.endpoint;
-        console.log('[CS] parsedSettings.enabled=' + parsedSettings.enabled + ', tokenEndpoint=' + tokenEndpoint);
-        
-        // Check if Copilot Studio is enabled AND endpoint is configured
-        if (!parsedSettings.enabled || !tokenEndpoint) {
-          console.log('[CS] NOT CONFIGURED - returning error');
+        // Guard: check availability via the single source of truth
+        if (!isCopilotStudioAvailable()) {
+          console.log('[CS] NOT AVAILABLE - connector not ready');
           return { 
             success: false, 
-            error: 'Copilot Studio 未配置或未启用。请在设置中配置 Token Endpoint 并启用。' 
+            error: 'Copilot Studio 连接器未就绪' 
           };
         }
-        
-        // Helper function to attempt query with session reuse
-        const attemptQuery = async (isRetry: boolean = false): Promise<FunctionCallResult> => {
-          try {
-            const tokenRef = sessionRefs?.tokenRef;
-            const conversationRef = sessionRefs?.conversationRef;
-            
-            // === TOKEN MANAGEMENT ===
-            let token: string;
-            const now = Date.now();
-            const TOKEN_SAFETY_MARGIN_MS = 60000; // 60 seconds before expiry
-            
-            if (tokenRef?.current && tokenRef.current.expiresAt - now > TOKEN_SAFETY_MARGIN_MS) {
-              // Reuse existing token
-              token = tokenRef.current.token;
-              console.log('[CS] Reusing existing token, expires in:', Math.round((tokenRef.current.expiresAt - now) / 1000), 'seconds');
-            } else {
-              // Fetch new token
-              console.log('[CS] Fetching new token from:', tokenEndpoint);
-              const tokenResponse = await fetch(tokenEndpoint, {
-                method: 'GET',
-                headers: { 'Content-Type': 'application/json' },
-              });
-              console.log('[CS] token response status:', tokenResponse.status);
-              
-              if (!tokenResponse.ok) {
-                return { success: false, error: `获取 Copilot Studio token 失败: ${tokenResponse.status}` };
-              }
-              
-              const tokenData = await tokenResponse.json();
-              token = tokenData.token;
-              console.log('[CS] token obtained, length:', token?.length || 0);
-              
-              if (!token) {
-                return { success: false, error: '无法获取 Copilot Studio 访问令牌' };
-              }
-              
-              // Store token with expiry (Direct Line tokens typically last 30 minutes)
-              // We'll use expires_in from response or default to 30 minutes
-              const expiresIn = tokenData.expires_in || 1800; // seconds
-              if (tokenRef) {
-                tokenRef.current = {
-                  token,
-                  expiresAt: now + (expiresIn * 1000),
-                };
-              }
-            }
-            
-            // === CONVERSATION MANAGEMENT ===
-            let conversationId: string;
-            let initialWatermark: string | undefined;
-            
-            if (conversationRef?.current && !isRetry) {
-              // Reuse existing conversation
-              conversationId = conversationRef.current.conversationId;
-              initialWatermark = conversationRef.current.watermark;
-              console.log('[CS] Reusing existing conversation:', conversationId, 'watermark:', initialWatermark || '(none)');
-            } else {
-              // Create new conversation
-              if (isRetry && conversationRef) {
-                console.log('[CS] Retry: clearing old conversation ref');
-                conversationRef.current = null;
-              }
-              
-              console.log('[CS] Creating new Direct Line conversation...');
-              const conversationResponse = await fetch('https://directline.botframework.com/v3/directline/conversations', {
-                method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${token}`,
-                  'Content-Type': 'application/json',
-                },
-              });
-              console.log('[CS] conversation response status:', conversationResponse.status);
-              
-              if (!conversationResponse.ok) {
-                // If 401/403, clear token and fail
-                if (conversationResponse.status === 401 || conversationResponse.status === 403) {
-                  if (tokenRef) tokenRef.current = null;
-                }
-                return { success: false, error: `创建 Direct Line 会话失败: ${conversationResponse.status}` };
-              }
-              
-              const conversationData = await conversationResponse.json();
-              conversationId = conversationData.conversationId;
-              initialWatermark = undefined;
-              
-              // Store conversation ref
-              if (conversationRef) {
-                conversationRef.current = {
-                  conversationId,
-                  streamUrl: conversationData.streamUrl,
-                  watermark: undefined,
-                };
-              }
-              console.log('[CS] New conversationId:', conversationId);
-            }
-            
-            // === SEND MESSAGE ===
-            const senderId = 'sales-copilot-user';
-            console.log('[CS] Sending message to bot, senderId:', senderId, ', text length:', enrichedQuery.length);
-            const sendResponse = await fetch(
-              `https://directline.botframework.com/v3/directline/conversations/${conversationId}/activities`,
-              {
-                method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${token}`,
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                  type: 'message',
-                  text: enrichedQuery,
-                }),
-              }
-            );
-            console.log('[CS] send message response status:', sendResponse.status);
-            
-            if (!sendResponse.ok) {
-              // If 401/403/404, conversation might be expired - clear refs and retry once
-              if (!isRetry && (sendResponse.status === 401 || sendResponse.status === 403 || sendResponse.status === 404)) {
-                console.log('[CS] Send failed with', sendResponse.status, '- clearing refs and retrying');
-                if (conversationRef) conversationRef.current = null;
-                if (sendResponse.status === 401 || sendResponse.status === 403) {
-                  if (tokenRef) tokenRef.current = null;
-                }
-                return attemptQuery(true);
-              }
-              return { success: false, error: `发送消息到 Copilot Studio 失败: ${sendResponse.status}` };
-            }
-            
-            // === POLL FOR RESPONSE ===
-            const MAX_MS = 20000;
-            const INTERVAL_MS = 800;
-            const QUIET_MS = 2500;
-            
-            console.log('[CS] Starting polling, MAX_MS=' + MAX_MS + ', INTERVAL=' + INTERVAL_MS + ', QUIET_MS=' + QUIET_MS);
-            
-            interface DirectLineActivity {
-              id?: string;
-              type: string;
-              from?: { id?: string; role?: string };
-              text?: string;
-              timestamp?: string;
-            }
-            
-            let watermark: string | undefined = initialWatermark;
-            const collected: DirectLineActivity[] = [];
-            let lastActivityAt = Date.now();
-            const startTime = Date.now();
-            
-            // Helper to check if activity is from bot (strict role check)
-            const isBot = (a: DirectLineActivity): boolean => {
-              return (
-                a.type === 'message' &&
-                !!a.from &&
-                a.from.role === 'bot' &&
-                typeof a.text === 'string' &&
-                a.text.length > 0
-              );
-            };
-            
-            while (Date.now() - startTime < MAX_MS) {
-              await new Promise(resolve => setTimeout(resolve, INTERVAL_MS));
-              
-              // Build URL with watermark if available
-              let url = `https://directline.botframework.com/v3/directline/conversations/${conversationId}/activities`;
-              if (watermark) {
-                url += `?watermark=${encodeURIComponent(watermark)}`;
-              }
-              console.log('[CS] watermark:', watermark || '(none)');
-              
-              const activitiesResponse = await fetch(url, {
-                method: 'GET',
-                headers: {
-                  'Authorization': `Bearer ${token}`,
-                },
-              });
-              
-              if (!activitiesResponse.ok) {
-                console.log('[CS] Poll failed with status:', activitiesResponse.status);
-                // If 401/403/404 on poll, conversation might be expired
-                if (!isRetry && (activitiesResponse.status === 401 || activitiesResponse.status === 403 || activitiesResponse.status === 404)) {
-                  console.log('[CS] Poll failed with', activitiesResponse.status, '- clearing refs and retrying');
-                  if (conversationRef) conversationRef.current = null;
-                  if (activitiesResponse.status === 401 || activitiesResponse.status === 403) {
-                    if (tokenRef) tokenRef.current = null;
-                  }
-                  return attemptQuery(true);
-                }
-                continue;
-              }
-              
-              const activitiesData = await activitiesResponse.json();
-              const activities: DirectLineActivity[] = activitiesData.activities || [];
-              
-              // Update watermark for next poll AND store in ref
-              if (activitiesData.watermark) {
-                watermark = activitiesData.watermark;
-                if (conversationRef?.current) {
-                  conversationRef.current.watermark = watermark;
-                }
-              }
-              
-              // Log all activity from.ids
-              console.log('[CS] all activity from.ids:', activities.map((a: DirectLineActivity) => a.from?.id).join(', ') || '(empty)');
-              
-              // Check for typing activity from bot (update lastActivityAt)
-              const hasTyping = activities.some((a: DirectLineActivity) => 
-                a.type === 'typing' && a.from?.role === 'bot'
-              );
-              if (hasTyping) {
-                lastActivityAt = Date.now();
-                console.log('[CS] bot typing detected, reset lastActivityAt');
-              }
-              
-              // Filter for new bot messages
-              const newBotMessages = activities.filter(isBot);
-              
-              if (newBotMessages.length > 0) {
-                for (const m of newBotMessages) {
-                  console.log('[CS] msg from.role:', m.from?.role, 'from.id:', m.from?.id);
-                }
-                console.log('[CS] new bot messages this poll:', newBotMessages.map((m: DirectLineActivity) => ({
-                  id: m.id,
-                  text: (m.text || '').slice(0, 80),
-                  timestamp: m.timestamp,
-                })));
-                
-                // Add to collected (avoid duplicates by id)
-                const existingIds = new Set(collected.map((c: DirectLineActivity) => c.id));
-                for (const msg of newBotMessages) {
-                  if (!existingIds.has(msg.id)) {
-                    collected.push(msg);
-                    lastActivityAt = Date.now();
-                  }
-                }
-                console.log('[CS] collected total:', collected.length);
-              }
-              
-              // Check if we should break: have messages AND quiet period elapsed
-              const quietElapsed = Date.now() - lastActivityAt;
-              if (collected.length > 0 && quietElapsed > QUIET_MS) {
-                console.log('[CS] Quiet period elapsed (' + quietElapsed + 'ms > ' + QUIET_MS + 'ms), breaking');
-                break;
-              }
-            }
-            
-            // Combine collected messages
-            if (collected.length > 0) {
-              const combined = collected
-                .sort((a: DirectLineActivity, b: DirectLineActivity) => 
-                  new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime()
-                )
-                .map((m: DirectLineActivity) => m.text)
-                .join('\n\n');
-              
-              console.log('[CS] FINAL combined (' + collected.length + ' messages):', combined.slice(0, 200));
-              
-              return {
-                success: true,
-                data: {
-                  answer: combined || '(no reply)',
-                  source: 'Copilot Studio',
-                  conversationId,
-                },
-              };
-            }
-            
-            console.log('[CS] No bot messages collected after timeout');
-            return { success: false, error: 'Copilot Studio 响应超时' };
-          } catch (fetchError: unknown) {
-            console.error('[CS] Copilot Studio error:', fetchError);
-            // On error, clear refs if this might be a session issue
-            const errorMsg = fetchError instanceof Error ? fetchError.message : '';
-            if (errorMsg.includes('expired') || errorMsg.includes('not found') || errorMsg.includes('Conversation')) {
-              if (sessionRefs?.conversationRef) sessionRefs.conversationRef.current = null;
-            }
-            return { 
-              success: false, 
-              error: fetchError instanceof Error ? fetchError.message : 'Copilot Studio 请求失败' 
+
+        try {
+          const csConfig = getCopilotConfig();
+          console.log('[CS] Calling MicrosoftCopilotStudioService.ExecuteCopilotAsyncV2...');
+          const result = await MicrosoftCopilotStudioService.ExecuteCopilotAsyncV2(
+            csConfig?.agentName || COPILOT_STUDIO_AGENT_NAME,
+            { message: enrichedQuery, notificationUrl: 'https://notificationurlplaceholder' },
+          );
+
+          if (!result.success) {
+            console.error('[CS] SDK connector error:', result.error);
+            return {
+              success: false,
+              error: result.error?.message ?? 'Copilot Studio 调用失败',
             };
           }
-        };
-        
-        // Execute the query with session reuse
-        return attemptQuery();
+
+          // ExecuteCopilotAsyncV2 returns void type but actual data is in result.data
+          const responseData = result.data as unknown as { lastResponse?: string; responses?: string[]; conversationId?: string } | undefined;
+          const answer = responseData?.lastResponse || responseData?.responses?.join('\n\n') || '';
+          const conversationId = responseData?.conversationId;
+          console.log('[CS] FINAL answer length:', answer.length, 'conversationId:', conversationId);
+
+          // Persist conversation ID for multi-turn
+          if (conversationId && csConfig) {
+            saveCopilotConfig({ ...csConfig, conversationId });
+          }
+
+          return {
+            success: true,
+            data: {
+              answer: answer || '(no reply)',
+              source: 'Copilot Studio',
+              conversationId,
+            },
+          };
+        } catch (sdkError: unknown) {
+          console.error('[CS] Copilot Studio SDK error:', sdkError);
+          return {
+            success: false,
+            error: sdkError instanceof Error ? sdkError.message : 'Copilot Studio 请求失败',
+          };
+        }
       }
 
       // ===== Fuzzy Matching Functions =====

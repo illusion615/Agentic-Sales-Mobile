@@ -14,9 +14,9 @@
  */
 
 import { invokeFlowForLLM } from '@/services/power-automate-service';
-import { getLLMConfig, getLocale } from '@/lib/i18n';
+import { getLocale } from '@/lib/i18n';
 import { getFunctionListForPrompt, getDisplayName } from './function-registry';
-import { executeFunction, type DirectLineSessionRefs } from './function-executor';
+import { executeFunction } from './function-executor';
 import { ActivityTypeKeyToLabel, type ActivityTypeKey } from '@/generated/models/activity-model';
 import { 
   parseAndValidateIntent,
@@ -157,7 +157,6 @@ async function fallbackToCopilotStudio(
   context: {
     userId?: string;
     userEmail?: string;
-    sessionRefs?: DirectLineSessionRefs;
     // Forwarded so Copilot Studio sees page/account/product/dialog context.
     pageContext?: { currentPage?: string; summary?: string; pageData?: unknown };
     conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
@@ -192,8 +191,7 @@ async function fallbackToCopilotStudio(
         pageContext: context.pageContext,
         conversationHistory: context.conversationHistory,
         locale,
-      },
-      context.sessionRefs
+      }
     );
     console.log('[FALLBACK_CS] executeFunction returned:', JSON.stringify(result).slice(0, 500));
     
@@ -339,12 +337,10 @@ export async function processMessage(
       pageData?: unknown;
       summary?: string;
     };
-    sessionRefs?: DirectLineSessionRefs;
   },
   onProgress?: (progress: ThinkingProgress) => void
 ): Promise<AgentResponse> {
   const startTime = Date.now();
-  const llmConfig = getLLMConfig();
   const isZh = (context.locale || getLocale()) === 'zh-Hans';
 
   // Check circuit breaker before making LLM call
@@ -360,14 +356,7 @@ export async function processMessage(
     };
   }
 
-  if (!llmConfig?.enabled) {
-    return {
-      success: false,
-      content: '',
-      error: '请先到设置启用 AI 助手 / Please enable AI assistant in Settings',
-      latencyMs: Date.now() - startTime,
-    };
-  }
+  // No need to check llmConfig here — invokeFlowForLLM has its own guard
 
   const functionList = getFunctionListForPrompt();
   const today = new Date().toISOString().split('T')[0];
@@ -436,7 +425,6 @@ export async function processMessage(
       {
         userId: context.userId,
         userEmail: context.userEmail,
-        sessionRefs: context.sessionRefs,
         pageContext: context.pageContext,
         conversationHistory: history,
       },
@@ -1268,7 +1256,6 @@ User: "Log a meeting with Rachel at King's College Hospital"
       {
         userId: context.userId,
         userEmail: context.userEmail,
-        sessionRefs: context.sessionRefs,
         pageContext: context.pageContext,
         conversationHistory: history,
       },
@@ -1300,25 +1287,6 @@ User: "Log a meeting with Rachel at King's College Hospital"
       {
         userId: context.userId,
         userEmail: context.userEmail,
-        sessionRefs: context.sessionRefs,
-        pageContext: context.pageContext,
-        conversationHistory: history,
-      },
-      onProgress
-    );
-  }
-
-  // ===== Route externalKnowledgeQuery directly to Copilot Studio =====
-  if (intent.function === 'externalKnowledgeQuery') {
-    console.log('[CopilotAgent] Routing externalKnowledgeQuery to Copilot Studio');
-    return await fallbackToCopilotStudio(
-      (intent.arguments?.query as string) || userMessage,
-      context.locale || getLocale(),
-      startTime,
-      {
-        userId: context.userId,
-        userEmail: context.userEmail,
-        sessionRefs: context.sessionRefs,
         pageContext: context.pageContext,
         conversationHistory: history,
       },
@@ -1665,8 +1633,7 @@ User: "Log a meeting with Rachel at King's College Hospital"
         pageContext: context.pageContext,
         conversationHistory: context.conversationHistory,
         locale: context.locale,
-      },
-      context.sessionRefs
+      }
     );
     console.log('[CopilotAgent] Function result:', functionResult);
   } catch (execError) {
@@ -1705,7 +1672,6 @@ User: "Log a meeting with Rachel at King's College Hospital"
         {
           userId: context.userId,
           userEmail: context.userEmail,
-          sessionRefs: context.sessionRefs,
           pageContext: context.pageContext,
           conversationHistory: context.conversationHistory || [],
         },

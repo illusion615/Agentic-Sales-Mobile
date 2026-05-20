@@ -22,7 +22,7 @@
 
 import { z } from 'zod';
 import { invokeFlowForLLM } from '@/services/power-automate-service';
-import { getLLMConfig, getLocale } from '@/lib/i18n';
+import { getLocale } from '@/lib/i18n';
 
 // ----------------------------- Schema ------------------------------------
 
@@ -236,14 +236,6 @@ export interface FrameRunOutcome {
  */
 export async function runFrame(ctx: FrameRunContext): Promise<FrameRunOutcome> {
   const startedAt = Date.now();
-  const llmConfig = getLLMConfig();
-  if (!llmConfig?.enabled || !llmConfig?.endpoint) {
-    return {
-      success: false,
-      error: 'LLM endpoint not configured',
-      latencyMs: Date.now() - startedAt,
-    };
-  }
 
   const locale = ctx.locale ?? ((getLocale() === 'zh-Hans' ? 'zh-Hans' : 'en') as 'zh-Hans' | 'en');
   const system = buildFramePrompt(locale);
@@ -271,7 +263,7 @@ export async function runFrame(ctx: FrameRunContext): Promise<FrameRunOutcome> {
 
   const userBlock = `${pageBlock}${historyBlock}\n\n[当前用户说] ${ctx.userMessage}`;
 
-  const resp = await invokeFlowForLLM(llmConfig.endpoint, {
+  const resp = await invokeFlowForLLM({
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: userBlock },

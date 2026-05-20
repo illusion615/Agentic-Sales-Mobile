@@ -3,16 +3,9 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useUser } from '@/hooks/use-user';
 import { useSettingsReady } from '@/contexts/settings-context';
 import { 
-  getCopilotConfig, 
-  getOrCreateConversation, 
-  sendUserContext, 
-  pollMessages,
-  clearConversation,
-  createWebSocketConnection,
-  type ConversationInfo,
-  type CopilotMessage
+  clearCopilotConversation,
 } from '@/services/copilot-service';
-import { getLocale, getLLMConfig, getSimulateStreaming, type Locale } from '@/lib/i18n';
+import { getLocale, getSimulateStreaming, type Locale } from '@/lib/i18n';
 import { toast } from 'sonner';
 import { processMessage, type ThinkingProgress } from '@/lib/copilot-agent';
 import type { AwaitingClarification, ResolutionItem } from '@/lib/agent-utils';
@@ -159,23 +152,6 @@ export interface ChatMessage {
 // Form fill callback type
 export type FormFillCallback = (data: Record<string, unknown>) => void;
 
-// Direct Line session refs for Copilot Studio multi-turn conversations
-export interface DirectLineTokenRef {
-  token: string;
-  expiresAt: number;
-}
-
-export interface DirectLineConversationRef {
-  conversationId: string;
-  streamUrl?: string;
-  watermark?: string;
-}
-
-export interface DirectLineSessionRefs {
-  tokenRef: React.MutableRefObject<DirectLineTokenRef | null>;
-  conversationRef: React.MutableRefObject<DirectLineConversationRef | null>;
-}
-
 interface CopilotContextValue {
   // Panel state
   isOpen: boolean;
@@ -220,9 +196,6 @@ interface CopilotContextValue {
 
   // Extract structured visit data using Copilot Studio
   extractVisitData: (text: string, findAccountByName: (name: string) => { id: string; name1?: string } | undefined) => Promise<ExtractedVisitData | null>;
-  
-  // Direct Line session refs for Copilot Studio
-  directLineSessionRefs: DirectLineSessionRefs;
   
   // Continue pending action after match selection
   continuePendingAction: (
@@ -503,8 +476,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     pageContextRef.current = pageContext;
   }, [pageContext]);
 
-  // Extract structured visit data using Copilot Studio Direct Line
-  // Delegates to the visit-extraction helper module
+  // Extract structured visit data using Copilot Studio SDK connector
   const extractVisitData = useCallback(async (
     text: string,
     findAccountByName: (name: string) => { id: string; name1?: string } | undefined
@@ -513,9 +485,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       text,
       findAccountByName,
       locale,
-      user?.objectId,
-      copilotConversationRef,
-      watermarkRef
+      user?.objectId
     );
   }, [locale, user]);
   
@@ -663,24 +633,10 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     formFillCallbackRef.current = callback;
   }, []);
   
-  // Refs for copilot connection
-  const copilotConversationRef = useRef<ConversationInfo | null>(null);
-  const userContextSentRef = useRef(false);
-  const watermarkRef = useRef<string | undefined>(undefined);
-  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const isReconnectingRef = useRef(false);
-  const wsCleanupRef = useRef<(() => void) | null>(null);
+  // Refs for copilot UI state
   const typingMessageIdRef = useRef<string | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // Direct Line session refs for Copilot Studio multi-turn conversations
-  const directLineTokenRef = useRef<DirectLineTokenRef | null>(null);
-  const directLineConversationRef = useRef<DirectLineConversationRef | null>(null);
-  const directLineSessionRefs: DirectLineSessionRefs = useMemo(() => ({
-    tokenRef: directLineTokenRef,
-    conversationRef: directLineConversationRef,
-  }), []);
 
   // Helper function to simulate streaming text effect
   const simulateStreamingText = useCallback((messageId: string, fullContent: string, agentName: string, timestamp: string, onComplete?: () => void) => {
@@ -749,255 +705,12 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     }, tickInterval);
   }, []);
 
-  // Helper function to show typing indicator for Copilot Studio
-  const showTypingIndicator = useCallback(() => {
-    // Clear any existing typing timeout
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-    }
-    
-    // If there's no existing typing message, create one
-    if (!typingMessageIdRef.current) {
-      const thinkingMsgId = `msg-${Date.now()}-typing`;
-      typingMessageIdRef.current = thinkingMsgId;
-      
-      const thinkingMessage: ChatMessage = {
-        id: thinkingMsgId,
-        type: 'agent',
-        role: 'assistant',
-        content: '',
-        agentName: 'Copilot',
-        timestamp: new Date().toISOString(),
-        isThinking: true,
-        thinkingSteps: [
-          { stage: 'generating', status: 'active', label: locale === 'zh-Hans' ? 'Copilot \u6b63\u5728\u601d\u8003...' : 'Copilot is thinking...' },
-        ],
-      };
-      setMessages((prev) => [...prev, thinkingMessage]);
-    }
-    
-    // Set timeout to remove typing indicator if no response (safety net)
-    typingTimeoutRef.current = setTimeout(() => {
-      if (typingMessageIdRef.current) {
-        setMessages((prev) => prev.filter((msg) => msg.id !== typingMessageIdRef.current));
-        typingMessageIdRef.current = null;
-      }
-    }, 30000); // 30 second timeout
-  }, [locale]);
-
-  // Helper function to clear typing indicator and add actual message
-  // Helper function to clear typing indicator and add actual message
-  const handleBotMessage = useCallback((message: CopilotMessage) => {
-    // Clear typing timeout
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-      typingTimeoutRef.current = null;
-    }
-    
-    const messageId = `bot-${message.timestamp.getTime()}-${Math.random().toString(36).slice(2, 7)}`;
-    const fullContent = message.text || '';
-    const timestamp = message.timestamp.toISOString();
-    
-    // Check if streaming is enabled
-    if (getSimulateStreaming() && fullContent.length > 0) {
-      // Keep isSending true during streaming, will be set to false when streaming completes
-      simulateStreamingText(messageId, fullContent, 'Copilot', timestamp, () => {
-        // Callback when streaming completes
-        setIsSending(false);
-      });
-    } else {
-      // Add message immediately without streaming
-      setIsSending(false);
-      
-      const newMessage: ChatMessage = {
-        id: messageId,
-        type: 'agent',
-        role: 'assistant',
-        content: fullContent,
-        agentName: 'Copilot',
-        timestamp,
-      };
-      
-      setMessages((prev) => {
-        // Remove typing indicator if present
-        const filtered = typingMessageIdRef.current 
-          ? prev.filter((msg) => msg.id !== typingMessageIdRef.current)
-          : prev;
-        
-        // Check for duplicate content
-        const existingContents = new Set(filtered.filter((p) => p.type === 'agent').map((p) => p.content));
-        if (existingContents.has(newMessage.content)) {
-          return filtered;
-        }
-        
-        return [...filtered, newMessage];
-      });
-      
-      typingMessageIdRef.current = null;
-    }
-  }, [simulateStreamingText]);
-
-  // Initialize copilot connection when panel opens AND settings are ready
-  // Connection is non-blocking - Copilot Studio is just a tool, not required for user interaction
+  // With SDK connector, Copilot Studio is always available — mark connected when settings are ready
   useEffect(() => {
-    // Wait for settings to be loaded from Dataverse before attempting connection
-    if (!settingsReady) {
-      console.log('[Copilot] Waiting for settings to load from Dataverse...');
-      return;
+    if (settingsReady) {
+      setIsConnected(true);
     }
-    
-    if (!isOpen) return;
-    if (copilotConversationRef.current) return; // Already connected
-    
-    // Polling fallback function (hoisted for use in initCopilot)
-    const startPolling = () => {
-      console.log('[Copilot] Starting polling fallback');
-      pollIntervalRef.current = setInterval(async () => {
-        if (!copilotConversationRef.current) return;
-        
-        try {
-          const { activities, watermark } = await pollMessages(
-            copilotConversationRef.current,
-            watermarkRef.current
-          );
-          watermarkRef.current = watermark;
-          
-          // Check for typing activities - Direct Line uses type === 'typing'
-          const typingActivities = activities.filter(
-            (a) => a.type === 'typing' && a.from === 'bot'
-          );
-          if (typingActivities.length > 0) {
-            showTypingIndicator();
-          }
-          
-          const botMessages = activities.filter(
-            (a) => a.type === 'message' && a.from === 'bot' && a.text
-          );
-          
-          if (botMessages.length > 0) {
-            for (const m of botMessages) {
-              handleBotMessage(m);
-            }
-          }
-        } catch (err) {
-          const error = err as Error & { status?: number };
-          if ((error.status === 403 || error.message?.includes('403')) && !isReconnectingRef.current) {
-            isReconnectingRef.current = true;
-            clearConversation();
-            copilotConversationRef.current = null;
-            userContextSentRef.current = false;
-            watermarkRef.current = undefined;
-            
-            if (pollIntervalRef.current) {
-              clearInterval(pollIntervalRef.current);
-              pollIntervalRef.current = null;
-            }
-            
-            setTimeout(async () => {
-              try {
-                const config = getCopilotConfig();
-                if (config) {
-                  const conversation = await getOrCreateConversation(config);
-                  copilotConversationRef.current = conversation;
-                  setIsConnected(true);
-                }
-              } catch (reconnectErr) {
-                console.error('Failed to reconnect:', reconnectErr);
-                setIsConnected(false);
-              } finally {
-                isReconnectingRef.current = false;
-              }
-            }, 1000);
-          }
-        }
-      }, 1000);
-    };
-    
-    // Initialize Copilot Studio connection in background (non-blocking)
-    const initCopilot = async () => {
-      const config = getCopilotConfig();
-      if (!config) {
-        console.log('[Copilot] No Copilot config found in localStorage');
-        setIsConnected(false);
-        return;
-      }
-      
-      // Don't set isConnecting - let user interact immediately
-      // Connection happens silently in background
-      console.log('[Copilot] Background: Initializing Copilot Studio connection...');
-      try {
-        const conversation = await getOrCreateConversation(config);
-        copilotConversationRef.current = conversation;
-        setIsConnected(true);
-        console.log('[Copilot] Background: Successfully connected');
-        
-        // Send user context if user is available
-        if (user && !userContextSentRef.current) {
-          await sendUserContext(conversation, {
-            userId: user.objectId || '',
-            userPrincipalName: user.userPrincipalName || '',
-            displayName: user.fullName || '',
-          });
-          userContextSentRef.current = true;
-        }
-        
-        // Try WebSocket connection first for real-time updates
-        // WebSocket provides typing indicators, polling is the fallback
-        if (conversation.streamUrl) {
-          console.log('[Copilot] Setting up WebSocket connection');
-          wsCleanupRef.current = createWebSocketConnection(conversation, {
-            onTyping: () => {
-              console.log('[Copilot] Received typing indicator');
-              showTypingIndicator();
-            },
-            onMessage: (message) => {
-              console.log('[Copilot] Received WebSocket message:', message);
-              handleBotMessage(message);
-            },
-            onClose: () => {
-              console.log('[Copilot] WebSocket closed, falling back to polling');
-              // Fall back to polling if WebSocket closes (includes error cases)
-              wsCleanupRef.current = null;
-              if (!pollIntervalRef.current && copilotConversationRef.current) {
-                startPolling();
-              }
-            },
-          });
-        } else {
-          // No streamUrl, use polling
-          startPolling();
-        }
-      } catch (error) {
-        console.error('[Copilot] Background: Failed to initialize:', error);
-        setIsConnected(false);
-        // Silent failure - Copilot Studio is optional, orchestration uses Power Automate Flow
-        // Only show error toast for critical issues (like invalid config)
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        if (errorMessage.includes('404')) {
-          console.warn('[Copilot] Token Endpoint not found - check Settings');
-        } else if (errorMessage.includes('HTML instead of JSON')) {
-          console.warn('[Copilot] Token Endpoint returned invalid response');
-        }
-      }
-    };
-    
-    initCopilot();
-    
-    return () => {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
-      }
-      if (wsCleanupRef.current) {
-        wsCleanupRef.current();
-        wsCleanupRef.current = null;
-      }
-      if (typingTimeoutRef.current) {
-        clearTimeout(typingTimeoutRef.current);
-        typingTimeoutRef.current = null;
-      }
-    };
-  }, [isOpen, settingsReady, user, showTypingIndicator, handleBotMessage]);
+  }, [settingsReady]);
 
   const openPanel = useCallback((fullScreen = false) => {
     setIsOpen(true);
@@ -1174,10 +887,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     clearClarificationSuggestions(); // Clear any pending clarification suggestions
     setIsSending(true);
     
-    // Always use Power Automate Flow as the orchestrator for LLM function calling
-    // Local agent processes data operations, Copilot Studio is available as a tool/function
-    const llmConfig = getLLMConfig();
-      if (llmConfig?.enabled) {
+    // Proceed directly — invokeFlowForLLM has its own availability guard
+    {
         // Create a thinking message that will be updated with progress
         const thinkingMsgId = `msg-${Date.now()}-thinking`;
         const thinkingMessage: ChatMessage = {
@@ -1274,7 +985,6 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
               pageData: pageContextRef.current.pageData,
               summary: pageContextRef.current.summary,
             } : undefined,
-            sessionRefs: directLineSessionRefs,
           }, handleProgress);
           
           // Clarification is now handled naturally by the LLM as a regular response
@@ -1605,95 +1315,27 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             };
           }));
         }
-    } else {
-      // LLM not enabled
-      setIsSending(false);
-      const notConfiguredMessage: ChatMessage = {
-        id: `msg-${Date.now()}-system`,
-        type: 'agent',
-        role: 'assistant',
-        content: locale === 'zh-Hans'
-          ? '⚠️ AI 助手尚未启用。请稍候或刷新页面重试。'
-          : '⚠️ AI assistant is not enabled. Please wait or refresh the page.',
-        agentName: 'System',
-        timestamp: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, notConfiguredMessage]);
     }
-  }, [user, locale]); // pageContext accessed via ref to avoid re-creating sendMessage
+  }, [user, locale]); // pageContext accessed via ref to avoid re-create sendMessage
 
   const startNewConversation = useCallback(async () => {
-    // Clear current session immediately for instant UX
-    clearConversation();
-    copilotConversationRef.current = null;
-    userContextSentRef.current = false;
-    watermarkRef.current = undefined;
-    // Clear Direct Line conversation ref (keep token if not expired)
-    directLineConversationRef.current = null;
+    // Clear current session
+    clearCopilotConversation();
     typingMessageIdRef.current = null;
     setMessages([]);
     
-    // Also clear persisted messages
+    // Clear persisted messages
     try {
       sessionStorage.removeItem('copilot-messages');
     } catch (e) {
       console.warn('Failed to clear persisted messages:', e);
     }
     
-    // Clean up existing connections
-    if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
-      pollIntervalRef.current = null;
-    }
-    if (wsCleanupRef.current) {
-      wsCleanupRef.current();
-      wsCleanupRef.current = null;
-    }
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = null;
     }
-    
-    // Re-initialize Copilot Studio connection in background (non-blocking)
-    // Copilot Studio is just a tool, not required for conversation to start
-    const config = getCopilotConfig();
-    if (config) {
-      // Don't set isConnecting - let user interact immediately
-      // Connection happens silently in background
-      (async () => {
-        try {
-          console.log('[Copilot] Background: Re-initializing Copilot Studio connection...');
-          const conversation = await getOrCreateConversation(config);
-          copilotConversationRef.current = conversation;
-          setIsConnected(true);
-          console.log('[Copilot] Background: Successfully connected');
-          
-          if (user) {
-            await sendUserContext(conversation, {
-              userId: user.objectId || '',
-              userPrincipalName: user.userPrincipalName || '',
-              displayName: user.fullName || '',
-            });
-            userContextSentRef.current = true;
-          }
-          
-          // Set up WebSocket connection for new conversation
-          if (conversation.streamUrl) {
-            wsCleanupRef.current = createWebSocketConnection(conversation, {
-              onTyping: () => showTypingIndicator(),
-              onMessage: (message: CopilotMessage) => handleBotMessage(message),
-              onError: (error: Error) => console.error('[Copilot] WebSocket error:', error),
-              onClose: () => console.log('[Copilot] WebSocket closed'),
-            });
-          }
-        } catch (error) {
-          console.error('[Copilot] Background: Failed to re-initialize:', error);
-          setIsConnected(false);
-          // Silent failure - Copilot Studio is optional, orchestration uses Power Automate Flow
-        }
-      })();
-    }
-  }, [user, showTypingIndicator, handleBotMessage]);
+  }, []);
 
   // Continue pending action after user selects a match from match-selection card
   const continuePendingAction = useCallback(async (
@@ -2121,7 +1763,6 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
               },
               summary: `User selected ${entityType}: ${selectedRecord.name}`,
             },
-            sessionRefs: directLineSessionRefs,
           }, handleProgress);
           
           // Update message with response
@@ -2177,7 +1818,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsSending(false);
     }
-  }, [user, locale, messages, directLineSessionRefs]);
+  }, [user, locale, messages]);
 
   // Create new record from pending intent (when user clicks 'Create New' instead of selecting a match)
   const createNewFromIntent = useCallback(async (
@@ -2531,7 +2172,6 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     setFormFillCallback,
     startNewConversation,
     extractVisitData,
-    directLineSessionRefs,
     continuePendingAction,
     createNewFromIntent,
     createEntityForResolution,
@@ -2565,7 +2205,6 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     setFormFillCallback,
     startNewConversation,
     extractVisitData,
-    directLineSessionRefs,
     continuePendingAction,
     createNewFromIntent,
     createEntityForResolution,

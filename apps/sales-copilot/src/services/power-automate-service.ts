@@ -5,9 +5,13 @@
  * Flow contract:
  *   Input:  { text: string }          — the prompt text
  *   Output: { output?: string }       — the AI-generated response
+ *
+ * ALL LLM availability checks are centralised here.
+ * Callers should NOT check getLLMConfig / endpoint / enabled themselves.
  */
 
 import { PowerAppsFlow_LLMService } from '@/generated/services/PowerAppsFlow_LLMService';
+import { getLLMConfig } from '@/lib/i18n';
 
 export interface FlowLLMResponse {
   success: boolean;
@@ -17,15 +21,35 @@ export interface FlowLLMResponse {
 }
 
 /**
+ * Whether the LLM flow is available for use.
+ * UI components can use this to show/hide AI features.
+ */
+export function isFlowAvailable(): boolean {
+  const config = getLLMConfig();
+  return !!config?.enabled;
+}
+
+/**
  * Invoke the LLM flow via Power Platform connector.
  *
  * Callers pass a `messages` array (OpenAI chat format). This function
  * serialises them into a single `text` string for the flow's Prompt input.
+ *
+ * Contains its own availability guard — callers do NOT need to pre-check config.
  */
 export async function invokeFlowForLLM(
   request: { messages: Array<{ role: string; content: string }> },
 ): Promise<FlowLLMResponse> {
   const startTime = Date.now();
+
+  // Centralised availability check — no caller needs to duplicate this
+  if (!isFlowAvailable()) {
+    return {
+      success: false,
+      error: 'AI assistant is not enabled',
+      latencyMs: Date.now() - startTime,
+    };
+  }
 
   try {
     // Serialise messages → single prompt string

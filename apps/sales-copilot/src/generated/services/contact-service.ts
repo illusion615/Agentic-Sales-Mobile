@@ -4,7 +4,7 @@ import type { IGetAllOptions } from '../models/CommonModels';
 import type { Contact } from '../models/contact-model';
 
 function fromDv(dv: Crf5c_contacts): Contact {
-  const d = dv as Record<string, unknown>;
+  const d = dv as unknown as Record<string, unknown>;
   return {
     id: dv.crf5c_contactid,
     fullname: dv.crf5c_fullname,

@@ -24,9 +24,8 @@ import { useOpportunityList, useCreateOpportunity, useUpdateOpportunity } from '
 import { useContactList } from '@/generated/hooks/use-contact';
 import { useWithAISummaryTrigger } from '@/hooks/use-ai-summary-trigger';
 import { touchAccountLastContacted } from '@/lib/account-touch';
-import { getLocale, t, type Locale, getLLMConfig, getAgentFramework } from '@/lib/i18n';
-import { invokeFlowForLLM } from '@/services/power-automate-service';
-import { getCopilotConfig } from '@/services/copilot-service';
+import { getLocale, t, type Locale } from '@/lib/i18n';
+import { invokeFlowForLLM, isFlowAvailable } from '@/services/power-automate-service';
 import { useCopilot } from '@/contexts/copilot-context';
 import {
   Select,
@@ -36,24 +35,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 
-// Check if AI assistant is configured based on selected agent framework
-function isAIAssistantConfigured(): boolean {
-  try {
-    const agentFramework = getAgentFramework();
-    
-    if (agentFramework === 'local-agent') {
-      // Check BYOM configuration
-      const llmConfig = getLLMConfig();
-      return !!llmConfig?.enabled && !!llmConfig?.endpoint;
-    } else {
-      // Check Copilot Studio configuration
-      const copilotConfig = getCopilotConfig();
-      return !!copilotConfig?.tokenEndpoint;
-    }
-  } catch {
-    return false;
-  }
-}
+
 
 export default function ActivityCapturePage() {
   const navigate = useNavigate();
@@ -77,7 +59,7 @@ export default function ActivityCapturePage() {
   }, []);
   const { data: user } = useUser();
   const locale: Locale = getLocale();
-  const copilotEnabled = isAIAssistantConfigured();
+  const copilotEnabled = isFlowAvailable();
   const copilot = useCopilot();
 
   // Data - use useActivity(id) for single record lookup instead of useActivityList().find()
@@ -265,11 +247,6 @@ export default function ActivityCapturePage() {
     expectedCloseDate?: string;
     matchingOpportunityId?: string;
   } | null> => {
-    const llmConfig = getLLMConfig();
-    if (!llmConfig?.enabled || !llmConfig?.endpoint) {
-      return null;
-    }
-
     try {
       // Build context about existing opportunities for deduplication
       const existingOppsContext = opportunities
@@ -335,14 +312,11 @@ Result: ${activityData.result}
 Next step: ${activityData.nextStep}
 Opportunity intent: ${activityData.opportunityIntent}`;
 
-      const response = await invokeFlowForLLM(llmConfig.endpoint, {
+      const response = await invokeFlowForLLM({
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userMessage },
         ],
-
-        model: llmConfig.model,
-        deploymentName: llmConfig.deploymentName,
       });
 
       if (!response.success || !response.content) {

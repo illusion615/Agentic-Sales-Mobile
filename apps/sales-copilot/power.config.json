@@ -21,6 +21,15 @@
         "workflowDisplayName": "Power Apps Flow - LLM",
         "workflowName": "c9412c8b-3ed4-4fa0-92a8-ea98ff6cca75"
       }
+    },
+    "db0d28da-2c3b-4cb4-b7d1-bfa6e32e41cf": {
+      "id": "/providers/Microsoft.PowerApps/apis/shared_microsoftcopilotstudio",
+      "displayName": "Microsoft Copilot Studio",
+      "dataSources": [
+        "microsoftcopilotstudio"
+      ],
+      "authenticationType": "oauthDefault",
+      "dataSets": {}
     }
   },
   "databaseReferences": {

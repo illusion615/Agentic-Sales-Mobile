@@ -15,7 +15,7 @@ import type { BusinessInsightTypeKey, BusinessInsightReferencetypeKey } from '@/
 
 
 import { useLocale } from '@/lib/i18n';
-import { t, getGreeting, getChatFontClass, getThinkingDotStyle, getAutoPlayAgentResponse, getSelectedVoice, findMatchingSystemVoice, getVoiceSummaryEnabled, getLLMConfig, generateVoiceSummary, getAgentFramework, getHomeHeaderWidget, type Locale, type ThinkingDotStyle, type HomeHeaderWidget } from '@/lib/i18n';
+import { t, getGreeting, getChatFontClass, getThinkingDotStyle, getAutoPlayAgentResponse, getSelectedVoice, findMatchingSystemVoice, getVoiceSummaryEnabled, generateVoiceSummary, getAgentFramework, getHomeHeaderWidget, type Locale, type ThinkingDotStyle, type HomeHeaderWidget } from '@/lib/i18n';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { formatCurrencyCompact, formatCurrencyFull } from '@/lib/format-currency';
 
@@ -911,11 +911,10 @@ export default function HomeDashboard() {
     
     if (!textToSpeak.trim()) return;
     
-    // Check if voice summary is enabled and custom LLM is configured
-    const llmConfig = getLLMConfig();
+    // Check if voice summary is enabled
     const voiceSummaryEnabled = getVoiceSummaryEnabled();
     
-    if (voiceSummaryEnabled && llmConfig && llmConfig.enabled) {
+    if (voiceSummaryEnabled) {
       // Use LLM to generate voice summary
       generateVoiceSummary(latestMessage.content, locale).then((result) => {
         if (result.success && result.summary) {
@@ -1276,18 +1275,11 @@ export default function HomeDashboard() {
   const handleRefreshInsight = async () => {
     if (isRefreshingInsight) return;
     
-    const llmConfig = getLLMConfig();
     const agentFramework = getAgentFramework();
 
     // Only local-agent framework is supported for insight refresh
-    // Copilot Studio session is managed by CopilotContext for chat interactions
-    if (agentFramework !== 'local-agent' || !llmConfig || !llmConfig.enabled || !llmConfig.endpoint) {
+    if (agentFramework !== 'local-agent') {
       toast.error(locale === 'zh-Hans' ? '请先配置并启用自定义 LLM 模型' : 'Please configure and enable a custom LLM first');
-      return;
-    }
-
-    if (!llmConfig || !llmConfig.enabled || !llmConfig.endpoint) {
-      toast.error(locale === 'zh-Hans' ? '请先配置智能体框架' : 'Please configure an agent framework first');
       return;
     }
     
@@ -1314,7 +1306,7 @@ export default function HomeDashboard() {
         `${client.name}`
       ).join('; ');
       
-      if (agentFramework === 'local-agent' && llmConfig?.enabled) {
+      if (agentFramework === 'local-agent') {
         // Use local agent with BYOM to generate insights directly
         const systemPrompt = locale === 'zh-Hans'
           ? `你是一个销售助手，负责分析销售数据并生成有价值的业务洞察。
@@ -1367,7 +1359,7 @@ ${atRiskClientsDetails || 'No at-risk clients'}
         // Update status for generating response
         setInsightRefreshStatus(locale === 'zh-Hans' ? '正在生成洞察...' : 'Generating insights...');
         // Call LLM directly using generateVoiceSummary with custom prompts
-        const summaryResult = await generateVoiceSummary(userPrompt, locale, systemPrompt, llmConfig);
+        const summaryResult = await generateVoiceSummary(userPrompt, locale, systemPrompt);
         
         if (summaryResult.success && summaryResult.summary) {
           agentResponse = summaryResult.summary;
@@ -1473,7 +1465,7 @@ Return JSON array format:
 Return only the JSON array, no other text.`;
       
       // Pass raw data directly to insight generation instead of agentResponse
-      const insightResult = await generateVoiceSummary(rawDataForInsights, locale, insightSystemPrompt, llmConfig || undefined);
+      const insightResult = await generateVoiceSummary(rawDataForInsights, locale, insightSystemPrompt);
       
       if (!insightResult.success || !insightResult.summary) {
         throw new Error(insightResult.error || 'Failed to generate insight');
@@ -1555,7 +1547,6 @@ ${agentResponse}`;
         locale === 'zh-Hans' ? '请生成今日业务简报的语音播报稿' : 'Generate today\'s business briefing voice script',
         locale,
         briefTranscriptPrompt,
-        llmConfig || undefined
       );
       
       // Get the brief transcript (fallback to agentResponse if generation fails)
@@ -1773,13 +1764,13 @@ ${agentResponse}`;
     copilot.openPanel();
   };
 
-  // Handle new conversation - delegates to context for Direct Line session management
+  // Handle new conversation - delegates to context for Copilot conversation reset
   const handleNewConversation = async () => {
     if (isCreatingConversation) return;
     setIsCreatingConversation(true);
     
     try {
-      // Let context handle Direct Line session reset
+      // Let context handle Copilot conversation reset
       await copilot.startNewConversation();
 
       const newConvo = await createConversation.mutateAsync({
@@ -1859,11 +1850,10 @@ ${agentResponse}`;
             toast.success(locale === 'zh-Hans' ? '正在播放语音...' : 'Playing voice...');
           };
           
-          // Check if voice summary is enabled and custom LLM is configured
-          const llmConfig = getLLMConfig();
+          // Check if voice summary is enabled
           const voiceSummaryEnabled = getVoiceSummaryEnabled();
           
-          if (voiceSummaryEnabled && llmConfig && llmConfig.enabled && textToSpeak.trim()) {
+          if (voiceSummaryEnabled && textToSpeak.trim()) {
             toast.info(locale === 'zh-Hans' ? '正在生成语音摘要...' : 'Generating voice summary...');
             generateVoiceSummary(longPressMessage.content, locale).then((result) => {
               if (result.success && result.summary) {
@@ -2357,11 +2347,10 @@ ${agentResponse}`;
                                     }
                                   };
                                   
-                                  // Check if voice summary is enabled and custom LLM is configured
-                                  const llmConfig = getLLMConfig();
+                                  // Check if voice summary is enabled
                                   const voiceSummaryEnabled = getVoiceSummaryEnabled();
                                   
-                                  if (voiceSummaryEnabled && llmConfig && llmConfig.enabled && textToSpeak.trim()) {
+                                  if (voiceSummaryEnabled && textToSpeak.trim()) {
                                     setPlayingInlineId(message.id);
                                     generateVoiceSummary(message.content, locale).then((result) => {
                                       if (result.success && result.summary) {

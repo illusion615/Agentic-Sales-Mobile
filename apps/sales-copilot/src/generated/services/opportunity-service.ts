@@ -18,7 +18,7 @@ const FIELD_MAP: Record<string, string> = {
 };
 
 function fromDv(dv: Crf5c_opportunity1s): Opportunity {
-  const d = dv as Record<string, unknown>;
+  const d = dv as unknown as Record<string, unknown>;
   return {
     id: dv.crf5c_opportunity1id,
     name1: dv.crf5c_name,

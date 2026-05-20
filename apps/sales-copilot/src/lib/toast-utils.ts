@@ -26,7 +26,7 @@ const toastMessages = {
     saved: '已保存',
     recording: '开始录音...',
     recordingComplete: '录音完成，正在处理...',
-    copilotConnected: 'Copilot Studio Token 端点连接成功',
+    copilotConnected: 'Copilot Studio 已连接',
     
     // Error messages
     connectionFailed: '连接失败',
@@ -37,9 +37,8 @@ const toastMessages = {
     updateFailed: '更新失败',
     accountNotFound: '未找到关联客户，请先创建客户',
     invalidResponse: '无效的响应',
-    copilotNotConfigured: '请先配置 Copilot Studio 端点',
+    copilotNotConfigured: '请先配置 Copilot Studio',
     providerEndpointRequired: '请先配置提供商和端点',
-    tokenEndpointRequired: '请输入 Token Endpoint URL',
     
     // Info messages
     processing: '正在处理...',
@@ -65,7 +64,7 @@ const toastMessages = {
     saved: 'Saved',
     recording: 'Recording...',
     recordingComplete: 'Processing...',
-    copilotConnected: 'Copilot Studio token endpoint connected successfully',
+    copilotConnected: 'Copilot Studio connected successfully',
     
     // Error messages
     connectionFailed: 'Connection failed',
@@ -76,9 +75,8 @@ const toastMessages = {
     updateFailed: 'Failed to update',
     accountNotFound: 'Account not found, please create account first',
     invalidResponse: 'Invalid response',
-    copilotNotConfigured: 'Please configure Copilot Studio endpoint first',
+    copilotNotConfigured: 'Please configure Copilot Studio first',
     providerEndpointRequired: 'Please configure provider and endpoint first',
-    tokenEndpointRequired: 'Please enter Token Endpoint URL',
     
     // Info messages
     processing: 'Processing...',

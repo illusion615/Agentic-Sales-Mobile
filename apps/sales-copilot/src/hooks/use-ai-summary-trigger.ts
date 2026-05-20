@@ -243,14 +243,13 @@ function extractSummaryFromResponse(result: Record<string, unknown>): { summary:
  * Fire the Power Automate flow in the background using the standard invokeFlowForLLM
  */
 async function triggerFlowInBackground(
-  flowUrl: string,
   userPrompt: string,
   summaryId: string,
   updateSummary: (params: { id: string; changedFields: Partial<Omit<AISummary, 'id'>> }) => Promise<unknown>
 ) {
   try {
     // Use the standard invokeFlowForLLM function which handles all the formatting
-    const result = await invokeFlowForLLM(flowUrl, {
+    const result = await invokeFlowForLLM({
       messages: [
         { role: 'user', content: userPrompt }
       ],
@@ -422,9 +421,7 @@ export function useAISummaryTrigger() {
       });
       
       // If we have a Power Automate flow URL configured, trigger it
-      const flowUrl = settings.powerAutomateFlowUrl;
-      
-      if (flowUrl && user?.userPrincipalName) {
+      if (user?.userPrincipalName) {
         // Update status to generating
         await updateAISummary.mutateAsync({
           id: summaryRecord.id,
@@ -437,8 +434,7 @@ export function useAISummaryTrigger() {
         const userPrompt = buildAIPrompt(entityType, entityData, relatedData);
         
         // Fire and forget - don't wait for the flow to complete
-        // Pass userPrompt directly since invokeFlowForLLM handles the email internally
-        triggerFlowInBackground(flowUrl, userPrompt, summaryRecord.id, updateAISummary.mutateAsync);
+        triggerFlowInBackground(userPrompt, summaryRecord.id, updateAISummary.mutateAsync);
       } else {
         // No flow configured or no user - generate a placeholder summary
         const placeholderSummary = generatePlaceholderSummary(entityType, entityData);

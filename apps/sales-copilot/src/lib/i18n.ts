@@ -964,13 +964,6 @@ export async function generateVoiceSummary(
     return { success: false, error: 'LLM not configured or disabled' };
   }
   
-  if (!config.endpoint) {
-    return { success: false, error: 'Endpoint not configured' };
-  }
-  
-  // Normalize endpoint - remove trailing slash
-  const baseEndpoint = config.endpoint.replace(/\/+$/, '');
-  
   const systemPrompt = customSystemPrompt || (locale === 'zh-Hans'
     ? '你是一个助手，负责将内容总结为简短的语音播报。请用简洁自然的中文口语风格，概括主要信息，不超过3句话。'
     : 'You are an assistant that summarizes content into brief voice announcements. Use concise, natural spoken language, summarizing key information in no more than 3 sentences.');
@@ -978,6 +971,33 @@ export async function generateVoiceSummary(
   const userPrompt = locale === 'zh-Hans'
     ? `请将以下内容总结为简短的语音播报：\n\n${content}`
     : `Please summarize the following content into a brief voice announcement:\n\n${content}`;
+
+  // Power Automate uses SDK connector — no endpoint needed
+  if (config.provider === 'power-automate') {
+    console.log('[Voice Summary] Using Power Automate Flow');
+    
+    const result = await invokeFlowForLLM({
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+    });
+    
+    if (result.success && result.content) {
+      console.log('[Voice Summary] Generated via Power Automate:', result.content.trim());
+      return { success: true, summary: result.content.trim() };
+    } else {
+      return { success: false, error: result.error || 'No content in flow response' };
+    }
+  }
+
+  // Non-power-automate providers need an endpoint
+  if (!config.endpoint) {
+    return { success: false, error: 'Endpoint not configured' };
+  }
+  
+  // Normalize endpoint - remove trailing slash
+  const baseEndpoint = config.endpoint.replace(/\/+$/, '');
   
   try {
     const headers: Record<string, string> = {
@@ -1031,23 +1051,6 @@ export async function generateVoiceSummary(
           { role: 'user', content: userPrompt }
         ]
       });
-    } else if (config.provider === 'power-automate') {
-      // Power Automate Flow: invoke the flow directly
-      console.log('[Voice Summary] Using Power Automate Flow');
-      
-      const result = await invokeFlowForLLM({
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-      });
-      
-      if (result.success && result.content) {
-        console.log('[Voice Summary] Generated via Power Automate:', result.content.trim());
-        return { success: true, summary: result.content.trim() };
-      } else {
-        return { success: false, error: result.error || 'No content in flow response' };
-      }
     } else {
       // OpenAI compatible
       if (!config.apiKey) {

@@ -51,11 +51,11 @@ export function lookupBind(entitySet: string, id: string | undefined): string | 
  * The fieldMap maps friendly names → DV names.
  */
 export function mapOptions(
-  opts: Record<string, unknown> | undefined,
+  opts: Record<string, unknown> | { filter?: string; orderBy?: string[]; top?: number; select?: string[] } | undefined,
   fieldMap: Record<string, string>
 ): Record<string, unknown> | undefined {
   if (!opts) return opts;
-  const mapped = { ...opts };
+  const mapped = { ...opts } as Record<string, unknown>;
 
   // Map select field names
   if (Array.isArray(mapped.select)) {

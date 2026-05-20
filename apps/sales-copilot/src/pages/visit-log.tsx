@@ -23,7 +23,7 @@ import { cn } from '@/lib/utils';
 import { useUser } from '@/hooks/use-user';
 import { useAccountList } from '@/generated/hooks/use-account';
 import { useCreateActivity } from '@/generated/hooks/use-activity';
-import { getCopilotConfig } from '@/services/copilot-service';
+import { isCopilotStudioAvailable } from '@/services/copilot-service';
 import { getLocale, getLLMConfig, generateVoiceSummary, type Locale } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -241,8 +241,7 @@ export default function VisitLogPage() {
   const createActivity = useCreateActivity();
 
   // Copilot state
-  const copilotConfig = getCopilotConfig();
-  const isCopilotConfigured = !!copilotConfig?.tokenEndpoint;
+  const isCopilotConfigured = isCopilotStudioAvailable();
   const llmConfig = getLLMConfig();
   const isLLMConfigured = !!llmConfig?.enabled;
 
@@ -390,13 +389,13 @@ Return ONLY JSON format, no other text. If a field cannot be extracted from the 
     }
   }, [locale, findAccountByName]);
 
-  // Extract data using Copilot Studio - delegates to context for Direct Line session management
+  // Extract data using Copilot Studio - delegates to context for centralized connector execution
   const extractWithCopilot = useCallback(async (text: string): Promise<ExtractedVisitData | null> => {
-    if (!copilotConfig) return null;
+    if (!isCopilotConfigured) return null;
 
-    // Delegate Direct Line orchestration to the centralized context
+    // Delegate Copilot Studio execution to the centralized context
     return copilot.extractVisitData(text, findAccountByName);
-  }, [copilotConfig, copilot, findAccountByName]);
+  }, [isCopilotConfigured, copilot, findAccountByName]);
 
   // Process natural language input
   const processInput = useCallback(async () => {

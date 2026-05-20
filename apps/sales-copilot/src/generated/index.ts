@@ -16,6 +16,7 @@ export * as Crf5c_copilotconversationsModel from './models/Crf5c_copilotconversa
 export * as Crf5c_opportunity1sModel from './models/Crf5c_opportunity1sModel';
 export * as Crf5c_productsModel from './models/Crf5c_productsModel';
 export * as Crf5c_settingsModel from './models/Crf5c_settingsModel';
+export * as MicrosoftCopilotStudioModel from './models/MicrosoftCopilotStudioModel';
 export * as PowerAppsFlow_LLMModel from './models/PowerAppsFlow_LLMModel';
 export * as accountModel from './models/account-model';
 export * as activityModel from './models/activity-model';
@@ -45,6 +46,7 @@ export * from './services/Crf5c_copilotconversationsService';
 export * from './services/Crf5c_opportunity1sService';
 export * from './services/Crf5c_productsService';
 export * from './services/Crf5c_settingsService';
+export * from './services/MicrosoftCopilotStudioService';
 export * from './services/PowerAppsFlow_LLMService';
 export * from './services/_adapter-utils';
 export * from './services/account-service';
