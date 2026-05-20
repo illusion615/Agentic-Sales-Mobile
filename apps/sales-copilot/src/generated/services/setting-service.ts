@@ -1,39 +1,53 @@
-import { getClient } from '@/lib/power-data';
+import { Crf5c_settingsService } from './Crf5c_settingsService';
+import type { Crf5c_settings } from '../models/Crf5c_settingsModel';
+import type { IGetAllOptions } from '../models/CommonModels';
 import type { Setting } from '../models/setting-model';
-import type { IOperationOptions } from '@microsoft/power-apps/data';
 
-const DATA_SOURCE_NAME = 'crf5c_settings';
+function fromDv(dv: Crf5c_settings): Setting {
+  return {
+    id: dv.crf5c_settingid,
+    settingKey: dv.crf5c_settingkey,
+    settingValue: dv.crf5c_settingvalue,
+    description: dv.crf5c_description,
+    updatedOn: dv.crf5c_updatedon,
+  };
+}
+
+function toDv(r: Partial<Omit<Setting, 'id'>>): Record<string, unknown> {
+  const dv: Record<string, unknown> = {};
+  if (r.settingKey !== undefined) dv.crf5c_settingkey = r.settingKey;
+  if (r.settingValue !== undefined) dv.crf5c_settingvalue = r.settingValue;
+  if (r.description !== undefined) dv.crf5c_description = r.description;
+  if (r.updatedOn !== undefined) dv.crf5c_updatedon = r.updatedOn;
+  return dv;
+}
 
 export class SettingService {
   static async create(record: Omit<Setting, 'id'>): Promise<Setting> {
-    const result = await getClient().createRecordAsync(DATA_SOURCE_NAME, record);
+    const result = await Crf5c_settingsService.create(toDv(record) as any);
     if (!result.success) throw result.error;
-    return result.data as Setting;
+    return fromDv(result.data!);
   }
 
-  static async update(
-    id: string,
-    changedFields: Partial<Omit<Setting, 'id'>>
-  ): Promise<Setting> {
-    const result = await getClient().updateRecordAsync(DATA_SOURCE_NAME, id, changedFields);
+  static async update(id: string, changedFields: Partial<Omit<Setting, 'id'>>): Promise<Setting> {
+    const result = await Crf5c_settingsService.update(id, toDv(changedFields) as any);
     if (!result.success) throw result.error;
-    return result.data as Setting;
+    return fromDv(result.data!);
   }
 
   static async delete(id: string): Promise<void> {
-    const result = await getClient().deleteRecordAsync(DATA_SOURCE_NAME, id);
-    if (!result.success) throw result.error;
+    await Crf5c_settingsService.delete(id);
   }
 
   static async get(id: string): Promise<Setting> {
-    const result = await getClient().retrieveRecordAsync(DATA_SOURCE_NAME, id);
+    const result = await Crf5c_settingsService.get(id);
     if (!result.success) throw result.error;
-    return result.data as Setting;
+    return fromDv(result.data!);
   }
 
-  static async getAll(options?: IOperationOptions): Promise<Setting[]> {
-    const result = await getClient().retrieveMultipleRecordsAsync(DATA_SOURCE_NAME, options);
+  static async getAll(options?: IGetAllOptions): Promise<Setting[]> {
+    const result = await Crf5c_settingsService.getAll(options);
     if (!result.success) throw result.error;
-    return result.data as Setting[];
+    return (result.data ?? []).map(fromDv);
   }
 }
