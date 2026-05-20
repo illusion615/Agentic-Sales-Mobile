@@ -419,3 +419,13 @@ export function compareFrameVsLegacy(
       : null;
   return { objectMatch, taskMatch };
 }
+
+// ----------------------- Sub-prompt dispatch key -------------------------
+
+/**
+ * Compute the routing key for the Layer 2 sub-prompt.
+ * Format: "Activity_Log", "Product_Knowledge", "Mixed_Log", "None_Chat", etc.
+ */
+export function getSubPromptKey(frame: FrameResult): string {
+  return `${frame.salesObject}_${frame.cognitiveTask}`;
+}

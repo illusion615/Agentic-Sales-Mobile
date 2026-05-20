@@ -31,6 +31,7 @@ import {
   type ResolutionCandidate,
 } from './agent-utils';
 import { runFrame, recordShadow, compareFrameVsLegacy } from './frame-shadow';
+import { runShadowPipeline, recordBenchmark, compareShadowVsLegacy } from './shadow-agent';
 
 // Greeting pattern for detecting simple greetings that don't need Copilot Studio
 const GREETING_PATTERN = /^(hi|hello|hey|你好|您好|嗨|早上好|下午好|晚上好|good\s*(morning|afternoon|evening))\b/i;
@@ -1202,26 +1203,29 @@ User: "Log a meeting with Rachel at King's College Hospital"
   console.log('[INTENT] Raw LLM response:', intentResponse.content);
   console.log('[INTENT] userQuery="' + userMessage + '" => function=' + (intent?.function || 'null') + ', args=' + JSON.stringify(intent?.arguments || {}));
 
-  // ===== Frame Shadow (方案 3 · Phase 1) =====
-  // Fire-and-forget: run the sales-coach Frame prompt in parallel, log the
-  // result alongside the legacy intent for boss-facing comparison. The Frame
-  // output is NOT used to make any production decision yet.
+  // ===== Frame Shadow + Shadow Agent (hierarchical intent benchmark) =====
+  // Fire-and-forget: run both the Frame classifier AND the full shadow pipeline
+  // (Frame → sub-prompt → parse) in parallel with legacy. Results are logged
+  // for benchmark comparison. Neither output affects production routing.
   void (async () => {
     try {
-      const frameOutcome = await runFrame({
+      const shadowCtx = {
         userMessage,
         pageContext: context.pageContext,
         conversationHistory: history,
-        locale: isZh ? 'zh-Hans' : 'en',
-      });
-      const agreement = frameOutcome.success && frameOutcome.result
-        ? compareFrameVsLegacy(frameOutcome.result, intent?.function ?? null)
-        : undefined;
+        locale: (isZh ? 'zh-Hans' : 'en') as 'zh-Hans' | 'en',
+      };
+
+      // Run full shadow pipeline (Frame + sub-prompt)
+      const shadowResult = await runShadowPipeline(shadowCtx);
+
+      // Also record legacy Frame Shadow comparison (existing viewer)
+      const agreement = compareFrameVsLegacy(shadowResult.frame, intent?.function ?? null);
       recordShadow({
         ts: Date.now(),
         userMessage,
         page: context.pageContext?.currentPage,
-        frame: frameOutcome,
+        frame: { success: true, result: shadowResult.frame, latencyMs: shadowResult.frameLatencyMs },
         legacy: {
           functionName: intent?.function ?? null,
           requiresMatching: intent?.requiresMatching,
@@ -1233,8 +1237,36 @@ User: "Log a meeting with Rachel at King's College Hospital"
         },
         agreement,
       });
+
+      // Record shadow benchmark (new: full pipeline comparison)
+      const benchmarkAgreement = compareShadowVsLegacy(
+        shadowResult,
+        intent?.function ?? null,
+        intent?.arguments as Record<string, unknown> | undefined
+      );
+      recordBenchmark({
+        ts: Date.now(),
+        userMessage,
+        page: context.pageContext?.currentPage,
+        shadow: shadowResult,
+        legacy: {
+          functionName: intent?.function ?? null,
+          arguments: intent?.arguments as Record<string, unknown> | undefined,
+          additionalActions: intent?.additionalActions,
+          latencyMs: intentResponse.latencyMs || 0,
+        },
+        agreement: benchmarkAgreement,
+      });
+
+      console.log('[ShadowAgent] Pipeline complete:',
+        `frame=${shadowResult.subPromptKey}`,
+        `sub-prompt=${shadowResult.subPromptOutput ? 'OK' : 'FAIL'}`,
+        `total=${shadowResult.totalLatencyMs}ms`,
+        `funcMatch=${benchmarkAgreement.functionMatch}`,
+        `argOverlap=${benchmarkAgreement.argumentOverlap?.toFixed(2) ?? 'n/a'}`
+      );
     } catch (err) {
-      console.warn('[FrameShadow] background run failed:', err);
+      console.warn('[ShadowAgent] background run failed:', err);
     }
   })();
 
