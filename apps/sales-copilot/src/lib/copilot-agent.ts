@@ -1259,8 +1259,9 @@ User: "Log a meeting with Rachel at King's College Hospital"
       });
 
       console.log('[ShadowAgent] Pipeline complete:',
-        `frame=${shadowResult.subPromptKey}`,
-        `sub-prompt=${shadowResult.subPromptOutput ? 'OK' : 'FAIL'}`,
+        `frame=${shadowResult.frame.salesObject}_${shadowResult.frame.cognitiveTask}`,
+        `plan=${shadowResult.plan ? 'OK' : 'FAIL'}`,
+        `skills=${shadowResult.skillsCount}`,
         `total=${shadowResult.totalLatencyMs}ms`,
         `funcMatch=${benchmarkAgreement.functionMatch}`,
         `argOverlap=${benchmarkAgreement.argumentOverlap?.toFixed(2) ?? 'n/a'}`
