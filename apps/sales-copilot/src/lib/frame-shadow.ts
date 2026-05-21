@@ -299,7 +299,18 @@ function tryParseFrame(text: string): FrameResult | null {
       return null;
     }
   }
+  // Coerce common LLM output issues before validation
+  if (candidate && typeof candidate === 'object') {
+    const c = candidate as Record<string, unknown>;
+    // LLM sometimes returns confidence as string "90" instead of number
+    if (typeof c.confidence === 'string') c.confidence = Number(c.confidence);
+    // LLM sometimes wraps temporal in quotes differently
+    if (typeof c.temporal === 'undefined') c.temporal = 'none';
+  }
   const safe = FrameResultSchema.safeParse(candidate);
+  if (!safe.success) {
+    console.warn('[FrameShadow] Zod validation failed:', safe.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join(', '));
+  }
   return safe.success ? safe.data : null;
 }
 

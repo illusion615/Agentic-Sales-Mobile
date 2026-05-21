@@ -89,33 +89,12 @@ function EditableField({
             </SelectContent>
           </Select>
         ) : type === 'date' ? (
-          <Popover open={isOpen} onOpenChange={setIsOpen}>
-            <PopoverTrigger asChild>
-              <Button
-                variant="outline"
-                className={cn(
-                  "h-8 w-full justify-start text-left font-normal text-sm mt-0.5",
-                  !value && "text-muted-foreground"
-                )}
-              >
-                <Calendar className="mr-2 h-3.5 w-3.5" />
-                {value ? String(value) : placeholder || 'Select date'}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0 z-[9999]" align="start" side="top" avoidCollisions>
-              <CalendarComponent
-                mode="single"
-                selected={value ? new Date(String(value)) : undefined}
-                onSelect={(date: Date | undefined) => {
-                  if (date) {
-                    onChange(format(date, 'yyyy-MM-dd'));
-                  }
-                  setIsOpen(false);
-                }}
-                initialFocus
-              />
-            </PopoverContent>
-          </Popover>
+          <input
+            type="date"
+            className="h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm mt-0.5"
+            value={value ? String(value) : ''}
+            onChange={(e) => onChange(e.target.value)}
+          />
         ) : type === 'textarea' ? (
           <Textarea
             value={String(value || '')}
