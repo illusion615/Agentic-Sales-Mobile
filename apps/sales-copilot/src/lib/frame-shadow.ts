@@ -51,8 +51,8 @@ export type FrameCognitiveTask = z.infer<typeof FrameCognitiveTaskSchema>;
 
 export const FrameBoundEntitySchema = z
   .object({
-    id: z.string().optional(),
-    name: z.string().optional(),
+    id: z.string().nullable().optional(),
+    name: z.string().nullable().optional(),
   })
   .nullable();
 
