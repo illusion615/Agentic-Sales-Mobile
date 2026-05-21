@@ -1038,9 +1038,17 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
           setIsConfirming(false);
           return;
         }
+
+        // Validate required fields before saving
+        const oppName = (formData.name as string || '').trim();
+        if (!oppName) {
+          toast.error(locale === 'zh-Hans' ? '商机名称为必填项' : 'Opportunity name is required');
+          setIsConfirming(false);
+          return;
+        }
         
         const createdOpp = await createOpportunity.mutateAsync({
-          name1: formData.name as string || '',
+          name1: oppName,
           account: { id: targetAccount.id, name1: targetAccount.name1 },
           totalamount: formData.amount as number || 0,
           stageKey,
@@ -1141,7 +1149,8 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
       onStatusChange?.('confirmed');
     } catch (error) {
       console.error('Failed to create record:', error);
-      toast.error(locale === 'zh-Hans' ? '创建失败，请重试' : 'Failed to create, please try again');
+      const errMsg = error instanceof Error ? error.message : String(error);
+      toast.error(locale === 'zh-Hans' ? `创建失败: ${errMsg}` : `Failed to create: ${errMsg}`);
     } finally {
       setIsConfirming(false);
     }
