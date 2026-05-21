@@ -44,6 +44,50 @@ export interface FormCardData {
   createdRecordId?: string;
 }
 
+/**
+ * Pull a human-readable message out of any error shape we might receive.
+ * Dataverse SDK rejects with plain objects whose `.message` is itself a JSON
+ * string wrapping the real error, so we peel that recursively.
+ */
+function formatCreateError(err: unknown): string {
+  return peelErrorMessage(err) || 'unknown error';
+}
+
+function peelErrorMessage(err: unknown, depth = 0): string {
+  if (depth > 4) return '';
+  if (err == null) return '';
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'string') {
+    const trimmed = err.trim();
+    if (trimmed.startsWith('{')) {
+      try {
+        return peelErrorMessage(JSON.parse(trimmed), depth + 1);
+      } catch {
+        return trimmed;
+      }
+    }
+    return trimmed;
+  }
+  if (typeof err === 'object') {
+    const e = err as Record<string, unknown>;
+    const candidates: unknown[] = [
+      e.message,
+      e.error,
+      (e.body as Record<string, unknown> | undefined)?.error,
+      (e.body as Record<string, unknown> | undefined)?.message,
+      e.body,
+      e.code,
+      e.statusText,
+    ];
+    for (const c of candidates) {
+      const m = peelErrorMessage(c, depth + 1);
+      if (m) return m;
+    }
+    try { return JSON.stringify(err); } catch { return Object.prototype.toString.call(err); }
+  }
+  return String(err);
+}
+
 interface FormCardProps {
   formCard: FormCardData;
   messageId: string;
@@ -1061,6 +1105,13 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
         createdRecordIdRef.current = createdOpp.id;
         copilot.updateFormCardStatus(messageId, 'confirmed', undefined, createdOpp.id);
         toast.success(locale === 'zh-Hans' ? '商机已创建' : 'Opportunity created');
+        // Resume parked intent (e.g. draftActivity) with the new opportunityId.
+        copilot.completeParkedIntentWithNewOpportunity(
+          createdOpp.id,
+          oppName,
+          targetAccount.id,
+          targetAccount.name1 || '',
+        );
       } else if (type === 'account') {
         // Create account
         const regionKeyMap: Record<string, AccountRegionKey> = {
@@ -1095,6 +1146,11 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
         createdRecordIdRef.current = createdAccount.id;
         copilot.updateFormCardStatus(messageId, 'confirmed', undefined, createdAccount.id);
         toast.success(locale === 'zh-Hans' ? '客户已创建' : 'Account created');
+        // Resume parked intent with the new accountId.
+        copilot.completeParkedIntentWithNewAccount(
+          createdAccount.id,
+          formData.name as string || '',
+        );
       } else if (type === 'contact') {
         // Create contact
         let targetAccount: Account | undefined;
@@ -1149,7 +1205,7 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
       onStatusChange?.('confirmed');
     } catch (error) {
       console.error('Failed to create record:', error);
-      const errMsg = error instanceof Error ? error.message : String(error);
+      const errMsg = formatCreateError(error);
       toast.error(locale === 'zh-Hans' ? `创建失败: ${errMsg}` : `Failed to create: ${errMsg}`);
     } finally {
       setIsConfirming(false);

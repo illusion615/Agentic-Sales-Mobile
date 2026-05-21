@@ -1091,7 +1091,10 @@ export async function executeFunction(
         
         interface ActivityMatch {
           id: string;
+          name: string;
           title: string;
+          subtitle?: string;
+          matchType: 'exact' | 'contains' | 'fuzzy';
           typeKey?: string;
           scheduleddate?: string;
           accountId?: string;
@@ -1106,12 +1109,15 @@ export async function executeFunction(
           const combinedText = `${titleLower} ${notesLower}`;
           
           let score = 0;
-          
+          let matchType: 'exact' | 'contains' | 'fuzzy' = 'fuzzy';
+
           // Exact title match: high score
           if (titleLower === queryLower) {
             score = 100;
+            matchType = 'exact';
           } else if (titleLower.includes(queryLower)) {
             score = 80;
+            matchType = 'contains';
           } else {
             // Word-based matching
             for (const word of queryWords) {
@@ -1134,14 +1140,28 @@ export async function executeFunction(
             if (daysDiff <= 7) score += 10;
             else if (daysDiff <= 14) score += 5;
           }
+
+          // Word/recency bonuses can stack past 100; cap so the UI confidence colors stay meaningful.
+          if (score > 100) score = 100;
           
+          const accountName = activity.account?.name1 || '未关联客户';
+          // Build a human-readable subtitle: account · type · date
+          const dateStr = activity.scheduleddate
+            ? new Date(activity.scheduleddate).toLocaleDateString()
+            : '';
+          const subtitleParts = [accountName, activity.typeKey, dateStr].filter(Boolean) as string[];
+
           return {
             id: activity.id,
+            // The match-selection UI renders `name` + `subtitle`. Activities use `title` as their display name.
+            name: activity.title || '(无标题)',
             title: activity.title,
+            subtitle: subtitleParts.join(' · '),
+            matchType,
             typeKey: activity.typeKey,
             scheduleddate: activity.scheduleddate,
             accountId: activity.account?.id,
-            accountName: activity.account?.name1 || '未关联客户',
+            accountName,
             notes: activity.notes,
             score,
           };

@@ -729,12 +729,23 @@ export const PendingResolutionSchema = z.object({
 });
 export type PendingResolution = z.infer<typeof PendingResolutionSchema>;
 
+// G-1: AdditionalAction shape carried alongside the primary intent so that
+// chain-create / cascade flows can resume the inferred multi-intent siblings
+// after the blocking clarification is cleared.
+export const AdditionalActionSchema = z.object({
+  function: z.string(),
+  arguments: z.record(z.string(), z.unknown()),
+  reason: z.string().optional(),
+});
+export type AdditionalAction = z.infer<typeof AdditionalActionSchema>;
+
 export const AwaitingClarificationSchema = z.object({
   kind: z.literal('awaiting-clarification'),
   pendingResolutions: z.array(PendingResolutionSchema).min(1),
   originalIntent: z.object({
     function: z.string(),
     arguments: z.record(z.string(), z.unknown()),
+    additionalActions: z.array(AdditionalActionSchema).optional(),
   }),
   // I-3 Slice 1: carry the remaining resolution queue (entities still to resolve after this blocker is cleared)
   // and the IDs of entities already resolved earlier in the chain (so the next step can scope by them).

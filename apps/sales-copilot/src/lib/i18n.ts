@@ -1187,6 +1187,19 @@ export function setSimulateStreaming(enabled: boolean): void {
   window.dispatchEvent(new CustomEvent('simulatestreaming-changed', { detail: enabled }));
 }
 
+// Intent detection mode: 'legacy' = single-LLM intent path, 'frame' = Frame + Orchestrator pipeline
+export type IntentMode = 'legacy' | 'frame';
+
+export function getIntentMode(): IntentMode {
+  const v = localStorage.getItem('intentMode');
+  return v === 'frame' ? 'frame' : 'legacy';
+}
+
+export function setIntentMode(mode: IntentMode): void {
+  localStorage.setItem('intentMode', mode);
+  window.dispatchEvent(new CustomEvent('intentmode-changed', { detail: mode }));
+}
+
 // Home header widget display setting
 export type HomeHeaderWidget = 'date-time' | 'performance' | 'task-completion' | 'pipeline-forecast';
 

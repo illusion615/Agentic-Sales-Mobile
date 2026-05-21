@@ -27,19 +27,51 @@ const queryCache = new QueryCache({
 // Global error handler for mutations
 const mutationCache = new MutationCache({
   onError: (error: unknown) => {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    
+    const errorMessage = extractMessage(error);
+
     // ResourceNotFound errors - show friendly message
     if (errorMessage.includes('ResourceNotFound') || errorMessage.includes('does not exist')) {
       toast.error('Operation failed: The requested resource was not found.');
       return;
     }
-    
-    // Show generic error for mutations
-    toast.error('Operation failed. Please try again.');
+
+    // Surface the actual error message so we can diagnose, instead of
+    // hiding everything behind "Operation failed. Please try again."
+    toast.error(`Operation failed: ${errorMessage || 'unknown error'}`);
     console.error('[QueryClient] Mutation error:', error);
   },
 });
+
+function extractMessage(err: unknown, depth = 0): string {
+  if (depth > 4) return '';
+  if (err == null) return '';
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'string') {
+    const t = err.trim();
+    if (t.startsWith('{')) {
+      try { return extractMessage(JSON.parse(t), depth + 1); } catch { return t; }
+    }
+    return t;
+  }
+  if (typeof err === 'object') {
+    const e = err as Record<string, unknown>;
+    const candidates: unknown[] = [
+      e.message,
+      e.error,
+      (e.body as Record<string, unknown> | undefined)?.error,
+      (e.body as Record<string, unknown> | undefined)?.message,
+      e.body,
+      e.code,
+      e.statusText,
+    ];
+    for (const c of candidates) {
+      const m = extractMessage(c, depth + 1);
+      if (m) return m;
+    }
+    try { return JSON.stringify(err); } catch { return Object.prototype.toString.call(err); }
+  }
+  return String(err);
+}
 
 export const queryClient = new QueryClient({
   queryCache,

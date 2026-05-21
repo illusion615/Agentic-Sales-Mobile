@@ -286,14 +286,27 @@ function EntryRow({ entry, benchmark, locale }: { entry: ShadowLogEntry; benchma
         <div className="border-t border-stone-100 bg-stone-50/60 px-3 py-2 text-xs">
           {ok && f ? (
             <>
+              <div className="mb-1 text-stone-500">
+                {locale === 'zh-Hans' ? `识别到 ${f.intents.length} 个意图：` : `${f.intents.length} intent(s) detected:`}
+              </div>
+              <ol className="mb-2 list-decimal space-y-1 pl-4 text-stone-700">
+                {f.intents.map((it, i) => (
+                  <li key={i}>
+                    <span className="rounded bg-stone-200 px-1.5 py-0.5 text-[10px] font-medium text-stone-700">
+                      {it.salesObject}_{it.cognitiveTask}
+                    </span>
+                    <span className="ml-1 text-[10px] text-stone-500">[{it.temporal}]</span>
+                    {it.relatesTo.length > 0 && (
+                      <span className="ml-1 text-[10px] text-indigo-600">
+                        →{it.relatesTo.map((r) => `#${r}`).join(',')}
+                      </span>
+                    )}
+                    <div className="text-[11px] text-stone-700">{it.summary}</div>
+                  </li>
+                ))}
+              </ol>
               <div className="mb-1 text-stone-500">{locale === 'zh-Hans' ? '销售教练推理：' : 'Sales-coach reasoning:'}</div>
               <div className="mb-2 italic text-stone-700">{f.reasoning}</div>
-              {f.ambiguity && (
-                <div className="mb-2 rounded-md bg-amber-50 px-2 py-1 text-amber-700">
-                  {locale === 'zh-Hans' ? '不确定：' : 'Ambiguity: '}
-                  {f.ambiguity}
-                </div>
-              )}
               {f.explicitNames && f.explicitNames.length > 0 && (
                 <div className="mb-2">
                   <span className="text-stone-500">{locale === 'zh-Hans' ? '点名实体：' : 'Explicit entities:'}</span>

@@ -16,7 +16,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { Search, Check, Building2, User, TrendingUp, AlertCircle, Plus, SkipForward, ChevronDown, ChevronUp } from 'lucide-react';
+import { Search, Check, Building2, User, TrendingUp, AlertCircle, Plus, SkipForward, ChevronDown, ChevronUp, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
@@ -46,12 +46,15 @@ interface MatchSelectionCardProps {
     pendingIntent?: {
       function: string;
       arguments: Record<string, unknown>;
+      // G-1: optional inferred siblings forwarded so chain-create resume can replay them
+      additionalActions?: Array<{ function: string; arguments: Record<string, unknown>; reason?: string }>;
     };
   };
   resolved?: boolean;
+  resolutionResult?: string;
   onSelect?: (record: { id: string; name: string; accountId?: string; accountName?: string }) => void;
-  onContinueWithSelection?: (record: { id: string; name: string; accountId?: string; accountName?: string }, pendingIntent: { function: string; arguments: Record<string, unknown> }) => void;
-  onCreateEntity?: (pendingIntent: { function: string; arguments: Record<string, unknown> }, entityKind: 'contact' | 'account' | 'opportunity', queryName: string) => void;
+  onContinueWithSelection?: (record: { id: string; name: string; accountId?: string; accountName?: string }, pendingIntent: { function: string; arguments: Record<string, unknown>; additionalActions?: Array<{ function: string; arguments: Record<string, unknown>; reason?: string }> }) => void;
+  onCreateEntity?: (pendingIntent: { function: string; arguments: Record<string, unknown>; additionalActions?: Array<{ function: string; arguments: Record<string, unknown>; reason?: string }> }, entityKind: 'contact' | 'account' | 'opportunity', queryName: string) => void;
   onSkip?: (pendingIntent: { function: string; arguments: Record<string, unknown> }, entityKind: 'contact' | 'account' | 'opportunity') => void;
   onSearchOther?: (newQuery: string, entityType: 'account' | 'contact' | 'opportunity' | 'activity', pendingIntent: { function: string; arguments: Record<string, unknown> }) => void;
 }
@@ -60,6 +63,7 @@ export function MatchSelectionCard({
   messageId: _messageId,
   matchSelection,
   resolved = false,
+  resolutionResult,
   onSelect,
   onContinueWithSelection,
   onCreateEntity,
@@ -251,7 +255,8 @@ export function MatchSelectionCard({
       transition={{ duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] as const }}
       className={cn(
         'glass-card p-4 rounded-xl',
-        isResolved && 'opacity-60 pointer-events-none',
+        isProcessing && 'opacity-60 pointer-events-none',
+        resolved && !isProcessing && 'pointer-events-none',
       )}
     >
       {/* Header */}
@@ -297,14 +302,14 @@ export function MatchSelectionCard({
       </div>
 
       {/* High-confidence match list */}
-      {hasHighMatches && (
+      {!resolved && hasHighMatches && (
         <div className="space-y-2">
           {highMatches.map((m, i) => renderMatchRow(m, i, false))}
         </div>
       )}
 
       {/* Empty state (no matches at all) */}
-      {!hasAnyMatches && (
+      {!resolved && !hasAnyMatches && (
         <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/30 mb-1">
           <AlertCircle className="w-4 h-4 text-muted-foreground flex-shrink-0" />
           <p className="text-xs text-muted-foreground">
@@ -316,7 +321,7 @@ export function MatchSelectionCard({
       )}
 
       {/* Low-confidence collapsible */}
-      {lowMatches.length > 0 && (
+      {!resolved && lowMatches.length > 0 && (
         <div className={cn('mt-2', hasHighMatches && 'pt-2')}>
           <button
             type="button"
@@ -339,7 +344,7 @@ export function MatchSelectionCard({
       )}
 
       {/* Action area: Create / Search other / Skip */}
-      {hasDraftIntent && entityKind && (
+      {!resolved && hasDraftIntent && entityKind && (
         <div className={cn(
           'mt-4 pt-3 border-t border-border/50 space-y-2',
         )}>
@@ -412,10 +417,14 @@ export function MatchSelectionCard({
           {locale === 'zh-Hans' ? '正在处理...' : 'Processing...'}
         </p>
       )}
-      {resolved && !isProcessing && (
-        <p className="text-xs text-muted-foreground mt-3 text-center italic">
-          {locale === 'zh-Hans' ? '已处理' : 'Resolved'}
-        </p>
+      {resolved && (
+        <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/15">
+          <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
+          <p className="text-sm text-foreground">
+            {resolutionResult
+              || (locale === 'zh-Hans' ? '已处理' : 'Resolved')}
+          </p>
+        </div>
       )}
     </motion.div>
   );

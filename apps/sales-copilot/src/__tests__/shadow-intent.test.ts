@@ -1,19 +1,29 @@
 /**
- * Tests for the Router → Orchestrator → Skills architecture
+ * Tests for the multi-intent Frame → Orchestrator → Skills architecture.
+ *
+ * Per boss discipline: these tests do NOT hardcode LLM-output fixtures and
+ * do NOT validate semantic correctness of the prompt. Real intent splitting
+ * is validated via shadow benchmark in production. Here we only exercise:
+ *   - Skills selector filtering by intent salesObjects
+ *   - DAG schema parsing & ref resolution
+ *   - Frame parser robustness against malformed / object-wrapped relatesTo
  */
 import { describe, it, expect } from 'vitest';
 import { resolveRefs, isDagPlan, DagPlanSchema, SingleIntentSchema } from '@/lib/dag-schema';
-import { selectSkills, formatSkillsForPrompt } from '@/lib/skills-selector';
-import { getSubPromptKey } from '@/lib/frame-shadow';
-import type { FrameResult } from '@/lib/frame-shadow';
+import { selectSkillsForIntents, formatSkillsForPrompt } from '@/lib/skills-selector';
+import { tryParseFrame, type IntentItem } from '@/lib/frame-shadow';
 
-function makeFrame(object: string, task: string, extras?: Partial<FrameResult>): FrameResult {
+function makeIntent(
+  salesObject: IntentItem['salesObject'],
+  cognitiveTask: IntentItem['cognitiveTask'],
+  extras: Partial<IntentItem> = {}
+): IntentItem {
   return {
-    salesObject: object as FrameResult['salesObject'],
-    cognitiveTask: task as FrameResult['cognitiveTask'],
+    salesObject,
+    cognitiveTask,
     temporal: 'none',
-    reasoning: 'test',
-    confidence: 90,
+    summary: '',
+    relatesTo: [],
     ...extras,
   };
 }
@@ -21,10 +31,9 @@ function makeFrame(object: string, task: string, extras?: Partial<FrameResult>):
 // ======================== Skills Selector ========================
 
 describe('skills-selector', () => {
-  it('filters to Activity skills for Activity frame', () => {
-    const frame = makeFrame('Activity', 'Log');
-    const skills = selectSkills(frame);
-    const names = skills.map(s => s.name);
+  it('filters to Activity skills for a single Activity intent', () => {
+    const skills = selectSkillsForIntents([makeIntent('Activity', 'Log')]);
+    const names = skills.map((s) => s.name);
 
     expect(names).toContain('draftActivity');
     expect(names).toContain('updateActivity');
@@ -33,76 +42,178 @@ describe('skills-selector', () => {
     expect(names).not.toContain('draftOpportunity');
   });
 
-  it('filters to Account skills for Account frame', () => {
-    const frame = makeFrame('Account', 'Find');
-    const skills = selectSkills(frame);
-    const names = skills.map(s => s.name);
+  it('filters to Account skills for an Account-only intent list', () => {
+    const skills = selectSkillsForIntents([makeIntent('Account', 'Find')]);
+    const names = skills.map((s) => s.name);
 
     expect(names).toContain('searchAccounts');
     expect(names).toContain('getAccountDetails');
     expect(names).not.toContain('draftActivity');
   });
 
-  it('includes all objects for Mixed frame', () => {
-    const frame = makeFrame('Mixed', 'Log', {
-      explicitNames: [
-        { kind: 'opportunity', text: 'deal' },
-        { kind: 'account', text: 'Acme' },
-      ],
-    });
-    const skills = selectSkills(frame);
-    const names = skills.map(s => s.name);
+  it('takes union across multi-intent lists', () => {
+    const skills = selectSkillsForIntents([
+      makeIntent('Opportunity', 'Log'),
+      makeIntent('Activity', 'Plan'),
+      makeIntent('Activity', 'Plan'),
+    ]);
+    const names = skills.map((s) => s.name);
 
     expect(names).toContain('draftOpportunity');
-    expect(names).toContain('draftAccount');
+    expect(names).toContain('draftActivity');
     expect(names).toContain('batchDraft');
   });
 
-  it('includes Product skills for Product frame', () => {
-    const frame = makeFrame('Product', 'Knowledge');
-    const skills = selectSkills(frame);
-    const names = skills.map(s => s.name);
+  it('includes Product skills for a Product Knowledge intent', () => {
+    const skills = selectSkillsForIntents([makeIntent('Product', 'Knowledge')]);
+    const names = skills.map((s) => s.name);
 
     expect(names).toContain('queryCopilotStudio');
     expect(names).not.toContain('draftActivity');
   });
 
-  it('returns fewer skills than total registry', () => {
-    const frame = makeFrame('Contact', 'Log');
-    const skills = selectSkills(frame);
-    expect(skills.length).toBeLessThan(15);
-    expect(skills.length).toBeGreaterThan(0);
+  it('a multi-object intent set produces more skills than a single-object set', () => {
+    const single = selectSkillsForIntents([makeIntent('Contact', 'Log')]);
+    const multi = selectSkillsForIntents([
+      makeIntent('Account', 'Log'),
+      makeIntent('Contact', 'Log'),
+      makeIntent('Opportunity', 'Log'),
+    ]);
+    expect(multi.length).toBeGreaterThan(single.length);
   });
 
-  it('formatSkillsForPrompt generates readable text', () => {
-    const frame = makeFrame('None', 'Chat');
-    const skills = selectSkills(frame);
+  it('formatSkillsForPrompt produces readable text', () => {
+    const skills = selectSkillsForIntents([makeIntent('None', 'Chat')]);
     const text = formatSkillsForPrompt(skills, 'en');
     expect(text.length).toBeGreaterThan(0);
     expect(text).toContain('[');
     expect(text).toContain('Parameters:');
   });
-
-  it('single-object frame has fewer skills than Mixed frame', () => {
-    const singleFrame = makeFrame('Contact', 'Log');
-    const mixedFrame = makeFrame('Mixed', 'Log', {
-      explicitNames: [
-        { kind: 'account', text: 'a' },
-        { kind: 'contact', text: 'b' },
-        { kind: 'opportunity', text: 'c' },
-      ],
-    });
-    expect(selectSkills(singleFrame).length).toBeLessThan(selectSkills(mixedFrame).length);
-  });
 });
 
-// ======================== Frame Shadow Dispatch ========================
+// ======================== Frame parser robustness ========================
 
-describe('frame-shadow dispatch', () => {
-  it('getSubPromptKey returns correct format', () => {
-    expect(getSubPromptKey(makeFrame('Activity', 'Log'))).toBe('Activity_Log');
-    expect(getSubPromptKey(makeFrame('Mixed', 'Log'))).toBe('Mixed_Log');
-    expect(getSubPromptKey(makeFrame('None', 'Chat'))).toBe('None_Chat');
+describe('frame-shadow parser', () => {
+  it('parses a clean valid response', () => {
+    const raw = JSON.stringify({
+      intents: [
+        { salesObject: 'Activity', cognitiveTask: 'Log', temporal: 'past', summary: 'visit', relatesTo: [] },
+      ],
+      explicitNames: [],
+      reasoning: 'one intent',
+      confidence: 90,
+    });
+    const result = tryParseFrame(raw);
+    expect(result).not.toBeNull();
+    expect(result!.intents).toHaveLength(1);
+    expect(result!.intents[0].salesObject).toBe('Activity');
+  });
+
+  it('coerces relatesTo with object-wrapped indices [{item:1}]', () => {
+    const raw = JSON.stringify({
+      intents: [
+        { salesObject: 'Opportunity', cognitiveTask: 'Log', summary: 'deal', relatesTo: [] },
+        { salesObject: 'Activity', cognitiveTask: 'Plan', summary: 'demo', relatesTo: [{ item: 0 }] },
+      ],
+      explicitNames: [],
+      reasoning: 'r',
+      confidence: 80,
+    });
+    const result = tryParseFrame(raw);
+    expect(result).not.toBeNull();
+    expect(result!.intents[1].relatesTo).toEqual([0]);
+  });
+
+  it('coerces relatesTo with {index:N}, {ref:N} object wrappers', () => {
+    const raw = JSON.stringify({
+      intents: [
+        { salesObject: 'Account', cognitiveTask: 'Log', summary: 'a', relatesTo: [] },
+        { salesObject: 'Activity', cognitiveTask: 'Log', summary: 'b', relatesTo: [{ index: 0 }, { ref: 0 }] },
+      ],
+      explicitNames: [],
+      reasoning: 'r',
+      confidence: 80,
+    });
+    const result = tryParseFrame(raw);
+    expect(result).not.toBeNull();
+    expect(result!.intents[1].relatesTo).toEqual([0, 0]);
+  });
+
+  it('coerces relatesTo with numeric strings', () => {
+    const raw = JSON.stringify({
+      intents: [
+        { salesObject: 'Activity', cognitiveTask: 'Log', summary: 'a', relatesTo: [] },
+        { salesObject: 'Activity', cognitiveTask: 'Plan', summary: 'b', relatesTo: ['0'] },
+      ],
+      explicitNames: [],
+      reasoning: 'r',
+      confidence: 80,
+    });
+    const result = tryParseFrame(raw);
+    expect(result).not.toBeNull();
+    expect(result!.intents[1].relatesTo).toEqual([0]);
+  });
+
+  it('drops relatesTo indices that point outside the array', () => {
+    const raw = JSON.stringify({
+      intents: [
+        { salesObject: 'Activity', cognitiveTask: 'Log', summary: 'a', relatesTo: [99, -1, 0] },
+      ],
+      explicitNames: [],
+      reasoning: 'r',
+      confidence: 80,
+    });
+    const result = tryParseFrame(raw);
+    expect(result).not.toBeNull();
+    expect(result!.intents[0].relatesTo).toEqual([0]);
+  });
+
+  it('coerces confidence from string', () => {
+    const raw = JSON.stringify({
+      intents: [{ salesObject: 'None', cognitiveTask: 'Chat', summary: '', relatesTo: [] }],
+      explicitNames: [],
+      reasoning: 'r',
+      confidence: '75',
+    });
+    const result = tryParseFrame(raw);
+    expect(result).not.toBeNull();
+    expect(result!.confidence).toBe(75);
+  });
+
+  it('extracts JSON from markdown-fenced response', () => {
+    const raw = '```json\n' + JSON.stringify({
+      intents: [{ salesObject: 'None', cognitiveTask: 'Chat', summary: 'hi', relatesTo: [] }],
+      explicitNames: [],
+      reasoning: 'r',
+      confidence: 90,
+    }) + '\n```';
+    const result = tryParseFrame(raw);
+    expect(result).not.toBeNull();
+    expect(result!.intents[0].cognitiveTask).toBe('Chat');
+  });
+
+  it('returns null on malformed JSON', () => {
+    expect(tryParseFrame('not json at all')).toBeNull();
+  });
+
+  it('returns null when intents array is missing', () => {
+    const raw = JSON.stringify({ reasoning: 'no intents', confidence: 50 });
+    expect(tryParseFrame(raw)).toBeNull();
+  });
+
+  it('returns null when intents array is empty', () => {
+    const raw = JSON.stringify({ intents: [], reasoning: 'r', confidence: 80 });
+    expect(tryParseFrame(raw)).toBeNull();
+  });
+
+  it('rejects unknown salesObject values', () => {
+    const raw = JSON.stringify({
+      intents: [{ salesObject: 'Mixed', cognitiveTask: 'Log', summary: '', relatesTo: [] }],
+      explicitNames: [],
+      reasoning: 'r',
+      confidence: 80,
+    });
+    expect(tryParseFrame(raw)).toBeNull();
   });
 });
 
@@ -147,7 +258,7 @@ describe('dag-schema', () => {
   });
 
   it('rejects invalid DAG plans', () => {
-    expect(DagPlanSchema.safeParse({ steps: [] }).success).toBe(false); // min 1 step
+    expect(DagPlanSchema.safeParse({ steps: [] }).success).toBe(false);
     expect(DagPlanSchema.safeParse({ notSteps: [] }).success).toBe(false);
   });
 });

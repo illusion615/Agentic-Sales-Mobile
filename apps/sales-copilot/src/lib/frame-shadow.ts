@@ -1,23 +1,23 @@
 /**
- * Frame Shadow Layer (方案 3 · Phase 1)
+ * Frame Shadow — multi-intent classifier
  * --------------------------------------------------------------------------
- * A second, independent LLM call that thinks like a senior CRM sales coach.
- * It does NOT replace the legacy intent prompt; it runs in parallel,
- * produces a structured "what is this person actually doing?" answer, and
- * gets logged to a ring buffer so we can compare against the legacy output.
+ * The Frame stage reads what the salesperson said and emits a list of
+ * INTENTS. One message can produce many intents (a past visit + a discovered
+ * opportunity + two future plans). This is the input to the Orchestrator,
+ * which maps each intent to a skill call.
  *
- * Design intent (do not enumerate keywords / verbs here):
- *   The Frame prompt asks the LLM three questions a sales coach would ask:
- *     1. Which sales object is this about? (Account / Contact / Opportunity /
- *        Activity / Product / Mixed / None)
- *     2. Which cognitive task is the user asking for? (Log / Plan / Find /
- *        Update / Recommend / Knowledge / Report / Chat)
- *     3. Which entities are already bound by the page they're on?
- *   No rule list, no verb enumeration, no regex — the model uses domain sense.
+ * Design:
+ *   - Schema is `intents: IntentItem[]`. No more "Mixed" hack — multi-intent
+ *     is naturally `intents.length > 1`.
+ *   - `relatesTo` is a 0-based integer dependency between intents. Models
+ *     stubbornly wrap it as `[{item:N}]` / `[{index:N}]` / `["N"]`; we coerce
+ *     all three forms back to plain integers.
+ *   - Frame is invoked with `responseFormat: 'json'` so the Flow forces the
+ *     LLM into JSON-object mode (much fewer parse failures).
  *
- * This file is self-contained. Nothing in production reads its output yet.
- * The viewer component (frame-shadow-viewer.tsx) renders the ring buffer for
- * boss-facing inspection.
+ * The viewer (frame-shadow-viewer.tsx) renders the ring buffer of recent
+ * runs for boss-facing inspection. Nothing in production routing depends on
+ * this file yet; it runs in shadow alongside legacy.
  */
 
 import { z } from 'zod';
@@ -32,7 +32,6 @@ export const FrameSalesObjectSchema = z.enum([
   'Opportunity',
   'Activity',
   'Product',
-  'Mixed',
   'None',
 ]);
 export type FrameSalesObject = z.infer<typeof FrameSalesObjectSchema>;
@@ -49,6 +48,54 @@ export const FrameCognitiveTaskSchema = z.enum([
 ]);
 export type FrameCognitiveTask = z.infer<typeof FrameCognitiveTaskSchema>;
 
+export const FrameTemporalSchema = z.enum(['past', 'future', 'none']);
+export type FrameTemporal = z.infer<typeof FrameTemporalSchema>;
+
+/**
+ * Coerce relatesTo entries.
+ * Models output one of:
+ *   [1]                   ✓ plain integer
+ *   ["1"]                 numeric string
+ *   [{ item: 1 }]         object wrapping
+ *   [{ index: 1 }]        object wrapping (alt key)
+ *   [{ ref: 1 }]          object wrapping (alt key)
+ * Anything else is dropped.
+ */
+const RelatesToEntrySchema = z.preprocess((raw) => {
+  if (typeof raw === 'number' && Number.isFinite(raw)) return Math.trunc(raw);
+  if (typeof raw === 'string' && /^-?\d+$/.test(raw)) return parseInt(raw, 10);
+  if (raw && typeof raw === 'object') {
+    const o = raw as Record<string, unknown>;
+    for (const k of ['item', 'index', 'idx', 'ref', 'i']) {
+      const v = o[k];
+      if (typeof v === 'number' && Number.isFinite(v)) return Math.trunc(v);
+      if (typeof v === 'string' && /^-?\d+$/.test(v)) return parseInt(v, 10);
+    }
+  }
+  return undefined;
+}, z.number().int());
+
+const RelatesToArraySchema = z.preprocess((raw) => {
+  if (raw === null || raw === undefined) return [];
+  if (!Array.isArray(raw)) return [raw];
+  return raw;
+}, z.array(RelatesToEntrySchema).default([]));
+
+export const IntentItemSchema = z.object({
+  salesObject: FrameSalesObjectSchema,
+  cognitiveTask: FrameCognitiveTaskSchema,
+  temporal: FrameTemporalSchema.default('none'),
+  summary: z.string().default(''),
+  relatesTo: RelatesToArraySchema,
+});
+export type IntentItem = z.infer<typeof IntentItemSchema>;
+
+export const FrameExplicitNameSchema = z.object({
+  kind: z.enum(['account', 'contact', 'opportunity', 'product']),
+  text: z.string(),
+});
+export type FrameExplicitName = z.infer<typeof FrameExplicitNameSchema>;
+
 export const FrameBoundEntitySchema = z
   .object({
     id: z.string().nullable().optional(),
@@ -56,159 +103,142 @@ export const FrameBoundEntitySchema = z
   })
   .nullable();
 
-export const FrameExplicitNameSchema = z.object({
-  kind: z.enum(['account', 'contact', 'opportunity', 'product']),
-  text: z.string(),
-});
+export const FrameBoundEntitiesSchema = z
+  .object({
+    account: FrameBoundEntitySchema.optional(),
+    opportunity: FrameBoundEntitySchema.optional(),
+    contact: FrameBoundEntitySchema.optional(),
+  })
+  .optional();
 
 export const FrameResultSchema = z.object({
-  salesObject: FrameSalesObjectSchema,
-  cognitiveTask: FrameCognitiveTaskSchema,
-  temporal: z.enum(['past', 'future', 'none']),
-  boundEntities: z
-    .object({
-      account: FrameBoundEntitySchema.optional(),
-      opportunity: FrameBoundEntitySchema.optional(),
-      contact: FrameBoundEntitySchema.optional(),
-    })
-    .optional(),
-  explicitNames: z.array(FrameExplicitNameSchema).optional(),
-  reasoning: z.string(),
-  confidence: z.number().min(0).max(100),
-  ambiguity: z.string().optional(),
+  intents: z.array(IntentItemSchema).min(1),
+  /** Page-bound entities, injected by the host (not produced by the LLM). */
+  boundEntities: FrameBoundEntitiesSchema,
+  explicitNames: z.array(FrameExplicitNameSchema).default([]),
+  reasoning: z.string().default(''),
+  confidence: z.preprocess(
+    (v) => (typeof v === 'string' ? Number(v) : v),
+    z.number().min(0).max(100).default(80)
+  ),
 });
-
 export type FrameResult = z.infer<typeof FrameResultSchema>;
 
 // ----------------------------- Prompt ------------------------------------
 
-function buildFramePrompt(locale: 'zh-Hans' | 'en'): string {
-  if (locale === 'zh-Hans') {
-    return `你是一位资深的 CRM 销售教练。你的任务不是解析关键字，而是用销售常识理解销售人员的一句话，然后用极简结构把"他在说什么"输出给下游系统。
+function buildFramePrompt(): string {
+  // English-only system prompt. The user message preserves whatever language
+  // the salesperson typed; the LLM responds with `summary` strings in the
+  // user's language.
+  return `You are a senior CRM sales coach. Read what a salesperson said and list every distinct thing they want the system to remember or do. Do not pick a single label — list them all.
 
-# 你的思考方式
+# Definition of one "intent"
+One intent = one independent fact or action the salesperson is communicating, that the CRM should either record (Log/Update), schedule (Plan), or answer (Find/Recommend/Knowledge/Report).
 
-读到销售人员的一句话时，脑子里只问三个问题：
+A single sentence often contains multiple intents:
+- A past visit AND the opportunity discovered during it = 2 intents.
+- A past meeting AND a follow-up they want to schedule = 2 intents.
+- A question AND a record-keeping ask = 2 intents.
 
-**问题 1：他在说哪一类「销售对象」？**
-销售对象的全集只有这几类：
-- Account（客户/医院/公司）
-- Contact（联系人/医生/采购）
-- Opportunity（商机/项目/订单/招标）
-- Activity（销售活动：拜访/通话/会议/邮件/演示等具体接触）
-- Product（产品本身的知识/规格/功能）
-- Mixed（一句话里涉及**超过一种类型的操作对象**。不要只看第一个动词。比如「记录拜访并创建一个商机」= Activity + Opportunity = Mixed。「拜访了客户，他们要建实验室，约了下周再谈」= Activity + Opportunity + Activity = Mixed。只要涉及两种以上对象，就选 Mixed。）
-- None（打招呼/系统问题/闲聊）
+Split intents whenever ANY of the following is true:
+- Two different time frames are mentioned (something that already happened + something to do later).
+- Two different sales objects are referenced (e.g. a customer's project AND a meeting about it).
+- Two different cognitive tasks are needed (e.g. record something AND ask a question).
 
-关键：动词不是销售对象。「拜访」不是销售对象——它是 Activity 这个对象的实例。
-「推荐产品」里"产品"是销售对象，"推荐"是动作。
-「记录一次拜访」里 Activity 才是销售对象。
-「商机页推荐产品」是 Product（用户在商机页面想让你推荐适合的产品）。
+Do NOT split intents when:
+- The same fact is restated in different words.
+- Modifiers describe the same underlying event ("visited Dr. Lisa at the cardiology department" = 1 intent, not 2).
+- Preparation, follow-up, or implicit sub-tasks of a scheduled activity are part of that activity, not separate intents. "Meet tomorrow and prepare for it" = 1 intent (the meeting).
+- Descriptions of what a customer wants, needs, or is buying are part of the Opportunity intent itself, not separate Product or Activity intents. The Opportunity's summary should absorb these details.
 
-**问题 2：他要让你完成哪一类「认知任务」？**
-任务的全集只有这几类：
-- Log（记录已经发生的事，过去时）
-- Plan（安排将要发生的事，未来时）
-- Find（查找/列出已有数据）
-- Update（修改已有记录的字段或状态）
-- Recommend（请你根据当前情境给出销售/产品建议）
-- Knowledge（问产品/行业知识，需要走知识库）
-- Report（生成日报/周报/总结）
-- Chat（打招呼、感谢、闲聊）
+Language-agnostic: judge by meaning, not by keywords. The user may write in any language or mix languages. Tense and time are inferred from meaning.
 
-判断关键：他是在「告诉你一件已发生的事」（Log/Update）、「让你帮他做一件未来的事」（Plan）、还是「让你告诉他一件他不知道的事」（Find/Recommend/Knowledge）？
+# Sales objects (each intent picks exactly one)
+- Account     — a customer organization (hospital, company, distributor)
+- Contact     — a person (doctor, buyer, decision maker)
+- Opportunity — a deal, project, tender, or buying interest. Customer demand and what they want to buy belongs here.
+- Activity    — a sales touch that happens at a point in time (visit, call, meeting, email, demo, product introduction delivered to the customer). Anything where the salesperson is interacting with or delivering something to the customer or to internal colleagues at a specific time.
+- Product     — knowledge about a product, or a request to recommend a product. ONLY used when the salesperson is asking the ASSISTANT for product information or a recommendation. Audience = the assistant, not the customer.
+    CORRECT (Product):  "what's the warranty on the X200?"             → Product, Knowledge
+    CORRECT (Product):  "recommend a product for this hospital"        → Product, Recommend
+    WRONG   (Product):  "do a product introduction to the customer"    → this is an Activity (a meeting/demo), use Activity, Plan
+    WRONG   (Product):  "I demoed the X200 yesterday"                  → Activity, Log
+    WRONG   (Product):  "the customer wants new devices"               → this is the Opportunity itself, fold into the Opportunity summary
+  Rule of thumb: if the audience of the action is the CUSTOMER, it's an Activity. Only when the audience is the ASSISTANT is it Product.
+- None        — the intent is not about a sales record (greeting, system question, smalltalk)
 
-**问题 3：他当前在哪个页面？页面已经把哪些对象绑给你了？**
-如果他在某客户的详情页说「加个活动」，他已经把 Account 绑好了，你不需要再让他打字。
-如果他在某商机详情页说「联系人 Sarah」，他已经绑了 Opportunity 和它隶属的 Account，Sarah 是要在这个 Account 范围内去找的 Contact。
-
-# 输出
-只输出一个合法 JSON 对象，不要 markdown、不要解释、不要代码块。
-{
-  "salesObject": "Account|Contact|Opportunity|Activity|Product|Mixed|None",
-  "cognitiveTask": "Log|Plan|Find|Update|Recommend|Knowledge|Report|Chat",
-  "temporal": "past|future|none",
-  "boundEntities": {
-    "account": { "id": "...", "name": "..." } | null,
-    "opportunity": { "id": "...", "name": "..." } | null,
-    "contact": { "id": "...", "name": "..." } | null
-  },
-  "explicitNames": [
-    { "kind": "account|contact|opportunity|product", "text": "用户原话里的名字" }
-  ],
-  "reasoning": "一句话写你作为销售教练为什么这么判断（不超过 30 字）",
-  "confidence": 0-100,
-  "ambiguity": "如果 confidence < 70 才填，一句话说不清楚在哪里"
-}`;
-  }
-
-  return `You are a senior CRM sales coach. Your job is NOT to parse keywords —
-it is to read what a salesperson said with domain sense, and emit a minimal
-structured answer of "what they're actually doing".
-
-# How you think
-
-When you read one line from a salesperson, ask yourself three questions:
-
-**Q1: Which "sales object" is this about?**
-There are only seven possibilities:
-- Account   (customer / hospital / company)
-- Contact   (person / doctor / buyer)
-- Opportunity (deal / project / tender / order)
-- Activity  (a sales touch: visit / call / meeting / email / demo)
-- Product   (knowledge about the product itself: specs / features)
-- Mixed     (one sentence involves **more than one type of object**. Don't
-            just look at the first verb. "Visited client, they want a new lab,
-            schedule a follow-up next week" = Activity + Opportunity + Activity
-            = Mixed. If two or more object types are involved, choose Mixed.)
-- None      (greeting / system question / chitchat)
-
-Important: verbs are NOT sales objects. "Visit" is not a sales object — it is
-an instance of the Activity object. In "recommend a product", Product is the
-object and "recommend" is the action. On the opportunity page, "recommend a
-product" is Product (the user is on an opportunity and wants you to suggest
-a fitting product).
-
-**Q2: Which "cognitive task" is the user asking for?**
-There are only eight possibilities:
-- Log        (record something that already happened — past tense)
-- Plan       (schedule something that will happen — future tense)
-- Find       (search / list existing data)
-- Update     (modify a field or status on an existing record)
-- Recommend  (use sales sense to suggest products / next steps)
-- Knowledge  (product or industry knowledge — needs the KB)
-- Report     (generate daily / weekly summary)
-- Chat       (greeting / thanks / smalltalk)
-
-Key question: is the user "telling you something that happened" (Log/Update),
-"asking you to do a future thing" (Plan), or "asking you to tell them
-something they don't know" (Find / Recommend / Knowledge)?
-
-**Q3: Which page are they on, and which entities are already bound?**
-If they're on an account detail page and say "add an activity", Account is
-already bound — they don't need to type it again.
-If they're on an opportunity detail page and say "contact Sarah", Opportunity
-and its parent Account are bound, and Sarah is a Contact to look up within
-that Account's scope.
+# Cognitive tasks (each intent picks exactly one)
+- Log        — record something that already happened or already exists
+- Plan       — schedule something to happen in the future
+- Find       — search for or list existing records
+- Update     — change a field on an existing record
+- Recommend  — ask the assistant to suggest products or next steps
+- Knowledge  — ask a product or industry knowledge question
+- Report     — ask for a daily / weekly / pipeline summary
+- Chat       — pure greeting / thanks / smalltalk
 
 # Output
-Emit one valid JSON object only. No markdown, no explanation, no code fences.
+Return a single JSON object with this exact shape. Do not wrap in markdown.
+
 {
-  "salesObject": "Account|Contact|Opportunity|Activity|Product|Mixed|None",
-  "cognitiveTask": "Log|Plan|Find|Update|Recommend|Knowledge|Report|Chat",
-  "temporal": "past|future|none",
-  "boundEntities": {
-    "account": { "id": "...", "name": "..." } | null,
-    "opportunity": { "id": "...", "name": "..." } | null,
-    "contact": { "id": "...", "name": "..." } | null
-  },
-  "explicitNames": [
-    { "kind": "account|contact|opportunity|product", "text": "name as user said it" }
+  "intents": [
+    {
+      "salesObject": "Account|Contact|Opportunity|Activity|Product|None",
+      "cognitiveTask": "Log|Plan|Find|Update|Recommend|Knowledge|Report|Chat",
+      "temporal": "past|future|none",
+      "summary": "one short sentence in the user's own language describing this single intent",
+      "relatesTo": [<plain integer, 0-based index of another intent in this same intents array>]
+    }
   ],
-  "reasoning": "one sentence, why a sales coach would judge it this way (<= 30 words)",
-  "confidence": 0-100,
-  "ambiguity": "only fill if confidence < 70 — one sentence on what's unclear"
-}`;
+  "explicitNames": [
+    { "kind": "account|contact|opportunity|product", "text": "name as the user said it" }
+  ],
+  "reasoning": "one short sentence in English on how you split the intents",
+  "confidence": 0-100
+}
+
+# Field rules
+- intents: always an array. Even a single intent (greeting, simple find) is one element.
+- relatesTo: array of plain JSON integers (0-based) indexing into this same intents array. Use [] when independent.
+    CORRECT:   "relatesTo": [1]
+    CORRECT:   "relatesTo": [0, 2]
+    CORRECT:   "relatesTo": []
+    WRONG:     "relatesTo": [{"item": 1}]
+    WRONG:     "relatesTo": ["1"]
+- A relatesTo dependency means: this intent only makes sense in the context of intent N.
+- explicitNames: every entity the user named in the message. [] if none.
+- Do NOT extract or invent boundEntities — page-bound entities are injected by the system.
+- confidence: 0-100, your overall confidence in the intent split.
+
+# Worked examples (shape only)
+
+User: "I visited London hospital today and talked with Lisa about their new operation room project. They're looking for new devices and want a product refresh introduction before next Wednesday. We need an internal meeting tomorrow to book resources and prepare."
+Expected intents: 4
+  [0] Activity,    Log,  past   — visited London hospital, met Lisa
+  [1] Opportunity, Log,  past   — new operation room project at London hospital, looking for new devices
+  [2] Activity,    Plan, future — product refresh introduction to the customer before next Wednesday   (relatesTo: [1])
+  [3] Activity,    Plan, future — internal meeting tomorrow to book resources   (relatesTo: [1])
+Note: "looking for new devices" folded into the Opportunity. "Product refresh introduction" is an Activity (audience = customer).
+
+User: "show me my top opportunities"
+Expected intents: 1
+  [0] Opportunity, Find, none
+
+User: "hi there"
+Expected intents: 1
+  [0] None, Chat, none
+
+User: "what's the warranty on the X200?"
+Expected intents: 1
+  [0] Product, Knowledge, none
+
+User: "我刚跟张总开完会，他想要个报价单，下周二再约一次"
+Expected intents: 3
+  [0] Activity, Log,  past   — 与张总开会
+  [1] Activity, Plan, future — 准备报价单发给客户   (relatesTo: [0])
+  [2] Activity, Plan, future — 下周二再约一次       (relatesTo: [0])
+
+Now process the user message.`;
 }
 
 // ----------------------------- Runner ------------------------------------
@@ -221,72 +251,88 @@ export interface FrameRunContext {
     pageData?: unknown;
   };
   conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  /** Reserved for future page-binding injection; not yet wired. */
+  boundEntities?: FrameResult['boundEntities'];
   locale?: 'zh-Hans' | 'en';
 }
 
 export interface FrameRunOutcome {
   success: boolean;
   result?: FrameResult;
-  raw?: string;
-  error?: string;
   latencyMs: number;
+  error?: string;
+  raw?: string;
 }
 
-/**
- * Run the Frame prompt. Pure function — does not write to the ring buffer.
- * Caller decides what to do with the outcome.
- */
 export async function runFrame(ctx: FrameRunContext): Promise<FrameRunOutcome> {
   const startedAt = Date.now();
 
-  const locale = ctx.locale ?? ((getLocale() === 'zh-Hans' ? 'zh-Hans' : 'en') as 'zh-Hans' | 'en');
-  const system = buildFramePrompt(locale);
+  const system = buildFramePrompt();
 
-  // Compress page context the way the legacy prompt does — keep payload small.
+  // Compress page context — keep payload small.
   let pageBlock = '';
   if (ctx.pageContext) {
     const { currentPage, summary, pageData } = ctx.pageContext;
-    pageBlock = `\n\n[页面] ${currentPage}`;
-    if (summary) pageBlock += `\n[页面摘要] ${summary}`;
+    pageBlock = `\n\n[Page] ${currentPage}`;
+    if (summary) pageBlock += `\n[Summary] ${summary}`;
     if (pageData) {
       try {
-        pageBlock += `\n[页面数据] ${JSON.stringify(pageData).slice(0, 1500)}`;
+        pageBlock += `\n[PageData] ${JSON.stringify(pageData).slice(0, 1500)}`;
       } catch {
         /* ignore */
       }
     }
   }
 
-  // Last 2 turns of history are enough for the framing decision.
   const tail = (ctx.conversationHistory ?? []).slice(-4);
   const historyBlock = tail.length
-    ? `\n\n[最近对话]\n${tail.map((m) => `${m.role}: ${m.content}`).join('\n')}`
+    ? `\n\n[Recent dialogue]\n${tail.map((m) => `${m.role}: ${m.content}`).join('\n')}`
     : '';
 
-  const userBlock = `${pageBlock}${historyBlock}\n\n[当前用户说] ${ctx.userMessage}`;
+  const userBlock = `${pageBlock}${historyBlock}\n\n[User] ${ctx.userMessage}`;
 
-  const resp = await invokeFlowForLLM({
+  // First attempt: strict JSON mode. On any failure, retry once in text mode
+  // — the flow's server-side Parse-JSON action sometimes throws
+  // "Retrieve operation failure: JSON Parse error: Unterminated string"
+  // when the model's JSON output is truncated. Text mode bypasses that
+  // parser and lets our tolerant client parser handle the response.
+  let resp = await invokeFlowForLLM({
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: userBlock },
     ],
+    responseFormat: 'json',
   });
+  let parsed = resp.success && resp.content ? tryParseFrame(resp.content) : null;
+  if (!parsed) {
+    const firstError = resp.error;
+    resp = await invokeFlowForLLM({
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: userBlock },
+      ],
+      responseFormat: 'text',
+    });
+    if (resp.success && resp.content) parsed = tryParseFrame(resp.content);
+    if (!resp.success && !resp.error && firstError) resp.error = firstError;
+  }
 
   const latencyMs = Date.now() - startedAt;
 
   if (!resp.success || !resp.content) {
     return { success: false, error: resp.error ?? 'empty response', latencyMs, raw: resp.content };
   }
-
-  const parsed = tryParseFrame(resp.content);
   if (!parsed) {
     return { success: false, error: 'parse/validation failed', latencyMs, raw: resp.content };
   }
 
+  // Inject host-provided boundEntities (LLM should not invent them).
+  if (ctx.boundEntities) parsed.boundEntities = ctx.boundEntities;
+
   return { success: true, result: parsed, latencyMs, raw: resp.content };
 }
 
-function tryParseFrame(text: string): FrameResult | null {
+export function tryParseFrame(text: string): FrameResult | null {
   let candidate: unknown;
   try {
     candidate = JSON.parse(text);
@@ -299,19 +345,22 @@ function tryParseFrame(text: string): FrameResult | null {
       return null;
     }
   }
-  // Coerce common LLM output issues before validation
-  if (candidate && typeof candidate === 'object') {
-    const c = candidate as Record<string, unknown>;
-    // LLM sometimes returns confidence as string "90" instead of number
-    if (typeof c.confidence === 'string') c.confidence = Number(c.confidence);
-    // LLM sometimes wraps temporal in quotes differently
-    if (typeof c.temporal === 'undefined') c.temporal = 'none';
-  }
+  // Some models wrap relatesTo indices as objects across the whole intents array
+  // — Zod's preprocess inside the schema handles each entry.
   const safe = FrameResultSchema.safeParse(candidate);
   if (!safe.success) {
-    console.warn('[FrameShadow] Zod validation failed:', safe.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join(', '));
+    console.warn(
+      '[FrameShadow] Zod validation failed:',
+      safe.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(', ')
+    );
+    return null;
   }
-  return safe.success ? safe.data : null;
+  // Drop relatesTo indices that point outside the array (defensive).
+  const n = safe.data.intents.length;
+  for (const intent of safe.data.intents) {
+    intent.relatesTo = intent.relatesTo.filter((idx) => idx >= 0 && idx < n);
+  }
+  return safe.data;
 }
 
 // ----------------------------- Ring buffer -------------------------------
@@ -320,7 +369,7 @@ const RING_KEY = 'copilot-frame-shadow-log';
 const RING_MAX = 50;
 
 export interface ShadowLogEntry {
-  ts: number; // epoch ms
+  ts: number;
   userMessage: string;
   page?: string;
   frame: FrameRunOutcome;
@@ -337,8 +386,9 @@ export interface ShadowLogEntry {
 }
 
 export interface ShadowAgreement {
-  objectMatch: boolean | null; // null when we can't decide
-  taskMatch: boolean | null;
+  intentCountMatch: boolean | null;
+  /** Whether legacy's primary function maps to one of the shadow intents. */
+  primaryObjectMatch: boolean | null;
   note?: string;
 }
 
@@ -349,7 +399,7 @@ export function recordShadow(entry: ShadowLogEntry): void {
     while (list.length > RING_MAX) list.pop();
     sessionStorage.setItem(RING_KEY, JSON.stringify(list));
   } catch {
-    // sessionStorage may be unavailable in some embeddings — swallow.
+    /* sessionStorage may be unavailable in some embeddings */
   }
 }
 
@@ -374,13 +424,9 @@ export function clearShadowLog(): void {
 
 // ------------------------ Frame ↔ Legacy compare -------------------------
 
-// Map legacy function names into the Frame's sales-object family. We use this
-// only to compute a coarse agreement signal for the viewer — it is NOT used
-// by production code paths.
 const LEGACY_FN_OBJECT: Record<string, FrameSalesObject> = {
   draftActivity: 'Activity',
   updateActivity: 'Activity',
-  batchDraft: 'Mixed',
   draftAccount: 'Account',
   updateAccount: 'Account',
   draftContact: 'Contact',
@@ -391,54 +437,77 @@ const LEGACY_FN_OBJECT: Record<string, FrameSalesObject> = {
   externalKnowledgeQuery: 'None',
 };
 
-const LEGACY_FN_TASK: Record<string, FrameCognitiveTask> = {
-  draftActivity: 'Log',
-  updateActivity: 'Update',
-  batchDraft: 'Log',
-  draftAccount: 'Log',
-  updateAccount: 'Update',
-  draftContact: 'Log',
-  updateContact: 'Update',
-  draftOpportunity: 'Log',
-  updateOpportunity: 'Update',
-  queryCopilotStudio: 'Knowledge',
-  externalKnowledgeQuery: 'Knowledge',
-};
-
+/**
+ * Coarse comparison signal for the viewer only. Not used by production code.
+ *  - intentCountMatch: do shadow intent count and legacy (1 + additionalActions) agree?
+ *  - primaryObjectMatch: is legacy's main function's sales object present in shadow intents?
+ */
 export function compareFrameVsLegacy(
   frame: FrameResult,
-  legacyFunctionName: string | null | undefined
+  legacyFunctionName: string | null | undefined,
+  legacyAdditionalActionCount = 0
 ): ShadowAgreement {
+  // Legacy chose to chat (function = null)
   if (legacyFunctionName == null) {
-    // Legacy chose Chat (null function). Agreement only if Frame also says Chat/None.
-    const chatLike = frame.cognitiveTask === 'Chat' || frame.salesObject === 'None';
+    const shadowIsChat =
+      frame.intents.length === 1 &&
+      (frame.intents[0].cognitiveTask === 'Chat' || frame.intents[0].salesObject === 'None');
     return {
-      objectMatch: frame.salesObject === 'None' ? true : null,
-      taskMatch: chatLike,
-      note: chatLike ? 'both → chat/none' : 'legacy null vs frame action',
+      intentCountMatch: shadowIsChat,
+      primaryObjectMatch: shadowIsChat ? true : null,
+      note: shadowIsChat ? 'both → chat/none' : 'legacy null vs shadow action',
     };
   }
+  // batchDraft is legacy's multi-record bag — count items in arguments.items if available.
+  const legacyTotal = 1 + legacyAdditionalActionCount;
+  const shadowTotal = frame.intents.length;
+  const intentCountMatch = legacyTotal === shadowTotal;
+
   const expectedObject = LEGACY_FN_OBJECT[legacyFunctionName];
-  const expectedTask = LEGACY_FN_TASK[legacyFunctionName];
-  // For "Find" queries, function names start with getXxx / fuzzyMatchXxx — treat as Find.
-  const isFind = /^(get|list|fuzzyMatch|search)/i.test(legacyFunctionName);
-  const objectMatch = expectedObject
-    ? frame.salesObject === expectedObject || frame.salesObject === 'Mixed'
+  const primaryObjectMatch = expectedObject
+    ? frame.intents.some((i) => i.salesObject === expectedObject)
     : null;
-  const taskMatch = isFind
-    ? frame.cognitiveTask === 'Find'
-    : expectedTask
-      ? frame.cognitiveTask === expectedTask
-      : null;
-  return { objectMatch, taskMatch };
+  return { intentCountMatch, primaryObjectMatch };
 }
 
-// ----------------------- Sub-prompt dispatch key -------------------------
+// ----------------------- Skill mapping helpers ---------------------------
 
 /**
- * Compute the routing key for the Layer 2 sub-prompt.
- * Format: "Activity_Log", "Product_Knowledge", "Mixed_Log", "None_Chat", etc.
+ * Suggest a default function name for an intent. The Orchestrator will refine.
+ * Used only as a hint when displaying intents in the viewer.
  */
-export function getSubPromptKey(frame: FrameResult): string {
-  return `${frame.salesObject}_${frame.cognitiveTask}`;
+export function suggestSkillForIntent(intent: IntentItem): string | null {
+  const { salesObject, cognitiveTask } = intent;
+  if (salesObject === 'None') return null;
+  const obj = salesObject;
+  switch (cognitiveTask) {
+    case 'Log':
+      if (obj === 'Activity') return 'draftActivity';
+      if (obj === 'Account') return 'draftAccount';
+      if (obj === 'Contact') return 'draftContact';
+      if (obj === 'Opportunity') return 'draftOpportunity';
+      return null;
+    case 'Plan':
+      if (obj === 'Activity') return 'draftActivity';
+      return null;
+    case 'Update':
+      if (obj === 'Activity') return 'updateActivity';
+      if (obj === 'Account') return 'updateAccount';
+      if (obj === 'Contact') return 'updateContact';
+      if (obj === 'Opportunity') return 'updateOpportunity';
+      return null;
+    case 'Find':
+      if (obj === 'Account') return 'searchAccounts';
+      if (obj === 'Opportunity') return 'getMyOpportunities';
+      if (obj === 'Activity') return 'getTodayActivities';
+      if (obj === 'Contact') return 'getContactsByAccount';
+      return null;
+    case 'Knowledge':
+    case 'Recommend':
+      return 'queryCopilotStudio';
+    case 'Report':
+      return 'getSalesSummary';
+    default:
+      return null;
+  }
 }

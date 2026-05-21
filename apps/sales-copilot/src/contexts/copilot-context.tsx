@@ -147,6 +147,9 @@ export interface ChatMessage {
   // I-2 Stage 1: awaiting-clarification blocking state
   awaitingClarification?: AwaitingClarification;
   resolutionState?: 'blocked' | 'resolving' | 'resolved';
+  // Short result line shown on the match-selection / awaiting-clarification card
+  // once the user has acted on it. Used to lock the card and surface what was decided.
+  resolutionResult?: string;
 }
 
 // Form fill callback type
@@ -201,7 +204,8 @@ interface CopilotContextValue {
   continuePendingAction: (
     selectedRecord: { id: string; name: string; accountId?: string; accountName?: string },
     pendingIntent: { function: string; arguments: Record<string, unknown> },
-    entityType: 'account' | 'contact' | 'opportunity' | 'activity'
+    entityType: 'account' | 'contact' | 'opportunity' | 'activity',
+    sourceMessageId?: string
   ) => Promise<void>;
   
   // Create new record from intent (skip match selection)
@@ -211,7 +215,7 @@ interface CopilotContextValue {
 
   // Unified resolution: chain-create the missing entity (e.g. open a draftContact form, then resume the parked main intent)
   createEntityForResolution: (
-    pendingIntent: { function: string; arguments: Record<string, unknown> },
+    pendingIntent: { function: string; arguments: Record<string, unknown>; additionalActions?: Array<{ function: string; arguments: Record<string, unknown>; reason?: string }> },
     entityKind: 'contact' | 'account' | 'opportunity',
     queryName: string,
     blockedMsgId?: string
@@ -257,6 +261,9 @@ interface CopilotContextValue {
 
   // I-2 Round 3: resume a parked intent after the user finishes creating a new contact via the inline draft form.
   completeParkedIntentWithNewContact: (contactId: string, contactName: string, accountId?: string, accountName?: string) => Promise<void>;
+  // Stage 5+: resume parked intent after creating a new account or opportunity via the inline draft form.
+  completeParkedIntentWithNewAccount: (accountId: string, accountName: string) => Promise<void>;
+  completeParkedIntentWithNewOpportunity: (opportunityId: string, opportunityName: string, accountId?: string, accountName?: string) => Promise<void>;
 }
 
 export interface PageContext {
@@ -300,11 +307,14 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
 
   // I-2 Round 3: parked intent — set when user replies 'create' to a contact awaiting-clarification.
   // The parked function is resumed by completeParkedIntentWithNewContact after the new contact is saved.
+  // G-1: also carries any inferred sibling intents (additionalActions) so they can be replayed
+  // as additional form-cards once the primary chain-create resume completes.
   const parkedIntentRef = useRef<{
     function: string;
     arguments: Record<string, unknown>;
     pendingKind: 'contact' | 'account' | 'opportunity';
     blockedMsgId: string;
+    additionalActions?: Array<{ function: string; arguments: Record<string, unknown>; reason?: string }>;
   } | null>(null);
 
   // Persist messages to sessionStorage - only when all streaming/thinking is complete
@@ -408,6 +418,61 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
   // Also propagates the new contact's account back into the parked args so the resumed form (e.g. Activity)
   // gets the correct account pre-filled — fixes the case where the agent only resolved the contact gap and
   // never resolved the account on its own.
+
+  // G-1: Replay any inferred sibling intents (additionalActions) after the parked primary intent resumes.
+  // Each sibling becomes an inline form-card so the user can confirm/edit it independently. Newly resolved
+  // ids/names from the chain (account/contact/opportunity) are merged into each sibling's args so they
+  // inherit the same context.
+  const replayAdditionalActions = useCallback(async (
+    actions: Array<{ function: string; arguments: Record<string, unknown>; reason?: string }> | undefined,
+    inheritedContext: Record<string, unknown>,
+  ) => {
+    if (!actions || actions.length === 0) return;
+    const { executeFunction } = await import('@/lib/function-executor');
+    const { getDisplayName } = await import('@/lib/function-registry');
+    for (let i = 0; i < actions.length; i++) {
+      const action = actions[i];
+      if (!action.function.startsWith('draft')) continue;
+      const mergedArgs: Record<string, unknown> = { ...action.arguments };
+      // Inherit ids/names from the resolved chain when the sibling didn't supply its own
+      for (const [key, val] of Object.entries(inheritedContext)) {
+        if (val != null && (mergedArgs[key] == null || mergedArgs[key] === '')) {
+          mergedArgs[key] = val;
+        }
+      }
+      try {
+        const result = await executeFunction(
+          action.function,
+          mergedArgs,
+          { userId: user?.objectId, userEmail: user?.userPrincipalName },
+        );
+        if (!result.success || !result.data) {
+          console.warn('[CopilotContext] replayAdditionalActions: draft failed', action.function, result.error);
+          continue;
+        }
+        const data = result.data as { type: string; isNew: boolean; data: Record<string, unknown> };
+        const fnDisplay = getDisplayName(action.function, locale === 'zh-Hans' ? 'zh-Hans' : 'en-US');
+        setMessages((prev) => [...prev, {
+          id: `msg-${Date.now()}-extra-${i}`,
+          type: 'form-card',
+          role: 'assistant',
+          content: action.reason || (locale === 'zh-Hans' ? '从对话中推断' : 'Inferred from conversation'),
+          functionCalled: action.function,
+          functionDisplayName: fnDisplay,
+          timestamp: new Date().toISOString(),
+          formCard: {
+            type: data.type as 'activity' | 'opportunity' | 'account' | 'contact',
+            isNew: data.isNew,
+            data: data.data,
+            status: 'pending',
+          },
+        }]);
+      } catch (err) {
+        console.warn('[CopilotContext] replayAdditionalActions error:', action.function, err);
+      }
+    }
+  }, [user, locale]);
+
   const completeParkedIntentWithNewContact = useCallback(async (contactId: string, contactName: string, accountId?: string, accountName?: string) => {
     const parked = parkedIntentRef.current;
     if (!parked || parked.pendingKind !== 'contact') return;
@@ -448,6 +513,13 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             status: 'pending',
           },
         }]);
+        // G-1: replay inferred siblings, inheriting the newly resolved contact + account
+        await replayAdditionalActions(parked.additionalActions, {
+          contactId,
+          contactName,
+          ...(accountId ? { accountId } : {}),
+          ...(accountName ? { accountName } : {}),
+        });
       } else {
         setMessages((prev) => [...prev, {
           id: `msg-${Date.now()}-resume-err`,
@@ -465,7 +537,96 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsSending(false);
     }
-  }, [user, locale]);
+  }, [user, locale, replayAdditionalActions]);
+
+  // Generic resume helper for the parked intent — used by both account and opportunity create paths.
+  // Patches the parked args with the newly created entity id/name (and any propagated parent), then
+  // re-runs the parked draft function and renders the resumed form-card.
+  const resumeParkedAfterEntityCreate = useCallback(async (
+    expectedKind: 'account' | 'opportunity',
+    patch: Record<string, unknown>,
+  ) => {
+    const parked = parkedIntentRef.current;
+    if (!parked || parked.pendingKind !== expectedKind) return;
+    parkedIntentRef.current = null;
+
+    const newArgs: Record<string, unknown> = { ...parked.arguments, ...patch };
+
+    setIsSending(true);
+    try {
+      const { executeFunction } = await import('@/lib/function-executor');
+      const { getDisplayName } = await import('@/lib/function-registry');
+      const fnResult = await executeFunction(
+        parked.function,
+        newArgs,
+        { userId: user?.objectId, userEmail: user?.userPrincipalName },
+      );
+      const fnDisplay = getDisplayName(parked.function, locale === 'zh-Hans' ? 'zh-Hans' : 'en-US');
+      const kindZh = expectedKind === 'account' ? '客户' : '商机';
+      const kindEn = expectedKind === 'account' ? 'Account' : 'Opportunity';
+
+      if (fnResult.success && fnResult.data) {
+        const formData = fnResult.data as { type: string; isNew: boolean; data: Record<string, unknown> };
+        setMessages((prev) => [...prev, {
+          id: `msg-${Date.now()}-resumed-form`,
+          type: 'form-card',
+          role: 'assistant',
+          content: locale === 'zh-Hans'
+            ? `${kindZh}已新建，请确认以下信息`
+            : `${kindEn} created. Please confirm the following information`,
+          functionCalled: parked.function,
+          functionDisplayName: fnDisplay,
+          timestamp: new Date().toISOString(),
+          formCard: {
+            type: formData.type as 'activity' | 'opportunity' | 'account' | 'contact',
+            isNew: formData.isNew,
+            data: formData.data,
+            status: 'pending',
+          },
+        }]);
+        // G-1: replay inferred siblings, inheriting the resolved entity ids/names
+        await replayAdditionalActions(parked.additionalActions, patch);
+      } else {
+        setMessages((prev) => [...prev, {
+          id: `msg-${Date.now()}-resume-err`,
+          type: 'agent',
+          role: 'assistant',
+          content: locale === 'zh-Hans'
+            ? `❌ 新建${kindZh}后恢复操作失败: ${fnResult.error}`
+            : `❌ Failed to resume after ${expectedKind} create: ${fnResult.error}`,
+          agentName: 'System',
+          timestamp: new Date().toISOString(),
+        }]);
+      }
+    } catch (err) {
+      console.error(`[CopilotContext] resume after ${expectedKind} create error:`, err);
+    } finally {
+      setIsSending(false);
+    }
+  }, [user, locale, replayAdditionalActions]);
+
+  const completeParkedIntentWithNewAccount = useCallback(async (
+    accountId: string,
+    accountName: string,
+  ) => {
+    await resumeParkedAfterEntityCreate('account', { accountId, accountName });
+  }, [resumeParkedAfterEntityCreate]);
+
+  const completeParkedIntentWithNewOpportunity = useCallback(async (
+    opportunityId: string,
+    opportunityName: string,
+    accountId?: string,
+    accountName?: string,
+  ) => {
+    const patch: Record<string, unknown> = { opportunityId, opportunityName };
+    // If parked args don't already have an account, propagate the opportunity's parent account.
+    const parked = parkedIntentRef.current;
+    if (parked) {
+      if (accountId && !parked.arguments.accountId) patch.accountId = accountId;
+      if (accountName && !parked.arguments.accountName) patch.accountName = accountName;
+    }
+    await resumeParkedAfterEntityCreate('opportunity', patch);
+  }, [resumeParkedAfterEntityCreate]);
   const pageContext = pageContextState;
   const pageContextRef = useRef<PageContext | null>(null);
   
@@ -757,12 +918,19 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
 
         // Mark the blocked message as resolved
         const blockedId = lastForGate.id;
-        setMessages((prev) => prev.map((m) => m.id === blockedId ? { ...m, resolutionState: 'resolved' as const } : m));
-
-        const { function: fn, arguments: args } = lastForGate.awaitingClarification.originalIntent;
+        const { function: fn, arguments: args, additionalActions: parkedExtras } = lastForGate.awaitingClarification.originalIntent;
         const pendingResolution = lastForGate.awaitingClarification.pendingResolutions[0];
         const pendingKind = pendingResolution.kind;
         const queryName = pendingResolution.query;
+        const kindLabelZh = pendingKind === 'contact' ? '联系人' : pendingKind === 'account' ? '客户' : '商机';
+        const gateResultText = isCreate
+          ? (locale === 'zh-Hans' ? `新建${kindLabelZh}：${queryName}` : `Created new ${pendingKind}: ${queryName}`)
+          : (locale === 'zh-Hans' ? `已跳过${kindLabelZh}关联` : `Skipped ${pendingKind} link`);
+        setMessages((prev) => prev.map((m) =>
+          m.id === blockedId
+            ? { ...m, resolutionState: 'resolved' as const, resolutionResult: gateResultText }
+            : m
+        ));
 
         // I-2 Round 3: differentiate 'create' from 'skip'
         if (isCreate && pendingKind === 'contact') {
@@ -772,6 +940,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             arguments: args,
             pendingKind: 'contact',
             blockedMsgId: blockedId,
+            additionalActions: parkedExtras,
           };
           const contactDraftMsg: ChatMessage = {
             id: `msg-${Date.now()}-contact-draft`,
@@ -798,22 +967,53 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         }
 
         if (isCreate && (pendingKind === 'account' || pendingKind === 'opportunity')) {
-          // Stage 5 stub: notify, then fall through to skip-style execution.
-          const kindZh = pendingKind === 'account' ? '客户' : '商机';
+          // Park the original intent and spawn a draft form for the new account/opportunity.
+          // After the user saves it, completeParkedIntentWithNewAccount/Opportunity resumes the parked draft.
+          parkedIntentRef.current = {
+            function: fn,
+            arguments: args,
+            pendingKind,
+            blockedMsgId: blockedId,
+            additionalActions: parkedExtras,
+          };
+          const isAccount = pendingKind === 'account';
+          const draftFn = isAccount ? 'createAccount' : 'createOpportunity';
+          const draftLabel = isAccount
+            ? (locale === 'zh-Hans' ? '新建客户' : 'New Account')
+            : (locale === 'zh-Hans' ? '新建商机' : 'New Opportunity');
+          const draftBody = isAccount
+            ? (locale === 'zh-Hans'
+                ? '新建客户，保存后将自动关联到本次操作'
+                : 'Create a new account — it will be linked automatically after save')
+            : (locale === 'zh-Hans'
+                ? '新建商机，保存后将自动关联到本次操作'
+                : 'Create a new opportunity — it will be linked automatically after save');
+          const draftData: Record<string, unknown> = isAccount
+            ? { name: queryName }
+            : {
+                name: queryName,
+                accountName: (args.accountName as string | undefined) ?? '',
+                accountId: (args.accountId as string | undefined) ?? '',
+              };
           setMessages((prev) => [...prev, {
-            id: `msg-${Date.now()}-stage5`,
-            type: 'agent',
+            id: `msg-${Date.now()}-${pendingKind}-draft`,
+            type: 'form-card',
             role: 'assistant',
-            content: locale === 'zh-Hans'
-              ? `ℹ️ 新建${kindZh}功能即将开放（Stage 5），本次先跳过${kindZh}关联。`
-              : `ℹ️ Creating new ${pendingKind} is coming soon (Stage 5). Skipping ${pendingKind} link for now.`,
-            agentName: 'System',
+            content: draftBody,
+            functionCalled: draftFn,
+            functionDisplayName: draftLabel,
             timestamp: new Date().toISOString(),
+            formCard: {
+              type: pendingKind,
+              isNew: true,
+              data: draftData,
+              status: 'pending',
+            },
           }]);
-          // Fall through to skip-style execution below.
+          return;
         }
 
-        // Skip (or Stage 5 fall-through): strip the unresolved entity and execute the original function directly.
+        // Skip: strip the unresolved entity and execute the original function directly.
         const strippedArgs: Record<string, unknown> = { ...args };
         if (pendingKind === 'contact') { delete strippedArgs.contactId; delete strippedArgs.contactName; }
         else if (pendingKind === 'account') { delete strippedArgs.accountId; delete strippedArgs.accountName; }
@@ -1341,8 +1541,20 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
   const continuePendingAction = useCallback(async (
     selectedRecord: { id: string; name: string; accountId?: string; accountName?: string },
     pendingIntent: { function: string; arguments: Record<string, unknown> },
-    entityType: 'account' | 'contact' | 'opportunity' | 'activity'
+    entityType: 'account' | 'contact' | 'opportunity' | 'activity',
+    sourceMessageId?: string
   ) => {
+    // Lock the source match-selection card with a result line.
+    if (sourceMessageId) {
+      const resultText = locale === 'zh-Hans'
+        ? `已选择：${selectedRecord.name}`
+        : `Selected: ${selectedRecord.name}`;
+      setMessages((prev) => prev.map((m) =>
+        m.id === sourceMessageId
+          ? { ...m, resolutionState: 'resolved' as const, resolutionResult: resultText }
+          : m
+      ));
+    }
     setIsSending(true);
     
     // Create a thinking message
@@ -1504,7 +1716,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
               if (msg.id !== thinkingMsgId) return msg;
               return {
                 ...msg,
-                type: 'agent' as const,
+                type: 'match-selection' as const,
                 content: locale === 'zh-Hans'
                   ? `找到 ${highConf.length} 个匹配的${entityLabel}，请选择：`
                   : `Found ${highConf.length} matching ${entityLabel}(s). Please select:`,
@@ -1520,6 +1732,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                   confidence: 'high' as const,
                   pendingIntent: newPendingIntent,
                 },
+                resolutionState: 'blocked' as const,
               };
             }));
             cascadeBlocked = true;
@@ -1567,6 +1780,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                 { stage: 'matching' as const, status: 'completed' as const, label: locale === 'zh-Hans' ? `未找到「${item.query}」匹配` : `No match for "${item.query}"` },
               ],
               awaitingClarification: ac,
+              resolutionState: 'blocked' as const,
             };
           }));
           cascadeBlocked = true;
@@ -1919,14 +2133,22 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
   // then resume it via completeParkedIntentWithNewContact after the user saves the new entity.
   // Mirrors the gate's create branch (sendMessage 'create' path) so button clicks bypass text-token matching.
   const createEntityForResolution = useCallback(async (
-    pendingIntent: { function: string; arguments: Record<string, unknown> },
+    pendingIntent: { function: string; arguments: Record<string, unknown>; additionalActions?: Array<{ function: string; arguments: Record<string, unknown>; reason?: string }> },
     entityKind: 'contact' | 'account' | 'opportunity',
     queryName: string,
     blockedMsgId?: string
   ) => {
     // Mark the source message resolved so the card freezes
     if (blockedMsgId) {
-      setMessages((prev) => prev.map((m) => m.id === blockedMsgId ? { ...m, resolutionState: 'resolved' as const } : m));
+      const kindLabelZh = entityKind === 'contact' ? '联系人' : entityKind === 'account' ? '客户' : '商机';
+      const resultText = locale === 'zh-Hans'
+        ? `新建${kindLabelZh}：${queryName}`
+        : `Created new ${entityKind}: ${queryName}`;
+      setMessages((prev) => prev.map((m) =>
+        m.id === blockedMsgId
+          ? { ...m, resolutionState: 'resolved' as const, resolutionResult: resultText }
+          : m
+      ));
     }
 
     if (entityKind === 'contact') {
@@ -1936,6 +2158,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         arguments: pendingIntent.arguments,
         pendingKind: 'contact',
         blockedMsgId: blockedMsgId || '',
+        additionalActions: pendingIntent.additionalActions,
       };
       const contactDraftMsg: ChatMessage = {
         id: `msg-${Date.now()}-contact-draft`,
@@ -1961,19 +2184,55 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // account / opportunity chain-create is Stage 5 — for now, show a stub and fall through to skip
-    const kindZh = entityKind === 'account' ? '客户' : '商机';
-    setMessages((prev) => [...prev, {
-      id: `msg-${Date.now()}-stage5`,
-      type: 'agent',
-      role: 'assistant',
-      content: locale === 'zh-Hans'
-        ? `ℹ️ 新建${kindZh}功能即将开放（Stage 5），本次先跳过${kindZh}关联。`
-        : `ℹ️ Creating new ${entityKind} is coming soon (Stage 5). Skipping ${entityKind} link for now.`,
-      agentName: 'System',
-      timestamp: new Date().toISOString(),
-    }]);
-    // Fall through: run the main draft with the entity stripped
+    // account / opportunity chain-create: park original intent, spawn a draft form for the new entity.
+    // After the user saves it, completeParkedIntentWithNewAccount/Opportunity resumes the parked draft.
+    if (entityKind === 'account' || entityKind === 'opportunity') {
+      const blockedId = blockedMsgId || `msg-${Date.now()}-park-anchor`;
+      parkedIntentRef.current = {
+        function: pendingIntent.function,
+        arguments: pendingIntent.arguments,
+        pendingKind: entityKind,
+        blockedMsgId: blockedId,
+        additionalActions: pendingIntent.additionalActions,
+      };
+      const isAccount = entityKind === 'account';
+      const draftFn = isAccount ? 'createAccount' : 'createOpportunity';
+      const draftLabel = isAccount
+        ? (locale === 'zh-Hans' ? '新建客户' : 'New Account')
+        : (locale === 'zh-Hans' ? '新建商机' : 'New Opportunity');
+      const draftBody = isAccount
+        ? (locale === 'zh-Hans'
+            ? '新建客户，保存后将自动关联到本次操作'
+            : 'Create a new account — it will be linked automatically after save')
+        : (locale === 'zh-Hans'
+            ? '新建商机，保存后将自动关联到本次操作'
+            : 'Create a new opportunity — it will be linked automatically after save');
+      const draftData: Record<string, unknown> = isAccount
+        ? { name: queryName }
+        : {
+            name: queryName,
+            accountName: (pendingIntent.arguments.accountName as string | undefined) ?? '',
+            accountId: (pendingIntent.arguments.accountId as string | undefined) ?? '',
+          };
+      setMessages((prev) => [...prev, {
+        id: `msg-${Date.now()}-${entityKind}-draft`,
+        type: 'form-card',
+        role: 'assistant',
+        content: draftBody,
+        functionCalled: draftFn,
+        functionDisplayName: draftLabel,
+        timestamp: new Date().toISOString(),
+        formCard: {
+          type: entityKind,
+          isNew: true,
+          data: draftData,
+          status: 'pending',
+        },
+      }]);
+      return;
+    }
+
+    // Unreachable — entityKind is exhausted by the contact / account / opportunity branches above.
     await skipResolutionAndDraftImpl(pendingIntent, entityKind);
   }, [user, locale]);
 
@@ -2040,7 +2299,15 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     blockedMsgId?: string
   ) => {
     if (blockedMsgId) {
-      setMessages((prev) => prev.map((m) => m.id === blockedMsgId ? { ...m, resolutionState: 'resolved' as const } : m));
+      const kindLabelZh = entityKind === 'contact' ? '联系人' : entityKind === 'account' ? '客户' : '商机';
+      const resultText = locale === 'zh-Hans'
+        ? `已跳过${kindLabelZh}关联`
+        : `Skipped ${entityKind} link`;
+      setMessages((prev) => prev.map((m) =>
+        m.id === blockedMsgId
+          ? { ...m, resolutionState: 'resolved' as const, resolutionResult: resultText }
+          : m
+      ));
     }
     await skipResolutionAndDraftImpl(pendingIntent, entityKind);
   }, [user, locale]);
@@ -2184,6 +2451,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     clearClarificationSuggestions,
     executeClarificationAction,
     completeParkedIntentWithNewContact,
+    completeParkedIntentWithNewAccount,
+    completeParkedIntentWithNewOpportunity,
   }), [
     isOpen,
     isFullScreen,
@@ -2216,6 +2485,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     clearClarificationSuggestions,
     executeClarificationAction,
     completeParkedIntentWithNewContact,
+    completeParkedIntentWithNewAccount,
+    completeParkedIntentWithNewOpportunity,
   ]);
 
   return (

@@ -14,7 +14,7 @@
  */
 
 import { invokeFlowForLLM } from '@/services/power-automate-service';
-import { getLocale } from '@/lib/i18n';
+import { getLocale, getIntentMode } from '@/lib/i18n';
 import { getFunctionListForPrompt, getDisplayName } from './function-registry';
 import { executeFunction } from './function-executor';
 import { ActivityTypeKeyToLabel, type ActivityTypeKey } from '@/generated/models/activity-model';
@@ -30,8 +30,9 @@ import {
   type PendingResolution,
   type ResolutionCandidate,
 } from './agent-utils';
-import { runFrame, recordShadow, compareFrameVsLegacy } from './frame-shadow';
-import { runShadowPipeline, recordBenchmark, compareShadowVsLegacy } from './shadow-agent';
+import { recordShadow, compareFrameVsLegacy } from './frame-shadow';
+import { runShadowPipeline, recordBenchmark, compareShadowVsLegacy, type ShadowResult } from './shadow-agent';
+import { frameToIntent } from './frame-to-intent';
 
 // Greeting pattern for detecting simple greetings that don't need Copilot Studio
 const GREETING_PATTERN = /^(hi|hello|hey|你好|您好|嗨|早上好|下午好|晚上好|good\s*(morning|afternoon|evening))\b/i;
@@ -289,10 +290,56 @@ async function processAdditionalIntents(
       continue;
     }
     
+    // Per-step fuzzyMatch: when a name field is set but its id is missing, try to resolve
+    // it now (best-effort, top-1 high-confidence only). For 'draftAccount' / 'draftOpportunity'
+    // / 'draftContact' the name field IS the new entity's name, not a query — so we only
+    // fuzzy-match the *referenced* names (e.g. accountName on draftOpportunity, contactName
+    // on draftActivity). For draftAccount the only name field is the account itself, so skip.
+    const stepArgs: Record<string, unknown> = { ...(intent.arguments || {}) };
+    if (intent.function !== 'draftAccount') {
+      const lookups: Array<{ name: keyof typeof stepArgs; idField: string; entityType: 'account' | 'contact' | 'opportunity' }> = [
+        { name: 'accountName', idField: 'accountId', entityType: 'account' },
+      ];
+      // contactName / opportunityName only make sense as references on draftActivity
+      // (and in some draftOpportunity flows for parent contact, but that's out of scope).
+      if (intent.function === 'draftActivity') {
+        lookups.push({ name: 'contactName', idField: 'contactId', entityType: 'contact' });
+        lookups.push({ name: 'opportunityName', idField: 'opportunityId', entityType: 'opportunity' });
+      }
+      for (const lookup of lookups) {
+        const nameVal = stepArgs[lookup.name];
+        const idVal = stepArgs[lookup.idField];
+        if (typeof nameVal === 'string' && nameVal.trim() && (typeof idVal !== 'string' || !idVal)) {
+          try {
+            const matchRes = await executeFunction(
+              'fuzzyMatch',
+              { entityType: lookup.entityType, query: nameVal.trim() },
+              context
+            );
+            if (matchRes.success && matchRes.data) {
+              const md = matchRes.data as { matches?: Array<{ id: string; name: string; score: number; accountId?: string; accountName?: string }> };
+              const top = (md.matches ?? []).find((m) => m.score >= 90);
+              if (top) {
+                stepArgs[lookup.idField] = top.id;
+                stepArgs[lookup.name] = top.name;
+                if (lookup.entityType === 'contact' && top.accountId && !stepArgs.accountId) {
+                  stepArgs.accountId = top.accountId;
+                  if (top.accountName) stepArgs.accountName = top.accountName;
+                }
+                console.log('[CopilotAgent] additional-intent auto-resolved', lookup.entityType, top.name);
+              }
+            }
+          } catch (e) {
+            console.warn('[CopilotAgent] additional-intent fuzzyMatch failed:', lookup.entityType, e);
+          }
+        }
+      }
+    }
+
     try {
       const result = await executeFunction(
         intent.function,
-        intent.arguments || {},
+        stepArgs,
         context
       );
       
@@ -1158,123 +1205,201 @@ User: "Log a meeting with Rachel at King's College Hospital"
 // unspecified: no clear tense word -> preserve existing default behavior
 
 }`;
-  console.log('[CopilotAgent] Pass 1: Intent detection');
+  const intentMode = getIntentMode();
+  console.log('[CopilotAgent] Pass 1: Intent detection (mode=' + intentMode + ')');
 
   // Notify progress: intent detection started
   if (onProgress) {
     onProgress({ stage: 'intent', status: 'active' });
   }
-  
-  // Build messages with conversation history
-  const intentMessages: Array<{ role: string; content: string }> = [
-    { role: 'system', content: intentSystemPrompt },
-  ];
-  
-  // Add conversation history (last 10 messages to avoid token overflow)
-  const recentHistory = history.slice(-10);
-  for (const msg of recentHistory) {
-    intentMessages.push({ role: msg.role, content: msg.content });
-  }
-  
-  // Add current user message
-  intentMessages.push({ role: 'user', content: userMessage });
 
-  const intentResponse = await invokeFlowForLLM({
-    messages: intentMessages,
-  });
+  let intent: IntentResult | null = null;
 
-  if (!intentResponse.success) {
-    // Record failure in circuit breaker
-    recordCircuitBreakerFailure();
-    recordMetrics({ success: false, latencyMs: Date.now() - startTime });
-    
-    return {
-      success: false,
-      content: '',
-      error: intentResponse.error || 'LLM 调用失败',
-      latencyMs: Date.now() - startTime,
+  if (intentMode === 'frame') {
+    // ===== Frame mode: Frame + Orchestrator drives production =====
+    const shadowCtx = {
+      userMessage,
+      pageContext: context.pageContext,
+      conversationHistory: history,
+      locale: (isZh ? 'zh-Hans' : 'en') as 'zh-Hans' | 'en',
     };
-  }
 
-  // Record success in circuit breaker
-  recordCircuitBreakerSuccess();
-
-  const intent = parseJsonResponse(intentResponse.content || '') as IntentResult | null;
-  console.log('[INTENT] Raw LLM response:', intentResponse.content);
-  console.log('[INTENT] userQuery="' + userMessage + '" => function=' + (intent?.function || 'null') + ', args=' + JSON.stringify(intent?.arguments || {}));
-
-  // ===== Frame Shadow + Shadow Agent (hierarchical intent benchmark) =====
-  // Fire-and-forget: run both the Frame classifier AND the full shadow pipeline
-  // (Frame → sub-prompt → parse) in parallel with legacy. Results are logged
-  // for benchmark comparison. Neither output affects production routing.
-  void (async () => {
+    let shadowResult: ShadowResult;
     try {
-      const shadowCtx = {
-        userMessage,
-        pageContext: context.pageContext,
-        conversationHistory: history,
-        locale: (isZh ? 'zh-Hans' : 'en') as 'zh-Hans' | 'en',
+      shadowResult = await runShadowPipeline(shadowCtx);
+    } catch (err) {
+      recordCircuitBreakerFailure();
+      recordMetrics({ success: false, latencyMs: Date.now() - startTime });
+      return {
+        success: false,
+        content: '',
+        error: 'Frame pipeline threw: ' + (err instanceof Error ? err.message : String(err)),
+        latencyMs: Date.now() - startTime,
       };
+    }
 
-      // Run full shadow pipeline (Frame + sub-prompt)
-      const shadowResult = await runShadowPipeline(shadowCtx);
-
-      // Also record legacy Frame Shadow comparison (existing viewer)
-      const agreement = compareFrameVsLegacy(shadowResult.frame, intent?.function ?? null);
+    // Always record the shadow run for the viewer (legacy side empty in frame mode)
+    try {
       recordShadow({
         ts: Date.now(),
         userMessage,
         page: context.pageContext?.currentPage,
-        frame: { success: true, result: shadowResult.frame, latencyMs: shadowResult.frameLatencyMs },
-        legacy: {
-          functionName: intent?.function ?? null,
-          requiresMatching: intent?.requiresMatching,
-          matchTargetEntity: intent?.matchTarget?.entityType,
-          resolutionsCount: intent?.resolutions?.length,
-          additionalActionsCount: intent?.additionalActions?.length,
-          confidence: intent?.confidence,
-          raw: (intentResponse.content || '').slice(0, 800),
-        },
-        agreement,
+        frame: { success: !shadowResult.error, result: shadowResult.frame, latencyMs: shadowResult.frameLatencyMs, error: shadowResult.error },
+        legacy: { functionName: null, raw: (shadowResult.planRaw ?? '').slice(0, 8000) },
+        agreement: compareFrameVsLegacy(shadowResult.frame, null, 0),
       });
-
-      // Record shadow benchmark (new: full pipeline comparison)
-      const benchmarkAgreement = compareShadowVsLegacy(
-        shadowResult,
-        intent?.function ?? null,
-        intent?.arguments as Record<string, unknown> | undefined
-      );
       recordBenchmark({
         ts: Date.now(),
         userMessage,
         page: context.pageContext?.currentPage,
         shadow: shadowResult,
-        legacy: {
-          functionName: intent?.function ?? null,
-          arguments: intent?.arguments as Record<string, unknown> | undefined,
-          additionalActions: intent?.additionalActions,
-          latencyMs: intentResponse.latencyMs || 0,
-        },
-        agreement: benchmarkAgreement,
+        legacy: { functionName: null, latencyMs: shadowResult.totalLatencyMs },
+        agreement: compareShadowVsLegacy(shadowResult, null, undefined),
       });
-
-      console.log('[ShadowAgent] Pipeline complete:',
-        `frame=${shadowResult.frame.salesObject}_${shadowResult.frame.cognitiveTask}`,
-        `plan=${shadowResult.plan ? 'OK' : 'FAIL'}`,
-        `skills=${shadowResult.skillsCount}`,
-        `total=${shadowResult.totalLatencyMs}ms`,
-        `funcMatch=${benchmarkAgreement.functionMatch}`,
-        `argOverlap=${benchmarkAgreement.argumentOverlap?.toFixed(2) ?? 'n/a'}`
-      );
-    } catch (err) {
-      console.warn('[ShadowAgent] background run failed:', err);
+    } catch (e) {
+      console.warn('[CopilotAgent] frame mode logging failed:', e);
     }
-  })();
+
+    if (shadowResult.error || !shadowResult.plan) {
+      recordCircuitBreakerFailure();
+      recordMetrics({ success: false, latencyMs: Date.now() - startTime });
+      return {
+        success: false,
+        content: '',
+        error: 'Frame mode failed: ' + (shadowResult.error ?? 'no plan produced'),
+        latencyMs: Date.now() - startTime,
+      };
+    }
+
+    const translated = frameToIntent(shadowResult);
+    if (!translated) {
+      recordCircuitBreakerFailure();
+      recordMetrics({ success: false, latencyMs: Date.now() - startTime });
+      return {
+        success: false,
+        content: '',
+        error: 'Frame mode produced no actionable plan (all intents non-actionable).',
+        latencyMs: Date.now() - startTime,
+      };
+    }
+
+    recordCircuitBreakerSuccess();
+    intent = translated as IntentResult;
+    console.log('[INTENT/frame] function=' + intent.function,
+      'args=' + JSON.stringify(intent.arguments || {}),
+      'extras=' + (intent.additionalActions?.length ?? 0),
+      'resolutions=' + (intent.resolutions?.length ?? 0));
+  } else {
+    // ===== Legacy mode: single LLM intent call (production path) =====
+    const intentMessages: Array<{ role: string; content: string }> = [
+      { role: 'system', content: intentSystemPrompt },
+    ];
+    const recentHistory = history.slice(-10);
+    for (const msg of recentHistory) {
+      intentMessages.push({ role: msg.role, content: msg.content });
+    }
+    intentMessages.push({ role: 'user', content: userMessage });
+
+    const intentResponse = await invokeFlowForLLM({
+      messages: intentMessages,
+      responseFormat: 'json',
+    });
+
+    if (!intentResponse.success) {
+      recordCircuitBreakerFailure();
+      recordMetrics({ success: false, latencyMs: Date.now() - startTime });
+      return {
+        success: false,
+        content: '',
+        error: intentResponse.error || 'LLM 调用失败',
+        latencyMs: Date.now() - startTime,
+      };
+    }
+
+    recordCircuitBreakerSuccess();
+    intent = parseJsonResponse(intentResponse.content || '') as IntentResult | null;
+    console.log('[INTENT] Raw LLM response:', intentResponse.content);
+    console.log('[INTENT] userQuery="' + userMessage + '" => function=' + (intent?.function || 'null') + ', args=' + JSON.stringify(intent?.arguments || {}));
+
+    // Fire-and-forget shadow pipeline for benchmarking (legacy mode only)
+    void (async () => {
+      try {
+        const shadowCtx = {
+          userMessage,
+          pageContext: context.pageContext,
+          conversationHistory: history,
+          locale: (isZh ? 'zh-Hans' : 'en') as 'zh-Hans' | 'en',
+        };
+        const shadowResult = await runShadowPipeline(shadowCtx);
+        const additionalActionsCount = intent?.additionalActions?.length ?? 0;
+        const agreement = compareFrameVsLegacy(
+          shadowResult.frame,
+          intent?.function ?? null,
+          additionalActionsCount
+        );
+        recordShadow({
+          ts: Date.now(),
+          userMessage,
+          page: context.pageContext?.currentPage,
+          frame: { success: true, result: shadowResult.frame, latencyMs: shadowResult.frameLatencyMs },
+          legacy: {
+            functionName: intent?.function ?? null,
+            requiresMatching: intent?.requiresMatching,
+            matchTargetEntity: intent?.matchTarget?.entityType,
+            resolutionsCount: intent?.resolutions?.length,
+            additionalActionsCount,
+            confidence: intent?.confidence,
+            raw: (intentResponse.content || '').slice(0, 8000),
+          },
+          agreement,
+        });
+        const benchmarkAgreement = compareShadowVsLegacy(
+          shadowResult,
+          intent?.function ?? null,
+          intent?.arguments as Record<string, unknown> | undefined
+        );
+        recordBenchmark({
+          ts: Date.now(),
+          userMessage,
+          page: context.pageContext?.currentPage,
+          shadow: shadowResult,
+          legacy: {
+            functionName: intent?.function ?? null,
+            arguments: intent?.arguments as Record<string, unknown> | undefined,
+            additionalActions: intent?.additionalActions,
+            latencyMs: intentResponse.latencyMs || 0,
+          },
+          agreement: benchmarkAgreement,
+        });
+        const intentLabels = shadowResult.frame.intents
+          .map((i) => `${i.salesObject}_${i.cognitiveTask}`)
+          .join(', ');
+        console.log('[ShadowAgent] Pipeline complete:',
+          `intents=[${intentLabels}]`,
+          `plan=${shadowResult.plan ? 'OK' : 'FAIL'}`,
+          `skills=${shadowResult.skillsCount}`,
+          `total=${shadowResult.totalLatencyMs}ms`,
+          `funcMatch=${benchmarkAgreement.functionMatch}`,
+          `argOverlap=${benchmarkAgreement.argumentOverlap?.toFixed(2) ?? 'n/a'}`
+        );
+      } catch (err) {
+        console.warn('[ShadowAgent] background run failed:', err);
+      }
+    })();
+  }
 
   // Notify progress: intent detection completed
-  const intentLabel = intent?.function 
-    ? getDisplayName(intent.function, isZh ? 'zh-Hans' : 'en-US')
-    : (isZh ? '直接回复' : 'Direct Response');
+  // In frame mode, surface ALL planned functions (primary + additionalActions)
+  // so the user can see the full multi-step plan in the thinking row.
+  const buildIntentLabel = (): string => {
+    if (!intent?.function) return isZh ? '直接回复' : 'Direct Response';
+    const primary = getDisplayName(intent.function, isZh ? 'zh-Hans' : 'en-US');
+    const extras = (intent.additionalActions ?? []).filter((a) => a.function);
+    if (!extras.length) return primary;
+    const extraLabels = extras.map((a) => getDisplayName(a.function, isZh ? 'zh-Hans' : 'en-US'));
+    return [primary, ...extraLabels].join(' → ');
+  };
+  const intentLabel = buildIntentLabel();
   if (onProgress) {
     onProgress({ stage: 'intent', status: 'completed', intentLabel });
   }
@@ -1613,6 +1738,15 @@ User: "Log a meeting with Rachel at King's College Hospital"
                 originalIntent: {
                   function: intent.function as string,
                   arguments: (intent.arguments || {}) as Record<string, unknown>,
+                  // G-1: carry inferred siblings so the resume helper can rerun them
+                  // after the primary clarification is resolved.
+                  ...(intent.additionalActions && intent.additionalActions.length > 0
+                    ? { additionalActions: intent.additionalActions.map((a) => ({
+                        function: a.function,
+                        arguments: a.arguments || {},
+                        reason: a.reason,
+                      })) }
+                    : {}),
                 },
                 // I-3 Slice 2: carry remaining queue + resolvedSoFar for Context cascade.
                 remainingResolutions: remainingResolutions.length > 0 ? remainingResolutions : undefined,
@@ -1831,9 +1965,14 @@ Please respond to the user in a friendly manner based on the error. Important ru
     console.log('[CopilotAgent] Multi-intent detected with', additionalActions.length, 'additional actions');
     console.log('[CopilotAgent] Summary:', intent.multiIntentAnalysis?.summary);
     
-    // Get account context for injecting into additional intents
+    // Get account / contact / opportunity context resolved during the primary intent
+    // so it can be injected into additional intents that reference the same entities by name.
     const matchedAccountId = intent.arguments?.accountId as string | undefined;
     const matchedAccountName = intent.arguments?.accountName as string | undefined;
+    const matchedContactId = intent.arguments?.contactId as string | undefined;
+    const matchedContactName = intent.arguments?.contactName as string | undefined;
+    const matchedOpportunityId = intent.arguments?.opportunityId as string | undefined;
+    const matchedOpportunityName = intent.arguments?.opportunityName as string | undefined;
     
     // Process additional intents asynchronously
     const additionalItems = await processAdditionalIntents(
@@ -1842,9 +1981,13 @@ Please respond to the user in a friendly manner based on the error. Important ru
         function: action.function,
         arguments: {
           ...action.arguments,
-          // Inject account context if not present
+          // Inject primary-resolved context if not already present on the step
           ...(matchedAccountId && !action.arguments.accountId ? { accountId: matchedAccountId } : {}),
           ...(matchedAccountName && !action.arguments.accountName ? { accountName: matchedAccountName } : {}),
+          ...(matchedContactId && !action.arguments.contactId ? { contactId: matchedContactId } : {}),
+          ...(matchedContactName && !action.arguments.contactName ? { contactName: matchedContactName } : {}),
+          ...(matchedOpportunityId && !action.arguments.opportunityId ? { opportunityId: matchedOpportunityId } : {}),
+          ...(matchedOpportunityName && !action.arguments.opportunityName ? { opportunityName: matchedOpportunityName } : {}),
         },
         confidence: 0.75,
         type: 'inferred' as const,

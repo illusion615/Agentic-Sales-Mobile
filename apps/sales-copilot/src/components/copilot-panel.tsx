@@ -369,6 +369,8 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
                   <MatchSelectionCard
                     messageId={message.id}
                     matchSelection={message.matchSelection}
+                    resolved={message.resolutionState === 'resolved'}
+                    resolutionResult={message.resolutionResult}
                     onSelect={(record) => {
                       toast.success(locale === 'zh-Hans' 
                         ? `已选择: ${record.name}` 
@@ -378,7 +380,8 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
                       continuePendingAction(
                         record,
                         pendingIntent,
-                        message.matchSelection?.entityType || 'account'
+                        message.matchSelection?.entityType || 'account',
+                        message.id
                       );
                     }}
                     onCreateEntity={(pendingIntent, entityKind, queryName) => {
@@ -416,6 +419,8 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
                   pendingIntent: {
                     function: message.awaitingClarification.originalIntent.function,
                     arguments: message.awaitingClarification.originalIntent.arguments,
+                    // G-1: forward inferred siblings so the chain-create resume can replay them
+                    additionalActions: message.awaitingClarification.originalIntent.additionalActions,
                   },
                 };
                 return (
@@ -441,8 +446,9 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
                       messageId={message.id}
                       matchSelection={adapted}
                       resolved={message.resolutionState === 'resolved'}
+                      resolutionResult={message.resolutionResult}
                       onContinueWithSelection={(record, pendingIntent) => {
-                        continuePendingAction(record, pendingIntent, entityType);
+                        continuePendingAction(record, pendingIntent, entityType, message.id);
                       }}
                       onCreateEntity={(pendingIntent, entityKind, queryName) => {
                         createEntityForResolution(pendingIntent, entityKind, queryName, message.id);

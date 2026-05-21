@@ -80,10 +80,22 @@
               "x-ms-dynamically-added": true,
               "description": "Please enter your input",
               "x-ms-content-hint": "TEXT"
+            },
+            "text_1": {
+              "description": "text or json",
+              "title": "ResponseFormat",
+              "type": "string",
+              "x-ms-content-hint": "TEXT",
+              "x-ms-dynamically-added": true,
+              "enum": [
+                "text",
+                "json"
+              ]
             }
           },
           "required": [
-            "text"
+            "text",
+            "text_1"
           ]
         },
         "ResponseActionOutput": {
@@ -94,7 +106,8 @@
               "x-ms-dynamically-added": true,
               "type": "string"
             }
-          }
+          },
+          "additionalProperties": {}
         }
       },
       "basePath": "/apim/logicflows"

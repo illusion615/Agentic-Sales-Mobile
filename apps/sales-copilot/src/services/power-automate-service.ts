@@ -3,8 +3,8 @@
  * Invokes the "Power Apps Flow - LLM" via SDK connector (shared_logicflows).
  *
  * Flow contract:
- *   Input:  { text: string }          — the prompt text
- *   Output: { output?: string }       — the AI-generated response
+ *   Input:  { text: string, text_1: 'text' | 'json' }
+ *   Output: { output?: string }
  *
  * ALL LLM availability checks are centralised here.
  * Callers should NOT check getLLMConfig / endpoint / enabled themselves.
@@ -38,7 +38,10 @@ export function isFlowAvailable(): boolean {
  * Contains its own availability guard — callers do NOT need to pre-check config.
  */
 export async function invokeFlowForLLM(
-  request: { messages: Array<{ role: string; content: string }> },
+  request: {
+    messages: Array<{ role: string; content: string }>;
+    responseFormat?: 'text' | 'json';
+  },
 ): Promise<FlowLLMResponse> {
   const startTime = Date.now();
 
@@ -57,9 +60,10 @@ export async function invokeFlowForLLM(
       .map((m) => `${m.role}: ${m.content}`)
       .join('\n');
 
-    console.log('[Power Automate] Invoking LLM flow via SDK connector, prompt length:', text.length);
+    const responseFormat = request.responseFormat ?? 'text';
+    console.log('[Power Automate] Invoking LLM flow, prompt length:', text.length, 'responseFormat:', responseFormat);
 
-    const result = await PowerAppsFlow_LLMService.Run({ text });
+    const result = await PowerAppsFlow_LLMService.Run({ text, text_1: responseFormat });
     const latencyMs = Date.now() - startTime;
 
     if (!result.success) {

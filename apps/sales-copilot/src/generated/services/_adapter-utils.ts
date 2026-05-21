@@ -24,9 +24,15 @@ export function dvNum(val: string | undefined | null): number | undefined {
   return isNaN(n) ? undefined : n;
 }
 
-/** Convert number → string for DV, undefined-safe */
-export function numToDv(val: number | undefined | null): string | undefined {
-  return val != null ? String(val) : undefined;
+/**
+ * Convert number → DV payload value, undefined-safe.
+ * Dataverse OData rejects string values for Edm.Decimal/Edm.Int when the
+ * service runs with IEEE754Compatible=false (default), so we keep it numeric.
+ * The PAC-generated TS types declare these columns as `string`, but that is
+ * incorrect at the wire level — toDv() casts to any.
+ */
+export function numToDv(val: number | undefined | null): number | undefined {
+  return val != null ? Number(val) : undefined;
 }
 
 /** Build a lookup object from DV _xxx_value GUID + formatted name */
