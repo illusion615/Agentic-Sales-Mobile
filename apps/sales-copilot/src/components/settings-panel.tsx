@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { ArrowLeft, Moon, Sun, Globe, HelpCircle, LogOut, Volume2, Play, Loader2, CheckCircle2, XCircle, Type, Palette, CircleDot, LayoutGrid, Speech, X, Zap, Bot, MessageSquare, Gauge, LayoutDashboard, Database, Bug, FileCode, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Moon, Sun, Globe, HelpCircle, LogOut, Volume2, Play, Type, Palette, CircleDot, LayoutGrid, Speech, X, Zap, MessageSquare, Gauge, LayoutDashboard, Database, Bug, FileCode, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
@@ -8,7 +8,6 @@ import { Button } from '@/components/ui/button';
 import { useUser } from '@/hooks/use-user';
 import { useAppSettings } from '@/hooks/use-app-settings';
 import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, setSelectedVoice, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getOrganizeInStructureCard, setOrganizeInStructureCard, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, type Locale, type VoiceOption, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget } from '@/lib/i18n';
-import { saveCopilotConfig } from '@/services/copilot-service';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
@@ -97,14 +96,8 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   useEffect(() => {
     // Only run when query has completed and we haven't loaded yet
     if (!isSettingsFetched || dbSettingsLoaded) return;
-    
-    // Initialize Copilot Studio agent name (single config source via copilot-service)
-    if (appSettings.copilotStudioAgentName) {
-      saveCopilotConfig({ agentName: appSettings.copilotStudioAgentName });
-    }
-    
     setDbSettingsLoaded(true);
-  }, [isSettingsFetched, dbSettingsLoaded, appSettings]);
+  }, [isSettingsFetched, dbSettingsLoaded]);
 
 
 
@@ -522,53 +515,8 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
               {locale === 'zh-Hans' ? 'AI 助手配置' : 'AI Assistant Configuration'}
             </h3>
             <div className="glass-card p-4 space-y-3">
-              {/* Connection Status */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Zap className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-sm font-medium">
-                      {locale === 'zh-Hans' ? 'AI 助手 (Flow)' : 'AI Assistant (Flow)'}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-green-500" />
-                    <span className="text-xs text-green-500">{locale === 'zh-Hans' ? '已集成' : 'Integrated'}</span>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Bot className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-sm font-medium">
-                      {locale === 'zh-Hans' ? 'Copilot Studio' : 'Copilot Studio'}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {isLoadingSettings ? (
-                      <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
-                    ) : appSettings.copilotStudioAgentName ? (
-                      <>
-                        <CheckCircle2 className="w-4 h-4 text-green-500" />
-                        <span className="text-xs text-green-500">{locale === 'zh-Hans' ? '已连接' : 'Connected'}</span>
-                      </>
-                    ) : (
-                      <>
-                        <XCircle className="w-4 h-4 text-muted-foreground" />
-                        <span className="text-xs text-muted-foreground">{locale === 'zh-Hans' ? '未连接' : 'Not connected'}</span>
-                      </>
-                    )}
-                  </div>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {locale === 'zh-Hans'
-                    ? 'AI 助手已通过 Power Platform 连接器集成（Flow + Copilot Studio）'
-                    : 'AI assistant integrated via Power Platform connectors (Flow + Copilot Studio).'}
-                </p>
-
-              </div>
-
               {/* Information Structure toggles */}
-              <div className="pt-3 border-t border-border/30 space-y-2">
+              <div className="space-y-2">
                 <SettingsItem
                   icon={LayoutGrid}
                   label={t('organizeInStructureCard', locale)}
