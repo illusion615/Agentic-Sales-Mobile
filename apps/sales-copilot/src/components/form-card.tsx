@@ -102,7 +102,7 @@ function EditableField({
                 {value ? String(value) : placeholder || 'Select date'}
               </Button>
             </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
+            <PopoverContent className="w-auto p-0 z-[9999]" align="start" side="top" avoidCollisions>
               <CalendarComponent
                 mode="single"
                 selected={value ? new Date(String(value)) : undefined}
@@ -1066,7 +1066,7 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
           totalamount: formData.amount as number || 0,
           stageKey,
           confidence: formData.confidence as number || 50,
-          expectedclosedate: formData.expectedCloseDate as string || '',
+          expectedclosedate: (formData.expectedCloseDate as string) || undefined,
           lastaction: formData.lastAction as string || '',
           ownerid: user?.objectId || 'unknown',
         } as Omit<Opportunity, 'id'>);
