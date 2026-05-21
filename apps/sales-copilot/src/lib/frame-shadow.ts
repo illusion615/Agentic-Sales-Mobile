@@ -97,7 +97,7 @@ function buildFramePrompt(locale: 'zh-Hans' | 'en'): string {
 - Opportunity（商机/项目/订单/招标）
 - Activity（销售活动：拜访/通话/会议/邮件/演示等具体接触）
 - Product（产品本身的知识/规格/功能）
-- Mixed（一句话同时点名多个，比如「给某客户的某联系人加一个商机」）
+- Mixed（一句话里涉及**超过一种类型的操作对象**。不要只看第一个动词。比如「记录拜访并创建一个商机」= Activity + Opportunity = Mixed。「拜访了客户，他们要建实验室，约了下周再谈」= Activity + Opportunity + Activity = Mixed。只要涉及两种以上对象，就选 Mixed。）
 - None（打招呼/系统问题/闲聊）
 
 关键：动词不是销售对象。「拜访」不是销售对象——它是 Activity 这个对象的实例。
@@ -157,8 +157,10 @@ There are only seven possibilities:
 - Opportunity (deal / project / tender / order)
 - Activity  (a sales touch: visit / call / meeting / email / demo)
 - Product   (knowledge about the product itself: specs / features)
-- Mixed     (one sentence names several, e.g. "add an opportunity for
-            Rachel at King's College Hospital")
+- Mixed     (one sentence involves **more than one type of object**. Don't
+            just look at the first verb. "Visited client, they want a new lab,
+            schedule a follow-up next week" = Activity + Opportunity + Activity
+            = Mixed. If two or more object types are involved, choose Mixed.)
 - None      (greeting / system question / chitchat)
 
 Important: verbs are NOT sales objects. "Visit" is not a sales object — it is

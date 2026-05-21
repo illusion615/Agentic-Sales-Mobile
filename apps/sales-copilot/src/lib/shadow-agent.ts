@@ -1,32 +1,36 @@
 /**
- * Shadow Agent Orchestrator
+ * Shadow Agent Engine (Orchestrator)
  *
- * Runs the hierarchical intent recognition pipeline in parallel with Legacy:
- *   Layer 1: Frame Shadow classifier → (object, task)
- *   Layer 2: Sub-prompt → function + arguments (or DAG plan)
+ * Architecture: Router → Orchestrator → Skills → Executor
  *
- * Results are logged to the shadow ring buffer for benchmark comparison.
- * This module does NOT affect production routing.
+ * This module is the Orchestrator layer. It receives:
+ *   - Frame Shadow classification (Router output)
+ *   - User message + context
+ *   - Filtered skills list (from skills-selector)
+ *
+ * It outputs a DAG execution plan — a unified format where:
+ *   - Single intent = steps.length === 1
+ *   - Multi intent = steps with seq + dependsOn + $ref
+ *
+ * Runs as a shadow/parallel system alongside Legacy for benchmarking.
+ * Does NOT affect production routing until explicitly switched.
  */
 
 import { runFrame, type FrameRunContext, type FrameResult } from './frame-shadow';
-import { getSubPrompt, type SubPromptContext } from './sub-prompts/index';
+import { selectSkills, formatSkillsForPrompt } from './skills-selector';
 import { invokeFlowForLLM } from '@/services/power-automate-service';
-import { DagPlanSchema, SingleIntentSchema, isDagPlan, resolveRefs, type SubPromptOutput, type DagStep } from './sub-prompts/dag-schema';
+import { DagPlanSchema, SingleIntentSchema, isDagPlan, type SubPromptOutput, type DagStep } from './dag-schema';
 import { getLocale } from '@/lib/i18n';
 
 // ----------------------------- Types ------------------------------------
 
 export interface ShadowResult {
-  /** Layer 1: Frame classification */
   frame: FrameResult;
   frameLatencyMs: number;
-  /** Layer 2: Sub-prompt extraction */
-  subPromptKey: string;
-  subPromptOutput: SubPromptOutput | null;
-  subPromptLatencyMs: number;
-  subPromptRaw?: string;
-  /** Combined */
+  skillsCount: number;
+  plan: SubPromptOutput | null;
+  planLatencyMs: number;
+  planRaw?: string;
   totalLatencyMs: number;
   error?: string;
 }
@@ -44,7 +48,7 @@ export interface ShadowBenchmarkEntry {
   };
   agreement: {
     functionMatch: boolean | null;
-    argumentOverlap: number | null; // 0-1 ratio of matching arg keys
+    argumentOverlap: number | null;
   };
 }
 
@@ -72,11 +76,132 @@ export function readBenchmarkLog(): ShadowBenchmarkEntry[] {
   }
 }
 
-// ----------------------------- Orchestrator --------------------------------
+// ----------------------------- Orchestrator Prompt -------------------------
+
+function buildOrchestratorPrompt(
+  frame: FrameResult,
+  skillsText: string,
+  locale: 'zh-Hans' | 'en'
+): string {
+  if (locale === 'zh-Hans') {
+    return `你是一个销售助手的执行规划器。你的任务是把用户的请求转化为一个或多个步骤的执行计划。
+
+# 当前分类
+- 销售对象: ${frame.salesObject}
+- 认知任务: ${frame.cognitiveTask}
+- 时态: ${frame.temporal}
+${frame.boundEntities?.account ? `- 已绑定客户: ${frame.boundEntities.account.name} (ID: ${frame.boundEntities.account.id})` : ''}
+${frame.boundEntities?.opportunity ? `- 已绑定商机: ${frame.boundEntities.opportunity.name} (ID: ${frame.boundEntities.opportunity.id})` : ''}
+${frame.boundEntities?.contact ? `- 已绑定联系人: ${frame.boundEntities.contact.name} (ID: ${frame.boundEntities.contact.id})` : ''}
+
+# 可用技能
+${skillsText}
+
+# 输出规则
+
+## 单步骤（用户只有一个意图）
+输出 JSON: {"function": "技能名", "arguments": {...}}
+
+## 多步骤（用户有多个意图）
+输出 DAG 执行计划:
+{
+  "steps": [
+    { "seq": 1, "outputRef": "$引用名", "function": "技能名", "arguments": {...} },
+    { "seq": 2, "dependsOn": ["$引用名"], "function": "技能名", "arguments": {"字段": "$引用名.id", ...} }
+  ]
+}
+
+## DAG 依赖规则
+- 如果创建商机+活动：活动依赖商机（opportunityId = "$opp.id"）
+- 如果创建客户+联系人：联系人依赖客户（accountName = "$acct.name"）
+- 独立操作可以有相同的 seq（并行）
+- 产品推荐（queryCopilotStudio）通常依赖商机上下文
+
+## 时态规则
+- temporal = past → 活动 temporalMode = "completed"
+- temporal = future → 活动 temporalMode = "planned"
+- 已绑定的实体直接用 ID，不需要用户再说
+
+## 金额转换
+- 200k / 200K → 200000
+- 50万 → 500000
+- 1.5M → 1500000
+
+只输出 JSON，不要解释。`;
+  }
+
+  return `You are an execution planner for a sales assistant. Transform the user's request into an execution plan of one or more steps.
+
+# Current Classification
+- Sales Object: ${frame.salesObject}
+- Cognitive Task: ${frame.cognitiveTask}
+- Temporal: ${frame.temporal}
+${frame.boundEntities?.account ? `- Bound Account: ${frame.boundEntities.account.name} (ID: ${frame.boundEntities.account.id})` : ''}
+${frame.boundEntities?.opportunity ? `- Bound Opportunity: ${frame.boundEntities.opportunity.name} (ID: ${frame.boundEntities.opportunity.id})` : ''}
+${frame.boundEntities?.contact ? `- Bound Contact: ${frame.boundEntities.contact.name} (ID: ${frame.boundEntities.contact.id})` : ''}
+
+# Available Skills
+${skillsText}
+
+# Output Rules
+
+## Single step (user has one intent)
+Output JSON: {"function": "skillName", "arguments": {...}}
+
+## Multi step (user has multiple intents)
+Output DAG execution plan:
+{
+  "steps": [
+    { "seq": 1, "outputRef": "$refName", "function": "skillName", "arguments": {...} },
+    { "seq": 2, "dependsOn": ["$refName"], "function": "skillName", "arguments": {"field": "$refName.id", ...} }
+  ]
+}
+
+## DAG Dependency Rules
+- Opportunity + Activity: Activity depends on Opportunity (opportunityId = "$opp.id")
+- Account + Contact: Contact depends on Account (accountName = "$acct.name")
+- Independent operations can share the same seq (parallel)
+- Product recommendations (queryCopilotStudio) usually depend on opportunity context
+
+## Temporal Rules
+- temporal = past → Activity temporalMode = "completed"
+- temporal = future → Activity temporalMode = "planned"
+- Bound entities: use their IDs directly, don't ask user again
+
+## Amount Conversion
+- 200k / 200K → 200000
+- 50万 → 500000
+- 1.5M → 1500000
+
+Output only JSON, no explanation.`;
+}
+
+function buildUserMessage(
+  userMessage: string,
+  frame: FrameResult,
+  pageContext?: { currentPage: string; summary?: string; pageData?: unknown },
+  conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>
+): string {
+  let msg = userMessage;
+
+  if (frame.explicitNames?.length) {
+    msg += `\n[用户提到的实体: ${frame.explicitNames.map(e => `${e.kind}:${e.text}`).join(', ')}]`;
+  }
+  if (pageContext?.summary) {
+    msg += `\n[页面: ${pageContext.currentPage}, ${pageContext.summary}]`;
+  }
+  if (conversationHistory?.length) {
+    const tail = conversationHistory.slice(-2);
+    msg += `\n[最近对话: ${tail.map(m => `${m.role}: ${m.content.slice(0, 100)}`).join(' | ')}]`;
+  }
+
+  return msg;
+}
+
+// ----------------------------- Pipeline -----------------------------------
 
 /**
- * Run the full shadow pipeline: Frame → Sub-prompt → Parse.
- * Does NOT execute any functions — only produces the intent plan.
+ * Run the full shadow pipeline: Frame → Skills Select → Orchestrator → Parse.
  */
 export async function runShadowPipeline(ctx: FrameRunContext): Promise<ShadowResult> {
   const totalStart = Date.now();
@@ -88,9 +213,9 @@ export async function runShadowPipeline(ctx: FrameRunContext): Promise<ShadowRes
     return {
       frame: { salesObject: 'None', cognitiveTask: 'Chat', temporal: 'none', reasoning: 'frame failed', confidence: 0 },
       frameLatencyMs: frameOutcome.latencyMs,
-      subPromptKey: 'None_Chat',
-      subPromptOutput: null,
-      subPromptLatencyMs: 0,
+      skillsCount: 0,
+      plan: null,
+      planLatencyMs: 0,
       totalLatencyMs: Date.now() - totalStart,
       error: `Frame failed: ${frameOutcome.error}`,
     };
@@ -99,193 +224,100 @@ export async function runShadowPipeline(ctx: FrameRunContext): Promise<ShadowRes
   const frame = frameOutcome.result;
   const frameLatencyMs = frameOutcome.latencyMs;
 
-  // Layer 2: Sub-prompt dispatch
-  const subPromptDef = getSubPrompt(frame);
-  const subPromptKey = `${frame.salesObject}_${frame.cognitiveTask}`;
-
-  if (!subPromptDef) {
-    return {
-      frame,
-      frameLatencyMs,
-      subPromptKey,
-      subPromptOutput: null,
-      subPromptLatencyMs: 0,
-      totalLatencyMs: Date.now() - totalStart,
-      error: `No sub-prompt registered for ${subPromptKey}`,
-    };
-  }
-
+  // Skills selection based on Frame classification
+  const skills = selectSkills(frame);
   const locale = ctx.locale ?? ((getLocale() === 'zh-Hans' ? 'zh-Hans' : 'en') as 'zh-Hans' | 'en');
-  const subCtx: SubPromptContext = {
-    userMessage: ctx.userMessage,
-    locale,
+  const skillsText = formatSkillsForPrompt(skills, locale);
+
+  // Layer 2: Orchestrator — one unified prompt
+  const systemPrompt = buildOrchestratorPrompt(frame, skillsText, locale);
+  const userPrompt = buildUserMessage(
+    ctx.userMessage,
     frame,
-    pageContext: ctx.pageContext ? {
-      currentPage: ctx.pageContext.currentPage,
-      summary: ctx.pageContext.summary,
-      pageData: ctx.pageContext.pageData,
-    } : undefined,
-    conversationHistory: ctx.conversationHistory,
-  };
+    ctx.pageContext,
+    ctx.conversationHistory
+  );
 
-  const systemPrompt = subPromptDef.buildSystemPrompt(subCtx);
-  const userPrompt = subPromptDef.buildUserPrompt(subCtx);
-
-  const subStart = Date.now();
-  const subResp = await invokeFlowForLLM({
+  const planStart = Date.now();
+  const planResp = await invokeFlowForLLM({
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ],
   });
-  const subPromptLatencyMs = Date.now() - subStart;
+  const planLatencyMs = Date.now() - planStart;
 
-  if (!subResp.success || !subResp.content) {
+  if (!planResp.success || !planResp.content) {
     return {
       frame,
       frameLatencyMs,
-      subPromptKey,
-      subPromptOutput: null,
-      subPromptLatencyMs,
-      subPromptRaw: subResp.content,
+      skillsCount: skills.length,
+      plan: null,
+      planLatencyMs,
+      planRaw: planResp.content,
       totalLatencyMs: Date.now() - totalStart,
-      error: `Sub-prompt LLM failed: ${subResp.error}`,
+      error: `Orchestrator LLM failed: ${planResp.error}`,
     };
   }
 
-  // Parse sub-prompt output
-  const parsed = parseSubPromptOutput(subResp.content);
+  const plan = parseOutput(planResp.content);
 
   return {
     frame,
     frameLatencyMs,
-    subPromptKey,
-    subPromptOutput: parsed,
-    subPromptLatencyMs,
-    subPromptRaw: subResp.content,
+    skillsCount: skills.length,
+    plan,
+    planLatencyMs,
+    planRaw: planResp.content,
     totalLatencyMs: Date.now() - totalStart,
-    error: parsed ? undefined : 'Sub-prompt output parse failed',
+    error: plan ? undefined : 'Orchestrator output parse failed',
   };
 }
 
-/**
- * Parse sub-prompt LLM output into either SingleIntent or DagPlan.
- */
-function parseSubPromptOutput(text: string): SubPromptOutput | null {
+function parseOutput(text: string): SubPromptOutput | null {
   let candidate: unknown;
   try {
     candidate = JSON.parse(text);
   } catch {
     const m = text.match(/\{[\s\S]*\}/);
     if (!m) return null;
-    try {
-      candidate = JSON.parse(m[0]);
-    } catch {
-      return null;
-    }
+    try { candidate = JSON.parse(m[0]); } catch { return null; }
   }
 
-  // Try DagPlan first (has "steps" array)
   const dagResult = DagPlanSchema.safeParse(candidate);
   if (dagResult.success) return dagResult.data;
 
-  // Try SingleIntent
   const singleResult = SingleIntentSchema.safeParse(candidate);
   if (singleResult.success) return singleResult.data;
 
   return null;
 }
 
-// ----------------------------- DAG Executor --------------------------------
-
-export interface DagExecutionResult {
-  success: boolean;
-  /** Results keyed by outputRef (e.g. "$opp" → { id: "xxx", name: "..." }) */
-  outputs: Record<string, Record<string, unknown>>;
-  /** All resolved steps with their final arguments */
-  resolvedSteps: Array<DagStep & { resolvedArgs: Record<string, unknown> }>;
-  errors: string[];
-}
-
-/**
- * Resolve a DAG plan: group by seq, resolve $ref placeholders, return
- * the execution-ready steps. Does NOT actually call executeFunction —
- * that's for the caller to decide (shadow mode just logs, production mode executes).
- */
-export function resolveDagPlan(
-  steps: DagStep[],
-  priorOutputs?: Record<string, Record<string, unknown>>
-): DagExecutionResult {
-  const outputs: Record<string, Record<string, unknown>> = { ...(priorOutputs || {}) };
-  const resolvedSteps: DagExecutionResult['resolvedSteps'] = [];
-  const errors: string[] = [];
-
-  // Group by seq
-  const groups = new Map<number, DagStep[]>();
-  for (const step of steps) {
-    const group = groups.get(step.seq) || [];
-    group.push(step);
-    groups.set(step.seq, group);
-  }
-
-  // Process groups in order
-  const sortedSeqs = Array.from(groups.keys()).sort((a, b) => a - b);
-  for (const seq of sortedSeqs) {
-    const group = groups.get(seq)!;
-    for (const step of group) {
-      // Check dependencies
-      if (step.dependsOn) {
-        for (const dep of step.dependsOn) {
-          if (!outputs[dep]) {
-            errors.push(`Step seq=${seq} function=${step.function}: missing dependency ${dep}`);
-          }
-        }
-      }
-
-      // Resolve $ref placeholders in arguments
-      const resolvedArgs = resolveRefs(step.arguments, outputs);
-      resolvedSteps.push({ ...step, resolvedArgs });
-
-      // Placeholder output for this step (will be filled by actual execution)
-      if (step.outputRef) {
-        outputs[step.outputRef] = { _placeholder: true, function: step.function };
-      }
-    }
-  }
-
-  return { success: errors.length === 0, outputs, resolvedSteps, errors };
-}
-
 // ----------------------------- Comparison --------------------------------
 
-/**
- * Compare shadow output vs legacy output for benchmark logging.
- */
 export function compareShadowVsLegacy(
   shadow: ShadowResult,
   legacyFunction: string | null,
   legacyArgs?: Record<string, unknown>
 ): ShadowBenchmarkEntry['agreement'] {
-  if (!shadow.subPromptOutput) {
+  if (!shadow.plan) {
     return { functionMatch: null, argumentOverlap: null };
   }
 
   let shadowFunction: string | null = null;
   let shadowArgs: Record<string, unknown> = {};
 
-  if (isDagPlan(shadow.subPromptOutput)) {
-    // For DAG plans, compare the first step's function
-    const first = shadow.subPromptOutput.steps[0];
+  if (isDagPlan(shadow.plan)) {
+    const first = shadow.plan.steps[0];
     shadowFunction = first?.function ?? null;
     shadowArgs = first?.arguments ?? {};
   } else {
-    shadowFunction = shadow.subPromptOutput.function;
-    shadowArgs = shadow.subPromptOutput.arguments;
+    shadowFunction = shadow.plan.function;
+    shadowArgs = shadow.plan.arguments;
   }
 
   const functionMatch = shadowFunction === legacyFunction;
 
-  // Compute argument key overlap
   let argumentOverlap: number | null = null;
   if (legacyArgs && Object.keys(legacyArgs).length > 0) {
     const legacyKeys = new Set(Object.keys(legacyArgs));
