@@ -42,37 +42,28 @@ export function FrameShadowViewer({ open, onClose, locale }: FrameShadowViewerPr
 
   const stats = useMemo(() => {
     if (entries.length === 0) {
-      return { total: 0, frameOk: 0, objectMatch: 0, taskMatch: 0, avgLatency: 0, funcMatch: 0, funcComparable: 0, avgArgOverlap: 0 };
+      return {
+        total: 0, frameOk: 0,
+        // Speed
+        legacyAvgMs: 0, shadowAvgMs: 0, speedDelta: 0,
+        // Accuracy
+        funcMatch: 0, funcComparable: 0,
+        avgArgOverlap: 0,
+      };
     }
     let frameOk = 0;
-    let objMatch = 0;
-    let objComparable = 0;
-    let taskMatch = 0;
-    let taskComparable = 0;
-    let latencySum = 0;
-    let latencyN = 0;
     for (const e of entries) {
       if (e.frame.success) frameOk += 1;
-      if (e.frame.latencyMs) {
-        latencySum += e.frame.latencyMs;
-        latencyN += 1;
-      }
-      if (e.agreement) {
-        if (e.agreement.objectMatch !== null && e.agreement.objectMatch !== undefined) {
-          objComparable += 1;
-          if (e.agreement.objectMatch) objMatch += 1;
-        }
-        if (e.agreement.taskMatch !== null && e.agreement.taskMatch !== undefined) {
-          taskComparable += 1;
-          if (e.agreement.taskMatch) taskMatch += 1;
-        }
-      }
     }
     // Orchestrator benchmark stats
     let funcMatch = 0;
     let funcComparable = 0;
     let argOverlapSum = 0;
     let argOverlapN = 0;
+    let legacyLatencySum = 0;
+    let legacyLatencyN = 0;
+    let shadowLatencySum = 0;
+    let shadowLatencyN = 0;
     for (const b of benchmarks) {
       if (b.agreement.functionMatch !== null && b.agreement.functionMatch !== undefined) {
         funcComparable += 1;
@@ -82,15 +73,24 @@ export function FrameShadowViewer({ open, onClose, locale }: FrameShadowViewerPr
         argOverlapSum += b.agreement.argumentOverlap;
         argOverlapN += 1;
       }
+      if (b.legacy?.latencyMs) {
+        legacyLatencySum += b.legacy.latencyMs;
+        legacyLatencyN += 1;
+      }
+      if (b.shadow.totalLatencyMs) {
+        shadowLatencySum += b.shadow.totalLatencyMs;
+        shadowLatencyN += 1;
+      }
     }
+    const legacyAvgMs = legacyLatencyN ? Math.round(legacyLatencySum / legacyLatencyN) : 0;
+    const shadowAvgMs = shadowLatencyN ? Math.round(shadowLatencySum / shadowLatencyN) : 0;
+    const speedDelta = legacyAvgMs && shadowAvgMs ? Math.round(((legacyAvgMs - shadowAvgMs) / legacyAvgMs) * 100) : 0;
     return {
       total: entries.length,
       frameOk,
-      objectMatch: objComparable ? Math.round((objMatch / objComparable) * 100) : 0,
-      taskMatch: taskComparable ? Math.round((taskMatch / taskComparable) * 100) : 0,
-      objComparable,
-      taskComparable,
-      avgLatency: latencyN ? Math.round(latencySum / latencyN) : 0,
+      legacyAvgMs,
+      shadowAvgMs,
+      speedDelta,
       funcMatch: funcComparable ? Math.round((funcMatch / funcComparable) * 100) : 0,
       funcComparable,
       avgArgOverlap: argOverlapN ? Math.round((argOverlapSum / argOverlapN) * 100) : 0,
@@ -125,8 +125,8 @@ export function FrameShadowViewer({ open, onClose, locale }: FrameShadowViewerPr
                   </div>
                   <div className="text-xs text-stone-500">
                     {locale === 'zh-Hans'
-                      ? `近 ${stats.total} 轮 · Frame 成功 ${stats.frameOk}/${stats.total} · 平均 ${stats.avgLatency}ms`
-                      : `Last ${stats.total} runs · Frame success ${stats.frameOk}/${stats.total} · Avg ${stats.avgLatency}ms`}
+                      ? `近 ${stats.total} 轮 · Legacy ${stats.legacyAvgMs}ms vs Shadow ${stats.shadowAvgMs}ms`
+                      : `Last ${stats.total} runs · Legacy ${stats.legacyAvgMs}ms vs Shadow ${stats.shadowAvgMs}ms`}
                   </div>
                 </div>
               </div>
@@ -158,26 +158,47 @@ export function FrameShadowViewer({ open, onClose, locale }: FrameShadowViewerPr
               </div>
             </div>
 
-            {/* Agreement summary */}
-            <div className="grid grid-cols-2 gap-2 border-b border-stone-200 bg-stone-50/60 px-4 py-3 text-xs sm:grid-cols-4">
-              <Tile
-                label={locale === 'zh-Hans' ? '销售对象一致率' : 'Object Match'}
-                value={`${stats.objectMatch}%`}
-                hint={locale === 'zh-Hans' ? `可对比 ${stats.objComparable ?? 0}` : `Comparable ${stats.objComparable ?? 0}`}
-              />
-              <Tile
-                label={locale === 'zh-Hans' ? '函数匹配率' : 'Function Match'}
-                value={`${stats.funcMatch}%`}
-                hint={locale === 'zh-Hans' ? `可对比 ${stats.funcComparable}` : `Comparable ${stats.funcComparable}`}
-              />
-              <Tile
-                label={locale === 'zh-Hans' ? '参数重叠率' : 'Arg Overlap'}
-                value={`${stats.avgArgOverlap}%`}
-              />
-              <Tile
-                label={locale === 'zh-Hans' ? 'Frame 解析成功率' : 'Frame Parse'}
-                value={`${stats.total ? Math.round((stats.frameOk / stats.total) * 100) : 0}%`}
-              />
+            {/* KPI Dashboard: Speed + Accuracy */}
+            <div className="border-b border-stone-200 bg-stone-50/60 px-4 py-3 text-xs">
+              {/* Speed comparison */}
+              <div className="mb-2 text-[10px] uppercase tracking-wide text-stone-400">
+                {locale === 'zh-Hans' ? '⚡ 速度（平均延迟）' : '⚡ Speed (avg latency)'}
+              </div>
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                <Tile
+                  label="Legacy"
+                  value={stats.legacyAvgMs ? `${stats.legacyAvgMs}ms` : '—'}
+                />
+                <Tile
+                  label="Shadow"
+                  value={stats.shadowAvgMs ? `${stats.shadowAvgMs}ms` : '—'}
+                />
+                <Tile
+                  label={locale === 'zh-Hans' ? '差值' : 'Delta'}
+                  value={stats.speedDelta ? `${stats.speedDelta > 0 ? '+' : ''}${stats.speedDelta}%` : '—'}
+                  hint={stats.speedDelta > 0 ? (locale === 'zh-Hans' ? 'Shadow 更快' : 'Shadow faster') : stats.speedDelta < 0 ? (locale === 'zh-Hans' ? 'Legacy 更快' : 'Legacy faster') : undefined}
+                />
+              </div>
+              {/* Accuracy comparison */}
+              <div className="mb-2 text-[10px] uppercase tracking-wide text-stone-400">
+                {locale === 'zh-Hans' ? '🎯 精度（Shadow vs Legacy 一致性）' : '🎯 Accuracy (Shadow vs Legacy agreement)'}
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <Tile
+                  label={locale === 'zh-Hans' ? '函数匹配' : 'Function Match'}
+                  value={`${stats.funcMatch}%`}
+                  hint={`${stats.funcComparable} ${locale === 'zh-Hans' ? '条可比' : 'comparable'}`}
+                />
+                <Tile
+                  label={locale === 'zh-Hans' ? '参数重叠' : 'Arg Overlap'}
+                  value={`${stats.avgArgOverlap}%`}
+                />
+                <Tile
+                  label={locale === 'zh-Hans' ? '样本量' : 'Samples'}
+                  value={`${stats.total}`}
+                  hint={`${stats.frameOk} ${locale === 'zh-Hans' ? '成功' : 'ok'}`}
+                />
+              </div>
             </div>
 
             {/* Entry list */}
@@ -240,22 +261,25 @@ function EntryRow({ entry, benchmark, locale }: { entry: ShadowLogEntry; benchma
         </div>
         <div className="line-clamp-2 text-sm text-stone-900">{entry.userMessage}</div>
         <div className="flex flex-wrap items-center gap-2 text-[11px] text-stone-600">
-          {ok && f ? (
+          {/* Speed per request */}
+          {benchmark && (
             <>
-              <Chip>Frame: {f.salesObject}</Chip>
-              <Chip>{f.cognitiveTask}</Chip>
-              {f.temporal !== 'none' && <Chip muted>{f.temporal}</Chip>}
-              <Chip muted>conf {f.confidence}</Chip>
+              <Chip muted>L: {benchmark.legacy?.latencyMs ?? '?'}ms</Chip>
+              <Chip muted>S: {benchmark.shadow.totalLatencyMs}ms</Chip>
+              {benchmark.legacy?.latencyMs && benchmark.shadow.totalLatencyMs ? (
+                <Chip>{benchmark.shadow.totalLatencyMs < benchmark.legacy.latencyMs ? '🟢' : '🔴'} {Math.abs(benchmark.shadow.totalLatencyMs - benchmark.legacy.latencyMs)}ms</Chip>
+              ) : null}
             </>
-          ) : (
-            <Chip danger>{locale === 'zh-Hans' ? 'Frame 解析失败' : 'Frame parse failed'}</Chip>
           )}
-          <span className="text-stone-400">↔</span>
-          <Chip outlined>Legacy: {entry.legacy?.functionName ?? 'null'}</Chip>
-          {entry.legacy?.resolutionsCount ? <Chip muted>resolutions ×{entry.legacy.resolutionsCount}</Chip> : null}
-          {entry.legacy?.additionalActionsCount ? (
-            <Chip muted>additional ×{entry.legacy.additionalActionsCount}</Chip>
-          ) : null}
+          <span className="text-stone-400">|</span>
+          {/* Function routing */}
+          <Chip outlined>L: {entry.legacy?.functionName ?? 'null'}</Chip>
+          <span className="text-stone-400">→</span>
+          {benchmark?.shadow.plan ? (
+            <Chip>{isDagPlan(benchmark.shadow.plan) ? `DAG ×${benchmark.shadow.plan.steps.length}` : (benchmark.shadow.plan as { function: string }).function}</Chip>
+          ) : (
+            <Chip danger>—</Chip>
+          )}
         </div>
       </button>
       {expanded && (
