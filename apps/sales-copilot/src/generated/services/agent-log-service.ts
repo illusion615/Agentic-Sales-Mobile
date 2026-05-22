@@ -2,6 +2,7 @@ import { Crf5c_agentlogsService } from './Crf5c_agentlogsService';
 import type { Crf5c_agentlogs } from '../models/Crf5c_agentlogsModel';
 import type { IGetAllOptions } from '../models/CommonModels';
 import type { AgentLog } from '../models/agent-log-model';
+import { requireCreated, requireId } from './_adapter-utils';
 
 function fromDv(dv: Crf5c_agentlogs): AgentLog {
   return {
@@ -32,20 +33,23 @@ export class AgentLogService {
   static async create(record: Omit<AgentLog, 'id'>): Promise<AgentLog> {
     const result = await Crf5c_agentlogsService.create(toDv(record) as any);
     if (!result.success) throw result.error;
-    return fromDv(result.data!);
+    return fromDv(requireCreated(result.data, 'crf5c_agentlogid', 'AgentLog'));
   }
 
   static async update(id: string, changedFields: Partial<Omit<AgentLog, 'id'>>): Promise<AgentLog> {
+    requireId(id, 'update', 'AgentLog');
     const result = await Crf5c_agentlogsService.update(id, toDv(changedFields) as any);
     if (!result.success) throw result.error;
     return fromDv(result.data!);
   }
 
   static async delete(id: string): Promise<void> {
+    requireId(id, 'delete', 'AgentLog');
     await Crf5c_agentlogsService.delete(id);
   }
 
   static async get(id: string): Promise<AgentLog> {
+    requireId(id, 'get', 'AgentLog');
     const result = await Crf5c_agentlogsService.get(id);
     if (!result.success) throw result.error;
     return fromDv(result.data!);

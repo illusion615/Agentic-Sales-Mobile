@@ -2,7 +2,7 @@ import { Crf5c_productsService } from './Crf5c_productsService';
 import type { Crf5c_products } from '../models/Crf5c_productsModel';
 import type { IGetAllOptions } from '../models/CommonModels';
 import type { Product } from '../models/product-model';
-import { dvNum, numToDv, mapOptions } from './_adapter-utils';
+import { dvNum, numToDv, mapOptions, requireCreated, requireId } from './_adapter-utils';
 
 const FIELD_MAP: Record<string, string> = {
   id: 'crf5c_productid',
@@ -47,20 +47,23 @@ export class ProductService {
   static async create(record: Omit<Product, 'id'>): Promise<Product> {
     const result = await Crf5c_productsService.create(toDv(record) as any);
     if (!result.success) throw result.error;
-    return fromDv(result.data!);
+    return fromDv(requireCreated(result.data, 'crf5c_productid', 'Product'));
   }
 
   static async update(id: string, changedFields: Partial<Omit<Product, 'id'>>): Promise<Product> {
+    requireId(id, 'update', 'Product');
     const result = await Crf5c_productsService.update(id, toDv(changedFields) as any);
     if (!result.success) throw result.error;
     return fromDv(result.data!);
   }
 
   static async delete(id: string): Promise<void> {
+    requireId(id, 'delete', 'Product');
     await Crf5c_productsService.delete(id);
   }
 
   static async get(id: string): Promise<Product> {
+    requireId(id, 'get', 'Product');
     const result = await Crf5c_productsService.get(id);
     if (!result.success) throw result.error;
     return fromDv(result.data!);

@@ -21,9 +21,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useActivityList } from '@/generated/hooks/use-activity';
 import { useQueryClient } from '@tanstack/react-query';
-import { ActivityTypeKeyToLabel, ActivityDraftstatusKeyToLabel, ActivityOutcomeKeyToLabel } from '@/generated/models/activity-model';
-import type { Activity as DataverseActivity, ActivityTypeKey, ActivityDraftstatusKey } from '@/generated/models/activity-model';
-import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
+import type { Activity as DataverseActivity } from '@/generated/models/activity-model';import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
 import { useCopilot } from '@/contexts/copilot-context';
 import { getLocale } from '@/lib/i18n';
 import { PullToRefresh } from '@/components/pull-to-refresh';
@@ -94,10 +92,10 @@ function isToday(dateStr: string): boolean {
 
 function ActivityItem({ activity }: { activity: DataverseActivity }) {
   const navigate = useNavigate();
-  const typeLabel = ActivityTypeKeyToLabel[activity.typeKey];
+  const typeLabel = activity.type;
   const Icon = activityIcons[typeLabel] || CheckSquare;
   const color = activityColors[typeLabel] || 'bg-muted';
-  const statusLabel = ActivityDraftstatusKeyToLabel[activity.draftstatusKey];
+  const statusLabel = activity.draftStatus;
   const isCompleted = statusLabel === 'completed';
 
   return (
@@ -208,7 +206,7 @@ export default function ActivitiesPage() {
   }, [filteredActivities]);
 
   const pendingCount = filteredActivities.filter(
-    (a: DataverseActivity) => ActivityDraftstatusKeyToLabel[a.draftstatusKey] !== 'completed'
+    (a: DataverseActivity) => a.draftStatus !== 'completed'
   ).length;
 
   // Set page context for Copilot agent awareness
@@ -219,9 +217,9 @@ export default function ActivitiesPage() {
       ? filteredActivities.map((a: DataverseActivity) => ({
           id: a.id,
           title: a.title,
-          type: ActivityTypeKeyToLabel[a.typeKey],
-          status: ActivityDraftstatusKeyToLabel[a.draftstatusKey],
-          outcome: a.outcomeKey ? ActivityOutcomeKeyToLabel[a.outcomeKey] : undefined,
+          type: a.type,
+          status: a.draftStatus,
+          outcome: a.outcome ? a.outcome : undefined,
           scheduledAt: a.scheduleddate,
           accountName: a.account?.name1,
           contactName: a.contact?.fullname,
@@ -494,7 +492,7 @@ export default function ActivitiesPage() {
                             </div>
                             <div className="space-y-1">
                               {dayActivities.slice(0, 3).map((activity: DataverseActivity) => {
-                                const typeLabel = ActivityTypeKeyToLabel[activity.typeKey];
+                                const typeLabel = activity.type;
                                 const color = activityColors[typeLabel] || 'bg-muted';
                                 return (
                                   <div
@@ -549,7 +547,7 @@ export default function ActivitiesPage() {
                             </div>
                             <div className="space-y-1">
                               {dayActivities.slice(0, 4).map((activity: DataverseActivity) => {
-                                const typeLabel = ActivityTypeKeyToLabel[activity.typeKey];
+                                const typeLabel = activity.type;
                                 const color = activityColors[typeLabel] || 'bg-muted';
                                 return (
                                   <div
@@ -615,7 +613,7 @@ export default function ActivitiesPage() {
                             {dayActivities.length > 0 && (
                               <div className="flex gap-0.5 mt-0.5">
                                 {dayActivities.slice(0, 3).map((activity: DataverseActivity, idx: number) => {
-                                  const typeLabel = ActivityTypeKeyToLabel[activity.typeKey];
+                                  const typeLabel = activity.type;
                                   const color = activityColors[typeLabel] || 'bg-muted';
                                   return (
                                     <div

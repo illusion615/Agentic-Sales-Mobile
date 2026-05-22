@@ -1,16 +1,17 @@
+// Choice column → Dataverse label maps. Kept ONLY for write-side conversion
+// (labelToDv reverse lookup in services). Read path uses dv.crf5c_<col>name
+// which Dataverse populates with the localized FormattedValue.
 export const AccountCreditstatusKeyToLabel = {
   'CreditstatusKey0': '正常',
   'CreditstatusKey1': '预警',
   'CreditstatusKey2': '冻结'
 } as const;
-export type AccountCreditstatusKey = keyof typeof AccountCreditstatusKeyToLabel;
 
 export const AccountPaymentstatusKeyToLabel = {
   'PaymentstatusKey0': '正常',
   'PaymentstatusKey1': '逾期',
   'PaymentstatusKey2': '催收中'
 } as const;
-export type AccountPaymentstatusKey = keyof typeof AccountPaymentstatusKeyToLabel;
 
 export const AccountRegionKeyToLabel = {
   'RegionKey0': '华东',
@@ -18,7 +19,6 @@ export const AccountRegionKeyToLabel = {
   'RegionKey2': '华南',
   'RegionKey3': '西南'
 } as const;
-export type AccountRegionKey = keyof typeof AccountRegionKeyToLabel;
 
 export const AccountTierKeyToLabel = {
   'TierKey0': 'S',
@@ -26,7 +26,6 @@ export const AccountTierKeyToLabel = {
   'TierKey2': 'B',
   'TierKey3': 'C'
 } as const;
-export type AccountTierKey = keyof typeof AccountTierKeyToLabel;
 
 export interface Account {
   /**
@@ -48,7 +47,7 @@ export interface Account {
   /**
    * @displayName Credit Status
    */
-  creditstatusKey?: AccountCreditstatusKey;
+  creditStatus?: string;
   /**
    * @displayName Email
    */
@@ -85,7 +84,7 @@ export interface Account {
   /**
    * @displayName Payment Status
    */
-  paymentstatusKey?: AccountPaymentstatusKey;
+  paymentStatus?: string;
   /**
    * @displayName Phone
    */
@@ -93,11 +92,11 @@ export interface Account {
   /**
    * @displayName Region
    */
-  regionKey?: AccountRegionKey;
+  region?: string;
   /**
    * @displayName Tier
    */
-  tierKey?: AccountTierKey;
+  tier?: string;
 }
 
 export const _Account = 'Account' as const;

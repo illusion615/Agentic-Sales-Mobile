@@ -5,8 +5,7 @@ import { cn } from '@/lib/utils';
 import { getLocale, t, getThinkingDotStyle, type Locale, type ThinkingDotStyle } from '@/lib/i18n';
 import { useNavigate } from 'react-router-dom';
 import { useBusinessInsightList } from '@/generated/hooks/use-business-insight';
-import { BusinessInsightTypeKeyToLabel } from '@/generated/models/business-insight-model';
-import type { BusinessInsight as DataverseBusinessInsight, BusinessInsightTypeKey } from '@/generated/models/business-insight-model';
+import type { BusinessInsight as DataverseBusinessInsight } from '@/generated/models/business-insight-model';
 
 // Helper to check if an insight is activity-related (exported for use in home.tsx)
 export function isActivityRelatedInsightUtil(insight: DataverseBusinessInsight): boolean {
@@ -94,7 +93,7 @@ export function InsightCarousel({
 
   // Fetch business insights from Dataverse
   const { data: dataverseInsights = [] } = useBusinessInsightList({
-    filter: 'isactive eq 1',
+    filter: 'isactive eq true',
     orderBy: ['displayorder asc'],
   });
 
@@ -261,9 +260,8 @@ export function InsightCarousel({
       }
 
       // Determine the icon based on type
-      const typeLabel = BusinessInsightTypeKeyToLabel[insight.typeKey as BusinessInsightTypeKey];
       const getIcon = () => {
-        switch (typeLabel) {
+        switch (insight.type) {
           case 'warning': return <AlertTriangle className="w-4 h-4" />;
           case 'success': return <TrendingUp className="w-4 h-4" />;
           default: return <Users className="w-4 h-4" />;
@@ -271,10 +269,10 @@ export function InsightCarousel({
       };
 
       // Map type to InsightCard type
-      const cardType: 'info' | 'warning' | 'success' = typeLabel === 'warning' ? 'warning' : typeLabel === 'success' ? 'success' : 'info';
+      const cardType: 'info' | 'warning' | 'success' = insight.type === 'warning' ? 'warning' : insight.type === 'success' ? 'success' : 'info';
 
       // Build references from IDs
-      const isClientRef = insight.referencetypeKey === 'ReferencetypeKey0';
+      const isClientRef = insight.referenceType === 'client';
       const references: ReferenceRecord[] = referenceIds.map((id: string) => ({
         id,
         name: id, // In real usage, you'd resolve this to a name

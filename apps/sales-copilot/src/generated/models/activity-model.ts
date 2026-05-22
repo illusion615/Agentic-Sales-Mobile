@@ -8,7 +8,6 @@ export const ActivityDraftstatusKeyToLabel = {
   'DraftstatusKey2': 'completed',
   'DraftstatusKey3': 'cancelled'
 } as const;
-export type ActivityDraftstatusKey = keyof typeof ActivityDraftstatusKeyToLabel;
 
 export const ActivityOutcomeKeyToLabel = {
   'OutcomeKey0': '成功',
@@ -17,7 +16,6 @@ export const ActivityOutcomeKeyToLabel = {
   'OutcomeKey3': '承诺后推迟',
   'OutcomeKey4': '无结果'
 } as const;
-export type ActivityOutcomeKey = keyof typeof ActivityOutcomeKeyToLabel;
 
 export const ActivityTypeKeyToLabel = {
   'TypeKey0': 'visit',
@@ -26,7 +24,6 @@ export const ActivityTypeKeyToLabel = {
   'TypeKey3': 'email',
   'TypeKey4': 'other'
 } as const;
-export type ActivityTypeKey = keyof typeof ActivityTypeKeyToLabel;
 
 export interface Activity {
   /**
@@ -57,7 +54,7 @@ export interface Activity {
    * @displayName Draft Status
    * @validationRule Required for create/update operations
    */
-  draftstatusKey: ActivityDraftstatusKey;
+  draftStatus: string;
   /**
    * @displayName Notes
    */
@@ -69,7 +66,7 @@ export interface Activity {
   /**
    * @displayName Outcome
    */
-  outcomeKey?: ActivityOutcomeKey;
+  outcome?: string;
   /**
    * @displayName Owner ID
    * @validationRule Required for create/update operations
@@ -84,7 +81,7 @@ export interface Activity {
    * @displayName Type
    * @validationRule Required for create/update operations
    */
-  typeKey: ActivityTypeKey;
+  type: string;
 }
 
 export const _Activity = 'Activity' as const;

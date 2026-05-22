@@ -43,7 +43,7 @@ export function MobileHeader({
       className={cn(
         'fixed top-0 left-0 right-0 z-50 safe-area-top',
         'h-14 px-4 flex items-center justify-between',
-        'glass-surface border-b border-border/50',
+        'bg-background/80 backdrop-blur-md border-b border-border/50',
         className
       )}
     >

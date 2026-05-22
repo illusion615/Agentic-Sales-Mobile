@@ -1,8 +1,18 @@
 import { Crf5c_activity1sService } from './Crf5c_activity1sService';
-import type { Crf5c_activity1s } from '../models/Crf5c_activity1sModel';
+import {
+  type Crf5c_activity1s,
+  Crf5c_activity1scrf5c_draftstatus,
+  Crf5c_activity1scrf5c_outcome,
+  Crf5c_activity1scrf5c_type,
+} from '../models/Crf5c_activity1sModel';
 import type { IGetAllOptions } from '../models/CommonModels';
-import type { Activity, ActivityDraftstatusKey, ActivityOutcomeKey, ActivityTypeKey } from '../models/activity-model';
-import { dvToKey, keyToDv, mapOptions } from './_adapter-utils';
+import {
+  ActivityDraftstatusKeyToLabel,
+  ActivityOutcomeKeyToLabel,
+  ActivityTypeKeyToLabel,
+  type Activity,
+} from '../models/activity-model';
+import { labelToDv, mapOptions, dvChoice, dvLookupName, requireCreated, requireId } from './_adapter-utils';
 
 const FIELD_MAP: Record<string, string> = {
   id: 'crf5c_activity1id',
@@ -19,21 +29,21 @@ function fromDv(dv: Crf5c_activity1s): Activity {
     id: dv.crf5c_activity1id,
     title: dv.crf5c_title,
     account: (d._crf5c_account_value as string)
-      ? { id: d._crf5c_account_value as string, name1: (d.crf5c_accountname as string) ?? '' }
+      ? { id: d._crf5c_account_value as string, name1: dvLookupName(d, '_crf5c_account_value') }
       : undefined,
     contact: (d._biz_contact_value as string)
-      ? { id: d._biz_contact_value as string, fullname: (d.biz_contactname as string) ?? '' }
+      ? { id: d._biz_contact_value as string, fullname: dvLookupName(d, '_biz_contact_value') }
       : undefined,
     createdon: dv.crf5c_createdon,
-    draftstatusKey: dvToKey('DraftstatusKey', dv.crf5c_draftstatus) as ActivityDraftstatusKey,
+    draftStatus: dvChoice(d, 'crf5c_draftstatus', Crf5c_activity1scrf5c_draftstatus),
     notes: dv.crf5c_notes,
     opportunity: (d._crf5c_opportunity_value as string)
-      ? { id: d._crf5c_opportunity_value as string, name1: (d.crf5c_opportunityname as string) ?? '' }
+      ? { id: d._crf5c_opportunity_value as string, name1: dvLookupName(d, '_crf5c_opportunity_value') }
       : undefined,
-    outcomeKey: dvToKey('OutcomeKey', dv.crf5c_outcome) as ActivityOutcomeKey | undefined,
+    outcome: dvChoice(d, 'crf5c_outcome', Crf5c_activity1scrf5c_outcome),
     ownerid: dv.crf5c_ownerid,
     scheduleddate: dv.crf5c_scheduleddate,
-    typeKey: dvToKey('TypeKey', dv.crf5c_type) as ActivityTypeKey,
+    type: dvChoice(d, 'crf5c_type', Crf5c_activity1scrf5c_type),
   };
 }
 
@@ -46,15 +56,15 @@ function toDv(r: Partial<Omit<Activity, 'id'>>): Record<string, unknown> {
   if (r.contact !== undefined) {
     dv['biz_Contact@odata.bind'] = r.contact?.id ? `/crf5c_contacts(${r.contact.id})` : null;
   }
-  if (r.draftstatusKey !== undefined) dv.crf5c_draftstatus = keyToDv(r.draftstatusKey);
+  if (r.draftStatus !== undefined) dv.crf5c_draftstatus = labelToDv(ActivityDraftstatusKeyToLabel, r.draftStatus);
   if (r.notes !== undefined) dv.crf5c_notes = r.notes;
   if (r.opportunity !== undefined) {
     dv['crf5c_Opportunity@odata.bind'] = r.opportunity?.id ? `/crf5c_opportunity1s(${r.opportunity.id})` : null;
   }
-  if (r.outcomeKey !== undefined) dv.crf5c_outcome = keyToDv(r.outcomeKey);
+  if (r.outcome !== undefined) dv.crf5c_outcome = labelToDv(ActivityOutcomeKeyToLabel, r.outcome);
   if (r.ownerid !== undefined) dv.crf5c_ownerid = r.ownerid;
   if (r.scheduleddate !== undefined) dv.crf5c_scheduleddate = r.scheduleddate;
-  if (r.typeKey !== undefined) dv.crf5c_type = keyToDv(r.typeKey);
+  if (r.type !== undefined) dv.crf5c_type = labelToDv(ActivityTypeKeyToLabel, r.type);
   return dv;
 }
 
@@ -62,20 +72,23 @@ export class ActivityService {
   static async create(record: Omit<Activity, 'id'>): Promise<Activity> {
     const result = await Crf5c_activity1sService.create(toDv(record) as any);
     if (!result.success) throw result.error;
-    return fromDv(result.data!);
+    return fromDv(requireCreated(result.data, 'crf5c_activity1id', 'Activity'));
   }
 
   static async update(id: string, changedFields: Partial<Omit<Activity, 'id'>>): Promise<Activity> {
+    requireId(id, 'update', 'Activity');
     const result = await Crf5c_activity1sService.update(id, toDv(changedFields) as any);
     if (!result.success) throw result.error;
     return fromDv(result.data!);
   }
 
   static async delete(id: string): Promise<void> {
+    requireId(id, 'delete', 'Activity');
     await Crf5c_activity1sService.delete(id);
   }
 
   static async get(id: string): Promise<Activity> {
+    requireId(id, 'get', 'Activity');
     const result = await Crf5c_activity1sService.get(id);
     if (!result.success) throw result.error;
     return fromDv(result.data!);

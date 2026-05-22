@@ -1,8 +1,16 @@
 import { Crf5c_businessinsightsService } from './Crf5c_businessinsightsService';
-import type { Crf5c_businessinsights } from '../models/Crf5c_businessinsightsModel';
+import {
+  type Crf5c_businessinsights,
+  Crf5c_businessinsightscrf5c_referencetype,
+  Crf5c_businessinsightscrf5c_type,
+} from '../models/Crf5c_businessinsightsModel';
 import type { IGetAllOptions } from '../models/CommonModels';
-import type { BusinessInsight, BusinessInsightReferencetypeKey, BusinessInsightTypeKey } from '../models/business-insight-model';
-import { dvToKey, keyToDv, dvNum, numToDv, mapOptions } from './_adapter-utils';
+import {
+  BusinessInsightReferencetypeKeyToLabel,
+  BusinessInsightTypeKeyToLabel,
+  type BusinessInsight,
+} from '../models/business-insight-model';
+import { labelToDv, dvNum, numToDv, mapOptions, dvChoice, requireCreated, requireId } from './_adapter-utils';
 
 const FIELD_MAP: Record<string, string> = {
   id: 'crf5c_businessinsightid',
@@ -19,6 +27,7 @@ const FIELD_MAP: Record<string, string> = {
 };
 
 function fromDv(dv: Crf5c_businessinsights): BusinessInsight {
+  const d = dv as unknown as Record<string, unknown>;
   return {
     id: dv.crf5c_businessinsightid,
     title: dv.crf5c_title,
@@ -29,9 +38,9 @@ function fromDv(dv: Crf5c_businessinsights): BusinessInsight {
     ownerid: dv.crf5c_ownerid,
     rationale: dv.crf5c_rationale,
     referenceidsjson: dv.crf5c_referenceidsjson,
-    referencetypeKey: dvToKey('ReferencetypeKey', dv.crf5c_referencetype) as BusinessInsightReferencetypeKey,
+    referenceType: dvChoice(d, 'crf5c_referencetype', Crf5c_businessinsightscrf5c_referencetype),
     summary: dv.crf5c_summary,
-    typeKey: dvToKey('TypeKey', dv.crf5c_type) as BusinessInsightTypeKey,
+    type: dvChoice(d, 'crf5c_type', Crf5c_businessinsightscrf5c_type),
     validuntil: dv.crf5c_validuntil,
   };
 }
@@ -46,9 +55,9 @@ function toDv(r: Partial<Omit<BusinessInsight, 'id'>>): Record<string, unknown> 
   if (r.ownerid !== undefined) dv.crf5c_ownerid = r.ownerid;
   if (r.rationale !== undefined) dv.crf5c_rationale = r.rationale;
   if (r.referenceidsjson !== undefined) dv.crf5c_referenceidsjson = r.referenceidsjson;
-  if (r.referencetypeKey !== undefined) dv.crf5c_referencetype = keyToDv(r.referencetypeKey);
+  if (r.referenceType !== undefined) dv.crf5c_referencetype = labelToDv(BusinessInsightReferencetypeKeyToLabel, r.referenceType);
   if (r.summary !== undefined) dv.crf5c_summary = r.summary;
-  if (r.typeKey !== undefined) dv.crf5c_type = keyToDv(r.typeKey);
+  if (r.type !== undefined) dv.crf5c_type = labelToDv(BusinessInsightTypeKeyToLabel, r.type);
   if (r.validuntil !== undefined) dv.crf5c_validuntil = r.validuntil;
   return dv;
 }
@@ -57,20 +66,23 @@ export class BusinessInsightService {
   static async create(record: Omit<BusinessInsight, 'id'>): Promise<BusinessInsight> {
     const result = await Crf5c_businessinsightsService.create(toDv(record) as any);
     if (!result.success) throw result.error;
-    return fromDv(result.data!);
+    return fromDv(requireCreated(result.data, 'crf5c_businessinsightid', 'BusinessInsight'));
   }
 
   static async update(id: string, changedFields: Partial<Omit<BusinessInsight, 'id'>>): Promise<BusinessInsight> {
+    requireId(id, 'update', 'BusinessInsight');
     const result = await Crf5c_businessinsightsService.update(id, toDv(changedFields) as any);
     if (!result.success) throw result.error;
     return fromDv(result.data!);
   }
 
   static async delete(id: string): Promise<void> {
+    requireId(id, 'delete', 'BusinessInsight');
     await Crf5c_businessinsightsService.delete(id);
   }
 
   static async get(id: string): Promise<BusinessInsight> {
+    requireId(id, 'get', 'BusinessInsight');
     const result = await Crf5c_businessinsightsService.get(id);
     if (!result.success) throw result.error;
     return fromDv(result.data!);

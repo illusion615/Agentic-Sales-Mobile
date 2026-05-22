@@ -5,16 +5,112 @@
 
 const CHOICE_BASE = 995340000;
 
-/** Convert DV choice integer (995340000-based) → friendly key string like 'TierKey0' */
-export function dvToKey(prefix: string, dv: number | undefined | null): string | undefined {
-  return dv != null ? `${prefix}${dv - CHOICE_BASE}` : undefined;
+/**
+ * Guard for mutation/read ops: refuse to forward an empty id to the generated
+ * Crf5c_*Service layer (which would blindly call `id.toString()` and emit the
+ * unreadable "undefined is not an object (evaluating 'e.toString')" error).
+ */
+export function requireId(id: string | undefined | null, op: string, entity: string): asserts id is string {
+  if (!id) throw new Error(`${entity}Service.${op}() called with empty id`);
 }
 
-/** Convert friendly key string like 'TierKey0' → DV choice integer */
-export function keyToDv(key: string | undefined | null): number | undefined {
-  if (!key) return undefined;
-  const m = key.match(/(\d+)$/);
-  return m ? CHOICE_BASE + Number(m[1]) : undefined;
+/**
+ * Strict contract guard for Dataverse create. The Power Apps SDK is typed
+ * (`createRecordAsync<TReq, TRes>` → `IOperationResult<TRes>`) and the
+ * generated `TRes` (e.g. `Crf5c_aisummaries`) declares the PK column as a
+ * required string. If `success === true` but the PK isn't echoed under its
+ * canonical name, the contract is broken — almost certainly an upstream cause
+ * (table not deployed to this environment, user lacks Read after Create,
+ * or a required field was rejected and the SDK swallowed the error). We
+ * surface that immediately with diagnostics instead of papering over it.
+ */
+export function requireCreated<T>(
+  data: T | undefined | null,
+  pkField: keyof T,
+  entity: string
+): T {
+  const pk = String(pkField);
+  if (!data || typeof data !== 'object') {
+    throw new Error(
+      `Dataverse create for ${entity} returned success but no row body ` +
+      `(expected PK ${pk}). Likely cause: table not deployed to this environment, ` +
+      `or the SDK swallowed an underlying error. Check the network log for the create call.`
+    );
+  }
+  const row = data as Record<string, unknown>;
+  const pkValue = row[pk];
+  if (typeof pkValue === 'string' && pkValue) return data;
+
+  const keys = Object.keys(row);
+  throw new Error(
+    `Dataverse create for ${entity} returned a row without its primary key ` +
+    `(expected ${pk}). Row keys actually returned: [${keys.join(', ') || '<empty>'}]. ` +
+    `This violates the SDK type contract — check (1) table is deployed to this ` +
+    `environment, (2) connector grants Read after Create, (3) required fields ` +
+    `in the create payload aren't being silently rejected.`
+  );
+}
+
+/**
+ * Convert a friendly choice label (e.g. 'prospecting', '正常') to the Dataverse
+ * choice integer using the SDK-generated KeyToLabel map.
+ */
+export function labelToDv(
+  keyToLabel: Readonly<Record<string, string>>,
+  label: string | undefined | null
+): number | undefined {
+  if (label == null || label === '') return undefined;
+  for (const [k, v] of Object.entries(keyToLabel)) {
+    if (v === label) {
+      const m = k.match(/(\d+)$/);
+      if (m) return CHOICE_BASE + Number(m[1]);
+    }
+  }
+  return undefined;
+}
+
+const ODATA_FV = '@OData.Community.Display.V1.FormattedValue';
+
+/**
+ * Read a choice column from a raw DV row. The Power Apps SDK's
+ * `retrieveMultipleRecordsAsync` returns rows in their raw OData shape and
+ * does NOT project `@FormattedValue` annotations into typed `<col>name`
+ * fields — only `get`/`create` sometimes do. So `dv.<col>name` alone yields
+ * '' on list queries and silently breaks any UI keyed on the label.
+ *
+ * Resolution order: (1) OData FormattedValue annotation, (2) numeric → label
+ * via the generated map, (3) the optional SDK-projected `<col>name` field.
+ */
+export function dvChoice<TMap extends Readonly<Record<number, string>>>(
+  dv: Record<string, unknown>,
+  colName: string,
+  numericMap: TMap,
+): string {
+  const fv = dv[colName + ODATA_FV];
+  if (typeof fv === 'string' && fv) return fv;
+  const raw = dv[colName];
+  if (raw != null && raw !== '') {
+    const num = typeof raw === 'number' ? raw : Number(raw);
+    if (!isNaN(num)) {
+      const label = (numericMap as Record<number, string>)[num];
+      if (label) return label;
+    }
+  }
+  const name = dv[colName + 'name'];
+  return typeof name === 'string' ? name : '';
+}
+
+/**
+ * Read a lookup column's display name from a raw DV row. Lookups expose
+ * the GUID at `_<col>_value` and the formatted name at
+ * `_<col>_value@OData.Community.Display.V1.FormattedValue`. The Power Apps
+ * SDK does not project this into the typed `<col>name` field on list
+ * responses, so reading `dv.<col>name` alone yields '' for any lookup
+ * nested inside a list query result.
+ */
+export function dvLookupName(dv: Record<string, unknown>, valueField: string): string {
+  const fv = dv[valueField + ODATA_FV];
+  return typeof fv === 'string' ? fv : '';
 }
 
 /** Safely parse a DV string as number, returning undefined if not a valid number */

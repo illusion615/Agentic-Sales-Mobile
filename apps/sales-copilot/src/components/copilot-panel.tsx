@@ -14,6 +14,7 @@ import { RecordListCard } from '@/components/record-list-card';
 import { AdditionalIntentsCard } from '@/components/additional-intents-card';
 import { FrameShadowViewer } from '@/components/frame-shadow-viewer';
 import { toast } from 'sonner';
+import { useActionDock } from '@/contexts/action-dock-context';
 
 
 
@@ -51,6 +52,8 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
     executeClarificationAction,
     rollbackToMessage,
   } = useCopilot();
+
+  const { chips: dockChips, slot: dockSlot } = useActionDock();
 
   // Render counter for loop diagnostics
   const renderCountRef = useRef(0);
@@ -181,8 +184,9 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
 
   // Handle input focus
   const handleInputFocus = () => {
-    if (mode === 'overlay' && !isExpanded) {
-      setIsExpanded(true);
+    if (mode !== 'overlay') return;
+    if (!isOpen) {
+      openPanel();
     }
   };
 
@@ -668,7 +672,8 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
   );
   };
 
-  const renderInputArea = () => (
+  // Pills + attachment preview only (no input bar). Used above the bottom-anchored input wrapper.
+  const renderInputExtras = () => (
     <>
       {/* Quick Action Pills - highlighted when showing clarification suggestions */}
       <div className={cn(
@@ -748,74 +753,83 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
           </div>
         </div>
       )}
-
-      {/* Input Bar */}
-      <div className="px-3 pb-3 pt-2">
-        <div className="relative p-[2px] rounded-2xl">
-          <div className="absolute inset-0 rounded-2xl neon-glow-blur" />
-          <div className="absolute inset-0 rounded-2xl neon-glow" />
-          
-          <div className="relative flex items-center gap-2 p-2 rounded-[14px] bg-background" style={{ backgroundColor: 'var(--background)' }}>
-            {/* Hidden file input */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
-              multiple
-              onChange={handleFileSelect}
-              className="hidden"
-            />
-
-            {/* Camera/Attachment Button */}
-            <button
-              type="button"
-              onClick={handleAttachmentClick}
-              className="w-10 h-10 flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-              aria-label={locale === 'zh-Hans' ? '添加附件' : 'Add attachment'}
-            >
-              <Paperclip className="w-5 h-5" />
-            </button>
-            {/* Input Field */}
-            <input
-              ref={inputRef}
-              type="text"
-              value={inputValue}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setInputValue(e.target.value)}
-              onKeyDown={handleKeyDown}
-              onCompositionStart={handleCompositionStart}
-              onCompositionEnd={handleCompositionEnd}
-              onFocus={handleInputFocus}
-              placeholder={locale === 'zh-Hans' ? '向 Copilot 提问...' : 'Ask Copilot...'}
-              className="flex-1 bg-transparent border-0 outline-none text-sm text-foreground placeholder:text-muted-foreground"
-            />
-
-            {/* Send Button */}
-            {isSending ? (
-              <button
-                onClick={() => {}}
-                className="w-10 h-10 rounded-full flex items-center justify-center text-red-500 hover:bg-muted/50 transition-colors"
-              >
-                <Square className="w-4 h-4 fill-current" />
-              </button>
-            ) : (
-              <button
-                onClick={() => inputValue.trim() && sendMessage(inputValue)}
-                disabled={!inputValue.trim()}
-                className={cn(
-                  'w-10 h-10 flex items-center justify-center transition-all',
-                  inputValue.trim()
-                    ? 'text-primary hover:brightness-125'
-                    : 'text-muted-foreground cursor-not-allowed'
-                )}
-                aria-label={locale === 'zh-Hans' ? '发送' : 'Send'}
-              >
-                <ArrowUp className="w-5 h-5" />
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
     </>
+  );
+
+  // Bottom-anchored input wrapper. Same wrapper used in collapsed and expanded states
+  // so the input bar's position and width stay locked.
+  const renderInputWrapper = () => (
+    <div className="mx-auto w-full max-w-md px-3 pt-2 pb-3">
+      {renderInputBar()}
+    </div>
+  );
+
+  // The neon-glow input pill — must be visually identical in collapsed dock and expanded panel.
+  // Don't inline this anywhere; both states call it so style/size stay locked together.
+  const renderInputBar = () => (
+    <div className="relative p-[2px] rounded-2xl">
+      <div className="absolute inset-0 rounded-2xl neon-glow-blur" />
+      <div className="absolute inset-0 rounded-2xl neon-glow" />
+
+      <div className="relative flex items-center gap-2 p-2 rounded-[14px] bg-background" style={{ backgroundColor: 'var(--background)' }}>
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+          multiple
+          onChange={handleFileSelect}
+          className="hidden"
+        />
+
+        {/* Camera/Attachment Button */}
+        <button
+          type="button"
+          onClick={handleAttachmentClick}
+          className="w-10 h-10 flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+          aria-label={locale === 'zh-Hans' ? '添加附件' : 'Add attachment'}
+        >
+          <Paperclip className="w-5 h-5" />
+        </button>
+        {/* Input Field */}
+        <input
+          ref={inputRef}
+          type="text"
+          value={inputValue}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setInputValue(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onCompositionStart={handleCompositionStart}
+          onCompositionEnd={handleCompositionEnd}
+          onFocus={handleInputFocus}
+          placeholder={locale === 'zh-Hans' ? '向 Copilot 提问...' : 'Ask Copilot...'}
+          className="flex-1 bg-transparent border-0 outline-none text-sm text-foreground placeholder:text-muted-foreground"
+        />
+
+        {/* Send Button */}
+        {isSending ? (
+          <button
+            onClick={() => {}}
+            className="w-10 h-10 rounded-full flex items-center justify-center text-red-500 hover:bg-muted/50 transition-colors"
+          >
+            <Square className="w-4 h-4 fill-current" />
+          </button>
+        ) : (
+          <button
+            onClick={() => inputValue.trim() && sendMessage(inputValue)}
+            disabled={!inputValue.trim()}
+            className={cn(
+              'w-10 h-10 flex items-center justify-center transition-all',
+              inputValue.trim()
+                ? 'text-primary hover:brightness-125'
+                : 'text-muted-foreground cursor-not-allowed'
+            )}
+            aria-label={locale === 'zh-Hans' ? '发送' : 'Send'}
+          >
+            <ArrowUp className="w-5 h-5" />
+          </button>
+        )}
+      </div>
+    </div>
   );
 
   // Full screen overlay mode
@@ -909,7 +923,8 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
 
         {/* Input */}
         <div className="safe-area-bottom">
-          {renderInputArea()}
+          {renderInputExtras()}
+          {renderInputWrapper()}
         </div>
       </motion.div>
       <FrameShadowViewer open={frameViewerOpen} onClose={() => setFrameViewerOpen(false)} locale={locale} />
@@ -919,141 +934,183 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
 
   // Expanded panel overlay mode
   if (mode === 'overlay') {
+    // Reusable panel-chrome JSX (drag handle + header + context chips) used by expanded states.
+    const panelChrome = (
+      <>
+        {/* Drag handle */}
+        <div
+          className="flex justify-center py-2 cursor-grab active:cursor-grabbing touch-none"
+          onPointerDown={(e: React.PointerEvent) => dragControls.start(e)}
+        >
+          <div className="w-10 h-1 rounded-full bg-muted-foreground/30" />
+        </div>
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-2 border-b border-border/30">
+          <button
+            onClick={handleClose}
+            className="w-8 h-8 flex items-center justify-center rounded-lg transition-all hover:brightness-125 active:brightness-75"
+            aria-label={locale === 'zh-Hans' ? '收起' : 'Collapse'}
+          >
+            <ChevronDown className="w-4 h-4 text-foreground" />
+          </button>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-foreground">Ask Copilot</span>
+            {isConnected && <span className="w-2 h-2 bg-green-500 rounded-full" />}
+            {isConnecting && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
+            <button
+              type="button"
+              onClick={() => setFrameViewerOpen(true)}
+              className="ml-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold text-orange-700 bg-orange-100 hover:bg-orange-200 transition-colors"
+              title={locale === 'zh-Hans' ? 'Frame 影子模式 · 销售专家思考记录' : 'Frame shadow mode · sales-coach reasoning log'}
+              aria-label="Frame shadow log"
+            >
+              F
+            </button>
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => startNewConversation()}
+              className="w-8 h-8 flex items-center justify-center rounded-lg transition-all hover:brightness-125 active:brightness-75"
+              aria-label={locale === 'zh-Hans' ? '新会话' : 'New session'}
+            >
+              <SquarePen className="w-4 h-4 text-foreground" />
+            </button>
+          </div>
+        </div>
+
+        {/* Context Chips */}
+        {shouldShowContext && (
+          <div className="px-4 py-2 border-b border-border/20 bg-muted/30">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-muted-foreground">
+                {locale === 'zh-Hans' ? '当前上下文:' : 'Context:'}
+              </span>
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 border border-primary/20">
+                <span className="text-xs font-medium text-primary">
+                  {pageContext.currentPage}
+                </span>
+                {((pageContext.pageData as Record<string, unknown>)?.accountName as string | undefined) && (
+                  <span className="text-xs text-primary/80">
+                    {' · '}{(pageContext.pageData as Record<string, unknown>).accountName as string}
+                  </span>
+                )}
+                {((pageContext.pageData as Record<string, unknown>)?.contactName as string | undefined) && (
+                  <span className="text-xs text-primary/80">
+                    {' · '}{(pageContext.pageData as Record<string, unknown>).contactName as string}
+                  </span>
+                )}
+                {((pageContext.pageData as Record<string, unknown>)?.opportunityName as string | undefined) && (
+                  <span className="text-xs text-primary/80">
+                    {' · '}{(pageContext.pageData as Record<string, unknown>).opportunityName as string}
+                  </span>
+                )}
+                {((pageContext.pageData as Record<string, unknown>)?.activitySubject as string | undefined) && (
+                  <span className="text-xs text-primary/80">
+                    {' · '}{(pageContext.pageData as Record<string, unknown>).activitySubject as string}
+                  </span>
+                )}
+                <button
+                  onClick={handleDismissContext}
+                  className="ml-0.5 w-4 h-4 flex items-center justify-center rounded-full hover:bg-primary/20 transition-colors"
+                  aria-label={locale === 'zh-Hans' ? '移除上下文' : 'Remove context'}
+                >
+                  <X className="w-3 h-3 text-primary" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </>
+    );
+
+    // ─── Unified ActionDock: single container morphs from collapsed dock to expanded panel ───
+    // Same input bar JSX renders in both collapsed and expanded states (via renderInputBar),
+    // so style/size stay locked together. Container animates its height.
     return (
-      <AnimatePresence>
-        {isOpen && (
-          <>
-            {/* Backdrop */}
+      <>
+        <AnimatePresence>
+          {isOpen && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
               className="fixed inset-0 z-[55] bg-black/30 backdrop-blur-sm"
               onClick={handleClose}
             />
-            
-            {/* Panel */}
-            <motion.div
-              ref={panelRef}
-              drag="y"
-              dragControls={dragControls}
-              dragListener={false}
-              dragConstraints={{ top: 0, bottom: 0 }}
-              dragElastic={{ top: 0.3, bottom: 0.5 }}
-              onDragEnd={(_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
-                if (info.offset.y < -80 || info.velocity.y < -500) {
-                  openPanel(true);
-                } else if (info.offset.y > 80 || info.velocity.y > 500) {
-                  closePanel();
-                }
-              }}
-              initial={{ y: '100%' }}
-              animate={{ y: 0 }}
-              exit={{ y: '100%' }}
-              transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 z-[60] bg-background/98 backdrop-blur-xl flex flex-col safe-area-bottom"
-              style={{ 
-                height: '78vh',
-                borderTopLeftRadius: 20, 
-                borderTopRightRadius: 20,
-                boxShadow: '0 -8px 32px -4px rgba(0, 0, 0, 0.15), 0 -4px 16px -4px rgba(0, 0, 0, 0.1)'
-              }}
-            >
-              {/* Drag handle */}
-              <div 
-                className="flex justify-center py-2 cursor-grab active:cursor-grabbing touch-none"
-                onPointerDown={(e: React.PointerEvent) => dragControls.start(e)}
-              >
-                <div className="w-10 h-1 rounded-full bg-muted-foreground/30" />
-              </div>
+          )}
+        </AnimatePresence>
 
-              {/* Header */}
-              <div className="flex items-center justify-between px-4 py-2 border-b border-border/30">
-                <button
-                  onClick={handleClose}
-                  className="w-8 h-8 flex items-center justify-center rounded-lg transition-all hover:brightness-125 active:brightness-75"
-                  aria-label={locale === 'zh-Hans' ? '收起' : 'Collapse'}
-                >
-                  <ChevronDown className="w-4 h-4 text-foreground" />
-                </button>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-foreground">Ask Copilot</span>
-                  {isConnected && <span className="w-2 h-2 bg-green-500 rounded-full" />}
-                  {isConnecting && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
-                  <button
-                    type="button"
-                    onClick={() => setFrameViewerOpen(true)}
-                    className="ml-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold text-orange-700 bg-orange-100 hover:bg-orange-200 transition-colors"
-                    title={locale === 'zh-Hans' ? 'Frame 影子模式 · 销售专家思考记录' : 'Frame shadow mode · sales-coach reasoning log'}
-                    aria-label="Frame shadow log"
-                  >
-                    F
-                  </button>
-                </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => startNewConversation()}
-                    className="w-8 h-8 flex items-center justify-center rounded-lg transition-all hover:brightness-125 active:brightness-75"
-                    aria-label={locale === 'zh-Hans' ? '新会话' : 'New session'}
-                  >
-                    <SquarePen className="w-4 h-4 text-foreground" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Context Chips */}
-              {shouldShowContext && (
-                <div className="px-4 py-2 border-b border-border/20 bg-muted/30">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs text-muted-foreground">
-                      {locale === 'zh-Hans' ? '当前上下文:' : 'Context:'}
-                    </span>
-                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 border border-primary/20">
-                      <span className="text-xs font-medium text-primary">
-                        {pageContext.currentPage}
-                      </span>
-                      {((pageContext.pageData as Record<string, unknown>)?.accountName as string | undefined) && (
-                        <span className="text-xs text-primary/80">
-                          {' · '}{(pageContext.pageData as Record<string, unknown>).accountName as string}
-                        </span>
-                      )}
-                      {((pageContext.pageData as Record<string, unknown>)?.contactName as string | undefined) && (
-                        <span className="text-xs text-primary/80">
-                          {' · '}{(pageContext.pageData as Record<string, unknown>).contactName as string}
-                        </span>
-                      )}
-                      {((pageContext.pageData as Record<string, unknown>)?.opportunityName as string | undefined) && (
-                        <span className="text-xs text-primary/80">
-                          {' · '}{(pageContext.pageData as Record<string, unknown>).opportunityName as string}
-                        </span>
-                      )}
-                      {((pageContext.pageData as Record<string, unknown>)?.activitySubject as string | undefined) && (
-                        <span className="text-xs text-primary/80">
-                          {' · '}{(pageContext.pageData as Record<string, unknown>).activitySubject as string}
-                        </span>
-                      )}
-                      <button
-                        onClick={handleDismissContext}
-                        className="ml-0.5 w-4 h-4 flex items-center justify-center rounded-full hover:bg-primary/20 transition-colors"
-                        aria-label={locale === 'zh-Hans' ? '移除上下文' : 'Remove context'}
-                      >
-                        <X className="w-3 h-3 text-primary" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Messages */}
+        <motion.div
+          ref={panelRef}
+          initial={false}
+          animate={{ height: isOpen ? '78vh' : 'auto' }}
+          transition={{ type: 'spring', damping: 32, stiffness: 280 }}
+          drag={isOpen ? 'y' : false}
+          dragControls={dragControls}
+          dragListener={false}
+          dragConstraints={{ top: 0, bottom: 0 }}
+          dragElastic={{ top: 0.3, bottom: 0.5 }}
+          onDragEnd={(_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+            if (info.offset.y < -80 || info.velocity.y < -500) {
+              openPanel(true);
+            } else if (info.offset.y > 80 || info.velocity.y > 500) {
+              closePanel();
+            }
+          }}
+          className={cn(
+            'fixed bottom-0 left-0 right-0 z-[60] flex flex-col justify-end overflow-hidden safe-area-bottom',
+            'bg-background/80 backdrop-blur-md border-t border-border/50',
+            isOpen && 'rounded-t-[20px]'
+          )}
+          style={
+            isOpen
+              ? { boxShadow: '0 -8px 32px -4px rgba(0, 0, 0, 0.15), 0 -4px 16px -4px rgba(0, 0, 0, 0.1)' }
+              : undefined
+          }
+          data-component="copilot-unified-dock"
+        >
+          {isOpen ? (
+            <>
+              {panelChrome}
               {renderMessages()}
+              {renderInputExtras()}
+            </>
+          ) : (
+            <div className="mx-auto w-full max-w-md flex flex-col gap-2 px-3 pt-2 pb-0">
+              {dockSlot !== null ? (
+                <div className="flex justify-center">{dockSlot}</div>
+              ) : dockChips.length > 0 ? (
+                <div className="flex items-center justify-center gap-2 flex-wrap">
+                  {dockChips.map((c) => {
+                    const Icon = c.icon;
+                    return (
+                      <button
+                        key={c.id}
+                        onClick={c.onClick}
+                        className={cn(
+                          'flex items-center gap-2 px-4 py-2.5',
+                          'rounded-full bg-background border border-border/60 shadow-sm',
+                          'text-xs font-medium text-foreground',
+                          'active:scale-95 transition-transform'
+                        )}
+                      >
+                        <Icon className="w-4 h-4 text-primary" />
+                        <span>{c.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
+          )}
+          {/* Input bar — always rendered, always last child, so its on-screen position never moves */}
+          {renderInputWrapper()}
+        </motion.div>
 
-              {/* Input */}
-              {renderInputArea()}
-            </motion.div>
-          </>
-        )}
         <FrameShadowViewer open={frameViewerOpen} onClose={() => setFrameViewerOpen(false)} locale={locale} />
-      </AnimatePresence>
+      </>
     );
   }
 
@@ -1061,7 +1118,8 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
   return (
     <div className="flex flex-col h-full">
       {renderMessages()}
-      {renderInputArea()}
+      {renderInputExtras()}
+      {renderInputWrapper()}
       <FrameShadowViewer open={frameViewerOpen} onClose={() => setFrameViewerOpen(false)} locale={locale} />
     </div>
   );

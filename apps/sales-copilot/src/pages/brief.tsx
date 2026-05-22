@@ -513,7 +513,7 @@ export default function BriefMePage() {
       </AnimatePresence>
       
       {/* Header */}
-      <header className="fixed top-0 left-0 right-0 z-40 glass-surface border-b border-border" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+      <header className="fixed top-0 left-0 right-0 z-40 bg-background/80 backdrop-blur-md border-b border-border" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
         <div className="flex items-center justify-between h-14 px-4">
           <button
             onClick={() => navigate('/')}

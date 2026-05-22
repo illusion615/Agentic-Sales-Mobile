@@ -340,7 +340,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   return (
     <div className="flex flex-col h-full overflow-hidden" style={{ background: 'linear-gradient(180deg, var(--scm-gradient-start) 0%, var(--scm-gradient-end) 100%)' }}>
       {/* Header */}
-      <header className="sticky top-0 z-40 glass-surface border-b border-border/50 safe-area-top">
+      <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-md border-b border-border/50 safe-area-top">
         <div className="flex items-center justify-between h-14 px-4">
           <button
             onClick={onClose}
@@ -585,6 +585,8 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                     : 'When enabled, AI responses will appear word by word with typing effect'}
                 </p>
               </div>
+
+              {/* New bottom dock (ActionDock) toggle */}
 
               {/* Intent detection mode toggle (Frame multi-intent vs Legacy single-LLM) */}
               <div className="pt-3 border-t border-border/30">

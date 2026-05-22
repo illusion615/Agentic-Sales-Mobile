@@ -255,7 +255,7 @@ export default function ActivityCapturePage() {
           id: opp.id,
           name: opp.name1,
           amount: opp.totalamount,
-          stage: opp.stageKey,
+          stage: opp.stage,
         }));
 
       const systemPrompt = locale === 'zh-Hans'
@@ -403,8 +403,8 @@ Opportunity intent: ${activityData.opportunityIntent}`;
         // Create new activity
         await createActivity.mutateAsync({
           title,
-          typeKey: 'TypeKey0', // visit
-          draftstatusKey: 'DraftstatusKey1', // confirmed
+          type: 'visit', // visit
+          draftStatus: 'confirmed', // confirmed
           ownerid: user?.objectId || '',
           scheduleddate: new Date(formData.visitDate).toISOString(),
           notes,
@@ -429,12 +429,12 @@ Opportunity intent: ${activityData.opportunityIntent}`;
         
         if (oppAnalysis?.hasOpportunity) {
           const stageKeyMap: Record<string, string> = {
-            prospecting: 'StageKey0',
-            qualification: 'StageKey1',
-            proposal: 'StageKey2',
-            negotiation: 'StageKey3',
-            won: 'StageKey4',
-            lost: 'StageKey5',
+            prospecting: 'prospecting',
+            qualification: 'qualification',
+            proposal: 'proposal',
+            negotiation: 'negotiation',
+            won: 'won',
+            lost: 'lost',
           };
 
           if (oppAnalysis.matchingOpportunityId) {
@@ -446,7 +446,7 @@ Opportunity intent: ${activityData.opportunityIntent}`;
                 changedFields: {
                   lastaction: formData.result,
                   confidence: oppAnalysis.confidence,
-                  ...(oppAnalysis.stage && { stageKey: stageKeyMap[oppAnalysis.stage] as 'StageKey0' | 'StageKey1' | 'StageKey2' | 'StageKey3' | 'StageKey4' | 'StageKey5' }),
+                  ...(oppAnalysis.stage && { stage: stageKeyMap[oppAnalysis.stage] as 'prospecting' | 'qualification' | 'proposal' | 'negotiation' | 'won' | 'lost' }),
                   ...(oppAnalysis.expectedCloseDate && { expectedclosedate: oppAnalysis.expectedCloseDate }),
                 },
               });
@@ -467,7 +467,7 @@ Opportunity intent: ${activityData.opportunityIntent}`;
                 // Set account lookup - required field
                 account: { id: targetAccount.id, name1: targetAccount.name1 },
                 totalamount: oppAnalysis.totalAmount || 0,
-                stageKey: (stageKeyMap[oppAnalysis.stage || 'prospecting'] || 'StageKey0') as 'StageKey0' | 'StageKey1' | 'StageKey2' | 'StageKey3' | 'StageKey4' | 'StageKey5',
+                stage: (stageKeyMap[oppAnalysis.stage || 'prospecting'] || 'prospecting') as 'prospecting' | 'qualification' | 'proposal' | 'negotiation' | 'won' | 'lost',
                 confidence: oppAnalysis.confidence || 50,
                 ownerid: user?.objectId || '',
                 lastaction: formData.result,
@@ -487,7 +487,8 @@ Opportunity intent: ${activityData.opportunityIntent}`;
       // Navigate back - use the canonical activity ID
       navigate(isEditMode && activityId ? `/activities/${activityId}` : '/home');
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'Failed to save activity');
+      // Toast is shown by the global MutationCache.onError handler.
+      console.error('Failed to save activity:', error);
     } finally {
       setIsProcessing(false);
     }
@@ -507,7 +508,7 @@ Opportunity intent: ${activityData.opportunityIntent}`;
   if (isEditMode && isLoadingActivity) {
     return (
       <div className="h-screen flex flex-col bg-background overflow-hidden">
-        <header className="fixed top-0 left-0 right-0 z-40 glass-surface border-b border-border/50 safe-area-top">
+        <header className="fixed top-0 left-0 right-0 z-40 bg-background/80 backdrop-blur-md border-b border-border/50 safe-area-top">
           <div className="flex items-center justify-between h-14 px-4">
             <button
               onClick={() => navigate('/')}
@@ -531,7 +532,7 @@ Opportunity intent: ${activityData.opportunityIntent}`;
   if (isEditMode && !isLoadingActivity && !existingActivity) {
     return (
       <div className="h-screen flex flex-col bg-background overflow-hidden">
-        <header className="fixed top-0 left-0 right-0 z-40 glass-surface border-b border-border/50 safe-area-top">
+        <header className="fixed top-0 left-0 right-0 z-40 bg-background/80 backdrop-blur-md border-b border-border/50 safe-area-top">
           <div className="flex items-center justify-between h-14 px-4">
             <button
               onClick={() => navigate('/')}
@@ -569,7 +570,7 @@ Opportunity intent: ${activityData.opportunityIntent}`;
       )}
 
       {/* Header */}
-      <header className="fixed top-0 left-0 right-0 z-40 glass-surface border-b border-border/50 safe-area-top">
+      <header className="fixed top-0 left-0 right-0 z-40 bg-background/80 backdrop-blur-md border-b border-border/50 safe-area-top">
         <div className="flex items-center justify-between h-14 px-4">
           <button
             onClick={() => navigate('/')}

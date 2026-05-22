@@ -1257,7 +1257,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           const isBatchDraftFunction = response.functionCalled === 'batchDraft' && response.success && response.functionResult;
           
           // Check if response is a fuzzy match function
-          const isFuzzyMatchFunction = response.functionCalled && ['fuzzyMatchAccount', 'fuzzyMatchContact', 'fuzzyMatchOpportunity'].includes(response.functionCalled);
+          const isFuzzyMatchFunction = response.functionCalled && ['fuzzyMatchAccount', 'fuzzyMatchContact', 'fuzzyMatchOpportunity', 'fuzzyMatchActivity'].includes(response.functionCalled);
           
           if (isBatchDraftFunction) {
             // Create a batch-form-card message for multiple drafts

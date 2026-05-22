@@ -28,9 +28,9 @@ import { useCreateAccount, useAccountList } from '@/generated/hooks/use-account'
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useContactList } from '@/generated/hooks/use-contact';
 import { touchAccountLastContacted } from '@/lib/account-touch';
-import type { Activity, ActivityTypeKey, ActivityDraftstatusKey } from '@/generated/models/activity-model';
-import type { Opportunity, OpportunityStageKey } from '@/generated/models/opportunity-model';
-import type { Account, AccountRegionKey, AccountTierKey } from '@/generated/models/account-model';
+import type { Activity } from '@/generated/models/activity-model';
+import type { Opportunity } from '@/generated/models/opportunity-model';
+import type { Account } from '@/generated/models/account-model';
 import { useUser } from '@/hooks/use-user';
 import { useCreateContact } from '@/generated/hooks/use-contact';
 import type { Contact } from '@/generated/models/contact-model';
@@ -42,50 +42,6 @@ export interface FormCardData {
   data: Record<string, unknown>;
   status?: 'pending' | 'confirmed' | 'modified';
   createdRecordId?: string;
-}
-
-/**
- * Pull a human-readable message out of any error shape we might receive.
- * Dataverse SDK rejects with plain objects whose `.message` is itself a JSON
- * string wrapping the real error, so we peel that recursively.
- */
-function formatCreateError(err: unknown): string {
-  return peelErrorMessage(err) || 'unknown error';
-}
-
-function peelErrorMessage(err: unknown, depth = 0): string {
-  if (depth > 4) return '';
-  if (err == null) return '';
-  if (err instanceof Error) return err.message;
-  if (typeof err === 'string') {
-    const trimmed = err.trim();
-    if (trimmed.startsWith('{')) {
-      try {
-        return peelErrorMessage(JSON.parse(trimmed), depth + 1);
-      } catch {
-        return trimmed;
-      }
-    }
-    return trimmed;
-  }
-  if (typeof err === 'object') {
-    const e = err as Record<string, unknown>;
-    const candidates: unknown[] = [
-      e.message,
-      e.error,
-      (e.body as Record<string, unknown> | undefined)?.error,
-      (e.body as Record<string, unknown> | undefined)?.message,
-      e.body,
-      e.code,
-      e.statusText,
-    ];
-    for (const c of candidates) {
-      const m = peelErrorMessage(c, depth + 1);
-      if (m) return m;
-    }
-    try { return JSON.stringify(err); } catch { return Object.prototype.toString.call(err); }
-  }
-  return String(err);
 }
 
 interface FormCardProps {
@@ -942,16 +898,7 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
       const { type } = formCard;
 
       if (type === 'activity') {
-        // Create activity
-        const typeKeyMap: Record<string, ActivityTypeKey> = {
-          visit: 'TypeKey0',
-          call: 'TypeKey1',
-          meeting: 'TypeKey2',
-          email: 'TypeKey3',
-          other: 'TypeKey4',
-        };
-        const activityType = formData.type as string || 'visit';
-        const typeKey = typeKeyMap[activityType] || 'TypeKey0';
+        const activityType = (formData.type as string) || 'visit';
         
         // Use accountId directly if provided
         let targetAccount: Account | undefined;
@@ -1015,20 +962,17 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
         if (formData.result) notesParts.push(`结果: ${formData.result}`);
         if (formData.nextStep) notesParts.push(`下一步: ${formData.nextStep}`);
 
-        // I-8 Slice A: map temporalMode -> draftstatusKey
-        // planned   -> Confirmed (open activity scheduled in the future)
-        // completed -> Completed (activity already happened)
-        // unspecified / undefined -> Draft (zero-regression default)
+        // I-8 Slice A: map temporalMode -> draftStatus label
         const temporalMode = formData.temporalMode as 'planned' | 'completed' | 'unspecified' | undefined;
-        const draftstatusKey: ActivityDraftstatusKey =
-          temporalMode === 'completed' ? 'DraftstatusKey2'
-          : temporalMode === 'planned' ? 'DraftstatusKey1'
-          : 'DraftstatusKey0';
+        const draftStatus: string =
+          temporalMode === 'completed' ? 'completed'
+          : temporalMode === 'planned' ? 'confirmed'
+          : 'draft';
 
         const createInput: Omit<Activity, 'id'> = {
           title: formData.title as string || '',
-          typeKey,
-          draftstatusKey,
+          type: activityType,
+          draftStatus,
           ownerid: user?.objectId || 'unknown',
           scheduleddate: formData.scheduledDate as string || new Date().toISOString(),
           notes: notesParts.join(' | ') || '',
@@ -1047,17 +991,7 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
         copilot.updateFormCardStatus(messageId, 'confirmed', undefined, createdActivity.id);
         toast.success(locale === 'zh-Hans' ? '活动已创建' : 'Activity created');
       } else if (type === 'opportunity') {
-        // Create opportunity
-        const stageKeyMap: Record<string, OpportunityStageKey> = {
-          prospecting: 'StageKey0',
-          qualification: 'StageKey1',
-          proposal: 'StageKey2',
-          negotiation: 'StageKey3',
-          won: 'StageKey4',
-          lost: 'StageKey5',
-        };
-        const stage = formData.stage as string || 'prospecting';
-        const stageKey = stageKeyMap[stage] || 'StageKey0';
+        const stage = (formData.stage as string) || 'prospecting';
         
         let targetAccount: Account | undefined;
         const accountIdFromData = formData.accountId as string;
@@ -1095,7 +1029,7 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
           name1: oppName,
           account: { id: targetAccount.id, name1: targetAccount.name1 },
           totalamount: formData.amount as number || 0,
-          stageKey,
+          stage,
           confidence: formData.confidence as number || 50,
           expectedclosedate: (formData.expectedCloseDate as string) || undefined,
           lastaction: formData.lastAction as string || '',
@@ -1113,29 +1047,14 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
           targetAccount.name1 || '',
         );
       } else if (type === 'account') {
-        // Create account
-        const regionKeyMap: Record<string, AccountRegionKey> = {
-          '华东': 'RegionKey0',
-          '华北': 'RegionKey1',
-          '华南': 'RegionKey2',
-          '西南': 'RegionKey3',
-        };
-        const tierKeyMap: Record<string, AccountTierKey> = {
-          S: 'TierKey0',
-          A: 'TierKey1',
-          B: 'TierKey2',
-          C: 'TierKey3',
-        };
-        const region = formData.region as string || '';
-        const tier = formData.tier as string || '';
-        const regionKey = regionKeyMap[region] || 'RegionKey0';
-        const tierKey = tierKeyMap[tier] || 'TierKey3';
-        
+        const region = (formData.region as string) || '华东';
+        const tier = (formData.tier as string) || 'C';
+
         const createdAccount = await createAccount.mutateAsync({
           name1: formData.name as string || '',
           industry: formData.industry as string || '',
-          regionKey,
-          tierKey,
+          region,
+          tier,
           phone: formData.phone as string || '',
           email: formData.email as string || '',
           address: formData.address as string || '',
@@ -1205,8 +1124,7 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
       onStatusChange?.('confirmed');
     } catch (error) {
       console.error('Failed to create record:', error);
-      const errMsg = formatCreateError(error);
-      toast.error(locale === 'zh-Hans' ? `创建失败: ${errMsg}` : `Failed to create: ${errMsg}`);
+      // Toast is shown by the global MutationCache.onError handler in query-client.ts.
     } finally {
       setIsConfirming(false);
     }

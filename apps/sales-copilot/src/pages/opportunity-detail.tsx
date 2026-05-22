@@ -44,14 +44,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useAccount } from '@/generated/hooks/use-account';
 import { useActivityList } from '@/generated/hooks/use-activity';
 import { useEntityAISummary, useWithAISummaryTrigger } from '@/hooks/use-ai-summary-trigger';
-import {
-  OpportunityStageKeyToLabel,
-  OpportunityConfidencetrendKeyToLabel,
-} from '@/generated/models/opportunity-model';
-import type { OpportunityStageKey, OpportunityConfidencetrendKey } from '@/generated/models/opportunity-model';
-import { ActivityTypeKeyToLabel, ActivityDraftstatusKeyToLabel } from '@/generated/models/activity-model';
-import type { Activity, ActivityTypeKey, ActivityDraftstatusKey } from '@/generated/models/activity-model';
-import { toast } from 'sonner';
+import {  } from '@/generated/models/opportunity-model';
+import type { Activity } from '@/generated/models/activity-model';import { toast } from 'sonner';
 import { getLocale, t } from '@/lib/i18n';
 import { FloatingQuickActions } from '@/components/floating-quick-actions';
 import { useCopilot } from '@/contexts/copilot-context';
@@ -83,32 +77,32 @@ function formatDate(dateStr?: string): string {
   return new Date(dateStr).toLocaleDateString();
 }
 
-function getStageIndex(stageKey: OpportunityStageKey): number {
-  const label = OpportunityStageKeyToLabel[stageKey];
+function getStageIndex(stage: string): number {
+  const label = stage;
   return stages.indexOf(label);
 }
 
-function getTrendIcon(trendKey?: OpportunityConfidencetrendKey) {
+function getTrendIcon(trendKey?: string) {
   if (!trendKey) return null;
-  const label = OpportunityConfidencetrendKeyToLabel[trendKey];
+  const label = trendKey;
   if (label === 'up') return <TrendingUp className="w-4 h-4 text-emerald-500" />;
   if (label === 'down') return <TrendingDown className="w-4 h-4 text-rose-500" />;
   return <Minus className="w-4 h-4 text-muted-foreground" />;
 }
 
-function getActivityTypeIcon(typeKey: ActivityTypeKey | null | undefined): React.ComponentType<{ className?: string }> {
-  switch (typeKey) {
-    case 'TypeKey0': return MapPin; // visit
-    case 'TypeKey1': return Phone; // call
-    case 'TypeKey2': return Calendar; // meeting
-    case 'TypeKey3': return Mail; // email
+function getActivityTypeIcon(type: string | null | undefined): React.ComponentType<{ className?: string }> {
+  switch (type) {
+    case 'visit': return MapPin; // visit
+    case 'call': return Phone; // call
+    case 'meeting': return Calendar; // meeting
+    case 'email': return Mail; // email
     default: return CheckSquare;
   }
 }
 
-function StageProgress({ stageKey, confidence }: { stageKey: OpportunityStageKey; confidence?: number }) {
-  const currentIndex = getStageIndex(stageKey);
-  const stageLabel = OpportunityStageKeyToLabel[stageKey];
+function StageProgress({ stage, confidence }: { stage: string; confidence?: number }) {
+  const currentIndex = getStageIndex(stage);
+  const stageLabel = stage;
   const isClosed = stageLabel === 'won' || stageLabel === 'lost';
 
   const displayStages = stages.slice(0, 4); // Only show active stages
@@ -188,8 +182,8 @@ export default function OpportunityDetailPage() {
     if (!opportunity) return;
     setIsRefreshingAI(true);
     triggerForEntity('opportunity', opportunity.id, JSON.parse(JSON.stringify(opportunity)), {
-      account: account ? { id: account.id, name: account.name1, tier: account.tierKey } : undefined,
-      activities: activities.map((a: Activity) => ({ id: a.id, title: a.title, type: a.typeKey, date: a.scheduleddate })),
+      account: account ? { id: account.id, name: account.name1, tier: account.tier } : undefined,
+      activities: activities.map((a: Activity) => ({ id: a.id, title: a.title, type: a.type, date: a.scheduleddate })),
     });
     setTimeout(() => {
       refetchAISummary();
@@ -213,12 +207,13 @@ export default function OpportunityDetailPage() {
       toast.success(locale === 'zh-Hans' ? '商机已删除' : 'Opportunity deleted');
       navigate('/opportunities');
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'Failed to delete');
+      // Toast is shown by the global MutationCache.onError handler.
+      console.error('Failed to delete opportunity:', error);
       setIsDeleting(false);
     }
   };
 
-  const stageLabel = opportunity ? OpportunityStageKeyToLabel[opportunity.stageKey] : '';
+  const stageLabel = opportunity ? opportunity.stage : '';
   const isClosed = stageLabel === 'won' || stageLabel === 'lost';
 
   // Copilot context for agent awareness
@@ -228,7 +223,7 @@ export default function OpportunityDetailPage() {
   useEffect(() => {
     if (!opportunity) return;
     
-    const stageDisplayLabel = OpportunityStageKeyToLabel[opportunity.stageKey];
+    const stageDisplayLabel = opportunity.stage;
     
     copilot.setPageContext({
       currentPage: locale === 'zh-Hans' ? '商机详情' : 'Opportunity Detail',
@@ -243,7 +238,7 @@ export default function OpportunityDetailPage() {
         totalAmount: opportunity.totalamount,
         stage: stageDisplayLabel,
         confidence: opportunity.confidence,
-        confidenceTrend: opportunity.confidencetrendKey,
+        confidenceTrend: opportunity.confidenceTrend,
         expectedCloseDate: opportunity.expectedclosedate,
         daysUntilClose,
         activitiesCount: activities.length,
@@ -390,7 +385,7 @@ export default function OpportunityDetailPage() {
                 </Badge>
                 {opportunity.confidence && (
                   <Badge variant="outline" className="gap-1">
-                    {getTrendIcon(opportunity.confidencetrendKey)}
+                    {getTrendIcon(opportunity.confidenceTrend)}
                     {opportunity.confidence}%
                   </Badge>
                 )}
@@ -401,7 +396,7 @@ export default function OpportunityDetailPage() {
           {/* Stage Progress */}
           {!isClosed && (
             <div className="mt-4 pt-4 border-t border-border/50">
-              <StageProgress stageKey={opportunity.stageKey} confidence={opportunity.confidence} />
+              <StageProgress stage={opportunity.stage} confidence={opportunity.confidence} />
             </div>
           )}
 
@@ -498,7 +493,7 @@ export default function OpportunityDetailPage() {
                       {formatDate(opportunity.expectedclosedate)}
                     </span>
                   </div>
-                  {(opportunity.closedon || opportunity.stageKey === 'StageKey4' || opportunity.stageKey === 'StageKey5') && (
+                  {(opportunity.closedon || opportunity.stage === 'won' || opportunity.stage === 'lost') && (
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-muted-foreground flex items-center gap-2">
                         <CheckCircle2 className="w-4 h-4" />
@@ -558,7 +553,7 @@ export default function OpportunityDetailPage() {
                     >
                       <div className="flex gap-3">
                         {(() => {
-                          const Icon = getActivityTypeIcon(activity.typeKey);
+                          const Icon = getActivityTypeIcon(activity.type);
                           return (
                             <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
                               <Icon className="w-4 h-4 text-primary" />
@@ -570,21 +565,21 @@ export default function OpportunityDetailPage() {
                             <h4 className="text-sm font-medium text-foreground truncate">
                               {activity.title}
                             </h4>
-                            {activity.draftstatusKey && (
+                            {activity.draftStatus && (
                               <Badge
                                 variant="outline"
                                 className={cn(
                                   'text-[10px]',
-                                  activity.draftstatusKey === 'DraftstatusKey2' && 'text-emerald-600 border-emerald-200'
+                                  activity.draftStatus === 'completed' && 'text-emerald-600 border-emerald-200'
                                 )}
                               >
-                                {ActivityDraftstatusKeyToLabel[activity.draftstatusKey as ActivityDraftstatusKey]}
+                                {activity.draftStatus}
                               </Badge>
                             )}
                           </div>
                           <p className="text-xs text-muted-foreground mb-1">
                             {formatDate(activity.scheduleddate)}
-                            {activity.typeKey && ` • ${ActivityTypeKeyToLabel[activity.typeKey as ActivityTypeKey]}`}
+                            {activity.type && ` • ${activity.type}`}
                           </p>
                           {activity.notes && (
                             <p className="text-xs text-muted-foreground line-clamp-2">

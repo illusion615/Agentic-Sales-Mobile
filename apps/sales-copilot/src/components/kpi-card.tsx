@@ -9,8 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Button } from '@/components/ui/button';
 import { Calendar as CalendarPicker } from '@/components/ui/calendar';
 import type { BusinessInsight } from '@/generated/models/business-insight-model';
-import type { Activity, ActivityTypeKey } from '@/generated/models/activity-model';
-import { ActivityTypeKeyToLabel } from '@/generated/models/activity-model';
+import type { Activity } from '@/generated/models/activity-model';
 
 // Animation variants
 const itemVariants = {
@@ -264,7 +263,7 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
       if (!activitiesByDate[dateStr]) {
         activitiesByDate[dateStr] = [];
       }
-      const typeLabel = ActivityTypeKeyToLabel[activity.typeKey] || 'other';
+      const typeLabel = activity.type || 'other';
       // Check if this type already exists for the date
       const existingType = activitiesByDate[dateStr].find((t: { type: string; count: number }) => t.type === typeLabel);
       if (existingType) {
@@ -278,7 +277,7 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
     const totalActivities = monthActivities.length;
     const typeCounts: Record<string, number> = {};
     monthActivities.forEach((activity: Activity) => {
-      const typeLabel = ActivityTypeKeyToLabel[activity.typeKey] || 'other';
+      const typeLabel = activity.type || 'other';
       typeCounts[typeLabel] = (typeCounts[typeLabel] || 0) + 1;
     });
     

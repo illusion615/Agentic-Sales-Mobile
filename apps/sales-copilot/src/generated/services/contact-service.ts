@@ -2,6 +2,7 @@ import { Crf5c_contactsService } from './Crf5c_contactsService';
 import type { Crf5c_contacts } from '../models/Crf5c_contactsModel';
 import type { IGetAllOptions } from '../models/CommonModels';
 import type { Contact } from '../models/contact-model';
+import { dvLookupName, requireCreated, requireId } from './_adapter-utils';
 
 function fromDv(dv: Crf5c_contacts): Contact {
   const d = dv as unknown as Record<string, unknown>;
@@ -10,7 +11,7 @@ function fromDv(dv: Crf5c_contacts): Contact {
     fullname: dv.crf5c_fullname,
     account: {
       id: (d._crf5c_account_value as string) ?? '',
-      name1: (d.crf5c_accountname as string) ?? '',
+      name1: dvLookupName(d, '_crf5c_account_value'),
     },
     email: dv.crf5c_email,
     phone: dv.crf5c_phone,
@@ -32,20 +33,23 @@ export class ContactService {
   static async create(record: Omit<Contact, 'id'>): Promise<Contact> {
     const result = await Crf5c_contactsService.create(toDv(record) as any);
     if (!result.success) throw result.error;
-    return fromDv(result.data!);
+    return fromDv(requireCreated(result.data, 'crf5c_contactid', 'Contact'));
   }
 
   static async update(id: string, changedFields: Partial<Omit<Contact, 'id'>>): Promise<Contact> {
+    requireId(id, 'update', 'Contact');
     const result = await Crf5c_contactsService.update(id, toDv(changedFields) as any);
     if (!result.success) throw result.error;
     return fromDv(result.data!);
   }
 
   static async delete(id: string): Promise<void> {
+    requireId(id, 'delete', 'Contact');
     await Crf5c_contactsService.delete(id);
   }
 
   static async get(id: string): Promise<Contact> {
+    requireId(id, 'get', 'Contact');
     const result = await Crf5c_contactsService.get(id);
     if (!result.success) throw result.error;
     return fromDv(result.data!);

@@ -11,21 +11,13 @@ import { useAccountList } from '@/generated/hooks/use-account';
 
 import { useCopilotConversationList, useUpdateCopilotConversation, useCreateCopilotConversation } from '@/generated/hooks/use-copilot-conversation';
 import { useCreateBusinessInsight, useBusinessInsightList, useDeleteBusinessInsight } from '@/generated/hooks/use-business-insight';
-import type { BusinessInsightTypeKey, BusinessInsightReferencetypeKey } from '@/generated/models/business-insight-model';
-
-
 import { useLocale } from '@/lib/i18n';
 import { t, getGreeting, getChatFontClass, getThinkingDotStyle, getAutoPlayAgentResponse, getSelectedVoice, findMatchingSystemVoice, getVoiceSummaryEnabled, generateVoiceSummary, getAgentFramework, getHomeHeaderWidget, type Locale, type ThinkingDotStyle, type HomeHeaderWidget } from '@/lib/i18n';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { formatCurrencyCompact, formatCurrencyFull } from '@/lib/format-currency';
 
 import { SettingsPanel } from '@/components/settings-panel';
-import type { Activity } from '@/generated/models/activity-model';
-import type { Opportunity, OpportunityStageKey } from '@/generated/models/opportunity-model';
-import type { Account } from '@/generated/models/account-model';
-import type { CopilotConversation } from '@/generated/models/copilot-conversation-model';
-import { OpportunityStageKeyToLabel, ActivityDraftstatusKeyToLabel, ActivityTypeKeyToLabel } from '@/generated/models';
-import { useCopilotConfigured } from '@/hooks/use-copilot-configured';
+import type { Activity } from '@/generated/models/activity-model';import type { Opportunity } from '@/generated/models/opportunity-model';import type { Account } from '@/generated/models/account-model';import type { CopilotConversation } from '@/generated/models/copilot-conversation-model';import { useCopilotConfigured } from '@/hooks/use-copilot-configured';
 import { useFirstMount } from '@/hooks/use-first-mount';
 import { DynamicDataRenderer, tryParseJson } from '@/components/dynamic-data-renderer';
 import { FormCard } from '@/components/form-card';
@@ -34,8 +26,8 @@ import { RecordListCard } from '@/components/record-list-card';
 // bell-triggered Insights sheet). Keep the path available via brief-me page.
 import { KPICards, type KPIData, type AgendaItem, type AtRiskClient } from '@/components/kpi-card';
 import { MarkdownContent } from '@/components/markdown-content';
-import type { BusinessInsight } from '@/generated/models/business-insight-model';
-import { useCopilot, type ChatMessage } from '@/contexts/copilot-context';
+import type { BusinessInsight } from '@/generated/models/business-insight-model';import { useCopilot, type ChatMessage } from '@/contexts/copilot-context';
+import { useRegisterDockChips, type ActionDockChip } from '@/contexts/action-dock-context';
 
 
 
@@ -237,13 +229,13 @@ function QuickActionChip({ icon: Icon, label, onClick }: QuickActionProps) {
 }
 
 // Helper to check if stage is won or lost
-function isClosedStage(stageKey: OpportunityStageKey): boolean {
-  const label = OpportunityStageKeyToLabel[stageKey];
+function isClosedStage(stage: string): boolean {
+  const label = stage;
   return label === 'won' || label === 'lost';
 }
 
-function isWonStage(stageKey: OpportunityStageKey): boolean {
-  return OpportunityStageKeyToLabel[stageKey] === 'won';
+function isWonStage(stage: string): boolean {
+  return stage === 'won';
 }
 
 // Uses shared MarkdownContent component from @/components/markdown-content
@@ -450,7 +442,7 @@ export default function HomeDashboard() {
   const { data: conversations = [], isLoading: isLoadingConversations } = useCopilotConversationList();
   const updateConversation = useUpdateCopilotConversation();
   const createConversation = useCreateCopilotConversation();
-  const { data: businessInsights = [], refetch: refetchBusinessInsights, isLoading: isLoadingBusinessInsights } = useBusinessInsightList({ filter: 'isactive eq 1', orderBy: ['displayorder asc'] });
+  const { data: businessInsights = [], refetch: refetchBusinessInsights, isLoading: isLoadingBusinessInsights } = useBusinessInsightList({ filter: 'isactive eq true', orderBy: ['displayorder asc'] });
   const createBusinessInsight = useCreateBusinessInsight();
   const deleteBusinessInsight = useDeleteBusinessInsight();
   const updateActivity = useUpdateActivity();
@@ -486,7 +478,7 @@ export default function HomeDashboard() {
 
     // Active opportunities (not won/lost)
     const activeOpps = opportunities.filter(
-      (o: Opportunity) => !isClosedStage(o.stageKey)
+      (o: Opportunity) => !isClosedStage(o.stage)
     );
 
     // Hot opportunities - top 3 active opportunities by amount
@@ -568,14 +560,14 @@ export default function HomeDashboard() {
     const activitiesThisWeek = activities.length;
     const weeklyTarget = 15; // Default target
 
-    // Activity breakdown - use typeKey
+    // Activity breakdown - use type
     const visitCount = activities.filter((a: Activity) => {
-      const typeLabel = ActivityTypeKeyToLabel[a.typeKey];
+      const typeLabel = a.type;
       return typeLabel === 'visit' || typeLabel === 'meeting';
     }).length;
     
     const callCount = activities.filter((a: Activity) => {
-      const typeLabel = ActivityTypeKeyToLabel[a.typeKey];
+      const typeLabel = a.type;
       return typeLabel === 'call';
     }).length;
 
@@ -592,7 +584,7 @@ export default function HomeDashboard() {
     });
     
     const agendaItems: AgendaItem[] = todayActivities.slice(0, 5).map((a: Activity, idx: number) => {
-      const typeLabel = ActivityTypeKeyToLabel[a.typeKey];
+      const typeLabel = a.type;
       const type = typeLabel === 'call' ? 'call' :
                    typeLabel === 'visit' || typeLabel === 'meeting' ? 'visit' :
                    typeLabel === 'email' ? 'proposal' : 'follow-up';
@@ -615,12 +607,12 @@ export default function HomeDashboard() {
       // Any activity scheduled before today (not including today)
       const isBeforeToday = scheduled < todayStart;
       // NOT completed
-      const isNotCompleted = ActivityDraftstatusKeyToLabel[a.draftstatusKey] !== 'completed';
+      const isNotCompleted = a.draftStatus !== 'completed';
       return isBeforeToday && isNotCompleted;
     });
     
     const overdueItems: AgendaItem[] = overdueActivities.map((a: Activity, idx: number) => {
-      const typeLabel = ActivityTypeKeyToLabel[a.typeKey];
+      const typeLabel = a.type;
       const type = typeLabel === 'call' ? 'call' :
                    typeLabel === 'visit' || typeLabel === 'meeting' ? 'visit' :
                    typeLabel === 'email' ? 'proposal' : 'follow-up';
@@ -640,7 +632,7 @@ export default function HomeDashboard() {
     // No fallback placeholder data - show real data only
 
     const agendaCompleted = todayActivities.filter(
-      (a: Activity) => ActivityDraftstatusKeyToLabel[a.draftstatusKey] === 'completed'
+      (a: Activity) => a.draftStatus === 'completed'
     ).length;
 
     // Quarterly Performance calculation
@@ -655,7 +647,7 @@ export default function HomeDashboard() {
     // NOT silently absorb it here, otherwise the same opp would be counted in
     // every quarter forever.
     const wonOpportunities = opportunities.filter((o: Opportunity) => {
-      if (!isWonStage(o.stageKey)) return false;
+      if (!isWonStage(o.stage)) return false;
       if (!o.closedon) return false;
       const d = new Date(o.closedon);
       if (Number.isNaN(d.getTime())) return false;
@@ -986,13 +978,13 @@ export default function HomeDashboard() {
     try {
       await updateActivity.mutateAsync({
         id: activityId,
-        changedFields: { draftstatusKey: 'DraftstatusKey2' as const } // 'completed'
+        changedFields: { draftStatus: 'completed' as const } // 'completed'
       });
       toast.success(locale === 'zh-Hans' ? '已标记完成' : 'Marked as done');
       refetchActivities();
     } catch (error) {
+      // Toast is shown by the global MutationCache.onError handler.
       console.error('Failed to mark activity as done:', error);
-      toast.error(locale === 'zh-Hans' ? '操作失败' : 'Operation failed');
     }
   }, [updateActivity, refetchActivities, locale]);
 
@@ -1005,8 +997,8 @@ export default function HomeDashboard() {
       toast.success(locale === 'zh-Hans' ? '已重新安排' : 'Rescheduled');
       refetchActivities();
     } catch (error) {
+      // Toast is shown by the global MutationCache.onError handler.
       console.error('Failed to reschedule activity:', error);
-      toast.error(locale === 'zh-Hans' ? '操作失败' : 'Operation failed');
     }
   }, [updateActivity, refetchActivities, locale]);
 
@@ -1252,6 +1244,18 @@ export default function HomeDashboard() {
     handleBriefMeStop();
     setBriefMeExpanded(false);
   };
+
+  // Register page-scoped chips into the global ActionDock.
+  const dockChips = useMemo<ActionDockChip[]>(
+    () => [
+      { id: 'new-visit', icon: Plus, label: t('newVisit', locale), onClick: handleNewVisit },
+      { id: 'view-opps', icon: Eye, label: t('viewOpportunities', locale), onClick: handleViewOpportunities },
+      { id: 'brief-me', icon: Radio, label: t('briefMe', locale), onClick: handleBriefMe },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [locale],
+  );
+  useRegisterDockChips(dockChips);
 
   const formatBriefMeTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -1574,45 +1578,45 @@ ${agentResponse}`;
         const validUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // Valid for 24 hours
         
         const savePromises = parsedInsights.map((item: { insight: string; rationale: string; type: string }, idx: number) => {
-          // Get category info for title and typeKey based on insight type
-          const typeMapping: Record<string, { title: string; typeKey: BusinessInsightTypeKey }> = {
+          // Get category info for title and type based on insight type
+          const typeMapping: Record<string, { title: string; type: string }> = {
             'followup': {
               title: locale === 'zh-Hans' ? '今日跟进提醒' : 'Follow-up Alert',
-              typeKey: 'TypeKey1' as BusinessInsightTypeKey
+              type: 'call'
             },
             'closing': {
               title: locale === 'zh-Hans' ? '本周成交预测' : 'Closing This Week',
-              typeKey: 'TypeKey2' as BusinessInsightTypeKey
+              type: 'meeting'
             },
             'risk': {
               title: locale === 'zh-Hans' ? '风险商机警告' : 'At-Risk Alert',
-              typeKey: 'TypeKey0' as BusinessInsightTypeKey
+              type: 'visit'
             },
             'revisit': {
               title: locale === 'zh-Hans' ? '待回访客户' : 'Pending Revisit',
-              typeKey: 'TypeKey0' as BusinessInsightTypeKey
+              type: 'visit'
             },
             'performance': {
               title: locale === 'zh-Hans' ? '业绩达成分析' : 'Performance Analysis',
-              typeKey: 'TypeKey2' as BusinessInsightTypeKey
+              type: 'meeting'
             },
             'opportunity': {
               title: locale === 'zh-Hans' ? '商机动态' : 'Opportunity Update',
-              typeKey: 'TypeKey1' as BusinessInsightTypeKey
+              type: 'call'
             },
             'client': {
               title: locale === 'zh-Hans' ? '客户洞察' : 'Client Insight',
-              typeKey: 'TypeKey1' as BusinessInsightTypeKey
+              type: 'call'
             },
             'activity': {
               title: locale === 'zh-Hans' ? '活动动态' : 'Activity Update',
-              typeKey: 'TypeKey1' as BusinessInsightTypeKey
+              type: 'call'
             }
           };
           
           const categoryInfo = typeMapping[item.type] || {
             title: locale === 'zh-Hans' ? `智能洞察 #${idx + 1}` : `Smart Insight #${idx + 1}`,
-            typeKey: 'TypeKey1' as BusinessInsightTypeKey
+            type: 'call'
           };
           
           return createBusinessInsight.mutateAsync({
@@ -1625,8 +1629,8 @@ ${agentResponse}`;
             isactive: true,
             ownerid: userId || '',
             referenceidsjson: '[]',
-            referencetypeKey: 'ReferencetypeKey0' as BusinessInsightReferencetypeKey,
-            typeKey: categoryInfo.typeKey,
+            referenceType: 'client',
+            type: categoryInfo.type,
             validuntil: validUntil,
           });
         });
@@ -2694,65 +2698,15 @@ ${agentResponse}`;
 
       {/* Brief Me is now non-blocking - audio plays in background while user can interact with page */}
 
-      {/* Fixed Bottom Area - Quick Actions + Voice Mic */}
+      {/* Brief Me audio player (only visible when Brief Me is active) */}
+      {briefMeExpanded && !chatPanelExpanded && (
       <div className={cn(
-        'fixed left-0 right-0 z-40 safe-area-bottom pointer-events-none bg-scm-fade-up',
+        'fixed left-0 right-0 z-[60] safe-area-bottom pointer-events-none',
         isCopilotConfigured ? 'bottom-20' : 'bottom-0'
       )}>
-        <div className="flex flex-col items-center px-4 pb-4 pointer-events-auto">
-          {/* Quick Action Buttons - Hide when chat expanded or brief me expanded */}
+        <div className="flex flex-col items-center px-4 pb-4">
           <AnimatePresence mode="wait">
-            {!chatPanelExpanded && !briefMeExpanded && (
-              <motion.div
-                key="quick-actions"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.25, ease: 'easeOut' as const }}
-                className="flex items-center justify-center gap-2"
-              >
-                <button
-                  onClick={handleNewVisit}
-                  className={cn(
-                    'flex items-center gap-2 px-4 py-2.5',
-                    'rounded-full glass-card-hover',
-                    'text-xs font-medium text-foreground',
-                    'active:scale-95 transition-transform'
-                  )}
-                >
-                  <Plus className="w-4 h-4 text-primary" />
-                  <span>{t('newVisit', locale)}</span>
-                </button>
-
-                <button
-                  onClick={handleViewOpportunities}
-                  className={cn(
-                    'flex items-center gap-2 px-4 py-2.5',
-                    'rounded-full glass-card-hover',
-                    'text-xs font-medium text-foreground',
-                    'active:scale-95 transition-transform'
-                  )}
-                >
-                  <Eye className="w-4 h-4 text-primary" />
-                  <span>{t('viewOpportunities', locale)}</span>
-                </button>
-
-                <button
-                  onClick={handleBriefMe}
-                  className={cn(
-                    'flex items-center gap-2 px-4 py-2.5',
-                    'rounded-full glass-card-hover',
-                    'text-xs font-medium text-foreground',
-                    'active:scale-95 transition-transform'
-                  )}
-                >
-                  <Radio className="w-4 h-4 text-primary" />
-                  <span>{t('briefMe', locale)}</span>
-                </button>
-              </motion.div>
-            )}
-
-            {/* Brief Me Audio Player - replaces quick actions */}
+            {/* Brief Me Audio Player */}
             {!chatPanelExpanded && briefMeExpanded && (
               <motion.div
                 key="brief-me-player"
@@ -2760,7 +2714,7 @@ ${agentResponse}`;
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.9 }}
                 transition={{ duration: 0.25, ease: [0.25, 0.46, 0.45, 0.94] as const }}
-                className="flex items-center justify-center mb-4"
+                className="flex items-center justify-center mb-4 pointer-events-auto"
               >
                 <div
                   className={cn(
@@ -2863,6 +2817,7 @@ ${agentResponse}`;
 
         </div>
       </div>
+      )}
 
       {/* Full Screen Chat Panel */}
       <AnimatePresence>
@@ -2875,7 +2830,7 @@ ${agentResponse}`;
             className="fixed inset-0 z-[100] bg-background"
           >
             {/* Full screen header */}
-            <header className="fixed top-0 left-0 right-0 z-40 glass-surface border-b border-border/50 safe-area-top">
+            <header className="fixed top-0 left-0 right-0 z-40 bg-background/80 backdrop-blur-md border-b border-border/50 safe-area-top">
               <div className="flex items-center justify-between h-14 px-4">
                 <button
                   onClick={handleCloseFullScreen}

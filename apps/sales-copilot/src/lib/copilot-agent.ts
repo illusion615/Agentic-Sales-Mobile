@@ -17,7 +17,6 @@ import { invokeFlowForLLM } from '@/services/power-automate-service';
 import { getLocale, getIntentMode } from '@/lib/i18n';
 import { getFunctionListForPrompt, getDisplayName } from './function-registry';
 import { executeFunction } from './function-executor';
-import { ActivityTypeKeyToLabel, type ActivityTypeKey } from '@/generated/models/activity-model';
 import { 
   parseAndValidateIntent,
   isCircuitBreakerOpen, 
@@ -507,6 +506,7 @@ ${functionList}
    - 仅当用户明确询问本系统 Dataverse 里的业务数据（如"这个产品有哪些客户"、"这个产品的商机"）时，才使用本地查询函数
    - 示例(在 Product Center 页面): "这个产品有什么功能？" -> {"function": "queryCopilotStudio", "arguments": {"query": "这个产品有什么功能"}}
    - 示例(在 Product Detail 页面, productName="UltraVision X1"): "tell me about its specifications" -> {"function": "queryCopilotStudio", "arguments": {"query": "UltraVision X1 specifications"}}
+   - **⚠️ 反例（绝对不要走 queryCopilotStudio）**：用户自己的销售流程/管道/跟进/计划类问题，例如「下周跟进计划」、「suggest my next week follow up plan」、「plan my visits」、「帮我排一下下周拜访」、「我这周该见谁」、「pipeline 怎么样」、「how am I doing in customer engagement」、「这个商机下一步」。这些必须用本地函数（draftActivity / batchDraft / getSalesSummary / getTopOpportunities / getOpportunitiesClosingSoon 等），不是产品知识。判断方法：问题主语是「我/我的客户/我的商机/我的活动」=> 本地函数；问题主语是「产品/某个 SKU/规格/认证」=> queryCopilotStudio。
 5. 对于天气、通用常识等超出本地数据范围的问题，使用 "externalKnowledgeQuery"
 6. **活动拟定(draftActivity)重要规则**：当用户说"计划新活动"、"记录拜访"、"添加活动"、"创建活动"、"log activity"等：
    - **⚠️ 强制：arguments 必须包含 temporalMode 字段**，三选一："completed"/"planned"/"unspecified"。详见下面的 temporalMode 子项。该字段决定表单结构（是否显示 result/nextStep）与最终活动状态，省略会导致回归 bug。
@@ -858,6 +858,7 @@ Rules:
    - ONLY use local query functions when user explicitly asks about business data in this system's Dataverse (e.g., "which customers use this product", "opportunities for this product")
    - Example (on Product Center page): "what features does this product have?" -> {"function": "queryCopilotStudio", "arguments": {"query": "what features does this product have"}}
    - Example (on Product Detail page, productName="UltraVision X1"): "tell me about its specifications" -> {"function": "queryCopilotStudio", "arguments": {"query": "UltraVision X1 specifications"}}
+   - **⚠️ COUNTER-EXAMPLES (NEVER route to queryCopilotStudio)**: Questions about the user's own pipeline / follow-ups / planning, e.g. "suggest my next week follow up plan", "plan my visits", "who should I see this week", "how am I doing in customer engagement", "what's next on this opp", "下周跟进计划", "帮我排一下下周拜访". These MUST use local functions (draftActivity / batchDraft / getSalesSummary / getTopOpportunities / getOpportunitiesClosingSoon). Rule of thumb: subject = "my/my customers/my opps/my activities" => local function; subject = "the product / a SKU / specs / certification" => queryCopilotStudio.
 5. For weather, general knowledge, etc., use "externalKnowledgeQuery"
 6. **ACTIVITY DRAFT RULES (draftActivity)**: When user says "plan activity", "record visit", "add activity", "create activity", "log activity", "schedule meeting" etc.:
    - **⚠️ MANDATORY: arguments MUST include the temporalMode field**, one of "completed" / "planned" / "unspecified". See the TEMPORAL MODE sub-item below for cue lists. This field drives form rendering (show/hide result/nextStep) and the final activity status; omitting it is a regression bug.
@@ -2269,12 +2270,25 @@ Please provide a brief summary and analysis, do not list individual records.`;
     } else if (fnName?.includes('Opportunit') || fnName === 'getTopOpportunities' || fnName === 'getOpportunitiesClosingSoon') {
       recordList = {
         type: 'opportunity',
-        records: resultData.map((item: Record<string, unknown>) => ({
-          id: String(item.id || ''),
-          title: String(item.name1 || item.name || ''),
-          subtitle: item.estimatedvalue ? `$${(Number(item.estimatedvalue) / 1000).toFixed(0)}K` : '',
-          meta: String(item.stage || ''),
-        })),
+        records: resultData.map((item: Record<string, unknown>) => {
+          // Real opp records use `amount` + `stage` (raw stageKey) + `expectedCloseDate`; legacy fallbacks left for safety.
+          const amountRaw = (item.amount ?? item.totalamount ?? item.estimatedvalue) as number | string | undefined;
+          const amountNum = typeof amountRaw === 'number' ? amountRaw : amountRaw ? Number(amountRaw) : undefined;
+          const amountStr = amountNum != null && !Number.isNaN(amountNum)
+            ? (amountNum >= 1000 ? `$${(amountNum / 1000).toFixed(0)}K` : `$${amountNum.toFixed(0)}`)
+            : '';
+          const stageLabel = String(item.stage || '');
+          const closeRaw = (item.expectedCloseDate || item.expectedclosedate) as string | undefined;
+          const closeStr = closeRaw ? new Date(closeRaw).toLocaleDateString() : '';
+          // Stage + amount on subtitle, close-date on meta — gives boss the at-a-glance trio.
+          const subtitleParts = [stageLabel, amountStr].filter(Boolean);
+          return {
+            id: String(item.id || ''),
+            title: String(item.name1 || item.name || ''),
+            subtitle: subtitleParts.join(' · '),
+            meta: closeStr ? (isZh ? `预计成交 ${closeStr}` : `Close ${closeStr}`) : '',
+          };
+        }),
         title: isZh ? '商机列表' : 'Opportunities',
       };
     } else if (fnName === 'getContactsByAccount') {
@@ -2292,8 +2306,7 @@ Please provide a brief summary and analysis, do not list individual records.`;
       recordList = {
         type: 'activity',
         records: resultData.map((item: Record<string, unknown>) => {
-          const rawType = String(item.type || item.typeKey || '');
-          const typeLabel = ActivityTypeKeyToLabel[rawType as ActivityTypeKey] || rawType;
+          const typeLabel = String(item.type || '');
           const dateStr = (item.scheduledDate || item.scheduleddate) as string | undefined;
           return {
             id: String(item.id || ''),

@@ -89,9 +89,8 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
         ? `${EntityTypeLabels[form.type].zh}已创建` 
         : `${EntityTypeLabels[form.type].en} created`);
     } catch (error: unknown) {
-      toast.error(locale === 'zh-Hans' 
-        ? `创建失败: ${error instanceof Error ? error.message : '未知错误'}` 
-        : `Failed to create: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      // Toast is shown by the global MutationCache.onError handler.
+      console.error('Failed to create entity from additional intent:', error);
     } finally {
       setIsSubmitting(null);
     }

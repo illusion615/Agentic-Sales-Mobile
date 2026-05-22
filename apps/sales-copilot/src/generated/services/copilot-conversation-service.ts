@@ -2,6 +2,7 @@ import { Crf5c_copilotconversationsService } from './Crf5c_copilotconversationsS
 import type { Crf5c_copilotconversations } from '../models/Crf5c_copilotconversationsModel';
 import type { IGetAllOptions } from '../models/CommonModels';
 import type { CopilotConversation } from '../models/copilot-conversation-model';
+import { requireCreated, requireId } from './_adapter-utils';
 
 function fromDv(dv: Crf5c_copilotconversations): CopilotConversation {
   return {
@@ -26,20 +27,23 @@ export class CopilotConversationService {
   static async create(record: Omit<CopilotConversation, 'id'>): Promise<CopilotConversation> {
     const result = await Crf5c_copilotconversationsService.create(toDv(record) as any);
     if (!result.success) throw result.error;
-    return fromDv(result.data!);
+    return fromDv(requireCreated(result.data, 'crf5c_copilotconversationid', 'CopilotConversation'));
   }
 
   static async update(id: string, changedFields: Partial<Omit<CopilotConversation, 'id'>>): Promise<CopilotConversation> {
+    requireId(id, 'update', 'CopilotConversation');
     const result = await Crf5c_copilotconversationsService.update(id, toDv(changedFields) as any);
     if (!result.success) throw result.error;
     return fromDv(result.data!);
   }
 
   static async delete(id: string): Promise<void> {
+    requireId(id, 'delete', 'CopilotConversation');
     await Crf5c_copilotconversationsService.delete(id);
   }
 
   static async get(id: string): Promise<CopilotConversation> {
+    requireId(id, 'get', 'CopilotConversation');
     const result = await Crf5c_copilotconversationsService.get(id);
     if (!result.success) throw result.error;
     return fromDv(result.data!);

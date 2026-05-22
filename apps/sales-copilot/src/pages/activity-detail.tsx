@@ -29,14 +29,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useContactList } from '@/generated/hooks/use-contact';
 import { useAccountList } from '@/generated/hooks/use-account';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
-import type { Contact } from '@/generated/models/contact-model';
-import type { Account } from '@/generated/models/account-model';
-import type { Opportunity, OpportunityStageKeyToLabel as OpportunityStageKeyToLabelType } from '@/generated/models/opportunity-model';
-import { OpportunityStageKeyToLabel } from '@/generated/models/opportunity-model';
-import { useEntityAISummary, useWithAISummaryTrigger } from '@/hooks/use-ai-summary-trigger';
-import { ActivityTypeKeyToLabel, ActivityDraftstatusKeyToLabel, ActivityOutcomeKeyToLabel } from '@/generated/models/activity-model';
-import type { Activity as DataverseActivity, ActivityDraftstatusKey } from '@/generated/models/activity-model';
-import { toast } from 'sonner';
+import type { Contact } from '@/generated/models/contact-model';import type { Account } from '@/generated/models/account-model';import type { Opportunity, OpportunityStageKeyToLabel as OpportunityStageKeyToLabelType } from '@/generated/models/opportunity-model';import { useEntityAISummary, useWithAISummaryTrigger } from '@/hooks/use-ai-summary-trigger';
+import type { Activity as DataverseActivity } from '@/generated/models/activity-model';import { toast } from 'sonner';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -156,9 +150,9 @@ export default function ActivityDetailPage() {
   useEffect(() => {
     if (!activity) return;
     
-    const typeLabel = ActivityTypeKeyToLabel[activity.typeKey];
-    const statusLabel = ActivityDraftstatusKeyToLabel[activity.draftstatusKey];
-    const outcomeLabel = activity.outcomeKey ? ActivityOutcomeKeyToLabel[activity.outcomeKey] : undefined;
+    const typeLabel = activity.type;
+    const statusLabel = activity.draftStatus;
+    const outcomeLabel = activity.outcome ? activity.outcome : undefined;
     
     copilot.setPageContext({
       currentPage: locale === 'zh-Hans' ? '活动详情' : 'Activity Detail',
@@ -208,14 +202,14 @@ export default function ActivityDetailPage() {
       await updateActivity.mutateAsync({
         id: activity.id,
         changedFields: {
-          draftstatusKey: 'DraftstatusKey2' as ActivityDraftstatusKey,
+          draftStatus: 'completed',
         },
       });
       
       // Trigger AI summary generation after completing
       triggerForEntity('activity', activity.id, {
         ...activity,
-        draftstatusKey: 'DraftstatusKey2',
+        draftStatus: 'completed',
       } as Record<string, unknown>, {
         account: activity.account ? { id: activity.account.id, name: activity.account.name1 } : undefined,
         opportunity: activity.opportunity ? { id: activity.opportunity.id, name: activity.opportunity.name1 } : undefined,
@@ -265,12 +259,12 @@ export default function ActivityDetailPage() {
     );
   }
 
-  const typeLabel = ActivityTypeKeyToLabel[activity.typeKey];
+  const typeLabel = activity.type;
   const Icon = activityIcons[typeLabel] || CheckSquare;
   const color = activityColors[typeLabel] || 'bg-muted';
-  const statusLabel = ActivityDraftstatusKeyToLabel[activity.draftstatusKey];
+  const statusLabel = activity.draftStatus;
   const isCompleted = statusLabel === 'completed';
-  const outcomeLabel = activity.outcomeKey ? ActivityOutcomeKeyToLabel[activity.outcomeKey] : undefined;
+  const outcomeLabel = activity.outcome ? activity.outcome : undefined;
 
   const deleteButton = (
     <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
@@ -482,7 +476,7 @@ export default function ActivityDetailPage() {
                       {fullOpportunity && (
                         <>
                           <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 capitalize">
-                            {OpportunityStageKeyToLabel[fullOpportunity.stageKey]}
+                            {fullOpportunity.stage}
                           </Badge>
                           <span className="font-medium text-foreground">
                             ${(fullOpportunity.totalamount || 0).toLocaleString()}

@@ -26,7 +26,15 @@ const queryCache = new QueryCache({
 
 // Global error handler for mutations
 const mutationCache = new MutationCache({
-  onError: (error: unknown) => {
+  onError: (error: unknown, _variables, _context, mutation) => {
+    // Orchestration mutations whose mutationFn calls other mutations should
+    // opt out via meta.suppressGlobalToast — the inner mutation already
+    // surfaced the real error, so re-toasting here would duplicate it.
+    if (mutation.meta?.suppressGlobalToast) {
+      console.error('[QueryClient] Mutation error (suppressed toast):', error);
+      return;
+    }
+
     const errorMessage = extractMessage(error);
 
     // ResourceNotFound errors - show friendly message
@@ -60,6 +68,7 @@ function extractMessage(err: unknown, depth = 0): string {
       e.error,
       (e.body as Record<string, unknown> | undefined)?.error,
       (e.body as Record<string, unknown> | undefined)?.message,
+      (e.innerError as Record<string, unknown> | undefined)?.message,
       e.body,
       e.code,
       e.statusText,
@@ -68,7 +77,9 @@ function extractMessage(err: unknown, depth = 0): string {
       const m = extractMessage(c, depth + 1);
       if (m) return m;
     }
-    try { return JSON.stringify(err); } catch { return Object.prototype.toString.call(err); }
+    const ctor = (err as { constructor?: { name?: string } }).constructor?.name ?? 'Error';
+    const status = (e.status as number | string | undefined) ?? (e.statusCode as number | string | undefined);
+    return status != null ? `${ctor} (status=${status})` : `${ctor} with no message`;
   }
   return String(err);
 }

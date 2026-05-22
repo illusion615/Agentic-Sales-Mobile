@@ -1,6 +1,7 @@
 import { getClient } from '@/lib/power-data';
 import type { Signal } from '../models/signal-model';
 import type { IOperationOptions } from '@microsoft/power-apps/data';
+import { requireId } from './_adapter-utils';
 
 const DATA_SOURCE_NAME = 'crf5c_signals';
 
@@ -15,17 +16,20 @@ export class SignalService {
     id: string,
     changedFields: Partial<Omit<Signal, 'id'>>
   ): Promise<Signal> {
+    requireId(id, 'update', 'Signal');
     const result = await getClient().updateRecordAsync(DATA_SOURCE_NAME, id, changedFields);
     if (!result.success) throw result.error;
     return result.data as Signal;
   }
 
   static async delete(id: string): Promise<void> {
+    requireId(id, 'delete', 'Signal');
     const result = await getClient().deleteRecordAsync(DATA_SOURCE_NAME, id);
     if (!result.success) throw result.error;
   }
 
   static async get(id: string): Promise<Signal> {
+    requireId(id, 'get', 'Signal');
     const result = await getClient().retrieveRecordAsync(DATA_SOURCE_NAME, id);
     if (!result.success) throw result.error;
     return result.data as Signal;

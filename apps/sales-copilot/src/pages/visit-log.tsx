@@ -462,8 +462,8 @@ Return ONLY JSON format, no other text. If a field cannot be extracted from the 
       
       await createActivity.mutateAsync({
         title: `${t('title', locale)} - ${selectedAccount?.name1 || formData.contactName || 'Visit'}`,
-        typeKey: 'TypeKey0', // visit type
-        draftstatusKey: 'DraftstatusKey1', // confirmed
+        type: 'visit', // visit type
+        draftStatus: 'confirmed', // confirmed
         ownerid: user?.objectId || '',
         scheduleddate: formData.visitDate.toISOString(),
         notes: [
@@ -525,7 +525,7 @@ Return ONLY JSON format, no other text. If a field cannot be extracted from the 
   return (
     <div className="min-h-screen flex flex-col bg-background">
       {/* Header */}
-      <header className="fixed top-0 left-0 right-0 z-40 glass-surface border-b border-border/50 safe-area-top">
+      <header className="fixed top-0 left-0 right-0 z-40 bg-background/80 backdrop-blur-md border-b border-border/50 safe-area-top">
         <div className="flex items-center justify-between h-14 px-4">
           <button
             onClick={() => navigate(-1)}

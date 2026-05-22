@@ -4,7 +4,6 @@ export const AISummaryEntityTypeKeyToLabel = {
   'EntityTypeKey2': 'contact',
   'EntityTypeKey3': 'activity'
 } as const;
-export type AISummaryEntityTypeKey = keyof typeof AISummaryEntityTypeKeyToLabel;
 
 export const AISummaryStatusKeyToLabel = {
   'StatusKey0': 'pending',
@@ -12,7 +11,6 @@ export const AISummaryStatusKeyToLabel = {
   'StatusKey2': 'completed',
   'StatusKey3': 'failed'
 } as const;
-export type AISummaryStatusKey = keyof typeof AISummaryStatusKeyToLabel;
 
 export interface AISummary {
   /**
@@ -35,7 +33,7 @@ export interface AISummary {
    * @displayName Entity Type
    * @validationRule Required for create/update operations
    */
-  entityTypeKey: AISummaryEntityTypeKey;
+  entityType: string;
   /**
    * @displayName Expires On
    */
@@ -48,7 +46,7 @@ export interface AISummary {
    * @displayName Status
    * @validationRule Required for create/update operations
    */
-  statusKey: AISummaryStatusKey;
+  status: string;
   /**
    * @displayName Summary
    * @validationRule Required for create/update operations

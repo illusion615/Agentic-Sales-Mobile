@@ -7,9 +7,9 @@ import { AccountService } from '@/generated/services/account-service';
 import { OpportunityService } from '@/generated/services/opportunity-service';
 import { ActivityService } from '@/generated/services/activity-service';
 import { ContactService } from '@/generated/services/contact-service';
-import type { Account, AccountRegionKey, AccountTierKey } from '@/generated/models/account-model';
-import type { Opportunity, OpportunityStageKey } from '@/generated/models/opportunity-model';
-import type { Activity, ActivityTypeKey, ActivityDraftstatusKey } from '@/generated/models/activity-model';
+import type { Account } from '@/generated/models/account-model';
+import type { Opportunity } from '@/generated/models/opportunity-model';
+import type { Activity } from '@/generated/models/activity-model';
 import type { Contact } from '@/generated/models/contact-model';
 import { calculateEnhancedMatchScore, getConfidenceLevel, type EnhancedMatchScore } from './agent-utils';
 import { touchAccountLastContacted } from './account-touch';
@@ -59,65 +59,6 @@ export interface FunctionCallResult {
   invalidateQueries?: string[];
 }
 
-// Region label to key mapping
-const regionLabelToKey: Record<string, AccountRegionKey> = {
-  '华东': 'RegionKey0',
-  '华北': 'RegionKey1',
-  '华南': 'RegionKey2',
-  '西南': 'RegionKey3',
-};
-
-// Tier label to key mapping
-const tierLabelToKey: Record<string, AccountTierKey> = {
-  'S': 'TierKey0',
-  'A': 'TierKey1',
-  'B': 'TierKey2',
-  'C': 'TierKey3',
-};
-
-// Stage label to key mapping
-const stageLabelToKey: Record<string, OpportunityStageKey> = {
-  'prospecting': 'StageKey0',
-  'qualification': 'StageKey1',
-  'proposal': 'StageKey2',
-  'negotiation': 'StageKey3',
-  'won': 'StageKey4',
-  'lost': 'StageKey5',
-};
-
-// Activity type label to key mapping
-const activityTypeLabelToKey: Record<string, ActivityTypeKey> = {
-  'visit': 'TypeKey0',
-  'call': 'TypeKey1',
-  'meeting': 'TypeKey2',
-  'email': 'TypeKey3',
-  'other': 'TypeKey4',
-};
-
-// Activity status label to key mapping (supports various user expressions)
-const activityStatusLabelToKey: Record<string, ActivityDraftstatusKey> = {
-  // English
-  'draft': 'DraftstatusKey0',
-  'confirmed': 'DraftstatusKey1',
-  'completed': 'DraftstatusKey2',
-  'cancelled': 'DraftstatusKey3',
-  'canceled': 'DraftstatusKey3',
-  // Common variations
-  'done': 'DraftstatusKey2',
-  'complete': 'DraftstatusKey2',
-  'finished': 'DraftstatusKey2',
-  'cancel': 'DraftstatusKey3',
-  'confirm': 'DraftstatusKey1',
-  // Chinese
-  '草稿': 'DraftstatusKey0',
-  '已确认': 'DraftstatusKey1',
-  '确认': 'DraftstatusKey1',
-  '已完成': 'DraftstatusKey2',
-  '完成': 'DraftstatusKey2',
-  '已取消': 'DraftstatusKey3',
-  '取消': 'DraftstatusKey3',
-};
-
 /**
  * Execute a function by name with given arguments
  */
@@ -157,8 +98,8 @@ export async function executeFunction(
             id: a.id,
             name: a.name1,
             industry: a.industry,
-            region: a.regionKey,
-            tier: a.tierKey,
+            region: a.region,
+            tier: a.tier,
             phone: a.phone,
             email: a.email,
           })),
@@ -174,12 +115,11 @@ export async function executeFunction(
 
       case 'getAccountsByRegion': {
         const regionLabel = args.region as string;
-        const regionKey = regionLabelToKey[regionLabel];
         const limit = (args.limit as number) || 10;
-        if (!regionKey) return { success: false, error: `未知区域: ${regionLabel}` };
+        if (!regionLabel) return { success: false, error: '缺少 region 参数' };
         const accounts = await AccountService.getAll();
         const filtered = accounts
-          .filter((a: Account) => a.regionKey === regionKey)
+          .filter((a: Account) => a.region === regionLabel)
           .slice(0, limit);
         return {
           success: true,
@@ -187,19 +127,18 @@ export async function executeFunction(
             id: a.id,
             name: a.name1,
             industry: a.industry,
-            tier: a.tierKey,
+            tier: a.tier,
           })),
         };
       }
 
       case 'getAccountsByTier': {
         const tierLabel = args.tier as string;
-        const tierKey = tierLabelToKey[tierLabel];
         const limit = (args.limit as number) || 10;
-        if (!tierKey) return { success: false, error: `未知等级: ${tierLabel}` };
+        if (!tierLabel) return { success: false, error: '缺少 tier 参数' };
         const accounts = await AccountService.getAll();
         const filtered = accounts
-          .filter((a: Account) => a.tierKey === tierKey)
+          .filter((a: Account) => a.tier === tierLabel)
           .slice(0, limit);
         return {
           success: true,
@@ -207,7 +146,7 @@ export async function executeFunction(
             id: a.id,
             name: a.name1,
             industry: a.industry,
-            region: a.regionKey,
+            region: a.region,
           })),
         };
       }
@@ -218,9 +157,8 @@ export async function executeFunction(
         const limit = (args.limit as number) || 10;
         const opportunities = await OpportunityService.getAll();
         let filtered = opportunities;
-        if (stageLabel && stageLabelToKey[stageLabel]) {
-          const stageKey = stageLabelToKey[stageLabel];
-          filtered = opportunities.filter((o: Opportunity) => o.stageKey === stageKey);
+        if (stageLabel) {
+          filtered = opportunities.filter((o: Opportunity) => o.stage === stageLabel);
         }
         // Filter by owner if userId provided
         if (context.userId) {
@@ -233,7 +171,7 @@ export async function executeFunction(
             name: o.name1,
             account: o.account?.name1,
             amount: o.totalamount,
-            stage: o.stageKey,
+            stage: o.stage,
             confidence: o.confidence,
             expectedCloseDate: o.expectedclosedate,
           })),
@@ -251,8 +189,10 @@ export async function executeFunction(
             name: o.name1,
             account: o.account?.name1,
             amount: o.totalamount,
-            stage: o.stageKey,
+            stage: o.stage,
+            stageLabel: o.stage,
             confidence: o.confidence,
+            expectedCloseDate: o.expectedclosedate,
           })),
         };
       }
@@ -268,7 +208,8 @@ export async function executeFunction(
             id: o.id,
             name: o.name1,
             amount: o.totalamount,
-            stage: o.stageKey,
+            stage: o.stage,
+            stageLabel: o.stage,
             confidence: o.confidence,
             expectedCloseDate: o.expectedclosedate,
           })),
@@ -300,7 +241,8 @@ export async function executeFunction(
             name: o.name1,
             account: o.account?.name1,
             amount: o.totalamount,
-            stage: o.stageKey,
+            stage: o.stage,
+            stageLabel: o.stage,
             expectedCloseDate: o.expectedclosedate,
           })),
         };
@@ -312,19 +254,18 @@ export async function executeFunction(
         const activities = await ActivityService.getAll();
         const today = new Date().toISOString().split('T')[0];
         let filtered = activities.filter((a: Activity) => a.scheduleddate?.startsWith(today));
-        if (typeLabel && activityTypeLabelToKey[typeLabel]) {
-          const typeKey = activityTypeLabelToKey[typeLabel];
-          filtered = filtered.filter((a: Activity) => a.typeKey === typeKey);
+        if (typeLabel) {
+          filtered = filtered.filter((a: Activity) => a.type === typeLabel);
         }
         return {
           success: true,
           data: filtered.map((a: Activity) => ({
             id: a.id,
             title: a.title,
-            type: a.typeKey,
+            type: a.type,
             account: a.account?.name1,
             scheduledDate: a.scheduleddate,
-            status: a.draftstatusKey,
+            status: a.draftStatus,
             notes: a.notes,
           })),
         };
@@ -353,10 +294,10 @@ export async function executeFunction(
           data: filtered.map((a: Activity) => ({
             id: a.id,
             title: a.title,
-            type: a.typeKey,
+            type: a.type,
             account: a.account?.name1,
             scheduledDate: a.scheduleddate,
-            status: a.draftstatusKey,
+            status: a.draftStatus,
           })),
         };
       }
@@ -374,9 +315,9 @@ export async function executeFunction(
           data: filtered.map((a: Activity) => ({
             id: a.id,
             title: a.title,
-            type: a.typeKey,
+            type: a.type,
             scheduledDate: a.scheduleddate,
-            status: a.draftstatusKey,
+            status: a.draftStatus,
             notes: a.notes,
           })),
         };
@@ -531,11 +472,11 @@ export async function executeFunction(
         const accountChanges: Partial<Account> = {};
         if (args.name) accountChanges.name1 = args.name as string;
         if (args.industry) accountChanges.industry = args.industry as string;
-        if (args.region && regionLabelToKey[args.region as string]) {
-          accountChanges.regionKey = regionLabelToKey[args.region as string];
+        if (args.region) {
+          accountChanges.region = args.region as string;
         }
-        if (args.tier && tierLabelToKey[args.tier as string]) {
-          accountChanges.tierKey = tierLabelToKey[args.tier as string];
+        if (args.tier) {
+          accountChanges.tier = args.tier as string;
         }
         if (args.phone) accountChanges.phone = args.phone as string;
         if (args.email) accountChanges.email = args.email as string;
@@ -582,8 +523,8 @@ export async function executeFunction(
         const oppChanges: Partial<Opportunity> = {};
         if (args.name) oppChanges.name1 = args.name as string;
         if (args.amount !== undefined) oppChanges.totalamount = args.amount as number;
-        if (args.stage && stageLabelToKey[args.stage as string]) {
-          oppChanges.stageKey = stageLabelToKey[args.stage as string];
+        if (args.stage) {
+          oppChanges.stage = args.stage as string;
         }
         if (args.confidence !== undefined) oppChanges.confidence = args.confidence as number;
         if (args.expectedCloseDate) oppChanges.expectedclosedate = args.expectedCloseDate as string;
@@ -592,7 +533,7 @@ export async function executeFunction(
         // When stage transitions to a terminal state (won/lost), stamp closedon
         // with the current time so dashboards (Q Perf, etc.) attribute the deal
         // to the correct quarter. Caller-provided closedon wins if supplied.
-        if (oppChanges.stageKey === 'StageKey4' || oppChanges.stageKey === 'StageKey5') {
+        if (oppChanges.stage === 'won' || oppChanges.stage === 'lost') {
           oppChanges.closedon = (args.closedon as string) || new Date().toISOString();
         }
 
@@ -636,14 +577,20 @@ export async function executeFunction(
         // Build changed fields
         const actChanges: Partial<Activity> = {};
         if (args.title) actChanges.title = args.title as string;
-        if (args.type && activityTypeLabelToKey[args.type as string]) {
-          actChanges.typeKey = activityTypeLabelToKey[args.type as string];
+        if (args.type) {
+          actChanges.type = args.type as string;
         }
-        // Handle status update - map user-friendly terms to draftstatusKey
+        // Handle status update - normalize user-friendly terms to draftStatus label
         if (args.status) {
           const statusStr = (args.status as string).toLowerCase();
-          if (activityStatusLabelToKey[statusStr]) {
-            actChanges.draftstatusKey = activityStatusLabelToKey[statusStr];
+          const statusMap: Record<string, string> = {
+            'draft': 'draft', 'confirmed': 'confirmed', 'completed': 'completed', 'cancelled': 'cancelled', 'canceled': 'cancelled',
+            'done': 'completed', 'complete': 'completed', 'finished': 'completed', 'cancel': 'cancelled', 'confirm': 'confirmed',
+            '草稿': 'draft', '已确认': 'confirmed', '确认': 'confirmed',
+            '已完成': 'completed', '完成': 'completed', '已取消': 'cancelled', '取消': 'cancelled',
+          };
+          if (statusMap[statusStr]) {
+            actChanges.draftStatus = statusMap[statusStr];
           }
         }
         if (args.scheduledDate) actChanges.scheduleddate = args.scheduledDate as string;
@@ -786,12 +733,13 @@ export async function executeFunction(
       case 'getSalesSummary': {
         const opportunities = await OpportunityService.getAll();
         const totalAmount = opportunities.reduce((sum: number, o: Opportunity) => sum + o.totalamount, 0);
+        // Bucket by *label* so downstream LLM templates render “qualification/proposal”, not raw “StageKey1”.
         const byStage: Record<string, { count: number; amount: number }> = {};
         opportunities.forEach((o: Opportunity) => {
-          const stage = o.stageKey || 'unknown';
-          if (!byStage[stage]) byStage[stage] = { count: 0, amount: 0 };
-          byStage[stage].count++;
-          byStage[stage].amount += o.totalamount;
+          const stageLabel = o.stage || 'unknown';
+          if (!byStage[stageLabel]) byStage[stageLabel] = { count: 0, amount: 0 };
+          byStage[stageLabel].count++;
+          byStage[stageLabel].amount += o.totalamount;
         });
         return {
           success: true,
@@ -823,7 +771,7 @@ export async function executeFunction(
             id: a.id,
             name: a.name1,
             lastContactedOn: a.lastcontactedon,
-            tier: a.tierKey,
+            tier: a.tier,
             phone: a.phone,
           })),
         };
@@ -926,7 +874,7 @@ export async function executeFunction(
               id: a.id,
               name: a.name1 || '',
               industry: a.industry,
-              region: a.regionKey,
+              region: a.region,
               score: enhancedScore.score,
               matchType: enhancedScore.matchType,
               scoreBreakdown: enhancedScore.breakdown,
@@ -1026,7 +974,7 @@ export async function executeFunction(
               name: o.name1 || '',
               accountName: o.account?.name1,
               amount: o.totalamount,
-              stage: o.stageKey,
+              stage: o.stage,
               score: enhancedScore.score,
               matchType: enhancedScore.matchType,
             };
@@ -1095,7 +1043,7 @@ export async function executeFunction(
           title: string;
           subtitle?: string;
           matchType: 'exact' | 'contains' | 'fuzzy';
-          typeKey?: string;
+          type?: string;
           scheduleddate?: string;
           accountId?: string;
           accountName: string;
@@ -1149,7 +1097,7 @@ export async function executeFunction(
           const dateStr = activity.scheduleddate
             ? new Date(activity.scheduleddate).toLocaleDateString()
             : '';
-          const subtitleParts = [accountName, activity.typeKey, dateStr].filter(Boolean) as string[];
+          const subtitleParts = [accountName, activity.type, dateStr].filter(Boolean) as string[];
 
           return {
             id: activity.id,
@@ -1158,7 +1106,7 @@ export async function executeFunction(
             title: activity.title,
             subtitle: subtitleParts.join(' · '),
             matchType,
-            typeKey: activity.typeKey,
+            type: activity.type,
             scheduleddate: activity.scheduleddate,
             accountId: activity.account?.id,
             accountName,

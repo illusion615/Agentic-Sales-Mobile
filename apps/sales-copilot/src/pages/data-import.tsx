@@ -1,6 +1,11 @@
 /**
  * Data Import Page
- * 
+ *
+ * !!! 仅限空 Dataverse 环境下一键灌入演示种子数据使用，不得成为运行时业务入口 !!!
+ * DEV-ONLY TOOL. Reads `src/data/uk-test-data.ts` and writes real records into
+ * Dataverse via the standard service hooks. Do NOT wire this into the main
+ * navigation or auto-run flows. The route should stay hidden / dev-only.
+ *
  * Allows importing UK test data into the app's data layer.
  * Uses the existing Dataverse schema with field mappings.
  */
@@ -25,9 +30,6 @@ import {
   getTestDataSummary,
   type UKAccountData,
 } from '@/data/uk-test-data';
-import type { OpportunityConfidencetrendKey } from '@/generated/models/opportunity-model';
-import type { ActivityTypeKey, ActivityDraftstatusKey } from '@/generated/models/activity-model';
-
 const containerVariants = {
   hidden: { opacity: 0 },
   show: {
@@ -153,14 +155,14 @@ export default function DataImportPage() {
           const createdOpp = await createOpportunity.mutateAsync({
             name1: data.opportunity.name,
             account: { id: realAccountId, name1: data.name },
-            stageKey: data.opportunity.stage,
+            stage: data.opportunity.stage,
             totalamount: data.opportunity.amount,
             confidence: data.opportunity.confidence,
             expectedclosedate: data.opportunity.expectedCloseDate,
             closedon: data.opportunity.closedOn,
             lastaction: `${data.opportunity.currency} ${data.opportunity.amount.toLocaleString()}`,
             ownerid: ownerId,
-            confidencetrendKey: 'ConfidencetrendKey2' as OpportunityConfidencetrendKey,
+            confidenceTrend: 'flat',
           });
           // Save real opportunity ID
           oppIdMap.set(data.opportunity.name, createdOpp.id);
@@ -190,11 +192,11 @@ export default function DataImportPage() {
             title: isOverdue
               ? `[OVERDUE] Follow-up: ${data.name}`
               : `Scheduled: ${data.name}`,
-            typeKey: 'TypeKey0' as ActivityTypeKey,
+            type: 'visit',
             account: { id: realAccountId, name1: data.name },
             opportunity: realOppId ? { id: realOppId, name1: data.opportunity.name } : undefined,
             scheduleddate: data.nextActivityDate,
-            draftstatusKey: 'DraftstatusKey1' as ActivityDraftstatusKey,
+            draftStatus: 'confirmed',
             notes: `${data.department} | ${data.productLine}`,
             ownerid: ownerId,
           });
@@ -329,14 +331,14 @@ export default function DataImportPage() {
                     </p>
                     <p className={cn(
                       'text-xs',
-                      data.opportunity.stage === 'StageKey4' ? 'text-green-600 dark:text-green-400' :
-                      data.opportunity.stage === 'StageKey3' ? 'text-yellow-600 dark:text-yellow-400' :
+                      data.opportunity.stage === 'won' ? 'text-green-600 dark:text-green-400' :
+                      data.opportunity.stage === 'negotiation' ? 'text-yellow-600 dark:text-yellow-400' :
                       'text-muted-foreground'
                     )}>
-                      {data.opportunity.stage === 'StageKey4' ? 'Won' :
-                       data.opportunity.stage === 'StageKey3' ? 'Negotiation' :
-                       data.opportunity.stage === 'StageKey2' ? 'Proposal' :
-                       data.opportunity.stage === 'StageKey1' ? 'Qualification' : 'Discovery'}
+                      {data.opportunity.stage === 'won' ? 'Won' :
+                       data.opportunity.stage === 'negotiation' ? 'Negotiation' :
+                       data.opportunity.stage === 'proposal' ? 'Proposal' :
+                       data.opportunity.stage === 'qualification' ? 'Qualification' : 'Discovery'}
                     </p>
                   </div>
                 </div>

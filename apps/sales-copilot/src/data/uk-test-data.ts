@@ -1,6 +1,14 @@
 /**
  * UK Test Data Import Script
- * 
+ *
+ * !!! 仅限 data-import.tsx 一键灌种子数据使用，不得在运行时业务流程中引用 !!!
+ * DO NOT IMPORT THIS FROM RUNTIME CODE.
+ * This file is a hardcoded seed dataset used ONLY by `src/pages/data-import.tsx`
+ * to populate an empty Dataverse environment for demos. It is NOT a mock data
+ * layer and must NEVER be read at runtime to substitute for real Dataverse data.
+ * If you find yourself importing this from any file other than `data-import.tsx`,
+ * STOP and rethink — the answer is real Dataverse, not seed data.
+ *
  * 8 UK NHS Account records with linked Contacts and Opportunities
  * Field mapping to existing Dataverse schema:
  * - name1: Account name
@@ -21,9 +29,7 @@
  * - Closed Lost → lost (StageKey5)
  */
 
-import type { AccountTierKey } from '@/generated/models/account-model';
-import type { OpportunityStageKey, OpportunityConfidencetrendKey } from '@/generated/models/opportunity-model';
-import type { ActivityTypeKey, ActivityDraftstatusKey } from '@/generated/models/activity-model';
+// Choice fields are now plain label strings (Dataverse FormattedValue).
 
 export interface UKAccountData {
   // Account fields
@@ -33,7 +39,7 @@ export interface UKAccountData {
   accountType: string;
   department: string;
   productLine: string;
-  tier: AccountTierKey;
+  tier: string;
   lastActivityDate: string;
   nextActivityDate: string;
   notes: string;
@@ -53,7 +59,7 @@ export interface UKAccountData {
   // Opportunity (primary, used for the scheduled next activity binding)
   opportunity: {
     name: string;
-    stage: OpportunityStageKey;
+    stage: string;
     amount: number;
     currency: string;
     confidence: number;
@@ -65,7 +71,7 @@ export interface UKAccountData {
   // Used when an account has parallel deals under different product lines.
   additionalOpportunities?: Array<{
     name: string;
-    stage: OpportunityStageKey;
+    stage: string;
     amount: number;
     currency: string;
     confidence: number;
@@ -82,7 +88,7 @@ export const ukTestData: UKAccountData[] = [
     accountType: 'NHS Trust Teaching',
     department: 'Cardiac Center connectivity upgrade',
     productLine: 'BeneVision N + BeneLink',
-    tier: 'TierKey0', // S
+    tier: 'S', // S
     lastActivityDate: '2026-05-06',
     nextActivityDate: '2026-05-13',
     notes: 'NHS SBS Framework, decision 2026-06-12.',
@@ -96,7 +102,7 @@ export const ukTestData: UKAccountData[] = [
     },
     opportunity: {
       name: 'Royal London Cardiac Monitoring Upgrade',
-      stage: 'StageKey3', // negotiation (Pricing Review)
+      stage: 'negotiation', // negotiation (Pricing Review)
       amount: 820000,
       currency: 'GBP',
       confidence: 75,
@@ -110,7 +116,7 @@ export const ukTestData: UKAccountData[] = [
     accountType: 'NHS Cardiothoracic Specialty',
     department: '5-OR integrated monitoring & anesthesia',
     productLine: 'A9 Anesthesia + N22 Monitor',
-    tier: 'TierKey1', // A
+    tier: 'A', // A
     lastActivityDate: '2026-05-07',
     nextActivityDate: '2026-05-14',
     notes: 'Proposal sent 4 days ago, awaiting tech eval. Reference Royal London case.',
@@ -120,7 +126,7 @@ export const ukTestData: UKAccountData[] = [
     },
     opportunity: {
       name: 'Liverpool OR Anesthesia Integration',
-      stage: 'StageKey2', // proposal (Proposal Sent)
+      stage: 'proposal', // proposal (Proposal Sent)
       amount: 540000,
       currency: 'GBP',
       confidence: 60,
@@ -134,7 +140,7 @@ export const ukTestData: UKAccountData[] = [
     accountType: 'NHS Foundation Trust',
     department: 'ICU 60-bed monitoring expansion',
     productLine: 'BeneVision N1 ×60 + Central Station ×2',
-    tier: 'TierKey0', // S
+    tier: 'S', // S
     lastActivityDate: '2026-04-25',
     nextActivityDate: '2026-05-08', // Overdue
     notes: 'NHS Supply Chain tender deadline 2026-06-30. Quarterly check-in overdue.',
@@ -148,7 +154,7 @@ export const ukTestData: UKAccountData[] = [
     },
     opportunity: {
       name: 'GSTT ICU Monitoring Expansion',
-      stage: 'StageKey0', // prospecting (Discovery)
+      stage: 'prospecting', // prospecting (Discovery)
       amount: 1150000,
       currency: 'GBP',
       confidence: 40,
@@ -162,7 +168,7 @@ export const ukTestData: UKAccountData[] = [
     accountType: 'NHS Foundation Trust',
     department: 'Operating room anesthesia replacement',
     productLine: 'A8/A9 Anesthesia ×14',
-    tier: 'TierKey1', // A
+    tier: 'A', // A
     lastActivityDate: '2026-05-05',
     nextActivityDate: '2026-05-15', // On-site demo
     notes: 'Trial feedback positive on ventilation modes.',
@@ -172,7 +178,7 @@ export const ukTestData: UKAccountData[] = [
     },
     opportunity: {
       name: 'Manchester OR Anesthesia Replacement',
-      stage: 'StageKey2', // proposal (Demo Scheduled)
+      stage: 'proposal', // proposal (Demo Scheduled)
       amount: 880000,
       currency: 'GBP',
       confidence: 55,
@@ -186,7 +192,7 @@ export const ukTestData: UKAccountData[] = [
     accountType: 'NHS Foundation Trust',
     department: 'ECMO/ECPR joint programme',
     productLine: 'BeneFusion + Monitor + ECPR kit',
-    tier: 'TierKey1', // A
+    tier: 'A', // A
     lastActivityDate: '2026-05-02',
     nextActivityDate: '2026-05-16',
     notes: 'Following SAMU de Paris mobile ECPR reference case.',
@@ -200,7 +206,7 @@ export const ukTestData: UKAccountData[] = [
     },
     opportunity: {
       name: 'Oxford ECMO/ECPR Programme',
-      stage: 'StageKey1', // qualification
+      stage: 'qualification', // qualification
       amount: 760000,
       currency: 'GBP',
       confidence: 50,
@@ -214,7 +220,7 @@ export const ukTestData: UKAccountData[] = [
     accountType: 'NHS Foundation Trust',
     department: 'Lab automation upgrade',
     productLine: 'CAL 9000 Hematology Line + CL Chemiluminescence',
-    tier: 'TierKey0', // S
+    tier: 'S', // S
     lastActivityDate: '2026-04-28',
     nextActivityDate: '2026-05-03', // Overdue
     notes: 'Second-round pricing; renewal confirmation overdue.',
@@ -224,7 +230,7 @@ export const ukTestData: UKAccountData[] = [
     },
     opportunity: {
       name: 'KCH Lab Automation Upgrade',
-      stage: 'StageKey3', // negotiation
+      stage: 'negotiation', // negotiation
       amount: 1420000,
       currency: 'GBP',
       confidence: 70,
@@ -236,7 +242,7 @@ export const ukTestData: UKAccountData[] = [
         // Earlier stage / lower confidence than the lab automation upgrade
         // so the pipeline view shows two distinct opps for the same account.
         name: 'KCH Operating Room Equipment Procurement',
-        stage: 'StageKey2', // proposal
+        stage: 'proposal', // proposal
         amount: 520000,
         currency: 'GBP',
         confidence: 60,
@@ -251,7 +257,7 @@ export const ukTestData: UKAccountData[] = [
     accountType: 'NHS Foundation Trust',
     department: "Women's health ultrasound refresh",
     productLine: 'Nuewa R9 Platinum ×6',
-    tier: 'TierKey2', // B
+    tier: 'B', // B
     lastActivityDate: '2026-05-04',
     nextActivityDate: '2026-05-18',
     notes: 'Procured under NHS Supply Chain framework.',
@@ -261,7 +267,7 @@ export const ukTestData: UKAccountData[] = [
     },
     opportunity: {
       name: 'UHB Ultrasound Refresh',
-      stage: 'StageKey3', // negotiation (Pricing Review)
+      stage: 'negotiation', // negotiation (Pricing Review)
       amount: 340000,
       currency: 'GBP',
       confidence: 65,
@@ -275,7 +281,7 @@ export const ukTestData: UKAccountData[] = [
     accountType: 'NHS Trust Teaching',
     department: 'Emergency AED + defibrillator upgrade',
     productLine: 'BeneHeart L AED ×40 + D6 Defibrillator ×8',
-    tier: 'TierKey1', // A
+    tier: 'A', // A
     lastActivityDate: '2026-03-20',
     nextActivityDate: '2026-05-20', // Post-sale follow-up
     notes: 'Closed last quarter; sister site interested in expansion.',
@@ -285,7 +291,7 @@ export const ukTestData: UKAccountData[] = [
     },
     opportunity: {
       name: 'Leeds Emergency Defibrillator Upgrade',
-      stage: 'StageKey4', // won
+      stage: 'won', // won
       amount: 150000,
       currency: 'GBP',
       confidence: 100,
@@ -318,7 +324,7 @@ export function getAccountCreatePayloads(ownerId: string) {
     address: `${data.city}, ${data.country}`,
     industry: data.accountType,
     notes: `[${data.department}] [Product: ${data.productLine}] [Next: ${data.nextActivityDate}] ${data.notes}`,
-    tierKey: data.tier,
+    tier: data.tier,
     lastcontactedon: data.lastActivityDate,
     ownerid: ownerId,
   }));
@@ -373,14 +379,14 @@ export function getOpportunityCreatePayloads(ownerId: string) {
       id: generateUUID(`opp-${opp.name}`),
       name1: opp.name,
       account: { id: accountId, name1: data.name },
-      stageKey: opp.stage,
+      stage: opp.stage,
       totalamount: opp.amount,
       confidence: opp.confidence,
       expectedclosedate: opp.expectedCloseDate,
       closedon: opp.closedOn,
       lastaction: `${opp.currency} ${opp.amount.toLocaleString()}`,
       ownerid: ownerId,
-      confidencetrendKey: 'ConfidencetrendKey2' as OpportunityConfidencetrendKey, // flat
+      confidenceTrend: 'flat',
     });
 
     const payloads = [toPayload(data.opportunity)];
@@ -407,11 +413,11 @@ export function getActivityCreatePayloads(ownerId: string) {
       title: isOverdue 
         ? `[OVERDUE] Follow-up: ${data.name}` 
         : `Scheduled: ${data.name}`,
-      typeKey: 'TypeKey0' as ActivityTypeKey, // visit
+      type: 'visit',
       account: { id: accountId, name1: data.name },
       opportunity: { id: oppId, name1: data.opportunity.name },
       scheduleddate: data.nextActivityDate,
-      draftstatusKey: (isOverdue ? 'DraftstatusKey1' : 'DraftstatusKey1') as ActivityDraftstatusKey, // confirmed
+      draftStatus: 'confirmed',
       notes: `${data.department} | ${data.productLine}`,
       ownerid: ownerId,
     };
@@ -431,7 +437,7 @@ export function getTestDataSummary() {
       (sum, d) => sum + d.opportunity.amount + (d.additionalOpportunities?.reduce((s, o) => s + o.amount, 0) || 0),
       0,
     ),
-    wonDeals: ukTestData.filter((d) => d.opportunity.stage === 'StageKey4').length,
+    wonDeals: ukTestData.filter((d) => d.opportunity.stage === 'won').length,
     overdueFollowUps: ukTestData.filter((d) => new Date(d.nextActivityDate) < new Date('2026-05-11')).length,
   };
 }

@@ -2,6 +2,7 @@ import { Crf5c_settingsService } from './Crf5c_settingsService';
 import type { Crf5c_settings } from '../models/Crf5c_settingsModel';
 import type { IGetAllOptions } from '../models/CommonModels';
 import type { Setting } from '../models/setting-model';
+import { requireCreated, requireId } from './_adapter-utils';
 
 function fromDv(dv: Crf5c_settings): Setting {
   return {
@@ -26,20 +27,23 @@ export class SettingService {
   static async create(record: Omit<Setting, 'id'>): Promise<Setting> {
     const result = await Crf5c_settingsService.create(toDv(record) as any);
     if (!result.success) throw result.error;
-    return fromDv(result.data!);
+    return fromDv(requireCreated(result.data, 'crf5c_settingid', 'Setting'));
   }
 
   static async update(id: string, changedFields: Partial<Omit<Setting, 'id'>>): Promise<Setting> {
+    requireId(id, 'update', 'Setting');
     const result = await Crf5c_settingsService.update(id, toDv(changedFields) as any);
     if (!result.success) throw result.error;
     return fromDv(result.data!);
   }
 
   static async delete(id: string): Promise<void> {
+    requireId(id, 'delete', 'Setting');
     await Crf5c_settingsService.delete(id);
   }
 
   static async get(id: string): Promise<Setting> {
+    requireId(id, 'get', 'Setting');
     const result = await Crf5c_settingsService.get(id);
     if (!result.success) throw result.error;
     return fromDv(result.data!);

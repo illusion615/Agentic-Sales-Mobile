@@ -7,10 +7,7 @@ import { cn } from '@/lib/utils';
 import { useAccountList } from '@/generated/hooks/use-account';
 import { useContactList } from '@/generated/hooks/use-contact';
 import { useQueryClient } from '@tanstack/react-query';
-import { AccountTierKeyToLabel, AccountRegionKeyToLabel } from '@/generated/models/account-model';
-import type { Account, AccountTierKey, AccountRegionKey } from '@/generated/models/account-model';
-import type { Contact } from '@/generated/models/contact-model';
-import { getRegionEnglish } from '@/lib/display-labels';
+import type { Account } from '@/generated/models/account-model';import type { Contact } from '@/generated/models/contact-model';import { getRegionEnglish } from '@/lib/display-labels';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -116,7 +113,7 @@ export default function ClientsPage() {
         if (!matchesName && !matchesIndustry) return false;
       }
       // Tier filter
-      if (tierFilter !== 'all' && String(account.tierKey) !== tierFilter) return false;
+      if (tierFilter !== 'all' && String(account.tier) !== tierFilter) return false;
       // At risk filter
       if (showAtRiskOnly && !account.contactStatus.isAtRisk) return false;
       return true;
@@ -204,8 +201,8 @@ export default function ClientsPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Tiers</SelectItem>
-                  {Object.entries(AccountTierKeyToLabel).map(([key, label]) => (
-                    <SelectItem key={key} value={key}>{label}</SelectItem>
+                  {['S', 'A', 'B', 'C'].map((label) => (
+                    <SelectItem key={label} value={label}>{label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -259,15 +256,15 @@ export default function ClientsPage() {
                         <h3 className="text-sm font-medium text-foreground truncate flex-1">
                           {account.name1}
                         </h3>
-                        {account.tierKey && (
+                        {account.tier && (
                           <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">
-                            {AccountTierKeyToLabel[account.tierKey as AccountTierKey]}
+                            {account.tier}
                           </Badge>
                         )}
                       </div>
                       <p className="text-xs text-muted-foreground mb-1.5">
                         {account.industry || 'Uncategorized'}
-                        {account.regionKey && ` • ${getRegionEnglish(AccountRegionKeyToLabel[account.regionKey as AccountRegionKey])}`}
+                        {account.region && ` • ${getRegionEnglish(account.region)}`}
                       </p>
                       <div className="flex items-center gap-3 text-xs">
                         <span className={cn('px-1.5 py-0.5 rounded-md text-[10px] font-medium', account.contactStatus.color)}>

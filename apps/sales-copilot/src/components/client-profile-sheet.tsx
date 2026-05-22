@@ -30,10 +30,8 @@ import { GlassCard } from '@/components/glass-card';
 import { useAccount } from '@/generated/hooks/use-account';
 import { useActivityList } from '@/generated/hooks/use-activity';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
-import { ActivityTypeKeyToLabel, ActivityDraftstatusKeyToLabel } from '@/generated/models/activity-model';
-import { OpportunityStageKeyToLabel, OpportunityConfidencetrendKeyToLabel } from '@/generated/models/opportunity-model';
-import type { Activity, ActivityTypeKey, ActivityDraftstatusKey } from '@/generated/models/activity-model';
-import type { Opportunity, OpportunityStageKey, OpportunityConfidencetrendKey } from '@/generated/models/opportunity-model';
+import type { Activity } from '@/generated/models/activity-model';
+import type { Opportunity } from '@/generated/models/opportunity-model';
 import { getLocale } from '@/lib/i18n';
 
 interface ClientProfileSheetProps {
@@ -43,12 +41,12 @@ interface ClientProfileSheetProps {
 }
 
 const stageProgress: Record<string, number> = {
-  StageKey0: 10, // Prospecting
-  StageKey1: 30, // Qualification
-  StageKey2: 50, // Proposal
-  StageKey3: 75, // Negotiation
-  StageKey4: 100, // Won
-  StageKey5: 0, // Lost
+  prospecting: 10,
+  qualification: 30,
+  proposal: 50,
+  negotiation: 75,
+  won: 100,
+  lost: 0,
 };
 
 function formatDate(dateStr?: string): string {
@@ -86,7 +84,7 @@ export function ClientProfileSheet({ accountId, open, onOpenChange }: ClientProf
     return allActivities
       .filter((a: Activity) => a.account?.id === accountId)
       .filter((a: Activity) => {
-        const typeLabel = ActivityTypeKeyToLabel[a.typeKey];
+        const typeLabel = a.type;
         return typeLabel === 'visit' || typeLabel === 'meeting' || typeLabel === 'call';
       })
       .sort((a: Activity, b: Activity) => 
@@ -99,7 +97,7 @@ export function ClientProfileSheet({ accountId, open, onOpenChange }: ClientProf
   const openOpportunities = useMemo(() => {
     return allOpportunities
       .filter((o: Opportunity) => o.account?.id === accountId)
-      .filter((o: Opportunity) => o.stageKey !== 'StageKey4' && o.stageKey !== 'StageKey5')
+      .filter((o: Opportunity) => o.stage !== 'won' && o.stage !== 'lost')
       .sort((a: Opportunity, b: Opportunity) => (b.totalamount || 0) - (a.totalamount || 0))
       .slice(0, 3);
   }, [allOpportunities, accountId]);
@@ -115,7 +113,7 @@ export function ClientProfileSheet({ accountId, open, onOpenChange }: ClientProf
       )
       .slice(0, 5)
       .forEach((activity: Activity) => {
-        const statusLabel = ActivityDraftstatusKeyToLabel[activity.draftstatusKey];
+        const statusLabel = activity.draftStatus;
         const isCompleted = statusLabel === 'completed';
         
         // Extract action items from notes or use title
@@ -309,8 +307,8 @@ export function ClientProfileSheet({ accountId, open, onOpenChange }: ClientProf
                     </div>
                   ) : (
                     recentVisits.map((activity: Activity, index: number) => {
-                      const typeLabel = ActivityTypeKeyToLabel[activity.typeKey];
-                      const statusLabel = ActivityDraftstatusKeyToLabel[activity.draftstatusKey];
+                      const typeLabel = activity.type;
+                      const statusLabel = activity.draftStatus;
                       const isCompleted = statusLabel === 'completed';
                       
                       return (
@@ -374,17 +372,17 @@ export function ClientProfileSheet({ accountId, open, onOpenChange }: ClientProf
                     </div>
                   ) : (
                     openOpportunities.map((opp: Opportunity) => {
-                      const progress = stageProgress[opp.stageKey as string] || 0;
-                      const stageLabel = OpportunityStageKeyToLabel[opp.stageKey as OpportunityStageKey];
-                      const trendKey = opp.confidencetrendKey as OpportunityConfidencetrendKey;
-                      const TrendIcon = trendKey === 'ConfidencetrendKey0' 
+                      const progress = stageProgress[opp.stage as string] || 0;
+                      const stageLabel = opp.stage;
+                      const trend = opp.confidenceTrend;
+                      const TrendIcon = trend === 'up' 
                         ? TrendingUp 
-                        : trendKey === 'ConfidencetrendKey1' 
+                        : trend === 'down' 
                           ? TrendingDown 
                           : Minus;
-                      const trendColor = trendKey === 'ConfidencetrendKey0'
+                      const trendColor = trend === 'up'
                         ? 'text-emerald-500'
-                        : trendKey === 'ConfidencetrendKey1'
+                        : trend === 'down'
                           ? 'text-rose-500'
                           : 'text-muted-foreground';
                       

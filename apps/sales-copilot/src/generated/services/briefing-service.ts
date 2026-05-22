@@ -2,7 +2,7 @@ import { Crf5c_briefingsService } from './Crf5c_briefingsService';
 import type { Crf5c_briefings } from '../models/Crf5c_briefingsModel';
 import type { IGetAllOptions } from '../models/CommonModels';
 import type { Briefing } from '../models/briefing-model';
-import { dvNum, numToDv } from './_adapter-utils';
+import { dvNum, numToDv, requireCreated, requireId } from './_adapter-utils';
 
 function fromDv(dv: Crf5c_briefings): Briefing {
   return {
@@ -29,20 +29,23 @@ export class BriefingService {
   static async create(record: Omit<Briefing, 'id'>): Promise<Briefing> {
     const result = await Crf5c_briefingsService.create(toDv(record) as any);
     if (!result.success) throw result.error;
-    return fromDv(result.data!);
+    return fromDv(requireCreated(result.data, 'crf5c_briefingid', 'Briefing'));
   }
 
   static async update(id: string, changedFields: Partial<Omit<Briefing, 'id'>>): Promise<Briefing> {
+    requireId(id, 'update', 'Briefing');
     const result = await Crf5c_briefingsService.update(id, toDv(changedFields) as any);
     if (!result.success) throw result.error;
     return fromDv(result.data!);
   }
 
   static async delete(id: string): Promise<void> {
+    requireId(id, 'delete', 'Briefing');
     await Crf5c_briefingsService.delete(id);
   }
 
   static async get(id: string): Promise<Briefing> {
+    requireId(id, 'get', 'Briefing');
     const result = await Crf5c_briefingsService.get(id);
     if (!result.success) throw result.error;
     return fromDv(result.data!);

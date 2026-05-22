@@ -6,11 +6,7 @@ import { MobileLayout } from '@/components/mobile-layout';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { useProductList, useAccountList, useOpportunityList, useActivityList } from '@/generated/hooks';
-import type { Product } from '@/generated/models/product-model';
-import type { Account } from '@/generated/models/account-model';
-import type { Opportunity, OpportunityStageKeyToLabel } from '@/generated/models/opportunity-model';
-import type { Activity, ActivityTypeKeyToLabel } from '@/generated/models/activity-model';
-import { imageFallbackByCategory, type ImageFallbackCategory } from '@/lib/product-images';
+import type { Product } from '@/generated/models/product-model';import type { Account } from '@/generated/models/account-model';import type { Opportunity, OpportunityStageKeyToLabel } from '@/generated/models/opportunity-model';import type { Activity, ActivityTypeKeyToLabel } from '@/generated/models/activity-model';import { imageFallbackByCategory, type ImageFallbackCategory } from '@/lib/product-images';
 import { useCopilot } from '@/contexts/copilot-context';
 import { getLocale } from '@/lib/i18n';
 import { useFirstMount } from '@/hooks/use-first-mount';
@@ -42,7 +38,7 @@ function parseBulletLines(text: string): string[] {
     .filter((line: string) => line.length > 0);
 }
 
-function getStageLabel(stageKey: string): string {
+function getStageLabel(stage: string): string {
   const stageMap: Record<string, string> = {
     StageKey0: 'Prospecting',
     StageKey1: 'Qualification',
@@ -51,28 +47,15 @@ function getStageLabel(stageKey: string): string {
     StageKey4: 'Won',
     StageKey5: 'Lost',
   };
-  return stageMap[stageKey] || stageKey;
+  return stageMap[stage] || stage;
 }
 
-function getActivityTypeLabel(typeKey: string): string {
-  const typeMap: Record<string, string> = {
-    TypeKey0: 'Visit',
-    TypeKey1: 'Call',
-    TypeKey2: 'Meeting',
-    TypeKey3: 'Email',
-    TypeKey4: 'Other',
-  };
-  return typeMap[typeKey] || typeKey;
+function getActivityTypeLabel(type: string): string {
+  return type;
 }
 
-function getDraftStatusLabel(statusKey: string): string {
-  const statusMap: Record<string, string> = {
-    DraftstatusKey0: 'Draft',
-    DraftstatusKey1: 'Confirmed',
-    DraftstatusKey2: 'Completed',
-    DraftstatusKey3: 'Cancelled',
-  };
-  return statusMap[statusKey] || statusKey;
+function getDraftStatusLabel(status: string): string {
+  return status;
 }
 
 export default function ProductDetailPage() {
@@ -273,10 +256,10 @@ export default function ProductDetailPage() {
                         <div>
                           <h4 className="text-sm font-medium text-foreground">{account.name1}</h4>
                           <p className="text-xs text-muted-foreground mt-0.5">
-                            {account.industry || 'No industry'} • {account.regionKey || 'No region'}
+                            {account.industry || 'No industry'} • {account.region || 'No region'}
                           </p>
                         </div>
-                        <span className="text-xs text-muted-foreground">{account.tierKey}</span>
+                        <span className="text-xs text-muted-foreground">{account.tier}</span>
                       </div>
                     </button>
                   ))
@@ -300,7 +283,7 @@ export default function ProductDetailPage() {
                         <div className="flex-1 min-w-0">
                           <h4 className="text-sm font-medium text-foreground truncate">{opp.name1}</h4>
                           <p className="text-xs text-muted-foreground mt-0.5">
-                            {getStageLabel(opp.stageKey)} • ${(opp.totalamount / 1000).toFixed(0)}K
+                            {getStageLabel(opp.stage)} • ${(opp.totalamount / 1000).toFixed(0)}K
                           </p>
                         </div>
                         <span className="text-xs text-muted-foreground">{opp.confidence ?? 0}%</span>
@@ -327,10 +310,10 @@ export default function ProductDetailPage() {
                         <div className="flex-1 min-w-0">
                           <h4 className="text-sm font-medium text-foreground truncate">{activity.title}</h4>
                           <p className="text-xs text-muted-foreground mt-0.5">
-                            {getActivityTypeLabel(activity.typeKey)} • {new Date(activity.scheduleddate).toLocaleDateString()}
+                            {getActivityTypeLabel(activity.type)} • {new Date(activity.scheduleddate).toLocaleDateString()}
                           </p>
                         </div>
-                        <span className="text-xs text-muted-foreground">{getDraftStatusLabel(activity.draftstatusKey)}</span>
+                        <span className="text-xs text-muted-foreground">{getDraftStatusLabel(activity.draftStatus)}</span>
                       </div>
                     </button>
                   ))

@@ -51,12 +51,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useAccountList } from '@/generated/hooks/use-account';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useActivityList } from '@/generated/hooks/use-activity';
-import { OpportunityStageKeyToLabel } from '@/generated/models/opportunity-model';
-import type { Opportunity, OpportunityStageKey } from '@/generated/models/opportunity-model';
-import { ActivityTypeKeyToLabel, ActivityDraftstatusKeyToLabel } from '@/generated/models/activity-model';
-import type { Activity, ActivityTypeKey, ActivityDraftstatusKey } from '@/generated/models/activity-model';
-import type { Account } from '@/generated/models/account-model';
-import { toast } from 'sonner';
+import type { Opportunity } from '@/generated/models/opportunity-model';import type { Activity } from '@/generated/models/activity-model';import type { Account } from '@/generated/models/account-model';import { toast } from 'sonner';
 import { getLocale } from '@/lib/i18n';
 import { useCopilot } from '@/contexts/copilot-context';
 import { PullToRefresh } from '@/components/pull-to-refresh';
@@ -76,12 +71,12 @@ function formatDate(dateStr?: string): string {
   return new Date(dateStr).toLocaleDateString();
 }
 
-function getActivityTypeIcon(typeKey: ActivityTypeKey | null | undefined): React.ComponentType<{ className?: string }> {
-  switch (typeKey) {
-    case 'TypeKey0': return MapPin; // visit
-    case 'TypeKey1': return Phone; // call
-    case 'TypeKey2': return Calendar; // meeting
-    case 'TypeKey3': return Mail; // email
+function getActivityTypeIcon(type: string | null | undefined): React.ComponentType<{ className?: string }> {
+  switch (type) {
+    case 'visit': return MapPin; // visit
+    case 'call': return Phone; // call
+    case 'meeting': return Calendar; // meeting
+    case 'email': return Mail; // email
     default: return CheckSquare;
   }
 }
@@ -525,7 +520,7 @@ export default function ContactDetailPage() {
                   </div>
                   <div className="flex items-center gap-2 text-xs">
                     <Badge variant="outline" className="text-[10px]">
-                      {OpportunityStageKeyToLabel[opp.stageKey as OpportunityStageKey]}
+                      {opp.stage}
                     </Badge>
                     {opp.confidence && (
                       <span className="text-muted-foreground">
@@ -559,7 +554,7 @@ export default function ContactDetailPage() {
                 >
                   <div className="flex gap-3">
                     {(() => {
-                      const Icon = getActivityTypeIcon(activity.typeKey);
+                      const Icon = getActivityTypeIcon(activity.type);
                       return (
                         <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
                           <Icon className="w-4 h-4 text-primary" />
@@ -571,21 +566,21 @@ export default function ContactDetailPage() {
                         <h4 className="text-sm font-medium text-foreground truncate">
                           {activity.title}
                         </h4>
-                        {activity.draftstatusKey && (
+                        {activity.draftStatus && (
                           <Badge
                             variant="outline"
                             className={cn(
                               'text-[10px]',
-                              activity.draftstatusKey === 'DraftstatusKey2' && 'text-emerald-600 border-emerald-200'
+                              activity.draftStatus === 'completed' && 'text-emerald-600 border-emerald-200'
                             )}
                           >
-                            {ActivityDraftstatusKeyToLabel[activity.draftstatusKey as ActivityDraftstatusKey]}
+                            {activity.draftStatus}
                           </Badge>
                         )}
                       </div>
                       <p className="text-xs text-muted-foreground">
                         {formatDate(activity.scheduleddate)}
-                        {activity.typeKey && ` • ${ActivityTypeKeyToLabel[activity.typeKey as ActivityTypeKey]}`}
+                        {activity.type && ` • ${activity.type}`}
                       </p>
                     </div>
                   </div>

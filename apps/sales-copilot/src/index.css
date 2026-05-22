@@ -399,7 +399,7 @@ html.light {
 
   /* Bottom fade gradient for fixed overlays */
   .bg-scm-fade-up {
-    background: linear-gradient(to top, var(--scm-gradient-start) 40%, transparent);
+    background: linear-gradient(to top, var(--scm-gradient-start) 70%, transparent);
   }
 
   /* User message bubble styling */

@@ -8,9 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useQueryClient } from '@tanstack/react-query';
-import { OpportunityStageKeyToLabel, OpportunityConfidencetrendKeyToLabel } from '@/generated/models/opportunity-model';
-import type { Opportunity as DataverseOpportunity, OpportunityConfidencetrendKey } from '@/generated/models/opportunity-model';
-import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
+import type { Opportunity as DataverseOpportunity } from '@/generated/models/opportunity-model';import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
 import { useCopilot } from '@/contexts/copilot-context';
 import { getLocale } from '@/lib/i18n';
 import { PullToRefresh } from '@/components/pull-to-refresh';
@@ -50,9 +48,9 @@ function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-function TrendIcon({ trendKey }: { trendKey?: OpportunityConfidencetrendKey }) {
+function TrendIcon({ trendKey }: { trendKey?: string }) {
   if (!trendKey) return null;
-  const trend = OpportunityConfidencetrendKeyToLabel[trendKey];
+  const trend = trendKey;
   if (trend === 'up') return <TrendingUp className="w-3 h-3 text-emerald-500" />;
   if (trend === 'down') return <TrendingDown className="w-3 h-3 text-rose-500" />;
   return <Minus className="w-3 h-3 text-muted-foreground" />;
@@ -80,7 +78,7 @@ export default function OpportunitiesPage() {
     const stages = ['prospecting', 'qualification', 'proposal', 'negotiation'];
     return stages.map((stage: string) => {
       const stageOpps = opportunities.filter((opp: DataverseOpportunity) => 
-        OpportunityStageKeyToLabel[opp.stageKey] === stage
+        opp.stage === stage
       );
       const totalValue = stageOpps.reduce((sum: number, opp: DataverseOpportunity) => sum + (opp.totalamount || 0), 0);
       return {
@@ -96,7 +94,7 @@ export default function OpportunitiesPage() {
   // Filter to active opportunities (not won/lost)
   const activeOpportunities = useMemo(() => {
     return opportunities.filter((opp: DataverseOpportunity) => {
-      const stage = OpportunityStageKeyToLabel[opp.stageKey];
+      const stage = opp.stage;
       return stage !== 'won' && stage !== 'lost';
     });
   }, [opportunities]);
@@ -186,7 +184,7 @@ export default function OpportunitiesPage() {
             ) : (
               <div className="space-y-3">
                 {activeOpportunities.map((opp: DataverseOpportunity) => {
-                  const stageLabel = OpportunityStageKeyToLabel[opp.stageKey];
+                  const stageLabel = opp.stage;
                   
                   return (
                     <motion.div key={opp.id} variants={itemVariants}>
@@ -236,7 +234,7 @@ export default function OpportunitiesPage() {
                                       : 'bg-[#6366F1]'
                                   }`}
                                 >
-                                  <TrendIcon trendKey={opp.confidencetrendKey} />
+                                  <TrendIcon trendKey={opp.confidenceTrend} />
                                   {opp.confidence}%
                                 </span>
                               )}

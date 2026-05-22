@@ -56,16 +56,8 @@ import { useContactList } from '@/generated/hooks/use-contact';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useActivityList } from '@/generated/hooks/use-activity';
 import { useEntityAISummary, useWithAISummaryTrigger } from '@/hooks/use-ai-summary-trigger';
-import {
-  AccountTierKeyToLabel,
-  AccountRegionKeyToLabel,
-  AccountCreditstatusKeyToLabel,
-} from '@/generated/models/account-model';
-import type { AccountTierKey, AccountRegionKey, AccountCreditstatusKey } from '@/generated/models/account-model';
-import { OpportunityStageKeyToLabel } from '@/generated/models/opportunity-model';
-import type { Opportunity, OpportunityStageKey } from '@/generated/models/opportunity-model';
-import { ActivityTypeKeyToLabel, ActivityDraftstatusKeyToLabel } from '@/generated/models/activity-model';
-import type { Activity, ActivityTypeKey, ActivityDraftstatusKey } from '@/generated/models/activity-model';
+import type { Opportunity } from '@/generated/models/opportunity-model';
+import type { Activity } from '@/generated/models/activity-model';
 import type { Contact } from '@/generated/models/contact-model';
 import { getRegionEnglish } from '@/lib/display-labels';
 import { toast } from 'sonner';
@@ -103,12 +95,12 @@ function getDaysSince(dateStr?: string): number {
   return Math.ceil(Math.abs(now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
 }
 
-function getActivityTypeIcon(typeKey: ActivityTypeKey | null | undefined): React.ComponentType<{ className?: string }> {
-  switch (typeKey) {
-    case 'TypeKey0': return MapPin; // visit
-    case 'TypeKey1': return Phone; // call
-    case 'TypeKey2': return Calendar; // meeting
-    case 'TypeKey3': return Mail; // email
+function getActivityTypeIcon(type: string | null | undefined): React.ComponentType<{ className?: string }> {
+  switch (type) {
+    case 'visit': return MapPin;
+    case 'call': return Phone;
+    case 'meeting': return Calendar;
+    case 'email': return Mail;
     default: return CheckSquare;
   }
 }
@@ -130,8 +122,8 @@ export default function ClientDetailPage() {
     email: '',
     address: '',
     notes: '',
-    tierKey: '' as AccountTierKey | '',
-    regionKey: '' as AccountRegionKey | '',
+    tier: '',
+    region: '',
   });
 
   // Fetch data from Dataverse
@@ -187,8 +179,8 @@ export default function ClientDetailPage() {
         email: account.email || '',
         address: account.address || '',
         notes: account.notes || '',
-        tierKey: (account.tierKey as AccountTierKey) || '',
-        regionKey: (account.regionKey as AccountRegionKey) || '',
+        tier: (account.tier as string) || '',
+        region: (account.region as string) || '',
       });
     }
   }, [account, isEditMode]);
@@ -208,8 +200,8 @@ export default function ClientDetailPage() {
     if (!account) return;
     setIsRefreshingAI(true);
     triggerForEntity('account', account.id, { ...account } as Record<string, unknown>, {
-      opportunities: opportunities.map((o: Opportunity) => ({ id: o.id, name: o.name1, stage: o.stageKey, amount: o.totalamount })),
-      activities: activities.map((a: Activity) => ({ id: a.id, title: a.title, type: a.typeKey, date: a.scheduleddate })),
+      opportunities: opportunities.map((o: Opportunity) => ({ id: o.id, name: o.name1, stage: o.stage, amount: o.totalamount })),
+      activities: activities.map((a: Activity) => ({ id: a.id, title: a.title, type: a.type, date: a.scheduleddate })),
       contacts: contacts.map((c: Contact) => ({ id: c.id, name: c.fullname, title: c.title })),
     });
     setTimeout(() => {
@@ -223,10 +215,10 @@ export default function ClientDetailPage() {
     (sum: number, opp: Opportunity) => sum + (opp.totalamount || 0),
     0
   );
-  const wonStageKey = 'StageKey4';
-  const lostStageKey = 'StageKey5';
+  const wonStage = 'won';
+  const lostStage = 'lost';
   const activeDeals = opportunities.filter(
-    (opp: Opportunity) => opp.stageKey !== wonStageKey && opp.stageKey !== lostStageKey
+    (opp: Opportunity) => opp.stage !== wonStage && opp.stage !== lostStage
   );
 
   const daysSinceContact = getDaysSince(account?.lastcontactedon || account?.lastinteractiondate);
@@ -247,8 +239,8 @@ export default function ClientDetailPage() {
         accountId: account.id,
         accountName: account.name1,
         industry: account.industry,
-        tier: account.tierKey,
-        region: account.regionKey,
+        tier: account.tier,
+        region: account.region,
         phone: account.phone,
         email: account.email,
         address: account.address,
@@ -257,7 +249,7 @@ export default function ClientDetailPage() {
         activitiesCount: activities.length,
         totalPipelineValue,
         daysSinceLastContact: daysSinceContact,
-        creditStatus: account.creditstatusKey,
+        creditStatus: account.creditStatus,
         notes: account.notes,
       },
     });
@@ -288,8 +280,8 @@ export default function ClientDetailPage() {
         email: editForm.email,
         address: editForm.address,
         notes: editForm.notes,
-        tierKey: editForm.tierKey || undefined,
-        regionKey: editForm.regionKey || undefined,
+        tier: editForm.tier || undefined,
+        region: editForm.region || undefined,
       };
       
       await updateAccount.mutateAsync({
@@ -302,8 +294,8 @@ export default function ClientDetailPage() {
         ...account,
         ...updatedData,
       } as Record<string, unknown>, {
-        opportunities: opportunities.map((o: Opportunity) => ({ id: o.id, name: o.name1, stage: o.stageKey, amount: o.totalamount })),
-        activities: activities.map((a: Activity) => ({ id: a.id, title: a.title, type: a.typeKey, date: a.scheduleddate })),
+        opportunities: opportunities.map((o: Opportunity) => ({ id: o.id, name: o.name1, stage: o.stage, amount: o.totalamount })),
+        activities: activities.map((a: Activity) => ({ id: a.id, title: a.title, type: a.type, date: a.scheduleddate })),
         contacts: contacts.map((c: Contact) => ({ id: c.id, name: c.fullname, title: c.title })),
       });
       
@@ -324,8 +316,8 @@ export default function ClientDetailPage() {
         email: account.email || '',
         address: account.address || '',
         notes: account.notes || '',
-        tierKey: (account.tierKey as AccountTierKey) || '',
-        regionKey: (account.regionKey as AccountRegionKey) || '',
+        tier: (account.tier as string) || '',
+        region: (account.region as string) || '',
       });
     }
   };
@@ -435,16 +427,16 @@ export default function ClientDetailPage() {
                 <div>
                   <Label htmlFor="tier">Tier</Label>
                   <Select
-                    value={editForm.tierKey || 'none'}
-                    onValueChange={(val: string) => setEditForm({ ...editForm, tierKey: val === 'none' ? '' : val as AccountTierKey })}
+                    value={editForm.tier || 'none'}
+                    onValueChange={(val: string) => setEditForm({ ...editForm, tier: val === 'none' ? '' : val })}
                   >
                     <SelectTrigger id="tier">
                       <SelectValue placeholder="Select tier" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">None</SelectItem>
-                      {Object.entries(AccountTierKeyToLabel).map(([key, label]) => (
-                        <SelectItem key={key} value={key}>{label}</SelectItem>
+                      {['S', 'A', 'B', 'C'].map((label) => (
+                        <SelectItem key={label} value={label}>{label}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -453,16 +445,16 @@ export default function ClientDetailPage() {
                 <div>
                   <Label htmlFor="region">Region</Label>
                   <Select
-                    value={editForm.regionKey || 'none'}
-                    onValueChange={(val: string) => setEditForm({ ...editForm, regionKey: val === 'none' ? '' : val as AccountRegionKey })}
+                    value={editForm.region || 'none'}
+                    onValueChange={(val: string) => setEditForm({ ...editForm, region: val === 'none' ? '' : val })}
                   >
                     <SelectTrigger id="region">
                       <SelectValue placeholder="Select region" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">None</SelectItem>
-                      {Object.entries(AccountRegionKeyToLabel).map(([key, label]) => (
-                        <SelectItem key={key} value={key}>{getRegionEnglish(label)}</SelectItem>
+                      {['华东', '华北', '华南', '西南'].map((label) => (
+                        <SelectItem key={label} value={label}>{getRegionEnglish(label)}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -557,15 +549,15 @@ export default function ClientDetailPage() {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1">
                 <h1 className="text-xl font-bold text-foreground truncate">{account.name1}</h1>
-                {account.tierKey && (
+                {account.tier && (
                   <Badge variant="secondary" className="flex-shrink-0">
-                    {AccountTierKeyToLabel[account.tierKey as AccountTierKey]}
+                    {account.tier}
                   </Badge>
                 )}
               </div>
               <p className="text-sm text-muted-foreground mb-2">
                 {account.industry || 'Uncategorized'}
-                {account.regionKey && ` • ${getRegionEnglish(AccountRegionKeyToLabel[account.regionKey as AccountRegionKey])}`}
+                {account.region && ` • ${getRegionEnglish(account.region)}`}
               </p>
               <div className="flex flex-wrap gap-2">
                 {daysSinceContact <= 14 ? (
@@ -579,9 +571,9 @@ export default function ClientDetailPage() {
                     At Risk
                   </Badge>
                 ) : null}
-                {account.creditstatusKey && account.creditstatusKey !== 'CreditstatusKey0' && (
+                {account.creditStatus && account.creditStatus !== '正常' && (
                   <Badge variant="outline" className="gap-1 text-amber-600 border-amber-200 dark:border-amber-900">
-                    {AccountCreditstatusKeyToLabel[account.creditstatusKey as AccountCreditstatusKey]}
+                    {account.creditStatus}
                   </Badge>
                 )}
               </div>
@@ -776,7 +768,7 @@ export default function ClientDetailPage() {
                   </div>
                   <div className="flex items-center gap-2 text-xs">
                     <Badge variant="outline" className="text-[10px]">
-                      {OpportunityStageKeyToLabel[opp.stageKey as OpportunityStageKey]}
+                      {opp.stage}
                     </Badge>
                     {opp.confidence && (
                       <span className="text-muted-foreground">
@@ -815,7 +807,7 @@ export default function ClientDetailPage() {
                 >
                   <div className="flex gap-3">
                     {(() => {
-                      const Icon = getActivityTypeIcon(activity.typeKey);
+                      const Icon = getActivityTypeIcon(activity.type);
                       return (
                         <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
                           <Icon className="w-4 h-4 text-primary" />
@@ -827,21 +819,21 @@ export default function ClientDetailPage() {
                         <h4 className="text-sm font-medium text-foreground truncate">
                           {activity.title}
                         </h4>
-                        {activity.draftstatusKey && (
+                        {activity.draftStatus && (
                           <Badge
                             variant="outline"
                             className={cn(
                               'text-[10px]',
-                              activity.draftstatusKey === 'DraftstatusKey2' && 'text-emerald-600 border-emerald-200'
+                              activity.draftStatus === 'completed' && 'text-emerald-600 border-emerald-200'
                             )}
                           >
-                            {ActivityDraftstatusKeyToLabel[activity.draftstatusKey as ActivityDraftstatusKey]}
+                            {activity.draftStatus}
                           </Badge>
                         )}
                       </div>
                       <p className="text-xs text-muted-foreground mb-1">
                         {formatDate(activity.scheduleddate)}
-                        {activity.typeKey && ` • ${ActivityTypeKeyToLabel[activity.typeKey as ActivityTypeKey]}`}
+                        {activity.type && ` • ${activity.type}`}
                       </p>
                       {activity.notes && (
                         <p className="text-xs text-muted-foreground line-clamp-2">

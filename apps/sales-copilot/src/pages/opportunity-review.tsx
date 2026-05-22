@@ -7,10 +7,7 @@ import { useAccountList } from '@/generated/hooks/use-account';
 import { useUser } from '@/hooks/use-user';
 import { getLocale, type Locale } from '@/lib/i18n';
 import { useFirstMount } from '@/hooks/use-first-mount';
-import { OpportunityStageKeyToLabel, type OpportunityStageKey } from '@/generated/models/opportunity-model';
-import type { Opportunity } from '@/generated/models/opportunity-model';
-
-const containerVariants = {
+import type { Opportunity } from '@/generated/models/opportunity-model';const containerVariants = {
   hidden: { opacity: 0 },
   show: {
     opacity: 1,
@@ -32,8 +29,8 @@ const stageConfig: Record<string, { zh: string; en: string; color: string }> = {
   lost: { zh: '丢单', en: 'Lost', color: 'bg-red-500' },
 };
 
-function isClosedStage(stageKey: OpportunityStageKey): boolean {
-  const label = OpportunityStageKeyToLabel[stageKey];
+function isClosedStage(stage: string): boolean {
+  const label = stage;
   return label === 'won' || label === 'lost';
 }
 
@@ -48,7 +45,7 @@ export default function OpportunityReviewPage() {
 
   // Filter user's active opportunities
   const activeOpps = opportunities.filter(
-    (o: Opportunity) => o.ownerid === userId && !isClosedStage(o.stageKey)
+    (o: Opportunity) => o.ownerid === userId && !isClosedStage(o.stage)
   );
 
   const getAccountName = (accountRef: { id: string; name1: string } | undefined) => {
@@ -61,15 +58,15 @@ export default function OpportunityReviewPage() {
     return `$${amount.toLocaleString()}`;
   };
 
-  const getStageConfig = (stageKey: OpportunityStageKey) => {
-    const label = OpportunityStageKeyToLabel[stageKey];
+  const getStageConfig = (stage: string) => {
+    const label = stage;
     return stageConfig[label] || stageConfig.prospecting;
   };
 
   return (
     <div className="h-screen flex flex-col bg-background">
       {/* Header */}
-      <header className="fixed top-0 left-0 right-0 z-40 glass-surface border-b border-border/50 safe-area-top">
+      <header className="fixed top-0 left-0 right-0 z-40 bg-background/80 backdrop-blur-md border-b border-border/50 safe-area-top">
         <div className="flex items-center justify-between h-14 px-4">
           <button
             onClick={() => navigate('/')}
@@ -118,7 +115,7 @@ export default function OpportunityReviewPage() {
 
           {/* Opportunity List */}
           {activeOpps.map((opp: Opportunity) => {
-            const stage = getStageConfig(opp.stageKey);
+            const stage = getStageConfig(opp.stage);
             const isAtRisk = (opp.confidence ?? 100) < 50;
 
             return (
