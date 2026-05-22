@@ -343,8 +343,6 @@ export default function HomeDashboard() {
   const inputRef = useRef<HTMLInputElement>(null);
   
   // Chat panel state - UI only, messages come from context
-  const [chatPanelExpanded, setChatPanelExpanded] = useState(false);
-  const [chatPanelFullScreen, setChatPanelFullScreen] = useState(false);
 
   const [longPressMessage, setLongPressMessage] = useState<ChatMessage | null>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -401,8 +399,6 @@ export default function HomeDashboard() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const chatPanelRef = useRef<HTMLDivElement>(null);
-  const dragControls = useDragControls();
   const lastAutoPlayedIdRef = useRef<string | null>(null);
   const speechSynthesisRef = useRef<SpeechSynthesisUtterance | null>(null);
   
@@ -926,27 +922,6 @@ export default function HomeDashboard() {
   }, [chatMessages, locale]);
 
 
-  // Click outside to collapse chat panel
-  useEffect(() => {
-    if (!chatPanelExpanded) return;
-    
-    const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as Node;
-      if (chatPanelRef.current && !chatPanelRef.current.contains(target)) {
-        setChatPanelExpanded(false);
-      }
-    };
-    
-    // Add a small delay to prevent immediate collapse when clicking to expand
-    const timer = setTimeout(() => {
-      document.addEventListener('mousedown', handleClickOutside);
-    }, 100);
-    
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [chatPanelExpanded]);
 
   // Pull to refresh
   const handleRefresh = useCallback(async () => {
@@ -964,10 +939,6 @@ export default function HomeDashboard() {
     }
   };
 
-  const handleAskCopilot = () => {
-    // Open the chat panel in full screen mode
-    setChatPanelFullScreen(true);
-  };
 
   const handleViewOpportunities = () => {
     navigate('/opportunity-review');
@@ -1728,30 +1699,6 @@ ${agentResponse}`;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Handle global copilot navigation
-  useEffect(() => {
-    const openChat = searchParams.get('openChat');
-    const message = searchParams.get('message');
-    
-    if (openChat === 'true') {
-      setChatPanelExpanded(true);
-      // Clear the query params
-      searchParams.delete('openChat');
-      searchParams.delete('message');
-      setSearchParams(searchParams, { replace: true });
-      
-      // Focus the input and send message if provided
-      setTimeout(() => {
-        if (message) {
-          setInputValue(message);
-          sendMessage(message);
-        } else {
-          inputRef.current?.focus();
-        }
-      }, 300);
-    }
-  }, [searchParams, setSearchParams, sendMessage]);
-
   // Handle enter key - send through shared copilot
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey && inputValue.trim()) {
@@ -1789,22 +1736,6 @@ ${agentResponse}`;
     } finally {
       setIsCreatingConversation(false);
     }
-  };
-
-  // Handle full screen toggle
-  const handleFullScreen = () => {
-    setChatPanelFullScreen(true);
-    setChatPanelExpanded(false);
-  };
-
-  // Handle close full screen
-  const handleCloseFullScreen = () => {
-    setChatPanelFullScreen(false);
-  };
-
-  // Handle collapse panel
-  const handleCollapsePanel = () => {
-    setChatPanelExpanded(false);
   };
 
   // Long press action handler
@@ -1989,476 +1920,6 @@ ${agentResponse}`;
 
   const quickActions = useMemo(() => getQuickActions(), [getQuickActions]);
 
-  // Chat panel content renderer
-  const renderChatContent = (isFullScreen: boolean, onDragHandlePointerDown?: (e: React.PointerEvent) => void) => (
-    <div className={cn(
-      'flex flex-col h-full',
-      isFullScreen ? 'pt-14' : ''
-    )}>
-      {/* Drag handle for swipe down to collapse - only show in expanded mode */}
-      {!isFullScreen && chatPanelExpanded && (
-        <div 
-          className="flex justify-center py-2 cursor-grab active:cursor-grabbing touch-none"
-          onPointerDown={onDragHandlePointerDown}
-        >
-          <div className="w-10 h-1 rounded-full bg-muted-foreground/30" />
-        </div>
-      )}
-      {/* Chat header - only show in expanded/full modes */}
-      {!isFullScreen && chatPanelExpanded && (
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border/30">
-          <button
-            onClick={handleCollapsePanel}
-            className="w-8 h-8 flex items-center justify-center rounded-lg transition-all hover:brightness-125 active:brightness-75"
-            aria-label={locale === 'zh-Hans' ? '收起' : 'Collapse'}
-          >
-            <ChevronDown className="w-4 h-4 text-foreground" />
-          </button>
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-foreground">Ask Copilot</span>
-            {copilotConnected && (
-              <span className="w-2 h-2 bg-green-500 rounded-full" />
-            )}
-
-          </div>
-
-          <div className="flex items-center gap-1">
-            <button
-              onClick={handleNewConversation}
-              disabled={isCreatingConversation}
-              className="w-8 h-8 flex items-center justify-center rounded-lg transition-all hover:brightness-125 active:brightness-75 disabled:opacity-50"
-              aria-label={locale === 'zh-Hans' ? '新建会话' : 'New conversation'}
-            >
-              {isCreatingConversation ? (
-                <Loader2 className="w-4 h-4 text-foreground animate-spin" />
-              ) : (
-                <SquarePen className="w-4 h-4 text-foreground" />
-              )}
-            </button>
-            <button
-              onClick={handleFullScreen}
-              className="w-8 h-8 flex items-center justify-center rounded-lg transition-all hover:brightness-125 active:brightness-75"
-              aria-label={locale === 'zh-Hans' ? '全屏' : 'Full screen'}
-            >
-              <Maximize2 className="w-4 h-4 text-foreground" />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Messages area */}
-      <div className={cn(
-        'flex-1 overflow-y-auto scrollbar-hide px-3 py-3',
-        isFullScreen ? 'pb-20' : ''
-      )}>
-        {isInitializingCopilot ? (
-          <div className="flex flex-col h-full items-center justify-center">
-            <Loader2 className="w-6 h-6 text-primary animate-spin mb-3" />
-            <p className="text-sm text-muted-foreground">
-              {locale === 'zh-Hans' ? '正在连接 Copilot...' : 'Connecting to Copilot...'}
-            </p>
-          </div>
-        ) : isLoadingConversations ? (
-          <div className="flex flex-col h-full items-center justify-center">
-            <Loader2 className="w-6 h-6 text-primary animate-spin mb-3" />
-            <p className="text-sm text-muted-foreground">
-              {locale === 'zh-Hans' ? '加载会话记录...' : 'Loading conversation history...'}
-            </p>
-          </div>
-        ) : chatMessages.length === 0 ? (
-          <div className="flex flex-col h-full justify-center px-4">
-            <p className="text-sm font-medium text-foreground mb-4">
-              {locale === 'zh-Hans' ? '我可以帮助您：' : 'I can help you with:'}
-            </p>
-            <ul className="space-y-3">
-              <li className="flex items-start gap-3">
-                <span className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <span className="text-xs text-primary font-medium">1</span>
-                </span>
-                <span className="text-sm text-muted-foreground">
-                  {locale === 'zh-Hans' ? '查询客户信息和商机状态' : 'Query customer info and opportunity status'}
-                </span>
-              </li>
-              <li className="flex items-start gap-3">
-                <span className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <span className="text-xs text-primary font-medium">2</span>
-                </span>
-                <span className="text-sm text-muted-foreground">
-                  {locale === 'zh-Hans' ? '获取今日日程和待办事项' : 'Get today\'s schedule and to-do items'}
-                </span>
-              </li>
-              <li className="flex items-start gap-3">
-                <span className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <span className="text-xs text-primary font-medium">3</span>
-                </span>
-                <span className="text-sm text-muted-foreground">
-                  {locale === 'zh-Hans' ? '分析销售趋势和业绩数据' : 'Analyze sales trends and performance data'}
-                </span>
-              </li>
-              <li className="flex items-start gap-3">
-                <span className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <span className="text-xs text-primary font-medium">4</span>
-                </span>
-                <span className="text-sm text-muted-foreground">
-                  {locale === 'zh-Hans' ? '生成拜访报告和会议纪要' : 'Generate visit reports and meeting notes'}
-                </span>
-              </li>
-            </ul>
-            <p className="text-xs text-muted-foreground mt-6 text-center">
-              {locale === 'zh-Hans' ? '输入问题或按住麦克风开始对话' : 'Type a question or hold the mic to start'}
-            </p>
-          </div>
-        ) : (
-          <>
-            {chatMessages.map((message: ChatMessage) => (
-              <div key={message.id} className={cn(
-                'mb-3',
-                message.type === 'user' ? 'flex justify-end' : ''
-              )}>
-                {/* Stage Card */}
-                {message.type === 'stage-card' && message.stageCard && (
-                  <StageCard
-                    stageCard={message.stageCard}
-                    onClick={() => navigate('/opportunity-review', { state: { opportunityId: message.stageCard!.opportunityId } })}
-                  />
-                )}
-                
-                {/* Record List Card (query results) */}
-                {message.recordList && (
-                  <RecordListCard
-                    type={message.recordList.type}
-                    records={message.recordList.records.map((r) => ({ ...r, type: message.recordList!.type }))}
-                    title={message.recordList.title}
-                  />
-                )}
-                
-                {/* Form Card (draft Activity/Opportunity/Account) */}
-                {message.type === 'form-card' && message.formCard && (
-                  <FormCard
-                    formCard={message.formCard}
-                    messageId={message.id}
-                    onStatusChange={(status) => {
-                      // Update message status in context
-                      copilot.setMessages((prev) => prev.map((m) => {
-                        if (m.id !== message.id) return m;
-                        return {
-                          ...m,
-                          formCard: m.formCard ? { ...m.formCard, status } : undefined,
-                        };
-                      }));
-                    }}
-                  />
-                )}
-                
-                {/* User Message */}
-                {message.type === 'user' && (
-                  <div className="max-w-[85%]">
-                    {/* Audio playback button if has audio */}
-                    {message.audioUrl && (
-                      <div className="flex justify-end mb-1">
-                        <button
-                          onClick={() => {
-                            if (playingAudioId === message.id) {
-                              audioRef.current?.pause();
-                              setPlayingAudioId(null);
-                            } else {
-                              if (audioRef.current) {
-                                audioRef.current.src = message.audioUrl!;
-                                audioRef.current.play();
-                                setPlayingAudioId(message.id);
-                              }
-                            }
-                          }}
-                          className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-primary/20 text-primary text-[10px]"
-                        >
-                          {playingAudioId === message.id ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
-                          <span>{message.audioDuration ? `${Math.floor(message.audioDuration / 60)}:${String(message.audioDuration % 60).padStart(2, '0')}` : '0:00'}</span>
-                        </button>
-                      </div>
-                    )}
-                    <div
-                      className={cn('px-3 py-2 rounded-2xl rounded-br-md user-message-bubble', getChatFontClass())}
-                    >
-                      {message.content}
-                    </div>
-                    <p className="text-[9px] text-muted-foreground mt-1 text-right">
-                      {new Date(message.timestamp).toLocaleTimeString(locale === 'zh-Hans' ? 'zh-CN' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
-                    </p>
-                  </div>
-                )}
-                
-                {/* Agent Message */}
-                {message.type === 'agent' && (() => {
-                  // Thinking state - show progress steps
-                  if (message.isThinking && message.thinkingSteps) {
-                    return (
-                      <div className="flex flex-col gap-1 max-w-[85%]">
-                        <div className="px-3 py-2 rounded-2xl rounded-bl-md bg-muted/50 border border-border">
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
-                            <div className="w-4 h-4 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-                            <span>{locale === 'zh-Hans' ? '思考中...' : 'Thinking...'}</span>
-                          </div>
-                          <div className="space-y-1.5">
-                            {message.thinkingSteps.map((step, idx) => (
-                              <div key={idx} className="flex items-center gap-2 text-xs">
-                                {step.status === 'completed' ? (
-                                  <span className="text-primary">✓</span>
-                                ) : step.status === 'active' ? (
-                                  <span className="w-3 h-3 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-                                ) : (
-                                  <span className="text-muted-foreground">○</span>
-                                )}
-                                <span className={cn(
-                                  step.status === 'completed' && 'text-primary',
-                                  step.status === 'active' && 'text-foreground font-medium',
-                                  step.status === 'pending' && 'text-muted-foreground'
-                                )}>
-                                  {step.label}
-                                </span>
-                                {step.detail && (
-                                  <span className="text-muted-foreground">· {step.detail}</span>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  }
-                  
-                  // Completed response
-                  const { isJson, isEmpty } = tryParseJson(message.content);
-                  return (
-                    <div
-                      onContextMenu={(e: React.MouseEvent<HTMLDivElement>) => {
-                        e.preventDefault();
-                        setLongPressMessage(message);
-                      }}
-                      onTouchStart={() => handleMessageTouchStart(message)}
-                      onTouchEnd={handleMessageTouchEnd}
-                      onTouchCancel={handleMessageTouchEnd}
-                    >
-                      {/* Show completed thinking steps in collapsed form */}
-                      {message.thinkingSteps && message.thinkingSteps.length > 0 && (
-                        <details className="mb-2 text-xs">
-                          <summary className="cursor-pointer text-muted-foreground hover:text-foreground flex items-center gap-1">
-                            <span>🧠</span>
-                            <span>{locale === 'zh-Hans' ? '查看思考过程' : 'View thinking process'}</span>
-                          </summary>
-                          <div className="mt-1.5 pl-4 space-y-1 text-muted-foreground">
-                            {message.thinkingSteps.map((step, idx) => (
-                              <div key={idx} className="flex items-center gap-2">
-                                <span className="text-primary">✓</span>
-                                <span>{step.label}</span>
-                                {step.detail && <span>· {step.detail}</span>}
-                              </div>
-                            ))}
-                          </div>
-                        </details>
-                      )}
-                      
-                      {isJson && isEmpty ? (
-                        /* Empty JSON response - show friendly message */
-                        <div className={cn('text-foreground', getChatFontClass())}>
-                          <p className="text-sm text-muted-foreground">
-                            {locale === 'zh-Hans' 
-                              ? '抱歉，未能找到您请求的数据。请尝试换一种方式提问或检查您的查询条件。'
-                              : "Sorry, I couldn't find the data you requested. Please try rephrasing your question or check your search criteria."}
-                          </p>
-                        </div>
-                      ) : isJson ? (
-                        /* Render JSON data as interactive table */
-                        <DynamicDataRenderer content={message.content} />
-                      ) : (
-                        /* Render as markdown text */
-                        <MarkdownContent content={message.content} className={cn('text-foreground', getChatFontClass())} />
-                      )}
-                      
-                      {/* Sources */}
-                      {message.sources && message.sources.length > 0 && (
-                        <div className="mt-2 flex flex-wrap gap-1">
-                          {message.sources.map((source) => (
-                            <button
-                              key={source.id}
-                              onClick={() => setSelectedSource(source)}
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-muted border border-border text-[9px] hover:bg-muted/80 transition-colors"
-                            >
-                              <span className="text-foreground font-medium">{source.label}</span>
-                              <span className="text-muted-foreground">· {source.detail}</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                      
-                      <div className="flex items-center gap-1.5 mt-1">
-                        {message.agentName && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-medium border bg-primary/20 text-primary border-primary/30">
-                            {message.agentName}
-                          </span>
-                        )}
-                        {message.functionDisplayName && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-medium border bg-accent/50 text-accent-foreground border-accent">
-                            <span>🛠️</span>
-                            {message.functionDisplayName}
-                          </span>
-                        )}
-                        <span className="text-[9px] text-muted-foreground">
-                          {new Date(message.timestamp).toLocaleTimeString(locale === 'zh-Hans' ? 'zh-CN' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                        {/* Copy and Play buttons - only for markdown (non-JSON) */}
-                        {!isJson && (
-                          <>
-                            <button
-                              onClick={() => {
-                                navigator.clipboard.writeText(message.content);
-                                toast.success(locale === 'zh-Hans' ? '已复制' : 'Copied');
-                              }}
-                              className="ml-auto p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-                              aria-label={locale === 'zh-Hans' ? '复制' : 'Copy'}
-                            >
-                              <Copy className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              onClick={() => {
-                                if (playingInlineId === message.id) {
-                                  // Stop playing
-                                  window.speechSynthesis.cancel();
-                                  setPlayingInlineId(null);
-                                } else {
-                                  // Start playing
-                                  let textToSpeak = message.content
-                                    .replace(/\*\*([^*]+)\*\*/g, '$1')
-                                    .replace(/\*([^*]+)\*/g, '$1')
-                                    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-                                    .replace(/#{1,6}\s+/g, '')
-                                    .replace(/`[^`]+`/g, '')
-                                    .replace(/```[\s\S]*?```/g, '');
-                                  
-                                  const speakFinalText = (text: string) => {
-                                    if ('speechSynthesis' in window && text.trim()) {
-                                      window.speechSynthesis.cancel();
-                                      const utterance = new SpeechSynthesisUtterance(text);
-                                      utterance.lang = locale === 'zh-Hans' ? 'zh-CN' : 'en-US';
-                                      const selectedVoiceId = getSelectedVoice();
-                                      const matchingVoice = findMatchingSystemVoice(selectedVoiceId, locale);
-                                      if (matchingVoice) utterance.voice = matchingVoice;
-                                      utterance.rate = 1.0;
-                                      utterance.pitch = 1.0;
-                                      utterance.onend = () => setPlayingInlineId(null);
-                                      utterance.onerror = () => setPlayingInlineId(null);
-                                      setPlayingInlineId(message.id);
-                                      window.speechSynthesis.speak(utterance);
-                                    }
-                                  };
-                                  
-                                  // Check if voice summary is enabled
-                                  const voiceSummaryEnabled = getVoiceSummaryEnabled();
-                                  
-                                  if (voiceSummaryEnabled && textToSpeak.trim()) {
-                                    setPlayingInlineId(message.id);
-                                    generateVoiceSummary(message.content, locale).then((result) => {
-                                      if (result.success && result.summary) {
-                                        speakFinalText(result.summary);
-                                      } else {
-                                        speakFinalText(textToSpeak);
-                                      }
-                                    }).catch(() => {
-                                      speakFinalText(textToSpeak);
-                                    });
-                                  } else if (textToSpeak.trim()) {
-                                    speakFinalText(textToSpeak);
-                                  }
-                                }
-                              }}
-                              className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-                              aria-label={playingInlineId === message.id ? (locale === 'zh-Hans' ? '停止' : 'Stop') : (locale === 'zh-Hans' ? '播放' : 'Play')}
-                            >
-                              {playingInlineId === message.id ? (
-                                <VolumeX className="w-3.5 h-3.5" />
-                              ) : (
-                                <Volume2 className="w-3.5 h-3.5" />
-                              )}
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
-            ))}
-            {/* Thinking dots - only show when isSending AND no thinking message is already displayed */}
-            {isSending && !chatMessages.some((m: ChatMessage) => m.isThinking) && (
-              <div className="flex justify-start mb-3 pl-1">
-                {thinkingDotStyle === 'bounce' && (
-                  <div className="flex items-center gap-1">
-                    <motion.span className="w-1.5 h-1.5 bg-primary rounded-full" animate={{ y: [0, -5, 0] }} transition={{ duration: 0.6, repeat: Infinity, delay: 0 }} />
-                    <motion.span className="w-1.5 h-1.5 bg-primary rounded-full" animate={{ y: [0, -5, 0] }} transition={{ duration: 0.6, repeat: Infinity, delay: 0.15 }} />
-                    <motion.span className="w-1.5 h-1.5 bg-primary rounded-full" animate={{ y: [0, -5, 0] }} transition={{ duration: 0.6, repeat: Infinity, delay: 0.3 }} />
-                  </div>
-                )}
-                {thinkingDotStyle === 'pulse' && (
-                  <div className="flex items-center gap-1">
-                    <motion.span className="w-1.5 h-1.5 bg-primary rounded-full" animate={{ scale: [1, 1.5, 1], opacity: [1, 0.5, 1] }} transition={{ duration: 1, repeat: Infinity, delay: 0 }} />
-                    <motion.span className="w-1.5 h-1.5 bg-primary rounded-full" animate={{ scale: [1, 1.5, 1], opacity: [1, 0.5, 1] }} transition={{ duration: 1, repeat: Infinity, delay: 0.2 }} />
-                    <motion.span className="w-1.5 h-1.5 bg-primary rounded-full" animate={{ scale: [1, 1.5, 1], opacity: [1, 0.5, 1] }} transition={{ duration: 1, repeat: Infinity, delay: 0.4 }} />
-                  </div>
-                )}
-                {thinkingDotStyle === 'wave' && (
-                  <div className="flex items-center gap-1">
-                    <motion.span className="w-1.5 h-1.5 bg-primary rounded-full" animate={{ y: [0, -4, 0, 4, 0] }} transition={{ duration: 1.2, repeat: Infinity, delay: 0, ease: 'easeInOut' as const }} />
-                    <motion.span className="w-1.5 h-1.5 bg-primary rounded-full" animate={{ y: [0, -4, 0, 4, 0] }} transition={{ duration: 1.2, repeat: Infinity, delay: 0.2, ease: 'easeInOut' as const }} />
-                    <motion.span className="w-1.5 h-1.5 bg-primary rounded-full" animate={{ y: [0, -4, 0, 4, 0] }} transition={{ duration: 1.2, repeat: Infinity, delay: 0.4, ease: 'easeInOut' as const }} />
-                  </div>
-                )}
-                {thinkingDotStyle === 'fade' && (
-                  <div className="flex items-center gap-1">
-                    <motion.span className="w-1.5 h-1.5 bg-primary rounded-full" animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1.5, repeat: Infinity, delay: 0 }} />
-                    <motion.span className="w-1.5 h-1.5 bg-primary rounded-full" animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1.5, repeat: Infinity, delay: 0.3 }} />
-                    <motion.span className="w-1.5 h-1.5 bg-primary rounded-full" animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1.5, repeat: Infinity, delay: 0.6 }} />
-                  </div>
-                )}
-                {thinkingDotStyle === 'orbit' && (
-                  <div className="relative w-5 h-5 flex items-center justify-center">
-                    <span className="absolute w-1.5 h-1.5 bg-primary/30 rounded-full" />
-                    <motion.span
-                      className="absolute w-1.5 h-1.5 bg-primary rounded-full"
-                      animate={{ rotate: 360 }}
-                      transition={{ duration: 1.2, repeat: Infinity, ease: 'linear' as const }}
-                      style={{ transformOrigin: 'center', x: 6 }}
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-          </>
-        )}
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* Quick Action Pills - above input */}
-      <div className="px-3 pb-2 pt-1 border-t border-border/20">
-        <div className="flex flex-wrap gap-2">
-          {quickActions.map((action: { text: string; query: string }, idx: number) => (
-            <button
-              key={idx}
-              onClick={() => sendMessage(action.query)}
-              disabled={isSending}
-              className={cn(
-                'px-3 py-1.5 rounded-full text-xs font-medium',
-                'bg-muted/50 hover:bg-muted text-foreground',
-                'border border-border/50 hover:border-border',
-                'transition-all active:scale-95',
-                'disabled:opacity-50 disabled:cursor-not-allowed'
-              )}
-            >
-              {action.text}
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-scm-gradient">
@@ -2483,7 +1944,7 @@ ${agentResponse}`;
         ref={mainContentRef}
         className={cn(
           'flex-1 pt-safe px-4 overflow-y-auto scrollbar-hide transition-all duration-300',
-          chatPanelExpanded ? 'pb-[55vh]' : 'pb-44'
+          'pb-44'
         )}
         onTouchStart={(e: React.TouchEvent) => {
           if (mainContentRef.current && mainContentRef.current.scrollTop <= 0) {
@@ -2660,46 +2121,10 @@ ${agentResponse}`;
 
 
 
-      {/* Expandable Chat Panel */}
-      <AnimatePresence>
-        {isCopilotConfigured && chatPanelExpanded && !chatPanelFullScreen && (
-          <motion.div
-            ref={chatPanelRef}
-            drag="y"
-            dragControls={dragControls}
-            dragListener={false}
-            dragConstraints={{ top: 0, bottom: 0 }}
-            dragElastic={{ top: 0.3, bottom: 0.5 }}
-            onDragEnd={(_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
-              // If dragged up more than 80px or with velocity > 500, expand to full screen
-              if (info.offset.y < -80 || info.velocity.y < -500) {
-                setChatPanelFullScreen(true);
-              }
-              // If dragged down more than 80px or with velocity > 500, collapse
-              else if (info.offset.y > 80 || info.velocity.y > 500) {
-                setChatPanelExpanded(false);
-              }
-            }}
-            initial={{ height: 0, y: 0 }}
-            animate={{ height: '50vh', y: 0 }}
-            exit={{ height: 0, y: 0 }}
-            transition={{ duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] }}
-            className="fixed bottom-[88px] left-0 right-0 z-40 bg-background/98 backdrop-blur-xl overflow-hidden"
-            style={{ 
-              borderTopLeftRadius: 20, 
-              borderTopRightRadius: 20,
-              boxShadow: '0 -8px 32px -4px rgba(0, 0, 0, 0.15), 0 -4px 16px -4px rgba(0, 0, 0, 0.1)'
-            }}
-          >
-            {renderChatContent(false, (e: React.PointerEvent) => dragControls.start(e))}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* Brief Me is now non-blocking - audio plays in background while user can interact with page */}
 
       {/* Brief Me audio player (only visible when Brief Me is active) */}
-      {briefMeExpanded && !chatPanelExpanded && (
+      {briefMeExpanded && (
       <div className={cn(
         'fixed left-0 right-0 z-[60] safe-area-bottom pointer-events-none',
         isCopilotConfigured ? 'bottom-20' : 'bottom-0'
@@ -2707,7 +2132,7 @@ ${agentResponse}`;
         <div className="flex flex-col items-center px-4 pb-4">
           <AnimatePresence mode="wait">
             {/* Brief Me Audio Player */}
-            {!chatPanelExpanded && briefMeExpanded && (
+            {briefMeExpanded && (
               <motion.div
                 key="brief-me-player"
                 initial={{ opacity: 0, scale: 0.9 }}
@@ -2819,116 +2244,6 @@ ${agentResponse}`;
       </div>
       )}
 
-      {/* Full Screen Chat Panel */}
-      <AnimatePresence>
-        {isCopilotConfigured && chatPanelFullScreen && (
-          <motion.div
-            initial={{ opacity: 0, y: '100%' }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: '100%' }}
-            transition={{ duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] }}
-            className="fixed inset-0 z-[100] bg-background"
-          >
-            {/* Full screen header */}
-            <header className="fixed top-0 left-0 right-0 z-40 bg-background/80 backdrop-blur-md border-b border-border/50 safe-area-top">
-              <div className="flex items-center justify-between h-14 px-4">
-                <button
-                  onClick={handleCloseFullScreen}
-                  className="w-10 h-10 flex items-center justify-center transition-all hover:brightness-125 active:brightness-75"
-                  aria-label={locale === 'zh-Hans' ? '关闭' : 'Close'}
-                >
-                  <X className="w-5 h-5 text-foreground" />
-                </button>
-                <div className="flex items-center gap-2">
-                  <span className="text-title text-foreground">Ask Copilot</span>
-                  {copilotConnected && (
-                    <span className="w-2 h-2 bg-green-500 rounded-full" />
-                  )}
-                </div>
-                <button
-                  onClick={handleNewConversation}
-                  disabled={isCreatingConversation}
-                  className="w-10 h-10 flex items-center justify-center transition-all hover:brightness-125 active:brightness-75 disabled:opacity-50"
-                  aria-label={locale === 'zh-Hans' ? '新建会话' : 'New conversation'}
-                >
-                  {isCreatingConversation ? (
-                    <Loader2 className="w-5 h-5 text-foreground animate-spin" />
-                  ) : (
-                    <SquarePen className="w-5 h-5 text-foreground" />
-                  )}
-                </button>
-              </div>
-            </header>
-
-            {/* Full screen chat content */}
-            {renderChatContent(true)}
-
-            {/* Full screen input bar */}
-            <div className="fixed bottom-0 left-0 right-0 z-40 glass-surface border-t border-border/50 safe-area-bottom">
-              <div className="flex items-center h-14 px-3">
-                <div className="relative flex-1">
-                  {/* Mic Button */}
-                  <motion.button
-                    onPointerDown={handleMicPointerDown}
-                    onPointerUp={handleMicPointerUp}
-                    onPointerLeave={handleMicPointerUp}
-                    whileTap={{ scale: 0.95 }}
-                    disabled={isOffline || isSending}
-                    className={cn(
-                      'absolute left-1 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center transition-all touch-none',
-                      isOffline || isSending ? 'opacity-50 cursor-not-allowed' :
-                      isRecording ? 'text-primary' : 'text-muted-foreground hover:brightness-150'
-                    )}
-                    style={{ touchAction: 'none' }}
-                  >
-                    <Mic className={cn('w-5 h-5', isRecording && 'animate-pulse')} />
-                  </motion.button>
-                  
-                  <input
-                    type="text"
-                    value={inputValue}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setInputValue(e.target.value)}
-                    onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-                      if (e.key === 'Enter' && inputValue.trim() && !isSending) {
-                        sendMessage(inputValue);
-                      }
-                    }}
-                    placeholder={locale === 'zh-Hans' ? '输入消息...' : 'Type a message...'}
-                    disabled={isOffline || isSending}
-                    className={cn(
-                      'w-full h-10 pl-10 pr-10 rounded-full text-body',
-                      'bg-muted border border-border',
-                      'text-foreground placeholder:text-muted-foreground',
-                      'focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50',
-                      'disabled:opacity-50'
-                    )}
-                  />
-                  
-                  {/* Send Button */}
-                  {isSending ? (
-                    <motion.button
-                      onClick={() => setIsSending(false)}
-                      whileTap={{ scale: 0.95 }}
-                      className="absolute right-1 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center text-red-500 transition-all hover:brightness-125"
-                    >
-                      <Square className="w-4 h-4 fill-current" />
-                    </motion.button>
-                  ) : (
-                    <motion.button
-                      onClick={() => inputValue.trim() && sendMessage(inputValue)}
-                      whileTap={{ scale: 0.95 }}
-                      disabled={!inputValue.trim() || isOffline}
-                      className="absolute right-1 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center transition-all hover:brightness-150"
-                    >
-                      <ArrowUp className={cn('w-5 h-5', inputValue.trim() && !isOffline ? 'text-primary' : 'text-muted-foreground')} />
-                    </motion.button>
-                  )}
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* Long Press Menu */}
       <Sheet open={!!longPressMessage} onOpenChange={() => setLongPressMessage(null)}>
