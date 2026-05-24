@@ -360,26 +360,17 @@ function ActivityFormCard({ data, formData, setFormData, onConfirm, onCancel, is
           accountId={formData.accountId as string}
           locale={locale}
         />
-        {/* I-8 Slice A: hide result/nextStep when activity is planned (event hasn't happened) */}
+        {/* I-8 Slice A: hide outcome when activity is planned (event hasn't happened). NextStep is handled
+            via multi-intent — concrete follow-ups become their own draftActivity rather than free text. */}
         {formData.temporalMode !== 'planned' && (
-          <>
-            <EditableField 
-              icon={FileText} 
-              label={locale === 'zh-Hans' ? '结果' : 'Result'} 
-              value={formData.result as string}
-              onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, result: v }))}
-              type="textarea"
-              placeholder={locale === 'zh-Hans' ? '输入活动结果' : 'Enter activity result'}
-            />
-            <EditableField 
-              icon={TrendingUp} 
-              label={locale === 'zh-Hans' ? '下一步' : 'Next Step'} 
-              value={formData.nextStep as string}
-              onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, nextStep: v }))}
-              type="textarea"
-              placeholder={locale === 'zh-Hans' ? '输入下一步计划' : 'Enter next step'}
-            />
-          </>
+          <EditableField
+            icon={FileText}
+            label={locale === 'zh-Hans' ? '结果' : 'Result'}
+            value={formData.result as string}
+            onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, result: v }))}
+            type="textarea"
+            placeholder={locale === 'zh-Hans' ? '输入活动结果' : 'Enter activity result'}
+          />
         )}
       </div>
 
@@ -963,15 +954,9 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
           : temporalMode === 'planned' ? 'confirmed'
           : 'draft';
 
-        // Build notes field - combine notes, result, and nextStep.
-        // result/nextStep are hidden from the form when temporalMode==='planned' (event hasn't happened),
-        // so any value the LLM leaked into them must NOT be persisted — otherwise the saved record
-        // shows content the user never saw in the draft, and the hidden fields are uneditable.
-        const includeOutcomeFields = temporalMode !== 'planned';
-        const notesParts: string[] = [];
-        if (formData.notes) notesParts.push(formData.notes as string);
-        if (includeOutcomeFields && formData.result) notesParts.push(`结果: ${formData.result}`);
-        if (includeOutcomeFields && formData.nextStep) notesParts.push(`下一步: ${formData.nextStep}`);
+        // Result maps to the Activity.outcome column; only persist when the field is visible
+        // (hidden for planned activities since the event hasn't happened yet).
+        const outcomeValue = temporalMode !== 'planned' ? (formData.result as string || '') : '';
 
         const createInput: Omit<Activity, 'id'> = {
           title: formData.title as string || '',
@@ -979,7 +964,8 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
           draftStatus,
           ownerid: user?.objectId || 'unknown',
           scheduleddate: formData.scheduledDate as string || new Date().toISOString(),
-          notes: notesParts.join(' | ') || '',
+          notes: (formData.notes as string) || '',
+          ...(outcomeValue && { outcome: outcomeValue }),
           ...(targetAccount && { account: { id: targetAccount.id, name1: targetAccount.name1 } }),
           ...(targetOpportunity && { opportunity: { id: targetOpportunity.id, name1: targetOpportunity.name1 } }),
           ...(targetContact && { contact: { id: targetContact.id, fullname: targetContact.fullname } }),
