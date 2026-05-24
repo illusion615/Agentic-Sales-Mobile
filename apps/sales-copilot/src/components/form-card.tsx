@@ -956,18 +956,22 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
           }
         }
         
-        // Build notes field - combine notes, result, and nextStep
-        const notesParts: string[] = [];
-        if (formData.notes) notesParts.push(formData.notes as string);
-        if (formData.result) notesParts.push(`结果: ${formData.result}`);
-        if (formData.nextStep) notesParts.push(`下一步: ${formData.nextStep}`);
-
         // I-8 Slice A: map temporalMode -> draftStatus label
         const temporalMode = formData.temporalMode as 'planned' | 'completed' | 'unspecified' | undefined;
         const draftStatus: string =
           temporalMode === 'completed' ? 'completed'
           : temporalMode === 'planned' ? 'confirmed'
           : 'draft';
+
+        // Build notes field - combine notes, result, and nextStep.
+        // result/nextStep are hidden from the form when temporalMode==='planned' (event hasn't happened),
+        // so any value the LLM leaked into them must NOT be persisted — otherwise the saved record
+        // shows content the user never saw in the draft, and the hidden fields are uneditable.
+        const includeOutcomeFields = temporalMode !== 'planned';
+        const notesParts: string[] = [];
+        if (formData.notes) notesParts.push(formData.notes as string);
+        if (includeOutcomeFields && formData.result) notesParts.push(`结果: ${formData.result}`);
+        if (includeOutcomeFields && formData.nextStep) notesParts.push(`下一步: ${formData.nextStep}`);
 
         const createInput: Omit<Activity, 'id'> = {
           title: formData.title as string || '',
