@@ -18,18 +18,11 @@ import { useActionDock } from '@/contexts/action-dock-context';
 
 
 
-interface CopilotPanelProps {
-  mode: 'overlay' | 'embedded';
-  onClose?: () => void;
-}
-
-export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
+export function CopilotPanel() {
   const navigate = useNavigate();
   const {
     isOpen,
     isFullScreen,
-    isExpanded,
-    setIsExpanded,
     openPanel,
     closePanel,
     isConnected,
@@ -153,12 +146,12 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
 
   // Focus input when panel opens
   useEffect(() => {
-    if (mode === 'overlay' && isOpen) {
+    if (isOpen) {
       setTimeout(() => {
         inputRef.current?.focus();
       }, 300);
     }
-  }, [mode, isOpen]);
+  }, [isOpen]);
 
   // Handle enter key - IME-safe (skip Enter during IME composition)
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -183,20 +176,14 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
 
   // Handle input focus
   const handleInputFocus = () => {
-    if (mode !== 'overlay') return;
     if (!isOpen) {
       openPanel();
     }
   };
 
-  // Handle close
+  // Handle close (collapse panel completely back to dock)
   const handleClose = () => {
-    if (mode === 'overlay') {
-      closePanel();
-      onClose?.();
-    } else {
-      setIsExpanded(false);
-    }
+    closePanel();
   };
 
 
@@ -827,8 +814,7 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
   );
 
   // Expanded panel overlay mode
-  if (mode === 'overlay') {
-    // Reusable panel-chrome JSX (drag handle + header + context chips) used by expanded states.
+  // ─── Unified ActionDock: single container morphs from collapsed dock to expanded panel ───
     const panelChrome = (
       <>
         {/* Drag handle — hidden in full-screen */}
@@ -847,15 +833,15 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
           isFullScreen && 'safe-area-top pt-3'
         )}>
           <button
-            onClick={handleClose}
+            onClick={isFullScreen ? () => openPanel(false) : handleClose}
             className="w-8 h-8 flex items-center justify-center rounded-lg transition-all hover:brightness-125 active:brightness-75"
-            aria-label={locale === 'zh-Hans' ? (isFullScreen ? '关闭' : '收起') : (isFullScreen ? 'Close' : 'Collapse')}
+            aria-label={
+              locale === 'zh-Hans'
+                ? (isFullScreen ? '返回面板' : '收起')
+                : (isFullScreen ? 'Back to panel' : 'Collapse')
+            }
           >
-            {isFullScreen ? (
-              <X className="w-5 h-5 text-foreground" />
-            ) : (
-              <ChevronDown className="w-4 h-4 text-foreground" />
-            )}
+            <ChevronDown className="w-4 h-4 text-foreground" />
           </button>
           <div className="flex items-center gap-2">
             {isFullScreen && <Sparkles className="w-5 h-5 text-primary" />}
@@ -1023,15 +1009,4 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
         <FrameShadowViewer open={frameViewerOpen} onClose={() => setFrameViewerOpen(false)} locale={locale} />
       </>
     );
-  }
-
-  // Embedded mode (for home page) - just renders content, no container
-  return (
-    <div className="flex flex-col h-full">
-      {renderMessages()}
-      {renderInputExtras()}
-      {renderInputWrapper()}
-      <FrameShadowViewer open={frameViewerOpen} onClose={() => setFrameViewerOpen(false)} locale={locale} />
-    </div>
-  );
 }

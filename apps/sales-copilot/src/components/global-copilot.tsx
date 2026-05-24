@@ -25,5 +25,5 @@ export function GlobalCopilot() {
     return null;
   }
 
-  return <CopilotPanel mode="overlay" />;
+  return <CopilotPanel />;
 }

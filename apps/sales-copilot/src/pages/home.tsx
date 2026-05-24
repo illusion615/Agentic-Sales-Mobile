@@ -336,20 +336,14 @@ export default function HomeDashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [isOffline] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const recordTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Use shared copilot context instead of local state
-  const inputRef = useRef<HTMLInputElement>(null);
   
   // Chat panel state - UI only, messages come from context
 
-  const [longPressMessage, setLongPressMessage] = useState<ChatMessage | null>(null);
-  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selectedSource, setSelectedSource] = useState<{ type: string; id: string; label: string } | null>(null);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [playingInlineId, setPlayingInlineId] = useState<string | null>(null);
-  const [isCreatingConversation, setIsCreatingConversation] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
   // Bell icon now opens the unified insights sheet (KPICards owns the JSX,
   // we just control open state from here so the bell can trigger it).
@@ -425,9 +419,6 @@ export default function HomeDashboard() {
   const setChatMessages = copilot.setMessages;
   const inputValue = copilot.inputValue;
   const setInputValue = copilot.setInputValue;
-  const isSending = copilot.isSending;
-  const setIsSending = copilot.setIsSending;
-  const copilotConnected = copilot.isConnected;
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
 
   // Data queries
@@ -1699,159 +1690,11 @@ ${agentResponse}`;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Handle enter key - send through shared copilot
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey && inputValue.trim()) {
-      e.preventDefault();
-      copilot.openPanel();
-      copilot.setInputValue(inputValue);
-      copilot.sendMessage(inputValue);
-      setInputValue('');
-    }
-  };
-
-  // Handle input focus - open shared copilot panel
-  const handleInputFocus = () => {
-    copilot.openPanel();
-  };
 
   // Handle new conversation - delegates to context for Copilot conversation reset
-  const handleNewConversation = async () => {
-    if (isCreatingConversation) return;
-    setIsCreatingConversation(true);
-    
-    try {
-      // Let context handle Copilot conversation reset
-      await copilot.startNewConversation();
-
-      const newConvo = await createConversation.mutateAsync({
-        ownerid: userId || '',
-        startedon: new Date().toISOString(),
-        messagesjson: '[]',
-        lastactiveon: new Date().toISOString(),
-      });
-      setCurrentConversationId(newConvo.id);
-      setChatMessages([]);
-      toast.success(locale === 'zh-Hans' ? '已创建新会话' : 'New conversation created');
-    } finally {
-      setIsCreatingConversation(false);
-    }
-  };
-
   // Long press action handler
-  const handleLongPressAction = (action: 'copy' | 'playVoice' | 'forward' | 'feedback') => {
-    if (!longPressMessage) return;
-    
-    switch (action) {
-      case 'copy':
-        navigator.clipboard.writeText(longPressMessage.content);
-        toast.success(locale === 'zh-Hans' ? '已复制到剪贴板' : 'Copied to clipboard');
-        break;
-      case 'playVoice':
-        // Play voice using Web Speech API
-        if ('speechSynthesis' in window) {
-          window.speechSynthesis.cancel();
-          let textToSpeak = longPressMessage.content;
-          try {
-            const parsed = JSON.parse(textToSpeak);
-            if (Array.isArray(parsed)) {
-              textToSpeak = parsed.map((item: Record<string, unknown>) => {
-                const name = item.name || item.title || item.subject || item.displayName || '';
-                return String(name);
-              }).filter(Boolean).join('. ');
-            }
-          } catch {
-            textToSpeak = textToSpeak
-              .replace(/\*\*([^*]+)\*\*/g, '$1')
-              .replace(/\*([^*]+)\*/g, '$1')
-              .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-              .replace(/#{1,6}\s+/g, '')
-              .replace(/`[^`]+`/g, '')
-              .replace(/```[\s\S]*?```/g, '');
-          }
-          
-          const speakFinalText = (text: string) => {
-            if (!text.trim()) return;
-            const utterance = new SpeechSynthesisUtterance(text);
-            utterance.lang = locale === 'zh-Hans' ? 'zh-CN' : 'en-US';
-            const selectedVoiceId = getSelectedVoice();
-            const matchingVoice = findMatchingSystemVoice(selectedVoiceId, locale);
-            if (matchingVoice) {
-              utterance.voice = matchingVoice;
-            }
-            utterance.rate = 1.0;
-            utterance.pitch = 1.0;
-            window.speechSynthesis.speak(utterance);
-            toast.success(locale === 'zh-Hans' ? '正在播放语音...' : 'Playing voice...');
-          };
-          
-          // Check if voice summary is enabled
-          const voiceSummaryEnabled = getVoiceSummaryEnabled();
-          
-          if (voiceSummaryEnabled && textToSpeak.trim()) {
-            toast.info(locale === 'zh-Hans' ? '正在生成语音摘要...' : 'Generating voice summary...');
-            generateVoiceSummary(longPressMessage.content, locale).then((result) => {
-              if (result.success && result.summary) {
-                speakFinalText(result.summary);
-              } else {
-                speakFinalText(textToSpeak);
-              }
-            }).catch(() => {
-              speakFinalText(textToSpeak);
-            });
-          } else if (textToSpeak.trim()) {
-            speakFinalText(textToSpeak);
-          }
-        } else {
-          toast.error(locale === 'zh-Hans' ? '您的浏览器不支持语音播放' : 'Your browser does not support speech synthesis');
-        }
-        break;
-        break;
-      case 'forward':
-        toast.success(locale === 'zh-Hans' ? '已转发到 Teams' : 'Forwarded to Teams');
-        break;
-      case 'feedback':
-        toast.success(locale === 'zh-Hans' ? '反馈已提交' : 'Feedback submitted');
-        break;
-    }
-    setLongPressMessage(null);
-  };
 
-  // Long press handlers for agent messages
-  const handleMessageTouchStart = (message: ChatMessage) => {
-    longPressTimerRef.current = setTimeout(() => {
-      setLongPressMessage(message);
-    }, 500); // 500ms for long press
-  };
 
-  const handleMessageTouchEnd = () => {
-    if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-    }
-  };
-
-  // Voice mic handlers
-  const handleMicPointerDown = () => {
-    recordTimerRef.current = setTimeout(() => {
-      setIsRecording(true);
-      toast.info(locale === 'zh-Hans' ? '开始录音...' : 'Recording...', { duration: 1500 });
-    }, 300);
-  };
-
-  const handleMicPointerUp = () => {
-    if (recordTimerRef.current) {
-      clearTimeout(recordTimerRef.current);
-      recordTimerRef.current = null;
-    }
-    if (isRecording) {
-      setIsRecording(false);
-      toast.success(locale === 'zh-Hans' ? '录音完成，正在处理...' : 'Processing...', { duration: 2000 });
-      // Mock voice-to-text
-      const mockTranscript = locale === 'zh-Hans' ? '今天有哪些客户需要跟进？' : 'Which customers need follow-up today?';
-      sendMessage(mockTranscript);
-    }
-  };
 
   // Avatar initial - first name first letter (used in sidebar)
   const getInitial = (name?: string) => {
@@ -2244,45 +2087,6 @@ ${agentResponse}`;
       </div>
       )}
 
-
-      {/* Long Press Menu */}
-      <Sheet open={!!longPressMessage} onOpenChange={() => setLongPressMessage(null)}>
-        <SheetContent side="bottom" className="bg-card border-t border-border rounded-t-3xl">
-          <SheetHeader className="sr-only">
-            <SheetTitle>{locale === 'zh-Hans' ? '消息操作' : 'Message Actions'}</SheetTitle>
-          </SheetHeader>
-          <div className="py-2 space-y-1">
-            <button
-              onClick={() => handleLongPressAction('copy')}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-muted transition-colors"
-            >
-              <Copy className="w-5 h-5 text-foreground" />
-              <span className="text-body text-foreground">{locale === 'zh-Hans' ? '复制' : 'Copy'}</span>
-            </button>
-            <button
-              onClick={() => handleLongPressAction('playVoice')}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-muted transition-colors"
-            >
-              <Play className="w-5 h-5 text-foreground" />
-              <span className="text-body text-foreground">{locale === 'zh-Hans' ? '播放语音' : 'Play Voice'}</span>
-            </button>
-            <button
-              onClick={() => handleLongPressAction('forward')}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-muted transition-colors"
-            >
-              <Forward className="w-5 h-5 text-foreground" />
-              <span className="text-body text-foreground">{locale === 'zh-Hans' ? '转发到 Teams' : 'Forward to Teams'}</span>
-            </button>
-            <button
-              onClick={() => handleLongPressAction('feedback')}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-muted transition-colors"
-            >
-              <ThumbsDown className="w-5 h-5 text-foreground" />
-              <span className="text-body text-foreground">{locale === 'zh-Hans' ? '反馈不准' : 'Report inaccurate'}</span>
-            </button>
-          </div>
-        </SheetContent>
-      </Sheet>
 
       {/* Source Detail Sheet */}
       <Sheet open={!!selectedSource} onOpenChange={() => setSelectedSource(null)}>
