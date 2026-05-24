@@ -281,6 +281,9 @@ interface CopilotContextValue {
   // Rollback conversation to a specific message (removes that message and all after it)
   rollbackToMessage: (messageId: string) => void;
 
+  // Phase D: collapse / expand the substep messages of one task group.
+  toggleTaskGroupCollapsed: (groupId: string) => void;
+
   // I-2 Round 3: resume a parked intent after the user finishes creating a new contact via the inline draft form.
   completeParkedIntentWithNewContact: (contactId: string, contactName: string, accountId?: string, accountName?: string) => Promise<void>;
   // Stage 5+: resume parked intent after creating a new account or opportunity via the inline draft form.
@@ -367,6 +370,27 @@ function hasMessageAfterLastUser(prev: ChatMessage[], predicate: (m: ChatMessage
     if (predicate(prev[i])) return true;
   }
   return false;
+}
+
+/**
+ * Phase D: when a new task announce is added, fold every prior task's
+ * substep messages so the chat stays tidy. The previous announce bubble
+ * remains visible (with its chevron now pointing right to hint at expand);
+ * its sub-rows are hidden behind `collapsed=true`.
+ */
+function collapseEarlierTasks(prev: ChatMessage[], newIntentIndex: number): ChatMessage[] {
+  let mutated = false;
+  const next = prev.map((m) => {
+    if (!m.taskGroupId) return m;
+    const match = /^task-(\d+)$/.exec(m.taskGroupId);
+    if (!match) return m;
+    const idx = Number.parseInt(match[1], 10);
+    if (!Number.isFinite(idx) || idx >= newIntentIndex) return m;
+    if (m.collapsed) return m;
+    mutated = true;
+    return { ...m, collapsed: true };
+  });
+  return mutated ? next : prev;
 }
 
 export function CopilotProvider({ children }: { children: ReactNode }) {
@@ -506,6 +530,16 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       if (targetIndex === -1) return prev;
       // Keep messages before the target message
       return prev.slice(0, targetIndex);
+    });
+  }, []);
+
+  // Phase D: toggle the collapsed state of every message in a task group.
+  // The announce bubble itself stays visible — only its sub-rows fold/unfold.
+  const toggleTaskGroupCollapsed = useCallback((groupId: string) => {
+    setMessages((prev) => {
+      const target = prev.find((m) => m.taskGroupId === groupId && m.taskRole === 'announce');
+      const nextCollapsed = !(target?.collapsed);
+      return prev.map((m) => (m.taskGroupId === groupId ? { ...m, collapsed: nextCollapsed } : m));
     });
   }, []);
 
@@ -1307,7 +1341,9 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                   if (announce) inserts.push(announce);
                 }
                 if (inserts.length === 0) return prev;
-                return [...prev.slice(0, idx), ...inserts, ...prev.slice(idx)];
+                // Phase D: fold any earlier task's substeps before showing the new announce.
+                const folded = collapseEarlierTasks(prev, intentIdxAc);
+                return [...folded.slice(0, idx), ...inserts, ...folded.slice(idx)];
               });
             }
             setMessages((prev) => prev.map((msg) => {
@@ -1445,7 +1481,9 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                   if (announce) inserts.push(announce);
                 }
                 if (inserts.length === 0) return prev;
-                return [...prev.slice(0, idx), ...inserts, ...prev.slice(idx)];
+                // Phase D: fold prior tasks before the new announce lands.
+                const folded = collapseEarlierTasks(prev, intentIdx);
+                return [...folded.slice(0, idx), ...inserts, ...folded.slice(idx)];
               });
             }
 
@@ -1822,9 +1860,11 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
               const announce = buildAnnounceMessage(stepIdx, overviewFromStream, isZhCascade);
               if (announce) {
                 setMessages((prev) => {
-                  const idx = prev.findIndex((m) => m.id === thinkingMsgId);
-                  if (idx < 0) return [...prev, announce];
-                  return [...prev.slice(0, idx), announce, ...prev.slice(idx)];
+                  // Phase D: fold any prior task's substeps before the next announce.
+                  const folded = collapseEarlierTasks(prev, stepIdx);
+                  const idx = folded.findIndex((m) => m.id === thinkingMsgId);
+                  if (idx < 0) return [...folded, announce];
+                  return [...folded.slice(0, idx), announce, ...folded.slice(idx)];
                 });
               }
             }
@@ -2641,6 +2681,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     refreshResolution,
     updateFormCardStatus,
     rollbackToMessage,
+    toggleTaskGroupCollapsed,
     clarificationSuggestions,
     setClarificationSuggestions,
     clearClarificationSuggestions,
@@ -2675,6 +2716,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     skipResolutionAndDraft,
     refreshResolution,
     updateFormCardStatus,
+    toggleTaskGroupCollapsed,
     clarificationSuggestions,
     setClarificationSuggestions,
     clearClarificationSuggestions,

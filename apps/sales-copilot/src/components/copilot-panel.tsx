@@ -45,6 +45,7 @@ export function CopilotPanel() {
     clarificationSuggestions,
     executeClarificationAction,
     rollbackToMessage,
+    toggleTaskGroupCollapsed,
   } = useCopilot();
 
   const { chips: dockChips, slot: dockSlot } = useActionDock();
@@ -263,7 +264,10 @@ export function CopilotPanel() {
       ) : (
         <>
 
-          {messages.map((message: ChatMessage) => (
+          {messages.map((message: ChatMessage) => {
+            // Phase D: hide substep messages when their owning task group is collapsed.
+            if (message.taskRole === 'substep' && message.collapsed) return null;
+            return (
             <div key={message.id} id={`message-${message.id}`} className={cn(
               'mb-3',
               message.type === 'user' ? 'flex justify-end' : ''
@@ -275,13 +279,15 @@ export function CopilotPanel() {
                 </div>
               )}
 
-              {/* Phase B: Per-task announce bubble */}
+              {/* Phase B: Per-task announce bubble (Phase D: now toggleable) */}
               {message.taskRole === 'announce' && message.taskAnnounce && (
                 <TaskAnnounceBubble
                   index={message.taskAnnounce.index}
                   total={message.taskAnnounce.total}
                   label={message.taskAnnounce.label}
                   locale={locale === 'zh-Hans' ? 'zh-Hans' : 'en'}
+                  collapsed={message.collapsed}
+                  onToggle={message.taskGroupId ? () => toggleTaskGroupCollapsed(message.taskGroupId!) : undefined}
                 />
               )}
 
@@ -589,7 +595,8 @@ export function CopilotPanel() {
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
           {/* Thinking dots removed - now shown inline in thinking message */}
         </>
       )}
