@@ -8,7 +8,7 @@ import { getLocale, getChatFontClass, getSelectedVoice, findMatchingSystemVoice,
 import { DynamicDataRenderer, tryParseJson } from '@/components/dynamic-data-renderer';
 import { FormCard } from '@/components/form-card';
 import { BatchFormCard } from '@/components/batch-form-card';
-import { MatchSelectionCard } from '@/components/match-selection-card';
+import { MatchSelectionCard, buildMatchReasonText } from '@/components/match-selection-card';
 import { MarkdownContent } from '@/components/markdown-content';
 import { RecordListCard } from '@/components/record-list-card';
 import { AdditionalIntentsCard } from '@/components/additional-intents-card';
@@ -353,18 +353,21 @@ export function CopilotPanel() {
               {/* Match Selection Card Message */}
               {message.type === 'match-selection' && message.matchSelection && (
                 <div className="max-w-full">
-                  {/* Show thinking steps if present */}
-                  {message.thinkingSteps && message.thinkingSteps.length > 0 && (
-                    <div className="mb-2 text-xs space-y-1 text-muted-foreground">
-                      {message.thinkingSteps.map((step, idx) => (
-                        <div key={idx} className="flex items-center gap-2">
-                          <span className="text-primary">✓</span>
-                          <span>{step.label}</span>
-                          {step.detail && <span>· {step.detail}</span>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  {/* Reason text — moved out of the card so the card stays focused on matches+actions. */}
+                  {(() => {
+                    const reason = buildMatchReasonText({
+                      entityType: message.matchSelection.entityType,
+                      query: message.matchSelection.query,
+                      pendingFn: message.matchSelection.pendingIntent?.function,
+                      locale: locale === 'zh-Hans' ? 'zh-Hans' : 'en',
+                    });
+                    if (!reason) return null;
+                    return (
+                      <p className={cn('text-foreground mb-2 leading-relaxed', getChatFontClass())}>
+                        {reason}
+                      </p>
+                    );
+                  })()}
                   {message.content && (
                     <p className="sr-only">{message.content}</p>
                   )}
@@ -427,17 +430,23 @@ export function CopilotPanel() {
                 };
                 return (
                   <div className="max-w-full">
-                    {message.thinkingSteps && message.thinkingSteps.length > 0 && (
-                      <div className="mb-2 text-xs space-y-1 text-muted-foreground">
-                        {message.thinkingSteps.map((step, idx) => (
-                          <div key={idx} className="flex items-center gap-2">
-                            <span className="text-primary">✓</span>
-                            <span>{step.label}</span>
-                            {step.detail && <span>· {step.detail}</span>}
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                    {/* Reason text \u2014 moved out of the card. Falls back to the
+                        agent's own content (e.g. clarification question) when
+                        the entity/function info isn't enough to derive one. */}
+                    {(() => {
+                      const reason = buildMatchReasonText({
+                        entityType,
+                        query: pr.query,
+                        pendingFn: message.awaitingClarification?.originalIntent.function,
+                        locale: locale === 'zh-Hans' ? 'zh-Hans' : 'en',
+                      }) || message.content;
+                      if (!reason) return null;
+                      return (
+                        <p className={cn('text-foreground mb-2 leading-relaxed', getChatFontClass())}>
+                          {reason}
+                        </p>
+                      );
+                    })()}
                     <MatchSelectionCard
                       messageId={message.id}
                       matchSelection={adapted}

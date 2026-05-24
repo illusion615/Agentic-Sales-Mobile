@@ -34,6 +34,65 @@ type MatchRecord = {
   stage?: string;
 };
 
+/**
+ * Build the "why are we asking this?" sentence shown above the card. Exported
+ * so [`copilot-panel`](./copilot-panel.tsx) can render it in the chat flow
+ * instead of having it nested inside the card itself (keeps the card focused
+ * on the matches + actions and surfaces the explanation as a regular
+ * assistant message).
+ */
+export function buildMatchReasonText(args: {
+  entityType: 'account' | 'contact' | 'opportunity' | 'activity';
+  query: string;
+  pendingFn?: string;
+  locale: Locale;
+}): string {
+  const { entityType, locale } = args;
+  const q = (args.query ?? '').trim();
+  const fn = args.pendingFn ?? '';
+  const draftKindLabels: Record<string, { zh: string; en: string }> = {
+    draftActivity: { zh: '记录这次活动', en: 'log this activity' },
+    draftOpportunity: { zh: '创建这个商机', en: 'create this opportunity' },
+    draftContact: { zh: '新建这个联系人', en: 'add this contact' },
+    draftAccount: { zh: '新建这个客户', en: 'create this account' },
+  };
+  const action = draftKindLabels[fn]
+    ?? (fn.startsWith('update') ? { zh: '完成更新', en: 'complete the update' } : { zh: '继续操作', en: 'continue' });
+
+  if (locale === 'zh-Hans') {
+    const tail = q ? `你提到的“${q}”在系统里有以下匹配：` : '系统里找到以下候选：';
+    switch (entityType) {
+      case 'account':
+        return `要${action.zh}，得先确认涉及的客户。${tail}`;
+      case 'contact':
+        return `要${action.zh}，得先确认对接的联系人。${tail}`;
+      case 'opportunity':
+        return `要${action.zh}，得先关联到正确的商机。${tail}`;
+      case 'activity':
+        return q
+          ? `先检查一下系统里是否已经有同名活动，避免重复记录。“${q}”的相近候选：`
+          : `先检查一下系统里是否已经有相似活动，避免重复记录。`;
+      default:
+        return '';
+    }
+  }
+  const enTail = q ? `Here's what I found for “${q}”:` : `Here's what I found:`;
+  switch (entityType) {
+    case 'account':
+      return `To ${action.en}, I need to know which account this is about. ${enTail}`;
+    case 'contact':
+      return `To ${action.en}, I need to confirm the contact. ${enTail}`;
+    case 'opportunity':
+      return `To ${action.en}, I need to attach it to the right opportunity. ${q ? `Matches for “${q}”:` : 'Candidates:'}`;
+    case 'activity':
+      return q
+        ? `Checking for existing activities so we don't duplicate. Candidates similar to “${q}”:`
+        : `Checking for existing activities so we don't duplicate.`;
+    default:
+      return '';
+  }
+}
+
 interface MatchSelectionCardProps {
   messageId: string;
   matchSelection: {
@@ -128,47 +187,8 @@ export function MatchSelectionCard({
       : labels[matchSelection.entityType]?.en || matchSelection.entityType;
   };
 
-  // Derive a human "why are we asking this?" line based on entityType + the
-  // pending draft function. Keeps the user oriented during multi-step resolution.
-  const getReasonText = (): string => {
-    const fn = pendingIntent?.function ?? '';
-    const q = matchSelection.query;
-    const draftKindLabels: Record<string, { zh: string; en: string }> = {
-      draftActivity: { zh: '记录这次活动', en: 'log this activity' },
-      draftOpportunity: { zh: '创建这个商机', en: 'create this opportunity' },
-      draftContact: { zh: '新建这个联系人', en: 'add this contact' },
-      draftAccount: { zh: '新建这个客户', en: 'create this account' },
-    };
-    const action = draftKindLabels[fn]
-      ?? (fn.startsWith('update') ? { zh: '完成更新', en: 'complete the update' } : { zh: '继续操作', en: 'continue' });
-
-    if (locale === 'zh-Hans') {
-      switch (matchSelection.entityType) {
-        case 'account':
-          return `要${action.zh}，得先确认涉及的客户。你提到的"${q}"在系统里有以下匹配：`;
-        case 'contact':
-          return `要${action.zh}，得先确认对接的联系人。你提到的"${q}"在系统里有以下匹配：`;
-        case 'opportunity':
-          return `要${action.zh}，得先关联到正确的商机。你提到的"${q}"在系统里有以下匹配：`;
-        case 'activity':
-          return `先检查一下系统里是否已经有同名活动，避免重复记录。"${q}"的相近候选：`;
-        default:
-          return '';
-      }
-    }
-    switch (matchSelection.entityType) {
-      case 'account':
-        return `To ${action.en}, I need to know which account this is about. Here's what I found for "${q}":`;
-      case 'contact':
-        return `To ${action.en}, I need to confirm the contact. Here's what I found for "${q}":`;
-      case 'opportunity':
-        return `To ${action.en}, I need to attach it to the right opportunity. Matches for "${q}":`;
-      case 'activity':
-        return `Checking for existing activities so we don't duplicate. Candidates similar to "${q}":`;
-      default:
-        return '';
-    }
-  };
+  // (Reason text lives in `buildMatchReasonText` and is rendered above the
+  // card by `copilot-panel.tsx`. No in-card copy remains.)
 
   const getMatchTypeLabel = (matchType: 'exact' | 'contains' | 'fuzzy') => {
     const labels: Record<string, { zh: string; en: string }> = {
@@ -365,16 +385,8 @@ export function MatchSelectionCard({
         </div>
       </div>
 
-      {/* Human-friendly reason: WHY this resolution step is being asked. */}
-      {(() => {
-        const reason = getReasonText();
-        if (!reason) return null;
-        return (
-          <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
-            {reason}
-          </p>
-        );
-      })()}
+      {/* Reason text moved out of the card: see `buildMatchReasonText` rendered
+          by `copilot-panel.tsx` above the card. */}
 
       {/* High-confidence match list */}
       {!resolved && hasHighMatches && (
