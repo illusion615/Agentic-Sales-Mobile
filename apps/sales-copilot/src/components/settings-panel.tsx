@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 
 import { useUser } from '@/hooks/use-user';
 import { useAppSettings } from '@/hooks/use-app-settings';
-import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, setSelectedVoice, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getOrganizeInStructureCard, setOrganizeInStructureCard, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getIntentMode, setIntentMode, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, type Locale, type VoiceOption, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget, type IntentMode } from '@/lib/i18n';
+import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, setSelectedVoice, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getOrganizeInStructureCard, setOrganizeInStructureCard, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, type Locale, type VoiceOption, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget } from '@/lib/i18n';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
@@ -87,7 +87,6 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const [voiceSummaryEnabled, setVoiceSummaryEnabledState] = useState(() => getVoiceSummaryEnabled());
   const [copilotInAllScreens, setCopilotInAllScreensState] = useState(() => getCopilotInAllScreens());
   const [simulateStreaming, setSimulateStreamingState] = useState(() => getSimulateStreaming());
-  const [intentMode, setIntentModeState] = useState<IntentMode>(() => getIntentMode());
   const [homeHeaderWidget, setHomeHeaderWidgetState] = useState<HomeHeaderWidget>(() => getHomeHeaderWidget());
 
   // Track if database settings have been loaded
@@ -204,12 +203,6 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const handleSimulateStreamingChange = (enabled: boolean) => {
     setSimulateStreamingState(enabled);
     setSimulateStreaming(enabled);
-  };
-
-  const handleIntentModeChange = (frameOn: boolean) => {
-    const m: IntentMode = frameOn ? 'frame' : 'legacy';
-    setIntentModeState(m);
-    setIntentMode(m);
   };
 
   const handleHomeHeaderWidgetChange = (widget: string) => {
@@ -587,25 +580,6 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
               </div>
 
               {/* New bottom dock (ActionDock) toggle */}
-
-              {/* Intent detection mode toggle (Frame multi-intent vs Legacy single-LLM) */}
-              <div className="pt-3 border-t border-border/30">
-                <SettingsItem
-                  icon={Zap}
-                  label={locale === 'zh-Hans' ? '多意图模式 (实验)' : 'Multi-Intent Mode (Experimental)'}
-                  rightElement={
-                    <Switch
-                      checked={intentMode === 'frame'}
-                      onCheckedChange={handleIntentModeChange}
-                    />
-                  }
-                />
-                <p className="text-xs text-muted-foreground mt-1 pl-8">
-                  {locale === 'zh-Hans'
-                    ? '启用后用 Frame + Orchestrator 处理多意图请求；失败会直接报错以便调试，不回退到经典模式。'
-                    : 'When enabled, use Frame + Orchestrator for multi-intent requests. Failures surface as errors (no fallback) for easier debugging.'}
-                </p>
-              </div>
             </div>
           </motion.div>
 

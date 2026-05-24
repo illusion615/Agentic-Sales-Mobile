@@ -7,9 +7,12 @@
  *   - DAG step 1            → intent.function + intent.arguments
  *   - DAG steps 2..N        → intent.additionalActions[]
  *   - Single-intent shape   → step 1 only, no additionalActions
- *   - Entity-name fields on step 1 (accountName / contactName / opportunityName /
- *     activityTitle) become intent.resolutions[] so the legacy resolver chain
- *     fires before execution.
+ *   - Entity-name fields on ANY step (accountName / contactName /
+ *     opportunityName / activityTitle) become intent.resolutions[] so the
+ *     legacy resolver chain fires before execution. Extras' resolutions are
+ *     merged into the top-level list (deduped) — without this, additionalActions
+ *     that reference a different account/contact than head would skip matching
+ *     and silently fail or attach to the wrong record.
  *
  * Returns null when the shadow result has no actionable plan.
  */
@@ -133,7 +136,16 @@ export function frameToIntent(shadow: ShadowResult): TranslatedIntent | null {
   }
 
   const slot = stepToIntentSlot(primaryFn, primaryArgs);
-  const resolutions = deriveResolutions(slot.function, slot.arguments);
+  const headResolutions = deriveResolutions(slot.function, slot.arguments) ?? [];
+
+  // Also derive resolutions for every extra step so multi-intent plans that
+  // reference a different account/contact/opportunity than head still get
+  // their entities pre-matched. The dispatcher in copilot-agent.ts only
+  // injects head's *resolved IDs* into extras — it does NOT trigger a fresh
+  // matching pass for extras with novel names.
+  const extraResolutions = extras.flatMap((s) => deriveResolutions(s.function, s.arguments) ?? []);
+
+  const mergedResolutions = mergeResolutions([...headResolutions, ...extraResolutions]);
 
   return {
     function: slot.function,
@@ -150,7 +162,24 @@ export function frameToIntent(shadow: ShadowResult): TranslatedIntent | null {
           },
         }
       : {}),
-    ...(resolutions ? { requiresMatching: true, resolutions } : {}),
+    ...(mergedResolutions.length
+      ? { requiresMatching: true, resolutions: mergedResolutions }
+      : {}),
     confidence: shadow.frame.confidence,
   };
+}
+
+/** Dedupe resolutions by (entityType, normalized query, scopeBy). First occurrence wins. */
+function mergeResolutions(
+  items: NonNullable<TranslatedIntent['resolutions']>
+): NonNullable<TranslatedIntent['resolutions']> {
+  const seen = new Set<string>();
+  const out: NonNullable<TranslatedIntent['resolutions']> = [];
+  for (const r of items) {
+    const key = `${r.entityType}|${r.query.trim().toLowerCase()}|${r.scopeBy ?? ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(r);
+  }
+  return out;
 }

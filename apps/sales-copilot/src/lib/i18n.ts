@@ -1187,12 +1187,18 @@ export function setSimulateStreaming(enabled: boolean): void {
   window.dispatchEvent(new CustomEvent('simulatestreaming-changed', { detail: enabled }));
 }
 
-// Intent detection mode: 'legacy' = single-LLM intent path, 'frame' = Frame + Orchestrator pipeline
+// Intent detection mode. As of the cutover, production always runs 'frame'
+// (Frame + Orchestrator pipeline). The 'legacy' single-LLM branch in
+// copilot-agent.ts is kept as in-source reference during the stabilization
+// window — it is unreachable from the UI. To re-enable for debugging only,
+// set `localStorage.intentMode = 'legacy'` from the devtools console.
 export type IntentMode = 'legacy' | 'frame';
 
 export function getIntentMode(): IntentMode {
-  const v = localStorage.getItem('intentMode');
-  return v === 'frame' ? 'frame' : 'legacy';
+  if (typeof localStorage !== 'undefined' && localStorage.getItem('intentMode') === 'legacy') {
+    return 'legacy';
+  }
+  return 'frame';
 }
 
 export function setIntentMode(mode: IntentMode): void {
