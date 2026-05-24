@@ -113,8 +113,8 @@ interface MatchSelectionCardProps {
   resolutionResult?: string;
   onSelect?: (record: { id: string; name: string; accountId?: string; accountName?: string }) => void;
   onContinueWithSelection?: (record: { id: string; name: string; accountId?: string; accountName?: string }, pendingIntent: { function: string; arguments: Record<string, unknown>; additionalActions?: Array<{ function: string; arguments: Record<string, unknown>; reason?: string }> }) => void;
-  onCreateEntity?: (pendingIntent: { function: string; arguments: Record<string, unknown>; additionalActions?: Array<{ function: string; arguments: Record<string, unknown>; reason?: string }> }, entityKind: 'contact' | 'account' | 'opportunity', queryName: string) => void;
-  onSkip?: (pendingIntent: { function: string; arguments: Record<string, unknown> }, entityKind: 'contact' | 'account' | 'opportunity') => void;
+  onCreateEntity?: (pendingIntent: { function: string; arguments: Record<string, unknown>; additionalActions?: Array<{ function: string; arguments: Record<string, unknown>; reason?: string }> }, entityKind: 'contact' | 'account' | 'opportunity' | 'activity', queryName: string) => void;
+  onSkip?: (pendingIntent: { function: string; arguments: Record<string, unknown> }, entityKind: 'contact' | 'account' | 'opportunity' | 'activity') => void;
   onSearchOther?: (newQuery: string, entityType: 'account' | 'contact' | 'opportunity' | 'activity', pendingIntent: { function: string; arguments: Record<string, unknown> }) => void;
 }
 
@@ -149,16 +149,21 @@ export function MatchSelectionCard({
   const hasDraftIntent = !!pendingIntent && pendingIntent.function.startsWith('draft');
 
   // Map entityType → entityKind for create/skip actions.
-  // activity self-dup detection has no chain-create / skip semantic.
-  const entityKind: 'contact' | 'account' | 'opportunity' | null =
+  // For 'activity' the semantic differs from the dependency entities:
+  //   - clicking a row    = "use this existing activity, don't draft a duplicate"
+  //   - "create new"      = "draft a new activity anyway, ignore the matches"
+  //   - "skip"            = "cancel this activity draft entirely"
+  const entityKind: 'contact' | 'account' | 'opportunity' | 'activity' | null =
     matchSelection.entityType === 'contact' ? 'contact'
     : matchSelection.entityType === 'account' ? 'account'
     : matchSelection.entityType === 'opportunity' ? 'opportunity'
+    : matchSelection.entityType === 'activity' ? 'activity'
     : null;
 
-  // Skip is hidden for entityKind === 'account' (account is mandatory for draftActivity / draftOpportunity)
-  // and for entityType === 'activity' (skipping a duplicate activity match has no clean semantic).
-  const skipAllowed = entityKind !== null && entityKind !== 'account' && matchSelection.entityType !== 'activity';
+  // Skip is hidden for entityKind === 'account' (account is mandatory for
+  // draftActivity / draftOpportunity — the user must either pick or create one).
+  // For everything else (contact, opportunity, activity) skip is meaningful.
+  const skipAllowed = entityKind !== null && entityKind !== 'account';
 
   const getEntityIcon = () => {
     switch (matchSelection.entityType) {
@@ -492,7 +497,9 @@ export function MatchSelectionCard({
               disabled={isResolved || !onSkip}
             >
               <SkipForward className="w-4 h-4" />
-              {locale === 'zh-Hans' ? '跳过' : 'Skip'}
+              {entityKind === 'activity'
+                ? (locale === 'zh-Hans' ? '取消草稿' : 'Cancel draft')
+                : (locale === 'zh-Hans' ? '跳过' : 'Skip')}
             </Button>
           )}
         </div>

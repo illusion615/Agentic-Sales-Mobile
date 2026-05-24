@@ -236,18 +236,20 @@ interface CopilotContextValue {
     pendingIntent: { function: string; arguments: Record<string, unknown> }
   ) => Promise<void>;
 
-  // Unified resolution: chain-create the missing entity (e.g. open a draftContact form, then resume the parked main intent)
+  // Unified resolution: chain-create the missing entity (e.g. open a draftContact form, then resume the parked main intent).
+  // entityKind === 'activity' means "create new activity anyway, ignore the duplicate matches" — runs the original draftActivity intent.
   createEntityForResolution: (
     pendingIntent: { function: string; arguments: Record<string, unknown>; additionalActions?: Array<{ function: string; arguments: Record<string, unknown>; reason?: string }> },
-    entityKind: 'contact' | 'account' | 'opportunity',
+    entityKind: 'contact' | 'account' | 'opportunity' | 'activity',
     queryName: string,
     blockedMsgId?: string
   ) => Promise<void>;
 
-  // Unified resolution: strip the unresolved entity from the args and open the main draft form so the user can pick in-form
+  // Unified resolution: strip the unresolved entity from the args and open the main draft form so the user can pick in-form.
+  // entityKind === 'activity' means "cancel this draft entirely" — no executeFunction call.
   skipResolutionAndDraft: (
     pendingIntent: { function: string; arguments: Record<string, unknown> },
-    entityKind: 'contact' | 'account' | 'opportunity',
+    entityKind: 'contact' | 'account' | 'opportunity' | 'activity',
     blockedMsgId?: string
   ) => Promise<void>;
 
@@ -1859,6 +1861,26 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           : m
       ));
     }
+
+    // Activity short-circuit: picking an existing activity means "this is the
+    // one I'm talking about" — don't draft a duplicate. Lock the card (already
+    // done above), append a brief ack, and stop. draftActivity always returns
+    // isNew:true regardless of activityId, so the old behavior here always
+    // produced a duplicate form.
+    if (entityType === 'activity' && pendingIntent.function === 'draftActivity') {
+      const ack: ChatMessage = {
+        id: `msg-${Date.now()}-activity-ack`,
+        type: 'agent',
+        role: 'assistant',
+        content: locale === 'zh-Hans'
+          ? `已关联到现有活动「${selectedRecord.name}」，未创建重复记录。`
+          : `Linked to existing activity "${selectedRecord.name}" — no duplicate created.`,
+        agentName: 'Sales Copilot',
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, ack]);
+      return;
+    }
     setIsSending(true);
     
     // Create a thinking message
@@ -2504,10 +2526,28 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
   // Mirrors the gate's create branch (sendMessage 'create' path) so button clicks bypass text-token matching.
   const createEntityForResolution = useCallback(async (
     pendingIntent: { function: string; arguments: Record<string, unknown>; additionalActions?: Array<{ function: string; arguments: Record<string, unknown>; reason?: string }> },
-    entityKind: 'contact' | 'account' | 'opportunity',
+    entityKind: 'contact' | 'account' | 'opportunity' | 'activity',
     queryName: string,
     blockedMsgId?: string
   ) => {
+    // Activity branch: "create new anyway" — lock the card, then run the
+    // original draftActivity. Original args carry no activityId, so the form
+    // will be a fresh draft (matching the duplicate-check bypass semantic).
+    if (entityKind === 'activity') {
+      if (blockedMsgId) {
+        const resultText = locale === 'zh-Hans'
+          ? `新建活动：${queryName}`
+          : `Creating new activity: ${queryName}`;
+        setMessages((prev) => prev.map((m) =>
+          m.id === blockedMsgId
+            ? { ...m, resolutionState: 'resolved' as const, resolutionResult: resultText }
+            : m
+        ));
+      }
+      await skipResolutionAndDraftImpl(pendingIntent, 'activity');
+      return;
+    }
+
     // Mark the source message resolved so the card freezes
     if (blockedMsgId) {
       const kindLabelZh = entityKind === 'contact' ? '联系人' : entityKind === 'account' ? '客户' : '商机';
@@ -2602,21 +2642,23 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // Unreachable — entityKind is exhausted by the contact / account / opportunity branches above.
+    // Unreachable — entityKind is exhausted by the contact / account / opportunity / activity branches above.
     await skipResolutionAndDraftImpl(pendingIntent, entityKind);
   }, [user, locale]);
 
   // Unified resolution — skip: strip the unresolved entity from args and run the original draft directly.
   // The resulting form-card has an empty lookup for the skipped entity so the user can pick it in-form.
-  // Mirrors the gate's skip branch.
+  // Mirrors the gate's skip branch. entityKind === 'activity' uses this path for "create new anyway"
+  // (no fields to strip; runs draftActivity with original args).
   const skipResolutionAndDraftImpl = async (
     pendingIntent: { function: string; arguments: Record<string, unknown> },
-    entityKind: 'contact' | 'account' | 'opportunity'
+    entityKind: 'contact' | 'account' | 'opportunity' | 'activity'
   ) => {
     const strippedArgs: Record<string, unknown> = { ...pendingIntent.arguments };
     if (entityKind === 'contact') { delete strippedArgs.contactId; delete strippedArgs.contactName; }
     else if (entityKind === 'account') { delete strippedArgs.accountId; delete strippedArgs.accountName; }
     else if (entityKind === 'opportunity') { delete strippedArgs.opportunityId; delete strippedArgs.opportunityName; }
+    else if (entityKind === 'activity') { delete strippedArgs.activityId; }
 
     setIsSending(true);
     try {
@@ -2665,9 +2707,25 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
 
   const skipResolutionAndDraft = useCallback(async (
     pendingIntent: { function: string; arguments: Record<string, unknown> },
-    entityKind: 'contact' | 'account' | 'opportunity',
+    entityKind: 'contact' | 'account' | 'opportunity' | 'activity',
     blockedMsgId?: string
   ) => {
+    // Activity branch: "skip" = cancel the draft entirely. The activity IS the
+    // thing being drafted, so there's nothing left to draft — just lock the
+    // card and stop. No executeFunction call.
+    if (entityKind === 'activity') {
+      if (blockedMsgId) {
+        const resultText = locale === 'zh-Hans'
+          ? '已取消活动草稿'
+          : 'Activity draft cancelled';
+        setMessages((prev) => prev.map((m) =>
+          m.id === blockedMsgId
+            ? { ...m, resolutionState: 'resolved' as const, resolutionResult: resultText }
+            : m
+        ));
+      }
+      return;
+    }
     if (blockedMsgId) {
       const kindLabelZh = entityKind === 'contact' ? '联系人' : entityKind === 'account' ? '客户' : '商机';
       const resultText = locale === 'zh-Hans'
