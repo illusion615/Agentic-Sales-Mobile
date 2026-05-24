@@ -300,6 +300,20 @@ export interface PageContext {
 
 const CopilotContext = createContext<CopilotContextValue | null>(null);
 
+// ===== Conversation persistence =====
+// localStorage so messages survive Power Apps player restarts (sessionStorage
+// dies with the host tab). Bump the schema version when ChatMessage's shape
+// changes incompatibly; on mismatch we discard and start fresh instead of
+// rendering broken cards.
+const PERSIST_KEY = 'copilot-messages';
+const PERSIST_SCHEMA_VERSION = 2;
+const PERSIST_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+interface PersistEnvelope {
+  v: number;
+  savedAt: number;
+  messages: ChatMessage[];
+}
+
 // ===== Phase B: task narration helpers =====
 type IntentsOverview = NonNullable<AgentResponse['intentsOverview']>;
 
@@ -442,11 +456,21 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   
-  // Chat state - persist messages in sessionStorage to survive navigation
+  // Chat state - persist messages in localStorage so they survive Power Apps
+  // player restarts (sessionStorage is wiped when the host tab/iframe closes).
+  // Envelope: { v: schema version, savedAt: epoch ms, messages: [...] }.
+  // Bump PERSIST_SCHEMA_VERSION when ChatMessage shape changes incompatibly.
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     try {
-      const stored = sessionStorage.getItem('copilot-messages');
-      return stored ? JSON.parse(stored) : [];
+      const stored = localStorage.getItem(PERSIST_KEY);
+      if (!stored) return [];
+      const parsed = JSON.parse(stored) as PersistEnvelope | ChatMessage[];
+      // Back-compat: legacy plain-array shape
+      if (Array.isArray(parsed)) return parsed;
+      if (!parsed || typeof parsed !== 'object') return [];
+      if (parsed.v !== PERSIST_SCHEMA_VERSION) return [];
+      if (typeof parsed.savedAt === 'number' && Date.now() - parsed.savedAt > PERSIST_TTL_MS) return [];
+      return Array.isArray(parsed.messages) ? parsed.messages : [];
     } catch {
       return [];
     }
@@ -490,17 +514,24 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       isThinking: undefined,
     }));
 
-    const json = JSON.stringify(persistableMessages);
+    const envelope: PersistEnvelope = {
+      v: PERSIST_SCHEMA_VERSION,
+      savedAt: Date.now(),
+      messages: persistableMessages as ChatMessage[],
+    };
+    const json = JSON.stringify(envelope);
 
-    // Skip if unchanged from last persisted snapshot
-    if (json === lastPersistedRef.current) {
+    // Skip if unchanged from last persisted snapshot (compare messages slice
+    // so the savedAt timestamp doesn't defeat the dedup).
+    const messagesJson = JSON.stringify(persistableMessages);
+    if (messagesJson === lastPersistedRef.current) {
       return;
     }
 
-    lastPersistedRef.current = json;
+    lastPersistedRef.current = messagesJson;
 
     try {
-      sessionStorage.setItem('copilot-messages', json);
+      localStorage.setItem(PERSIST_KEY, json);
     } catch (e) {
       console.warn('Failed to persist copilot messages:', e);
     }
@@ -1799,7 +1830,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     
     // Clear persisted messages
     try {
-      sessionStorage.removeItem('copilot-messages');
+      localStorage.removeItem(PERSIST_KEY);
     } catch (e) {
       console.warn('Failed to clear persisted messages:', e);
     }
