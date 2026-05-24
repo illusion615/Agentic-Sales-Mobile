@@ -1622,6 +1622,7 @@ User: "Log a meeting with Rachel at King's College Hospital"
                   pendingIntent: {
                     function: intent.function,
                     arguments: intent.arguments,
+                    ...((intent.additionalActions?.length ?? 0) > 0 ? { additionalActions: intent.additionalActions } : {}),
                   },
                 },
                 latencyMs: Date.now() - startTime,
@@ -1741,6 +1742,7 @@ User: "Log a meeting with Rachel at King's College Hospital"
                     arguments: intent.arguments,
                     // I-3 Slice 2: carry remaining queue for Context cascade.
                     remainingResolutions: remainingResolutions.length > 0 ? remainingResolutions : undefined,
+                    ...((intent.additionalActions?.length ?? 0) > 0 ? { additionalActions: intent.additionalActions } : {}),
                   };
                 })(),
               },

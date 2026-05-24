@@ -2289,6 +2289,15 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           }));
         }
         } // end bypassFinalActivityDraft else
+
+        // Replay any additional intents (e.g. draftOpportunity, follow-up draftActivity)
+        // that were carried through the match-selection flow. These were originally part
+        // of the LLM's multi-intent response but got parked when matching blocked.
+        const carriedActions = (pendingIntent as { additionalActions?: Array<{ function: string; arguments: Record<string, unknown>; reason?: string }> }).additionalActions;
+        if (carriedActions && carriedActions.length > 0) {
+          console.log('[CopilotContext] replaying', carriedActions.length, 'additional actions after match resolution');
+          await replayAdditionalActions(carriedActions, updatedArguments);
+        }
       } else {
         // For non-draft functions (queries, summaries, etc.), use full processMessage flow
         // Reconstruct the original user message with the selected entity
