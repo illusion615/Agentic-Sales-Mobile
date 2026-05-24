@@ -8,6 +8,7 @@ import {
 import { getLocale, getSimulateStreaming, type Locale } from '@/lib/i18n';
 import { toast } from 'sonner';
 import { processMessage, type ThinkingProgress, type AgentResponse } from '@/lib/copilot-agent';
+import { narrateTask, type PriorTaskOutcome } from '@/lib/task-narrator';
 import type { AwaitingClarification, ResolutionItem } from '@/lib/agent-utils';
 import { extractVisitDataFromText, type ExtractedVisitData } from '@/lib/visit-extraction';
 
@@ -393,6 +394,39 @@ function collapseEarlierTasks(prev: ChatMessage[], newIntentIndex: number): Chat
   return mutated ? next : prev;
 }
 
+/**
+ * Phase C: walk the current message list and produce one outcome line per
+ * already-completed task group, ordered by intentIndex. The narrator feeds
+ * these to the LLM so it can carry resolved entities into the next sentence.
+ */
+function extractPriorOutcomes(messages: ChatMessage[], upToIntentIndex: number): PriorTaskOutcome[] {
+  const byGroup = new Map<string, { intentIdx: number; label: string; outcomeParts: string[] }>();
+  for (const m of messages) {
+    if (!m.taskGroupId) continue;
+    const match = /^task-(\d+)$/.exec(m.taskGroupId);
+    if (!match) continue;
+    const intentIdx = Number.parseInt(match[1], 10);
+    if (!Number.isFinite(intentIdx) || intentIdx >= upToIntentIndex) continue;
+    let bucket = byGroup.get(m.taskGroupId);
+    if (!bucket) {
+      bucket = { intentIdx, label: '', outcomeParts: [] };
+      byGroup.set(m.taskGroupId, bucket);
+    }
+    if (m.taskRole === 'announce' && m.taskAnnounce?.label) {
+      bucket.label = m.taskAnnounce.label;
+    } else if (m.taskRole === 'substep' && typeof m.content === 'string' && m.content.trim()) {
+      bucket.outcomeParts.push(m.content.trim());
+    }
+  }
+  return [...byGroup.values()]
+    .sort((a, b) => a.intentIdx - b.intentIdx)
+    .map((b) => ({
+      taskGroupId: `task-${b.intentIdx}`,
+      label: b.label || `task-${b.intentIdx}`,
+      outcome: b.outcomeParts.length ? b.outcomeParts[b.outcomeParts.length - 1] : '(completed)',
+    }));
+}
+
 export function CopilotProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const { data: user } = useUser();
@@ -541,6 +575,38 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       const nextCollapsed = !(target?.collapsed);
       return prev.map((m) => (m.taskGroupId === groupId ? { ...m, collapsed: nextCollapsed } : m));
     });
+  }, []);
+
+  // Phase C: fire an async LLM narration for a freshly-inserted announce
+  // message. Best-effort — on any failure the sync sentence stays put.
+  const kickOffNarration = useCallback((args: {
+    announceMsgId: string;
+    intentIndex: number;
+    taskIndex: number;
+    total: number;
+    label: string;
+    fnName: string;
+    locale: 'zh-Hans' | 'en';
+  }) => {
+    const { announceMsgId, intentIndex, taskIndex, total, label, fnName, locale: loc } = args;
+    const prior = extractPriorOutcomes(messagesRef.current, intentIndex);
+    // Skip the LLM round-trip for the very first task — sync sentence is fine.
+    if (prior.length === 0) return;
+    narrateTask({ taskIndex, total, label, fnName, prior, locale: loc })
+      .then((narration) => {
+        if (!narration?.announceText || narration.announceText === label) return;
+        setMessages((prev) => prev.map((m) => {
+          if (m.id !== announceMsgId) return m;
+          return {
+            ...m,
+            content: narration.announceText,
+            taskAnnounce: m.taskAnnounce
+              ? { ...m.taskAnnounce, label: narration.announceText }
+              : m.taskAnnounce,
+          };
+        }));
+      })
+      .catch((err) => console.warn('[copilot-context] narration error swallowed:', err));
   }, []);
 
   // I-2 Round 3: resume a parked intent after the user finishes creating a new contact via the inline draft form.
@@ -1329,6 +1395,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             let acTaskGroupId: string | undefined;
             if (overviewAc && overviewAc.length > 1 && intentIdxAc !== undefined) {
               acTaskGroupId = `task-${intentIdxAc}`;
+              const announceForAc = buildAnnounceMessage(intentIdxAc, overviewAc, isZhAc);
+              let didInsertAnnounceAc = false;
               setMessages((prev) => {
                 const idx = prev.findIndex((m) => m.id === thinkingMsgId);
                 if (idx < 0) return prev;
@@ -1336,15 +1404,27 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                 if (!hasMessageAfterLastUser(prev, (m) => m.taskRole === 'overview')) {
                   inserts.push(buildOverviewMessage(overviewAc, isZhAc));
                 }
-                if (!hasMessageAfterLastUser(prev, (m) => m.taskRole === 'announce' && m.taskGroupId === `task-${intentIdxAc}`)) {
-                  const announce = buildAnnounceMessage(intentIdxAc, overviewAc, isZhAc);
-                  if (announce) inserts.push(announce);
+                if (announceForAc && !hasMessageAfterLastUser(prev, (m) => m.taskRole === 'announce' && m.taskGroupId === `task-${intentIdxAc}`)) {
+                  inserts.push(announceForAc);
+                  didInsertAnnounceAc = true;
                 }
                 if (inserts.length === 0) return prev;
                 // Phase D: fold any earlier task's substeps before showing the new announce.
                 const folded = collapseEarlierTasks(prev, intentIdxAc);
                 return [...folded.slice(0, idx), ...inserts, ...folded.slice(idx)];
               });
+              // Phase C: async LLM narration kick-off (best effort).
+              if (didInsertAnnounceAc && announceForAc?.taskAnnounce) {
+                kickOffNarration({
+                  announceMsgId: announceForAc.id,
+                  intentIndex: intentIdxAc,
+                  taskIndex: announceForAc.taskAnnounce.index,
+                  total: announceForAc.taskAnnounce.total,
+                  label: announceForAc.taskAnnounce.label,
+                  fnName: response.functionCalled ?? '',
+                  locale: isZhAc ? 'zh-Hans' : 'en',
+                });
+              }
             }
             setMessages((prev) => prev.map((msg) => {
               if (msg.id !== thinkingMsgId) return msg;
@@ -1469,6 +1549,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             let currentTaskGroupId: string | undefined;
             if (overview && overview.length > 1 && intentIdx !== undefined) {
               currentTaskGroupId = `task-${intentIdx}`;
+              const announceForIntent = buildAnnounceMessage(intentIdx, overview, isZhLocale);
+              let didInsertAnnounce = false;
               setMessages((prev) => {
                 const idx = prev.findIndex((m) => m.id === thinkingMsgId);
                 if (idx < 0) return prev;
@@ -1476,15 +1558,26 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                 if (!hasMessageAfterLastUser(prev, (m) => m.taskRole === 'overview')) {
                   inserts.push(buildOverviewMessage(overview, isZhLocale));
                 }
-                if (!hasMessageAfterLastUser(prev, (m) => m.taskRole === 'announce' && m.taskGroupId === `task-${intentIdx}`)) {
-                  const announce = buildAnnounceMessage(intentIdx, overview, isZhLocale);
-                  if (announce) inserts.push(announce);
+                if (announceForIntent && !hasMessageAfterLastUser(prev, (m) => m.taskRole === 'announce' && m.taskGroupId === `task-${intentIdx}`)) {
+                  inserts.push(announceForIntent);
+                  didInsertAnnounce = true;
                 }
                 if (inserts.length === 0) return prev;
                 // Phase D: fold prior tasks before the new announce lands.
                 const folded = collapseEarlierTasks(prev, intentIdx);
                 return [...folded.slice(0, idx), ...inserts, ...folded.slice(idx)];
               });
+              if (didInsertAnnounce && announceForIntent?.taskAnnounce) {
+                kickOffNarration({
+                  announceMsgId: announceForIntent.id,
+                  intentIndex: intentIdx,
+                  taskIndex: announceForIntent.taskAnnounce.index,
+                  total: announceForIntent.taskAnnounce.total,
+                  label: announceForIntent.taskAnnounce.label,
+                  fnName: response.functionCalled ?? '',
+                  locale: isZhLocale ? 'zh-Hans' : 'en',
+                });
+              }
             }
 
             setMessages((prev) => prev.map((msg) => {
@@ -1866,6 +1959,17 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                   if (idx < 0) return [...folded, announce];
                   return [...folded.slice(0, idx), announce, ...folded.slice(idx)];
                 });
+                if (announce.taskAnnounce) {
+                  kickOffNarration({
+                    announceMsgId: announce.id,
+                    intentIndex: stepIdx,
+                    taskIndex: announce.taskAnnounce.index,
+                    total: announce.taskAnnounce.total,
+                    label: announce.taskAnnounce.label,
+                    fnName: '',
+                    locale: isZhCascade ? 'zh-Hans' : 'en',
+                  });
+                }
               }
             }
             currentCascadeGroupId = `task-${itemIntentIndex}`;
