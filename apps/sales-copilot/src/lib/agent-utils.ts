@@ -17,6 +17,9 @@ export const ResolutionItemSchema = z.object({
   // Optional dependency: this resolution should be scoped by the named already-resolved entity.
   // e.g. contact resolution `scopeBy: 'account'` means filter contacts within the resolved account.
   scopeBy: z.enum(['account', 'opportunity']).optional(),
+  // Phase B: which intent (0-based head, 1+ for additionalActions) this resolution belongs to.
+  // Carried through so the Context-side cascade can emit per-task announces on boundary change.
+  intentIndex: z.number().int().nonnegative().optional(),
 });
 export type ResolutionItem = z.infer<typeof ResolutionItemSchema>;
 

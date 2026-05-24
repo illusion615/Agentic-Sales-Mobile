@@ -13,8 +13,10 @@ import { MarkdownContent } from '@/components/markdown-content';
 import { RecordListCard } from '@/components/record-list-card';
 import { AdditionalIntentsCard } from '@/components/additional-intents-card';
 import { FrameShadowViewer } from '@/components/frame-shadow-viewer';
+import { TaskAnnounceBubble } from '@/components/task-announce-bubble';
 import { toast } from 'sonner';
 import { useActionDock } from '@/contexts/action-dock-context';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 
 
@@ -46,6 +48,7 @@ export function CopilotPanel() {
   } = useCopilot();
 
   const { chips: dockChips, slot: dockSlot } = useActionDock();
+  const isMobile = useIsMobile();
 
   // Render counter for loop diagnostics
   const renderCountRef = useRef(0);
@@ -174,9 +177,13 @@ export function CopilotPanel() {
   };
 
   // Handle input focus
+  // On mobile, jump straight to full-screen — the intermediate 78vh state has
+  // too little vertical room to be useful for chatting.
   const handleInputFocus = () => {
     if (!isOpen) {
-      openPanel();
+      openPanel(isMobile);
+    } else if (isMobile && !isFullScreen) {
+      openPanel(true);
     }
   };
 
@@ -261,6 +268,23 @@ export function CopilotPanel() {
               'mb-3',
               message.type === 'user' ? 'flex justify-end' : ''
             )}>
+              {/* Phase B: Task overview — "识别到 N 个意图：A、B、C" (plain text, no bubble) */}
+              {message.taskRole === 'overview' && message.taskOverview && (
+                <div className="text-sm text-muted-foreground px-1">
+                  {message.content}
+                </div>
+              )}
+
+              {/* Phase B: Per-task announce bubble */}
+              {message.taskRole === 'announce' && message.taskAnnounce && (
+                <TaskAnnounceBubble
+                  index={message.taskAnnounce.index}
+                  total={message.taskAnnounce.total}
+                  label={message.taskAnnounce.label}
+                  locale={locale === 'zh-Hans' ? 'zh-Hans' : 'en'}
+                />
+              )}
+
               {/* User Message */}
               {message.type === 'user' && (
                 <div className="max-w-[85%] group">
@@ -431,7 +455,7 @@ export function CopilotPanel() {
               })()}
 
               {/* Agent Message (also renders awaiting-clarification thinking/streaming as generic text) */}
-              {(message.type === 'agent' || (message.type === 'awaiting-clarification' && (message.isThinking || message.isStreaming || !message.awaitingClarification))) && (() => {
+              {(message.type === 'agent' || (message.type === 'awaiting-clarification' && (message.isThinking || message.isStreaming || !message.awaitingClarification))) && message.taskRole !== 'overview' && message.taskRole !== 'announce' && (() => {
                 // Thinking state - show progress steps
                 if (message.isThinking && message.thinkingSteps) {
                   return (
@@ -865,9 +889,11 @@ export function CopilotPanel() {
           dragElastic={{ top: 0.3, bottom: 0.5 }}
           onDragEnd={(_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
             if (isFullScreen) {
-              // Full-screen: down-swipe collapses back to 78vh
+              // Full-screen: down-swipe collapses. On mobile we skip the 78vh
+              // mid state (too little room) and close all the way to the dock.
               if (info.offset.y > 80 || info.velocity.y > 500) {
-                openPanel(false);
+                if (isMobile) closePanel();
+                else openPanel(false);
               }
               return;
             }

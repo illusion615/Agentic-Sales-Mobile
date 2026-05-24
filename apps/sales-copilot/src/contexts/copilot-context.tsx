@@ -7,7 +7,7 @@ import {
 } from '@/services/copilot-service';
 import { getLocale, getSimulateStreaming, type Locale } from '@/lib/i18n';
 import { toast } from 'sonner';
-import { processMessage, type ThinkingProgress } from '@/lib/copilot-agent';
+import { processMessage, type ThinkingProgress, type AgentResponse } from '@/lib/copilot-agent';
 import type { AwaitingClarification, ResolutionItem } from '@/lib/agent-utils';
 import { extractVisitDataFromText, type ExtractedVisitData } from '@/lib/visit-extraction';
 
@@ -157,12 +157,16 @@ export interface ChatMessage {
   /** Groups every message belonging to a single task (announce + sub-steps + done line). */
   taskGroupId?: string;
   /** Role of this message inside its task group. Drives renderer choice. */
-  taskRole?: 'announce' | 'substep' | 'done-collapsed';
+  taskRole?: 'overview' | 'announce' | 'substep' | 'done-collapsed';
   /** Payload for the task-announce bubble (only set when taskRole === 'announce'). */
   taskAnnounce?: {
     index: number;      // 1-based
     total: number;
     label: string;      // localized human label (e.g. "登记客户拜访")
+  };
+  /** Payload for the upfront overview line ("识别到 N 个意图：A、B、C"). */
+  taskOverview?: {
+    intents: Array<{ index: number; label: string }>;
   };
   /** Whether this message should currently render in collapsed form. Toggled by orchestrator. */
   collapsed?: boolean;
@@ -291,6 +295,79 @@ export interface PageContext {
 }
 
 const CopilotContext = createContext<CopilotContextValue | null>(null);
+
+// ===== Phase B: task narration helpers =====
+type IntentsOverview = NonNullable<AgentResponse['intentsOverview']>;
+
+function pickLabel(label: { zh: string; en: string }, isZh: boolean): string {
+  return isZh ? label.zh : label.en;
+}
+
+const ZH_ORDINALS = ['第一', '第二', '第三', '第四', '第五', '第六', '第七', '第八', '第九'];
+function ordinalZh(n: number): string {
+  return ZH_ORDINALS[n - 1] ?? `第${n}`;
+}
+
+function buildOverviewMessage(overview: IntentsOverview, isZh: boolean): ChatMessage {
+  const labels = overview.map((o) => pickLabel(o.userFacingLabel, isZh));
+  const joined = isZh ? labels.join('、') : labels.join(', ');
+  const text = isZh
+    ? `识别到 ${overview.length} 个意图：${joined}`
+    : `Identified ${overview.length} intents: ${joined}`;
+  return {
+    id: `msg-${Date.now()}-overview`,
+    role: 'assistant',
+    type: 'agent',
+    content: text,
+    timestamp: new Date().toISOString(),
+    taskRole: 'overview',
+    taskOverview: { intents: overview.map((o) => ({ index: o.intentIndex, label: pickLabel(o.userFacingLabel, isZh) })) },
+  };
+}
+
+function buildAnnounceMessage(
+  intentIndex: number,
+  overview: IntentsOverview,
+  isZh: boolean,
+): ChatMessage | null {
+  const entry = overview.find((o) => o.intentIndex === intentIndex);
+  if (!entry) return null;
+  const label = pickLabel(entry.userFacingLabel, isZh);
+  const position = overview.findIndex((o) => o.intentIndex === intentIndex) + 1;
+  const total = overview.length;
+  const text = total > 1
+    ? (isZh
+        ? `现在开始${ordinalZh(position)}个任务：${label}`
+        : `Starting task ${position} of ${total}: ${label}`)
+    : (isZh ? `开始：${label}` : `Starting: ${label}`);
+  const taskGroupId = `task-${intentIndex}`;
+  return {
+    id: `msg-${Date.now()}-announce-${intentIndex}`,
+    role: 'assistant',
+    type: 'agent',
+    content: text,
+    timestamp: new Date().toISOString(),
+    taskGroupId,
+    taskRole: 'announce',
+    taskAnnounce: { index: position, total, label },
+  };
+}
+
+/**
+ * Returns true if a message with the given predicate exists after the latest
+ * user message in `prev`. Used to deduplicate overview / announce emissions
+ * across multi-call cascades within the same turn.
+ */
+function hasMessageAfterLastUser(prev: ChatMessage[], predicate: (m: ChatMessage) => boolean): boolean {
+  let lastUserIdx = -1;
+  for (let i = prev.length - 1; i >= 0; i--) {
+    if (prev[i].role === 'user') { lastUserIdx = i; break; }
+  }
+  for (let i = lastUserIdx + 1; i < prev.length; i++) {
+    if (predicate(prev[i])) return true;
+  }
+  return false;
+}
 
 export function CopilotProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
@@ -1211,6 +1288,28 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           // ===== I-2 Stage 1: Handle awaiting-clarification response =====
           if (response.awaitingClarification) {
             setIsSending(false);
+            // Phase B: emit overview + announce before the awaiting-clarification card
+            const overviewAc = response.intentsOverview;
+            const intentIdxAc = response.currentIntentIndex;
+            const isZhAc = locale === 'zh-Hans';
+            let acTaskGroupId: string | undefined;
+            if (overviewAc && overviewAc.length > 1 && intentIdxAc !== undefined) {
+              acTaskGroupId = `task-${intentIdxAc}`;
+              setMessages((prev) => {
+                const idx = prev.findIndex((m) => m.id === thinkingMsgId);
+                if (idx < 0) return prev;
+                const inserts: ChatMessage[] = [];
+                if (!hasMessageAfterLastUser(prev, (m) => m.taskRole === 'overview')) {
+                  inserts.push(buildOverviewMessage(overviewAc, isZhAc));
+                }
+                if (!hasMessageAfterLastUser(prev, (m) => m.taskRole === 'announce' && m.taskGroupId === `task-${intentIdxAc}`)) {
+                  const announce = buildAnnounceMessage(intentIdxAc, overviewAc, isZhAc);
+                  if (announce) inserts.push(announce);
+                }
+                if (inserts.length === 0) return prev;
+                return [...prev.slice(0, idx), ...inserts, ...prev.slice(idx)];
+              });
+            }
             setMessages((prev) => prev.map((msg) => {
               if (msg.id !== thinkingMsgId) return msg;
               return {
@@ -1228,6 +1327,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                 })),
                 awaitingClarification: response.awaitingClarification,
                 resolutionState: 'blocked' as const,
+                ...(acTaskGroupId ? { taskGroupId: acTaskGroupId, taskRole: 'substep' as const } : {}),
               };
             }));
             return;
@@ -1325,7 +1425,30 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             const entityType = response.functionCalled === 'fuzzyMatchAccount' ? 'account' :
                              response.functionCalled === 'fuzzyMatchContact' ? 'contact' :
                              response.functionCalled === 'fuzzyMatchActivity' ? 'activity' : 'opportunity';
-            
+
+            // ===== Phase B: emit task narration overview + announce BEFORE the match-selection =====
+            const overview = response.intentsOverview;
+            const intentIdx = response.currentIntentIndex;
+            const isZhLocale = locale === 'zh-Hans';
+            let currentTaskGroupId: string | undefined;
+            if (overview && overview.length > 1 && intentIdx !== undefined) {
+              currentTaskGroupId = `task-${intentIdx}`;
+              setMessages((prev) => {
+                const idx = prev.findIndex((m) => m.id === thinkingMsgId);
+                if (idx < 0) return prev;
+                const inserts: ChatMessage[] = [];
+                if (!hasMessageAfterLastUser(prev, (m) => m.taskRole === 'overview')) {
+                  inserts.push(buildOverviewMessage(overview, isZhLocale));
+                }
+                if (!hasMessageAfterLastUser(prev, (m) => m.taskRole === 'announce' && m.taskGroupId === `task-${intentIdx}`)) {
+                  const announce = buildAnnounceMessage(intentIdx, overview, isZhLocale);
+                  if (announce) inserts.push(announce);
+                }
+                if (inserts.length === 0) return prev;
+                return [...prev.slice(0, idx), ...inserts, ...prev.slice(idx)];
+              });
+            }
+
             setMessages((prev) => prev.map((msg) => {
               if (msg.id !== thinkingMsgId) return msg;
               return {
@@ -1343,6 +1466,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                   label: s.label,
                   detail: s.detail,
                 })),
+                ...(currentTaskGroupId ? { taskGroupId: currentTaskGroupId, taskRole: 'substep' as const } : {}),
                 matchSelection: {
                   entityType: entityType as 'account' | 'contact' | 'opportunity' | 'activity',
                   query: '',
@@ -1653,9 +1777,60 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         if (updatedArguments.opportunityId && !resolvedSoFar.opportunity) resolvedSoFar.opportunity = updatedArguments.opportunityId as string;
 
         let cascadeBlocked = false;
+        // ===== Phase B: recover prior task narration context from the message stream =====
+        // Latest taskGroupId among messages tells us which intent we were on; the
+        // overview message tells us the per-intent labels for future announces.
+        const stateForNarration = messages;
+        let prevIntentIndex: number | undefined = undefined;
+        for (let k = stateForNarration.length - 1; k >= 0; k--) {
+          const gid = stateForNarration[k].taskGroupId;
+          if (gid && gid.startsWith('task-')) {
+            const n = Number.parseInt(gid.slice(5), 10);
+            if (Number.isFinite(n)) { prevIntentIndex = n; break; }
+          }
+        }
+        const overviewFromStream: IntentsOverview | undefined = (() => {
+          const overviewMsg = stateForNarration.find((m) => m.taskRole === 'overview' && m.taskOverview);
+          if (!overviewMsg?.taskOverview) return undefined;
+          return overviewMsg.taskOverview.intents.map((it) => ({
+            intentIndex: it.index,
+            userFacingLabel: { zh: it.label, en: it.label },
+          }));
+        })();
+        const isZhCascade = locale === 'zh-Hans';
+        let currentCascadeGroupId: string | undefined =
+          prevIntentIndex !== undefined ? `task-${prevIntentIndex}` : undefined;
+
         for (let i = 0; i < remainingResolutions.length; i++) {
           const item = remainingResolutions[i];
           const remainingAfter = remainingResolutions.slice(i + 1);
+
+          // Phase B: on intent boundary change, emit an announce message before
+          // creating the next blocking card. This is what makes the user see
+          // "Starting task 2 of 4: …" between two related matches.
+          // If intermediate intents auto-resolved (no blocking entity), fill in
+          // their announces too so the user doesn't see Task 1 → Task 3 jumps.
+          const itemIntentIndex = (item as { intentIndex?: number }).intentIndex;
+          if (
+            overviewFromStream &&
+            overviewFromStream.length > 1 &&
+            itemIntentIndex !== undefined &&
+            itemIntentIndex !== prevIntentIndex
+          ) {
+            const startIdx = (prevIntentIndex ?? -1) + 1;
+            for (let stepIdx = startIdx; stepIdx <= itemIntentIndex; stepIdx++) {
+              const announce = buildAnnounceMessage(stepIdx, overviewFromStream, isZhCascade);
+              if (announce) {
+                setMessages((prev) => {
+                  const idx = prev.findIndex((m) => m.id === thinkingMsgId);
+                  if (idx < 0) return [...prev, announce];
+                  return [...prev.slice(0, idx), announce, ...prev.slice(idx)];
+                });
+              }
+            }
+            currentCascadeGroupId = `task-${itemIntentIndex}`;
+            prevIntentIndex = itemIntentIndex;
+          }
 
           // scopeBy injection from accumulated resolvedSoFar
           if (item.scopeBy && resolvedSoFar[item.scopeBy]) {
@@ -1751,6 +1926,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                   pendingIntent: newPendingIntent,
                 },
                 resolutionState: 'blocked' as const,
+                ...(currentCascadeGroupId ? { taskGroupId: currentCascadeGroupId, taskRole: 'substep' as const } : {}),
               };
             }));
             cascadeBlocked = true;
@@ -1799,6 +1975,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
               ],
               awaitingClarification: ac,
               resolutionState: 'blocked' as const,
+              ...(currentCascadeGroupId ? { taskGroupId: currentCascadeGroupId, taskRole: 'substep' as const } : {}),
             };
           }));
           cascadeBlocked = true;

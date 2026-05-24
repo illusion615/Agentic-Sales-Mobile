@@ -103,6 +103,16 @@ export interface AgentResponse {
   };
   // I-2 Stage 1: awaiting-clarification blocking state
   awaitingClarification?: AwaitingClarification;
+
+  // Phase B: Per-intent labels for narrative UI. When present, context layer
+  // emits a single overview message ("识别到 N 个意图…") then per-task announce
+  // bubbles as the resolution cascade advances across intentIndex boundaries.
+  intentsOverview?: Array<{ intentIndex: number; userFacingLabel: { zh: string; en: string } }>;
+
+  /** Phase B: 0-based intent index that this blocking response belongs to.
+   *  Lets the context layer detect intent boundaries inside the cascade and
+   *  emit a fresh task-announce bubble when the index changes. */
+  currentIntentIndex?: number;
 }
 
 // IntentResult is now imported from agent-utils as ValidatedIntentResult
@@ -136,6 +146,27 @@ interface IntentResult extends Partial<ValidatedIntentResult> {
     hasMultipleIntents: boolean;
     summary?: string;
   };
+}
+
+/**
+ * Phase B: Build the per-intent overview that the UI uses to render the
+ * upfront "identified N intents" announce. Only emits entries that have a
+ * `userFacingLabel` (i.e. populated by frame mode); legacy mode without
+ * labels returns an empty array and the UI silently skips the overview.
+ */
+function buildIntentsOverview(intent: IntentResult): AgentResponse['intentsOverview'] {
+  const out: NonNullable<AgentResponse['intentsOverview']> = [];
+  if (intent.userFacingLabel) {
+    out.push({ intentIndex: 0, userFacingLabel: intent.userFacingLabel });
+  }
+  if (intent.additionalActions) {
+    intent.additionalActions.forEach((a, i) => {
+      if (a.userFacingLabel) {
+        out.push({ intentIndex: i + 1, userFacingLabel: a.userFacingLabel });
+      }
+    });
+  }
+  return out.length > 1 ? out : undefined;
 }
 
 /**
@@ -1415,7 +1446,11 @@ User: "Log a meeting with Rachel at King's College Hospital"
     return [primary, ...extraLabels].join(' → ');
   };
   const intentLabel = buildIntentLabel();
-  if (onProgress) {
+  // Phase B: for multi-intent runs the overview message + per-task announces already
+  // communicate the full plan; the chained "Intent: A → B → C" step becomes redundant
+  // (and misleading when it appears scoped under Task 1/M). Suppress it in that case.
+  const hasMultipleIntents = (intent?.additionalActions ?? []).some((a) => a?.function);
+  if (onProgress && !hasMultipleIntents) {
     onProgress({ stage: 'intent', status: 'completed', intentLabel });
   }
 
@@ -1446,7 +1481,7 @@ User: "Log a meeting with Rachel at King's College Hospital"
         content: directResp,
         latencyMs: Date.now() - startTime,
         thinkingSteps: [
-          { stage: 'intent', status: 'completed', label: isZh ? `意图识别：${intentLabel}` : `Intent: ${intentLabel}` }
+          ...(hasMultipleIntents ? [] : [{ stage: 'intent' as const, status: 'completed' as const, label: isZh ? `意图识别：${intentLabel}` : `Intent: ${intentLabel}` }])
         ],
       };
     }
@@ -1479,6 +1514,8 @@ User: "Log a meeting with Rachel at King's College Hospital"
       : [{ entityType: intent.matchTarget!.entityType, query: intent.matchTarget!.query }];
     const resolvedSoFar: Record<string, string> = {};
     let blockingResponse: AgentResponse | null = null;
+    /** Phase B: intent index of the resolution that produced blockingResponse. */
+    let blockingIntentIndex: number | undefined = undefined;
     console.log('[CopilotAgent] Resolution chain length:', normalizedResolutions.length);
 
     for (let _resIdx = 0; _resIdx < normalizedResolutions.length; _resIdx++) {
@@ -1560,10 +1597,11 @@ User: "Log a meeting with Rachel at King's College Hospital"
                 },
                 latencyMs: Date.now() - startTime,
                 thinkingSteps: [
-                  { stage: 'intent', status: 'completed', label: isZh ? `意图识别：${intentLabel}` : `Intent: ${intentLabel}` },
+                  ...(hasMultipleIntents ? [] : [{ stage: 'intent' as const, status: 'completed' as const, label: isZh ? `意图识别：${intentLabel}` : `Intent: ${intentLabel}` }]),
                   { stage: 'matching', status: 'completed', label: isZh ? `找到 ${highConfAccountMatches.length} 个匹配客户` : `Found ${highConfAccountMatches.length} matching account${highConfAccountMatches.length === 1 ? '' : 's'}` },
                 ],
               };
+              blockingIntentIndex = (currentResolution as { intentIndex?: number }).intentIndex;
               break;
             } else {
               // No high-confidence account matches - proceed directly to create new account
@@ -1594,10 +1632,11 @@ User: "Log a meeting with Rachel at King's College Hospital"
                 },
                 latencyMs: Date.now() - startTime,
                 thinkingSteps: [
-                  { stage: 'intent', status: 'completed', label: isZh ? `意图识别：${intentLabel}` : `Intent: ${intentLabel}` },
+                  ...(hasMultipleIntents ? [] : [{ stage: 'intent' as const, status: 'completed' as const, label: isZh ? `意图识别：${intentLabel}` : `Intent: ${intentLabel}` }]),
                   { stage: 'matching', status: 'completed', label: isZh ? `发现 ${highConfActivityMatches.length} 个类似活动` : `Found ${highConfActivityMatches.length} similar activit${highConfActivityMatches.length === 1 ? 'y' : 'ies'}` },
                 ],
               };
+              blockingIntentIndex = (currentResolution as { intentIndex?: number }).intentIndex;
               break;
             } else {
               // No high-confidence activity matches - proceed directly to create new activity
@@ -1713,10 +1752,11 @@ User: "Log a meeting with Rachel at King's College Hospital"
               },
               latencyMs: Date.now() - startTime,
               thinkingSteps: [
-                { stage: 'intent', status: 'completed', label: isZh ? `意图识别：${intentLabel}` : `Intent: ${intentLabel}` },
+                ...(hasMultipleIntents ? [] : [{ stage: 'intent' as const, status: 'completed' as const, label: isZh ? `意图识别：${intentLabel}` : `Intent: ${intentLabel}` }]),
                 { stage: 'matching', status: 'completed', label: isZh ? `找到 ${highConfidenceMatches.length} 个高置信度匹配` : `Found ${highConfidenceMatches.length} high-confidence matches` },
               ],
             };
+            blockingIntentIndex = (currentResolution as { intentIndex?: number }).intentIndex;
             break;
           }
         } else {
@@ -1769,10 +1809,11 @@ User: "Log a meeting with Rachel at King's College Hospital"
               },
               latencyMs: Date.now() - startTime,
               thinkingSteps: [
-                { stage: 'intent', status: 'completed', label: isZh ? `意图识别：${intentLabel}` : `Intent: ${intentLabel}` },
+                ...(hasMultipleIntents ? [] : [{ stage: 'intent' as const, status: 'completed' as const, label: isZh ? `意图识别：${intentLabel}` : `Intent: ${intentLabel}` }]),
                 { stage: 'matching', status: 'completed', label: isZh ? `未找到 ${kindZh} 匹配，等待用户决断` : `No ${pendingKind} match, awaiting user` },
               ],
             };
+            blockingIntentIndex = (currentResolution as { intentIndex?: number }).intentIndex;
             break;
           }
           // No high-confidence matches, proceed with creating new record
@@ -1788,6 +1829,10 @@ User: "Log a meeting with Rachel at King's College Hospital"
     } // end for-loop over normalizedResolutions
 
     if (blockingResponse) {
+      if (blockingIntentIndex !== undefined) {
+        blockingResponse.currentIntentIndex = blockingIntentIndex;
+      }
+      blockingResponse.intentsOverview = buildIntentsOverview(intent);
       return blockingResponse;
     }
   }
@@ -2078,6 +2123,7 @@ Please respond to the user in a friendly manner based on the error. Important ru
           totalIntents: allItems.length,
           summary: intent.multiIntentAnalysis?.summary || '',
         },
+        intentsOverview: buildIntentsOverview(intent),
       };
     }
     
@@ -2095,7 +2141,7 @@ Please respond to the user in a friendly manner based on the error. Important ru
       functionResult: functionResult.data,
       latencyMs: Date.now() - startTime,
       thinkingSteps: [
-        { stage: 'intent', status: 'completed', label: isZh ? `意图识别：${intentLabel}` : `Intent: ${intentLabel}` },
+        ...(hasMultipleIntents ? [] : [{ stage: 'intent' as const, status: 'completed' as const, label: isZh ? `意图识别：${intentLabel}` : `Intent: ${intentLabel}` }]),
         { stage: 'executing', status: 'completed', label: isZh ? `${fnDisplayName}：已准备表单` : `${fnDisplayName}: Form ready` },
       ],
     };
@@ -2133,6 +2179,7 @@ Please respond to the user in a friendly manner based on the error. Important ru
         totalIntents: additionalIntentsResult.items.length + 1,
         summary: intent.multiIntentAnalysis?.summary || '',
       },
+      intentsOverview: buildIntentsOverview(intent),
     };
   }
 
@@ -2158,7 +2205,7 @@ Please respond to the user in a friendly manner based on the error. Important ru
       invalidateQueries: functionResult.invalidateQueries,
       latencyMs: Date.now() - startTime,
       thinkingSteps: [
-        { stage: 'intent', status: 'completed', label: isZh ? `意图识别：${intentLabel}` : `Intent: ${intentLabel}` },
+        ...(hasMultipleIntents ? [] : [{ stage: 'intent' as const, status: 'completed' as const, label: isZh ? `意图识别：${intentLabel}` : `Intent: ${intentLabel}` }]),
         { stage: 'executing', status: 'completed', label: isZh ? `Copilot Studio 已回复` : `Copilot Studio responded` },
         { stage: 'generating', status: 'completed', label: isZh ? `返回原文` : `Return verbatim` },
       ],
@@ -2253,11 +2300,7 @@ Please provide a brief summary and analysis, do not list individual records.`;
   // Step 2: Execution - shows function name and result count
   const recordCount = Array.isArray(functionResult.data) ? functionResult.data.length : 1;
   const thinkingSteps = [
-    { 
-      stage: 'intent' as const, 
-      status: 'completed' as const, 
-      label: isZh ? `意图识别：${intentLabel}` : `Intent: ${intentLabel}` 
-    },
+    ...(hasMultipleIntents ? [] as Array<{stage:'intent';status:'completed';label:string}> : [{ stage: 'intent' as const, status: 'completed' as const, label: isZh ? `意图识别：${intentLabel}` : `Intent: ${intentLabel}` }]),
     { 
       stage: 'executing' as const, 
       status: 'completed' as const, 

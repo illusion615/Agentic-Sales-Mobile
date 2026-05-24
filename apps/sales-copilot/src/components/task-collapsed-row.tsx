@@ -7,7 +7,7 @@
  * Click ⇢ caller toggles `collapsed=false` on all messages in this group
  * (re-expanding the full trail).
  */
-import { motion } from 'framer-motion';
+import { motion } from 'motion/react';
 import { CheckCircle2, ChevronRight } from 'lucide-react';
 
 interface TaskCollapsedRowProps {

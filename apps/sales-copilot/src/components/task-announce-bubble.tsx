@@ -7,7 +7,7 @@
  * Visual: rounded card, accent-tinted border, small index pill on the left,
  * label as primary text. Sits in the chat flow above the task's sub-steps.
  */
-import { motion } from 'framer-motion';
+import { motion } from 'motion/react';
 import { ChevronRight } from 'lucide-react';
 
 interface TaskAnnounceBubbleProps {
