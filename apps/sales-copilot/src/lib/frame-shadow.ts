@@ -81,12 +81,30 @@ const RelatesToArraySchema = z.preprocess((raw) => {
   return raw;
 }, z.array(RelatesToEntrySchema).default([]));
 
+/** Short human-friendly per-intent label used to narrate execution. */
+export const UserFacingLabelSchema = z.preprocess(
+  (raw) => {
+    if (typeof raw === 'string') return { zh: raw, en: raw };
+    if (raw && typeof raw === 'object') {
+      const o = raw as Record<string, unknown>;
+      const zh = typeof o.zh === 'string' ? o.zh : typeof o['zh-Hans'] === 'string' ? (o['zh-Hans'] as string) : '';
+      const en = typeof o.en === 'string' ? o.en : '';
+      return { zh, en };
+    }
+    return { zh: '', en: '' };
+  },
+  z.object({ zh: z.string().default(''), en: z.string().default('') }).default({ zh: '', en: '' })
+);
+export type UserFacingLabel = z.infer<typeof UserFacingLabelSchema>;
+
 export const IntentItemSchema = z.object({
   salesObject: FrameSalesObjectSchema,
   cognitiveTask: FrameCognitiveTaskSchema,
   temporal: FrameTemporalSchema.default('none'),
   summary: z.string().default(''),
   relatesTo: RelatesToArraySchema,
+  /** Short narrative label for UI (≤8 chars zh / ≤4 words en). Falls back to a template if empty. */
+  userFacingLabel: UserFacingLabelSchema.optional(),
 });
 export type IntentItem = z.infer<typeof IntentItemSchema>;
 
@@ -187,6 +205,7 @@ Return a single JSON object with this exact shape. Do not wrap in markdown.
       "cognitiveTask": "Log|Plan|Find|Update|Recommend|Knowledge|Report|Chat",
       "temporal": "past|future|none",
       "summary": "one short sentence in the user's own language describing this single intent",
+      "userFacingLabel": { "zh": "≤8 字中文动作短语，例如：登记客户拜访 / 识别潜在商机 / 计划后续任务", "en": "≤4 word imperative phrase, e.g. Log customer visit / Identify opportunity / Plan follow-up" },
       "relatesTo": [<plain integer, 0-based index of another intent in this same intents array>]
     }
   ],
@@ -199,6 +218,12 @@ Return a single JSON object with this exact shape. Do not wrap in markdown.
 
 # Field rules
 - intents: always an array. Even a single intent (greeting, simple find) is one element.
+- userFacingLabel: REQUIRED on every intent. Short, action-oriented, user-facing. Both zh and en MUST be filled regardless of input language — the UI may render either depending on the user's locale. No punctuation. Examples:
+    Activity Log past:     {"zh":"登记客户拜访","en":"Log visit"}
+    Opportunity Log past:  {"zh":"识别潜在商机","en":"Identify opportunity"}
+    Activity Plan future:  {"zh":"计划后续任务","en":"Plan follow-up"}
+    Account Find:          {"zh":"查找客户","en":"Find account"}
+    Product Knowledge:     {"zh":"产品咨询","en":"Product question"}
 - relatesTo: array of plain JSON integers (0-based) indexing into this same intents array. Use [] when independent.
     CORRECT:   "relatesTo": [1]
     CORRECT:   "relatesTo": [0, 2]
@@ -214,10 +239,10 @@ Return a single JSON object with this exact shape. Do not wrap in markdown.
 
 User: "I visited London hospital today and talked with Lisa about their new operation room project. They're looking for new devices and want a product refresh introduction before next Wednesday. We need an internal meeting tomorrow to book resources and prepare."
 Expected intents: 4
-  [0] Activity,    Log,  past   — visited London hospital, met Lisa
-  [1] Opportunity, Log,  past   — new operation room project at London hospital, looking for new devices
-  [2] Activity,    Plan, future — product refresh introduction to the customer before next Wednesday   (relatesTo: [1])
-  [3] Activity,    Plan, future — internal meeting tomorrow to book resources   (relatesTo: [1])
+  [0] Activity,    Log,  past   — visited London hospital, met Lisa                                                  label {zh:"登记客户拜访",en:"Log visit"}
+  [1] Opportunity, Log,  past   — new operation room project at London hospital, looking for new devices             label {zh:"识别潜在商机",en:"Identify opportunity"}
+  [2] Activity,    Plan, future — product refresh introduction to the customer before next Wednesday   (relatesTo: [1])  label {zh:"安排产品介绍",en:"Schedule product intro"}
+  [3] Activity,    Plan, future — internal meeting tomorrow to book resources   (relatesTo: [1])                      label {zh:"安排内部准备会",en:"Schedule internal prep"}
 Note: "looking for new devices" folded into the Opportunity. "Product refresh introduction" is an Activity (audience = customer).
 
 User: "show me my top opportunities"
@@ -329,7 +354,43 @@ export async function runFrame(ctx: FrameRunContext): Promise<FrameRunOutcome> {
   // Inject host-provided boundEntities (LLM should not invent them).
   if (ctx.boundEntities) parsed.boundEntities = ctx.boundEntities;
 
+  // Backfill userFacingLabel for any intent the LLM forgot to label.
+  for (const it of parsed.intents) {
+    if (!it.userFacingLabel || (!it.userFacingLabel.zh && !it.userFacingLabel.en)) {
+      it.userFacingLabel = fallbackUserFacingLabel(it);
+    } else {
+      if (!it.userFacingLabel.zh) it.userFacingLabel.zh = fallbackUserFacingLabel(it).zh;
+      if (!it.userFacingLabel.en) it.userFacingLabel.en = fallbackUserFacingLabel(it).en;
+    }
+  }
+
   return { success: true, result: parsed, latencyMs, raw: resp.content };
+}
+
+/** Deterministic fallback labels when the LLM omits userFacingLabel. */
+export function fallbackUserFacingLabel(intent: Pick<IntentItem, 'salesObject' | 'cognitiveTask'>): UserFacingLabel {
+  const key = `${intent.salesObject}|${intent.cognitiveTask}`;
+  const table: Record<string, UserFacingLabel> = {
+    'Activity|Log': { zh: '登记客户拜访', en: 'Log visit' },
+    'Activity|Plan': { zh: '计划后续任务', en: 'Plan follow-up' },
+    'Activity|Update': { zh: '更新拜访记录', en: 'Update activity' },
+    'Activity|Find': { zh: '查找拜访记录', en: 'Find activity' },
+    'Opportunity|Log': { zh: '识别潜在商机', en: 'Identify opportunity' },
+    'Opportunity|Plan': { zh: '规划商机进展', en: 'Plan opportunity' },
+    'Opportunity|Update': { zh: '更新商机信息', en: 'Update opportunity' },
+    'Opportunity|Find': { zh: '查找商机', en: 'Find opportunity' },
+    'Account|Log': { zh: '记录客户信息', en: 'Log account' },
+    'Account|Update': { zh: '更新客户信息', en: 'Update account' },
+    'Account|Find': { zh: '查找客户', en: 'Find account' },
+    'Contact|Log': { zh: '记录联系人', en: 'Log contact' },
+    'Contact|Update': { zh: '更新联系人', en: 'Update contact' },
+    'Contact|Find': { zh: '查找联系人', en: 'Find contact' },
+    'Product|Knowledge': { zh: '产品咨询', en: 'Product question' },
+    'Product|Recommend': { zh: '推荐产品', en: 'Recommend product' },
+    'None|Chat': { zh: '日常对话', en: 'Chat' },
+    'None|Report': { zh: '生成报告', en: 'Generate report' },
+  };
+  return table[key] ?? { zh: `${intent.cognitiveTask} ${intent.salesObject}`, en: `${intent.cognitiveTask} ${intent.salesObject}` };
 }
 
 export function tryParseFrame(text: string): FrameResult | null {

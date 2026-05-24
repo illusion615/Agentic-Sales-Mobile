@@ -20,20 +20,27 @@
 import type { ShadowResult } from './shadow-agent';
 import type { DagPlan, SingleIntent } from './dag-schema';
 import { isDagPlan } from './dag-schema';
+import { fallbackUserFacingLabel, type UserFacingLabel, type IntentItem } from './frame-shadow';
 
 export interface TranslatedIntent {
   function: string;
   arguments: Record<string, unknown>;
+  /** Human-friendly per-intent label for narration UI (head intent). */
+  userFacingLabel?: UserFacingLabel;
   additionalActions?: Array<{
     function: string;
     arguments: Record<string, unknown>;
     reason?: string;
+    /** Human-friendly per-intent label for narration UI. */
+    userFacingLabel?: UserFacingLabel;
   }>;
   requiresMatching?: boolean;
   resolutions?: Array<{
     entityType: 'account' | 'contact' | 'opportunity' | 'activity';
     query: string;
     scopeBy?: 'account' | 'opportunity';
+    /** Which intent (0-based head, 1+ for additionalActions) this resolution belongs to. */
+    intentIndex?: number;
   }>;
   multiIntentAnalysis?: {
     hasMultipleIntents: boolean;
@@ -49,47 +56,64 @@ const DRAFT_FUNCTIONS = new Set([
   'draftOpportunity',
 ]);
 
-/** Extract resolution chain from arguments based on present name fields. */
+/** True when a string field is a DAG `$ref.field` placeholder (resolved at execution time, not a literal name). */
+function isRefPlaceholder(v: unknown): boolean {
+  return typeof v === 'string' && v.startsWith('$');
+}
+
+/** Read a name field as a literal, returning '' if it's a $ref placeholder. */
+function literalName(v: unknown): string {
+  if (typeof v !== 'string') return '';
+  if (isRefPlaceholder(v)) return '';
+  return v.trim();
+}
+
+/** Extract resolution chain from arguments based on present name fields.
+ *  Skips $ref placeholders (e.g. "$intent_1.name") — those are resolved at
+ *  execution time from prior step outputs and must not leak into the UI as
+ *  fuzzy-match queries. */
 function deriveResolutions(
   fnName: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  intentIndex: number
 ): TranslatedIntent['resolutions'] {
   if (!DRAFT_FUNCTIONS.has(fnName) && !fnName.startsWith('update')) return undefined;
 
   const resolutions: NonNullable<TranslatedIntent['resolutions']> = [];
 
   // Account first (so contact/opportunity can scope by it)
-  const accountName = typeof args.accountName === 'string' ? args.accountName.trim() : '';
-  const accountId = typeof args.accountId === 'string' ? args.accountId : '';
+  const accountName = literalName(args.accountName);
+  const accountId = typeof args.accountId === 'string' && !isRefPlaceholder(args.accountId) ? args.accountId : '';
   if (accountName && !accountId) {
-    resolutions.push({ entityType: 'account', query: accountName });
+    resolutions.push({ entityType: 'account', query: accountName, intentIndex });
   }
 
-  const contactName = typeof args.contactName === 'string' ? args.contactName.trim() : '';
-  const contactId = typeof args.contactId === 'string' ? args.contactId : '';
+  const contactName = literalName(args.contactName);
+  const contactId = typeof args.contactId === 'string' && !isRefPlaceholder(args.contactId) ? args.contactId : '';
   if (contactName && !contactId) {
     resolutions.push({
       entityType: 'contact',
       query: contactName,
+      intentIndex,
       ...(accountName ? { scopeBy: 'account' as const } : {}),
     });
   }
 
-  const opportunityName =
-    typeof args.opportunityName === 'string' ? args.opportunityName.trim() : '';
-  const opportunityId = typeof args.opportunityId === 'string' ? args.opportunityId : '';
+  const opportunityName = literalName(args.opportunityName);
+  const opportunityId = typeof args.opportunityId === 'string' && !isRefPlaceholder(args.opportunityId) ? args.opportunityId : '';
   if (opportunityName && !opportunityId) {
     resolutions.push({
       entityType: 'opportunity',
       query: opportunityName,
+      intentIndex,
       ...(accountName ? { scopeBy: 'account' as const } : {}),
     });
   }
 
-  // Activity duplicate-detection: only when drafting an Activity with a title.
+  // Activity duplicate-detection: only when drafting an Activity with a literal title.
   if (fnName === 'draftActivity') {
-    const title = typeof args.title === 'string' ? args.title.trim() : '';
-    if (title) resolutions.push({ entityType: 'activity', query: title });
+    const title = literalName(args.title);
+    if (title) resolutions.push({ entityType: 'activity', query: title, intentIndex });
   }
 
   return resolutions.length ? resolutions : undefined;
@@ -136,29 +160,41 @@ export function frameToIntent(shadow: ShadowResult): TranslatedIntent | null {
   }
 
   const slot = stepToIntentSlot(primaryFn, primaryArgs);
-  const headResolutions = deriveResolutions(slot.function, slot.arguments) ?? [];
+  const headResolutions = deriveResolutions(slot.function, slot.arguments, 0) ?? [];
 
   // Also derive resolutions for every extra step so multi-intent plans that
   // reference a different account/contact/opportunity than head still get
   // their entities pre-matched. The dispatcher in copilot-agent.ts only
   // injects head's *resolved IDs* into extras — it does NOT trigger a fresh
   // matching pass for extras with novel names.
-  const extraResolutions = extras.flatMap((s) => deriveResolutions(s.function, s.arguments) ?? []);
+  const extraResolutions = extras.flatMap((s, i) => deriveResolutions(s.function, s.arguments, i + 1) ?? []);
 
   const mergedResolutions = mergeResolutions([...headResolutions, ...extraResolutions]);
+
+  // Frame intent labels: map by index. DAG sort by seq aligns 1:1 with frame.intents[]
+  // in the common case; we tolerate length mismatch by falling back to template.
+  const frameIntents = shadow.frame.intents as IntentItem[] | undefined;
+  const labelFor = (i: number): UserFacingLabel | undefined => {
+    const it = frameIntents?.[i];
+    if (!it) return undefined;
+    return it.userFacingLabel ?? fallbackUserFacingLabel(it);
+  };
+  const headLabel = labelFor(0);
+  const extrasWithLabels = extras.map((e, i) => ({ ...e, userFacingLabel: labelFor(i + 1) }));
 
   return {
     function: slot.function,
     arguments: slot.arguments,
-    ...(extras.length
+    ...(headLabel ? { userFacingLabel: headLabel } : {}),
+    ...(extrasWithLabels.length
       ? {
-          additionalActions: extras,
+          additionalActions: extrasWithLabels,
           // Required by downstream multi-intent dispatcher in copilot-agent.ts.
           // Without hasMultipleIntents=true, additionalActions are silently dropped
           // and only the primary step executes.
           multiIntentAnalysis: {
             hasMultipleIntents: true,
-            summary: shadow.frame.reasoning || `${extras.length + 1} intents from frame`,
+            summary: shadow.frame.reasoning || `${extrasWithLabels.length + 1} intents from frame`,
           },
         }
       : {}),

@@ -92,6 +92,8 @@ export interface AgentResponse {
       data: Record<string, unknown>;
       reason: string;
       batchIndex: number;
+      userFacingLabel?: { zh: string; en: string };
+      intentIndex?: number;
     }>;
   };
   // Intent analysis summary for debugging/display
@@ -109,10 +111,13 @@ interface IntentResult extends Partial<ValidatedIntentResult> {
   function: string | null;
   arguments?: Record<string, unknown>;
   directResponse?: string;
+  /** Per-intent human-friendly label for narration UI (head). */
+  userFacingLabel?: { zh: string; en: string };
   additionalActions?: Array<{
     function: string;
     arguments: Record<string, unknown>;
     reason?: string;
+    userFacingLabel?: { zh: string; en: string };
   }>;
   requiresMatching?: boolean;
   matchTarget?: {
@@ -124,6 +129,8 @@ interface IntentResult extends Partial<ValidatedIntentResult> {
     entityType: 'account' | 'contact' | 'opportunity' | 'activity';
     query: string;
     scopeBy?: 'account' | 'opportunity';
+    /** Which intent (0-based head, 1+ for additionalActions) this resolution belongs to. */
+    intentIndex?: number;
   }>;
   multiIntentAnalysis?: {
     hasMultipleIntents: boolean;
@@ -263,13 +270,16 @@ async function fallbackToCopilotStudio(
 async function processAdditionalIntents(
   intents: SingleIntent[],
   context: { userId?: string; userEmail?: string },
-  isZh: boolean
+  isZh: boolean,
+  labels?: Array<{ zh: string; en: string } | undefined>
 ): Promise<Array<{
   type: 'activity' | 'opportunity' | 'account' | 'contact';
   isNew: boolean;
   data: Record<string, unknown>;
   reason: string;
   batchIndex: number;
+  userFacingLabel?: { zh: string; en: string };
+  intentIndex?: number;
 }>> {
   const results: Array<{
     type: 'activity' | 'opportunity' | 'account' | 'contact';
@@ -277,6 +287,8 @@ async function processAdditionalIntents(
     data: Record<string, unknown>;
     reason: string;
     batchIndex: number;
+    userFacingLabel?: { zh: string; en: string };
+    intentIndex?: number;
   }> = [];
   
   for (let i = 0; i < intents.length; i++) {
@@ -356,6 +368,8 @@ async function processAdditionalIntents(
           data: data.data || data as Record<string, unknown>,
           reason: intent.reason || (isZh ? '从对话中推断' : 'Inferred from conversation'),
           batchIndex: i,
+          ...(labels?.[i] ? { userFacingLabel: labels[i] } : {}),
+          intentIndex: i + 1,
         });
       }
     } catch (error) {
@@ -1998,7 +2012,8 @@ Please respond to the user in a friendly manner based on the error. Important ru
         reason: action.reason || (isZh ? '从对话中推断' : 'Inferred from conversation'),
       })),
       { userId: context.userId, userEmail: context.userEmail },
-      isZh
+      isZh,
+      additionalActions.map((a) => a.userFacingLabel)
     );
     
     if (additionalItems.length > 0) {
@@ -2031,6 +2046,8 @@ Please respond to the user in a friendly manner based on the error. Important ru
           data: primaryData.data || primaryData as Record<string, unknown>,
           batchIndex: 0,
           reason: isZh ? '主要意图' : 'Primary intent',
+          ...(intent.userFacingLabel ? { userFacingLabel: intent.userFacingLabel } : {}),
+          intentIndex: 0,
         },
         ...additionalIntentsResult.items,
       ];

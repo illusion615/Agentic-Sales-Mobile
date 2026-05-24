@@ -336,7 +336,7 @@ export function CopilotPanel() {
                     </div>
                   )}
                   {message.content && (
-                    <p className="text-sm text-foreground mb-2">{message.content}</p>
+                    <p className="sr-only">{message.content}</p>
                   )}
                   <MatchSelectionCard
                     messageId={message.id}

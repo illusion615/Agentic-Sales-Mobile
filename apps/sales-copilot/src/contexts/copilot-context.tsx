@@ -65,6 +65,8 @@ export interface ChatMessage {
       batchIndex: number;
       status?: 'pending' | 'confirmed' | 'modified';
       createdRecordId?: string;
+      userFacingLabel?: { zh: string; en: string };
+      intentIndex?: number;
     }>;
     totalCount: number;
   };
@@ -150,6 +152,22 @@ export interface ChatMessage {
   // Short result line shown on the match-selection / awaiting-clarification card
   // once the user has acted on it. Used to lock the card and surface what was decided.
   resolutionResult?: string;
+
+  // ===== Multi-intent task narrative (Phase A: fields plumbed; Phase B: emitted) =====
+  /** Groups every message belonging to a single task (announce + sub-steps + done line). */
+  taskGroupId?: string;
+  /** Role of this message inside its task group. Drives renderer choice. */
+  taskRole?: 'announce' | 'substep' | 'done-collapsed';
+  /** Payload for the task-announce bubble (only set when taskRole === 'announce'). */
+  taskAnnounce?: {
+    index: number;      // 1-based
+    total: number;
+    label: string;      // localized human label (e.g. "登记客户拜访")
+  };
+  /** Whether this message should currently render in collapsed form. Toggled by orchestrator. */
+  collapsed?: boolean;
+  /** One-line summary shown when this task group is collapsed. */
+  collapsedSummary?: string;
 }
 
 // Form fill callback type

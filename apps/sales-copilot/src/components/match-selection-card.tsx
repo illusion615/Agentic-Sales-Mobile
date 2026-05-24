@@ -128,6 +128,48 @@ export function MatchSelectionCard({
       : labels[matchSelection.entityType]?.en || matchSelection.entityType;
   };
 
+  // Derive a human "why are we asking this?" line based on entityType + the
+  // pending draft function. Keeps the user oriented during multi-step resolution.
+  const getReasonText = (): string => {
+    const fn = pendingIntent?.function ?? '';
+    const q = matchSelection.query;
+    const draftKindLabels: Record<string, { zh: string; en: string }> = {
+      draftActivity: { zh: '记录这次活动', en: 'log this activity' },
+      draftOpportunity: { zh: '创建这个商机', en: 'create this opportunity' },
+      draftContact: { zh: '新建这个联系人', en: 'add this contact' },
+      draftAccount: { zh: '新建这个客户', en: 'create this account' },
+    };
+    const action = draftKindLabels[fn]
+      ?? (fn.startsWith('update') ? { zh: '完成更新', en: 'complete the update' } : { zh: '继续操作', en: 'continue' });
+
+    if (locale === 'zh-Hans') {
+      switch (matchSelection.entityType) {
+        case 'account':
+          return `要${action.zh}，得先确认涉及的客户。你提到的"${q}"在系统里有以下匹配：`;
+        case 'contact':
+          return `要${action.zh}，得先确认对接的联系人。你提到的"${q}"在系统里有以下匹配：`;
+        case 'opportunity':
+          return `要${action.zh}，得先关联到正确的商机。你提到的"${q}"在系统里有以下匹配：`;
+        case 'activity':
+          return `先检查一下系统里是否已经有同名活动，避免重复记录。"${q}"的相近候选：`;
+        default:
+          return '';
+      }
+    }
+    switch (matchSelection.entityType) {
+      case 'account':
+        return `To ${action.en}, I need to know which account this is about. Here's what I found for "${q}":`;
+      case 'contact':
+        return `To ${action.en}, I need to confirm the contact. Here's what I found for "${q}":`;
+      case 'opportunity':
+        return `To ${action.en}, I need to attach it to the right opportunity. Matches for "${q}":`;
+      case 'activity':
+        return `Checking for existing activities so we don't duplicate. Candidates similar to "${q}":`;
+      default:
+        return '';
+    }
+  };
+
   const getMatchTypeLabel = (matchType: 'exact' | 'contains' | 'fuzzy') => {
     const labels: Record<string, { zh: string; en: string }> = {
       exact: { zh: '精确匹配', en: 'Exact' },
@@ -202,6 +244,29 @@ export function MatchSelectionCard({
 
   const EntityIcon = getEntityIcon();
 
+  // Compact resolved state: a single-line pill instead of a full glass card.
+  // Keeps the user's focus on the next pending step in the multi-intent chain
+  // and de-clutters the conversation as steps complete.
+  if (resolved) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.2 }}
+        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/5 border border-primary/15 max-w-full"
+      >
+        <CheckCircle2 className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+        <EntityIcon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+        <span className="text-xs text-foreground truncate">
+          {resolutionResult || (locale === 'zh-Hans' ? '已处理' : 'Resolved')}
+        </span>
+        <span className="text-[10px] text-muted-foreground flex-shrink-0">
+          · {getEntityLabel()}
+        </span>
+      </motion.div>
+    );
+  }
+
   const renderMatchRow = (match: MatchRecord, index: number, isLowConf = false) => (
     <motion.button
       key={match.id}
@@ -256,7 +321,6 @@ export function MatchSelectionCard({
       className={cn(
         'glass-card p-4 rounded-xl',
         isProcessing && 'opacity-60 pointer-events-none',
-        resolved && !isProcessing && 'pointer-events-none',
       )}
     >
       {/* Header */}
@@ -300,6 +364,17 @@ export function MatchSelectionCard({
           </div>
         </div>
       </div>
+
+      {/* Human-friendly reason: WHY this resolution step is being asked. */}
+      {(() => {
+        const reason = getReasonText();
+        if (!reason) return null;
+        return (
+          <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
+            {reason}
+          </p>
+        );
+      })()}
 
       {/* High-confidence match list */}
       {!resolved && hasHighMatches && (
@@ -416,15 +491,6 @@ export function MatchSelectionCard({
         <p className="text-xs text-primary mt-3 text-center animate-pulse">
           {locale === 'zh-Hans' ? '正在处理...' : 'Processing...'}
         </p>
-      )}
-      {resolved && (
-        <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/15">
-          <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
-          <p className="text-sm text-foreground">
-            {resolutionResult
-              || (locale === 'zh-Hans' ? '已处理' : 'Resolved')}
-          </p>
-        </div>
       )}
     </motion.div>
   );
