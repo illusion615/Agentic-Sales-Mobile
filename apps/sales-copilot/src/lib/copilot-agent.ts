@@ -554,7 +554,7 @@ ${functionList}
    - **⚠️ 反例（绝对不要走 queryCopilotStudio）**：用户自己的销售流程/管道/跟进/计划类问题，例如「下周跟进计划」、「suggest my next week follow up plan」、「plan my visits」、「帮我排一下下周拜访」、「我这周该见谁」、「pipeline 怎么样」、「how am I doing in customer engagement」、「这个商机下一步」。这些必须用本地函数（draftActivity / batchDraft / getSalesSummary / getTopOpportunities / getOpportunitiesClosingSoon 等），不是产品知识。判断方法：问题主语是「我/我的客户/我的商机/我的活动」=> 本地函数；问题主语是「产品/某个 SKU/规格/认证」=> queryCopilotStudio。
 5. 对于天气、通用常识等超出本地数据范围的问题，使用 "externalKnowledgeQuery"
 6. **活动拟定(draftActivity)重要规则**：当用户说"计划新活动"、"记录拜访"、"添加活动"、"创建活动"、"log activity"等：
-   - **⚠️ 强制：arguments 必须包含 temporalMode 字段**，三选一："completed"/"planned"/"unspecified"。详见下面的 temporalMode 子项。该字段决定表单结构（是否显示 result/nextStep）与最终活动状态，省略会导致回归 bug。
+   - **⚠️ 强制：arguments 必须包含 temporalMode 字段**，三选一："completed"/"planned"/"unspecified"。详见下面的 temporalMode 子项。该字段决定表单结构（是否显示 result）与最终活动状态，省略会导致回归 bug。
    - **必须使用 draftActivity 函数**，不要使用 createActivity。draftActivity 会显示草稿表单让用户确认后再保存
    - 必须结合页面上下文生成有意义的标题，包含客户名称+主题/产品
    - 禁止使用"客户拜访"、"电话沟通"、"会议"等泛泛标题
@@ -562,8 +562,8 @@ ${functionList}
    - **⭐ 客户关联规则（最重要）**：如果页面上下文包含 accountId/accountName（如在客户详情页），必须传递 accountId 和 accountName 参数，不要设置 requiresMatching！用户在客户详情页说"add activity"、"log call"、"create opportunity"等，直接使用 pageData 中的 accountId 和 accountName，不需要匹配
    - 如果用户提到商机名称，使用 opportunityName 参数，系统会自动匹配
    - **⭐ temporalMode 时态字段（I-8 Slice A）**：根据用户措辞判定活动是"已发生"还是"将发生"，写入 arguments.temporalMode：
-     - "completed"：用户表达动作已完成。线索："刚"、"已经"、"了"、"昨天"、"上周"、"just"、"finished"、"did"、"yesterday"、"last week"。此时表单显示 result/nextStep，并应基于用户原话预填这两个字段
-     - "planned"：用户表达动作发生在未来或正在安排。线索："明天"、"下周"、"要"、"打算"、"准备"、"plan to"、"will"、"going to"、"tomorrow"、"scheduled"。此时表单隐藏 result/nextStep（事还没发生）
+     - "completed"：用户表达动作已完成。线索："刚"、"已经"、"了"、"昨天"、"上周"、"just"、"finished"、"did"、"yesterday"、"last week"。此时表单显示 result 字段，并应基于用户原话预填
+     - "planned"：用户表达动作发生在未来或正在安排。线索："明天"、"下周"、"要"、"打算"、"准备"、"plan to"、"will"、"going to"、"tomorrow"、"scheduled"。此时表单隐藏 result（事还没发生）
      - "unspecified"（缺省）：无明确时态线索（如裸说"拜访 A 客户"）或时态矛盾。沿用现有缺省行为，不影响回归
      - **仅 draftActivity 意图需要输出 temporalMode；其他意图（draftOpportunity、updateActivity 等）不写**
    - **⭐ 商机自动建议阈值（I-8 Slice B-1 混合方案，最高优先级，覆盖第 12.B 节）**：当 temporalMode="completed" 且用户原话中包含商机相关线索时，**先自评一个 confidence（0-100）**，再决定是否输出 additionalActions 商机。**这是输出 draftOpportunity 作为 additionalAction 的唯一路径**：
@@ -595,7 +595,7 @@ ${functionList}
      - 系统会按顺序逐个 fuzzyMatch，自动把上一步解析到的 ID 注入下一步
 9. **创建新记录前必须检查重复**：用户说"添加客户XXX"、"添加联系人xxx"时，先设置 requiresMatching，如果找到高置信匹配则提示可能重复
 10. **⭐ 多意图智能提取（关键能力）**：当用户描述一个完整的业务场景时，要识别其中隐含的多个意图并全部提取：
-   - **⚠️ 硬性规则：过去时活动 + 未来时计划同时出现 = 必须拆成 2 个 draftActivity**。例如"刚拜访了 XX 医院讨论了 OR 设备采购预算 50 万英镑，下周二再来一次给临床团队演示" → 主活动 draftActivity(completed visit, 含本次会议要点)，additionalActions:[draftActivity(planned follow-up, scheduledStart=下周二, type=Demo), draftOpportunity(若按 Rule 6 confidence≥40)]。**不要**把下周二的演示折叠进主活动的 nextStep 字段——用户给出了明确日期就必须独立成单。
+   - **⚠️ 硬性规则：过去时活动 + 未来时计划同时出现 = 必须拆成 2 个 draftActivity**。例如"刚拜访了 XX 医院讨论了 OR 设备采购预算 50 万英镑，下周二再来一次给临床团队演示" → 主活动 draftActivity(completed visit, 含本次会议要点)，additionalActions:[draftActivity(planned follow-up, scheduledStart=下周二, type=Demo), draftOpportunity(若按 Rule 6 confidence≥40)]。未来时计划必须独立成单，用户给出了明确日期就必须拆成独立 draftActivity。
    - **活动记录**：用户描述的拜访/通话/会议本身 → draftActivity
    - **商机发现**：用户提到的商业机会（如"他们要招标"、"有采购需求"、"要引进新设备"） → draftOpportunity (additionalActions)
    - **后续跟进**：用户提到的下一步计划（如"下周要演示产品"、"需要安排跟进"） → draftActivity (additionalActions)
@@ -689,8 +689,7 @@ JSON 格式:
     "title": "King's College Hospital - OR Procurement Discussion",
     "type": "visit",
     "accountName": "King's College Hospital",
-    "result": "Discussed new OR procurement. They need new devices and will open bidding soon.",
-    "nextStep": "Introduce new product next week"
+    "result": "Discussed new OR procurement. They need new devices and will open bidding soon."
   },
   "requiresMatching": true,
   "matchTarget": {"entityType": "account", "query": "King's College Hospital"},
@@ -775,8 +774,7 @@ JSON 格式:
     "title": "\u90ae\u4ef6 - \u624b\u672f\u5ba4\u8bbe\u5907\u62a5\u4ef7",
     "type": "email",
     "contactName": "Sarah",
-    "result": "\u53d1\u9001\u624b\u672f\u5ba4\u8bbe\u5907\u8be6\u7ec6\u62a5\u4ef7",
-    "nextStep": "\u7b49\u5f85\u5ba2\u6237\u56de\u590d\u8ba8\u8bba"
+    "result": "\u53d1\u9001\u624b\u672f\u5ba4\u8bbe\u5907\u8be6\u7ec6\u62a5\u4ef7"
   },
   "requiresMatching": true,
   "matchTarget": {"entityType": "contact", "query": "Sarah"}
@@ -847,13 +845,12 @@ JSON 格式:
     "type": "visit",
     "contactName": "Rachel",
     "temporalMode": "completed",
-    "result": "客户对心脏耗材表达强烈兴趣",
-    "nextStep": "下周安排产品演示"
+    "result": "客户对心脏耗材表达强烈兴趣"
   },
   "requiresMatching": true,
   "matchTarget": {"entityType": "contact", "query": "Rachel"}
 }
-// completed 线索："刚"、"了" → result/nextStep 必须预填
+// completed 线索："刚"、"了" → result 必须预填
 
 用户: "明天下午要拜访皇家伦敦医院的周总"
 ->
@@ -869,7 +866,7 @@ JSON 格式:
   "requiresMatching": true,
   "matchTarget": {"entityType": "contact", "query": "周总"}
 }
-// planned 线索："明天"、"要" → 不出 result/nextStep（事还没发生）
+// planned 线索："明天"、"要" → 不出 result（事还没发生）
 
 用户: "拜访 King's College Hospital"
 ->
@@ -906,7 +903,7 @@ Rules:
    - **⚠️ COUNTER-EXAMPLES (NEVER route to queryCopilotStudio)**: Questions about the user's own pipeline / follow-ups / planning, e.g. "suggest my next week follow up plan", "plan my visits", "who should I see this week", "how am I doing in customer engagement", "what's next on this opp", "下周跟进计划", "帮我排一下下周拜访". These MUST use local functions (draftActivity / batchDraft / getSalesSummary / getTopOpportunities / getOpportunitiesClosingSoon). Rule of thumb: subject = "my/my customers/my opps/my activities" => local function; subject = "the product / a SKU / specs / certification" => queryCopilotStudio.
 5. For weather, general knowledge, etc., use "externalKnowledgeQuery"
 6. **ACTIVITY DRAFT RULES (draftActivity)**: When user says "plan activity", "record visit", "add activity", "create activity", "log activity", "schedule meeting" etc.:
-   - **⚠️ MANDATORY: arguments MUST include the temporalMode field**, one of "completed" / "planned" / "unspecified". See the TEMPORAL MODE sub-item below for cue lists. This field drives form rendering (show/hide result/nextStep) and the final activity status; omitting it is a regression bug.
+   - **⚠️ MANDATORY: arguments MUST include the temporalMode field**, one of "completed" / "planned" / "unspecified". See the TEMPORAL MODE sub-item below for cue lists. This field drives form rendering (show/hide result) and the final activity status; omitting it is a regression bug.
    - **ALWAYS use draftActivity function**, never use createActivity. draftActivity shows a draft form for user to review and confirm before saving
    - MUST generate meaningful title using page context, including account name + topic/product
    - NEVER use generic titles like "Customer Visit", "Phone Call", "Meeting"
@@ -914,8 +911,8 @@ Rules:
    - **⭐ ACCOUNT BINDING RULE (MOST CRITICAL)**: If pageData contains accountId/accountName (e.g., on Account detail page), you MUST pass accountId and accountName parameters directly, DO NOT set requiresMatching! When user says "add activity", "log call", "create opportunity" etc. on Account detail page, use accountId and accountName from pageData directly, no matching needed
    - If user mentions an opportunity name, use opportunityName parameter and system will auto-match
    - **⭐ TEMPORAL MODE (I-8 Slice A)**: Detect whether the activity has happened or will happen and put it into arguments.temporalMode:
-     - "completed": User says the action is done. Cues: "just", "already", "finished", "did", "yesterday", "last week", past tense verbs. Form will show result/nextStep, and you MUST prefill both fields based on user's wording.
-     - "planned": User says the action is in the future or being scheduled. Cues: "plan to", "will", "going to", "tomorrow", "next week", "scheduled", "about to". Form will HIDE result/nextStep (the activity has not happened yet).
+     - "completed": User says the action is done. Cues: "just", "already", "finished", "did", "yesterday", "last week", past tense verbs. Form will show result field, and you MUST prefill it based on user's wording.
+     - "planned": User says the action is in the future or being scheduled. Cues: "plan to", "will", "going to", "tomorrow", "next week", "scheduled", "about to". Form will HIDE result (the activity has not happened yet).
      - "unspecified" (default): No clear tense cue (e.g. bare "visit A account") or contradicting cues. Preserves existing behavior, zero regression.
      - **ONLY draftActivity intents need temporalMode; other intents (draftOpportunity, updateActivity, etc.) must NOT include it.**
    - **⭐ OPPORTUNITY AUTO-SUGGEST THRESHOLD (I-8 Slice B-1 hybrid, HIGHEST PRIORITY, OVERRIDES Section 12.B)**: When temporalMode="completed" AND the user's wording contains opportunity cues, **first self-assess a confidence (0-100)**, then decide whether to emit a draftOpportunity additionalAction. **This is the ONLY allowed path for emitting draftOpportunity as an additionalAction**:
@@ -947,7 +944,7 @@ Rules:
      - System resolves each step in sequence and auto-injects the resolved ID of earlier steps into later ones
 9. **CHECK FOR DUPLICATES BEFORE CREATING**: When user says "add account XXX", "add contact XXX", first set requiresMatching to check for potential duplicates
 10. **⭐ MULTI-INTENT INTELLIGENT EXTRACTION (KEY CAPABILITY)**: When user describes a complete business scenario, identify and extract ALL implicit intents:
-   - **⚠️ HARD RULE — past-tense activity + future-tense plan in the same message = ALWAYS 2 separate draftActivity calls.** Example: "I just visited XX Hospital and discussed OR equipment procurement with a £500K budget. I'll come back next Tuesday to demo for the clinical team." → main = draftActivity(completed visit with discussion notes), additionalActions = [draftActivity(planned follow-up, scheduledStart=next Tuesday, type=Demo), draftOpportunity(if Rule 6 confidence≥40)]. **Do NOT** fold the next-Tuesday demo into the main activity's nextStep field — when the user supplies a concrete date it MUST be its own activity card.
+   - **⚠️ HARD RULE — past-tense activity + future-tense plan in the same message = ALWAYS 2 separate draftActivity calls.** Example: "I just visited XX Hospital and discussed OR equipment procurement with a £500K budget. I'll come back next Tuesday to demo for the clinical team." → main = draftActivity(completed visit with discussion notes), additionalActions = [draftActivity(planned follow-up, scheduledStart=next Tuesday, type=Demo), draftOpportunity(if Rule 6 confidence≥40)]. Future-tense plans MUST become their own draftActivity — when the user supplies a concrete date it MUST be its own activity card.
    - **Activity Record**: The visit/call/meeting itself that user is describing → draftActivity
    - **Opportunity Discovery**: Business opportunities mentioned (e.g., "they will bid", "have procurement needs", "want new equipment") → draftOpportunity (additionalActions)
    - **Follow-up Planning**: Next steps user mentions (e.g., "introduce product next week", "need to schedule follow-up") → draftActivity (additionalActions)
@@ -1041,8 +1038,7 @@ User: "I visited King's College Hospital and discussed the new operation room pr
     "title": "King's College Hospital - OR Procurement Discussion",
     "type": "visit",
     "accountName": "King's College Hospital",
-    "result": "Discussed new OR procurement. They need new devices and will open bidding soon.",
-    "nextStep": "Introduce new product next week"
+    "result": "Discussed new OR procurement. They need new devices and will open bidding soon."
   },
   "requiresMatching": true,
   "matchTarget": {"entityType": "account", "query": "King's College Hospital"},
@@ -1122,7 +1118,7 @@ User (on Activity detail page pageData.id="meeting-123"): "mark this meeting as 
 ->
 {
   "function": "updateActivity",
-  "arguments": {"activityId": "meeting-123", "status": "completed", "result": "Shared new features, customer very interested", "nextStep": "Onsite demo next Monday"},
+  "arguments": {"activityId": "meeting-123", "status": "completed", "result": "Shared new features, customer very interested"},
   "additionalActions": [
     {"function": "draftOpportunity", "arguments": {"name": "Customer - Product Adoption", "stage": "qualification"}, "reason": "Opportunity: Customer interested"},
     {"function": "draftActivity", "arguments": {"title": "Onsite Demo", "type": "visit"}, "reason": "Follow-up: Demo next Monday"}
@@ -1139,8 +1135,7 @@ User: "Sent Sarah Lee an email with a detailed quotation for the operating room 
     "title": "Email - Quotation for OR Equipment",
     "type": "email",
     "contactName": "Sarah Lee",
-    "result": "Sent detailed quotation for operating room equipment",
-    "nextStep": "Await customer response for further discussion"
+    "result": "Sent detailed quotation for operating room equipment"
   },
   "requiresMatching": true,
   "matchTarget": {"entityType": "contact", "query": "Sarah Lee"}
@@ -1211,13 +1206,12 @@ User: "Just visited Rachel at King's College Hospital, they're interested in car
     "type": "visit",
     "contactName": "Rachel",
     "temporalMode": "completed",
-    "result": "Customer expressed strong interest in cardiac consumables",
-    "nextStep": "Schedule product demo next week"
+    "result": "Customer expressed strong interest in cardiac consumables"
   },
   "requiresMatching": true,
   "matchTarget": {"entityType": "contact", "query": "Rachel"}
 }
-// completed cues: "just", "visited" (past tense) -> MUST prefill result and nextStep
+// completed cues: "just", "visited" (past tense) -> MUST prefill result
 
 User: "Plan a meeting with Rachel at King's College Hospital tomorrow afternoon"
 ->
@@ -1233,7 +1227,7 @@ User: "Plan a meeting with Rachel at King's College Hospital tomorrow afternoon"
   "requiresMatching": true,
   "matchTarget": {"entityType": "contact", "query": "Rachel"}
 }
-// planned cues: "plan", "tomorrow" -> DO NOT emit result/nextStep (activity has not happened yet)
+// planned cues: "plan", "tomorrow" -> DO NOT emit result (activity has not happened yet)
 
 User: "Log a meeting with Rachel at King's College Hospital"
 ->

@@ -362,12 +362,11 @@ export async function executeFunction(
             contactTitle: args.contactTitle as string || '',
             scheduledDate: args.scheduledDate as string || new Date().toISOString().split('T')[0],
             result: args.result as string || '',
-            nextStep: args.nextStep as string || '',
             opportunityId: args.opportunityId as string || '',
             opportunityName: args.opportunityName as string || '',
             notes: args.notes as string || '',
             // I-8 Slice A: carry temporal tense from LLM into form state so
-            // ActivityFormCard can show/hide result/nextStep and derive draftstatusKey.
+            // ActivityFormCard can show/hide result and derive draftstatusKey.
             temporalMode: args.temporalMode as string || '',
           },
         };
@@ -595,12 +594,9 @@ export async function executeFunction(
         }
         if (args.scheduledDate) actChanges.scheduleddate = args.scheduledDate as string;
         if (args.notes) actChanges.notes = args.notes as string;
-        // result and nextStep might be stored in notes or outcome
+        // result maps to Activity.outcome column
         if (args.result) {
-          actChanges.notes = (actChanges.notes || '') + ' | 结果: ' + (args.result as string);
-        }
-        if (args.nextStep) {
-          actChanges.notes = (actChanges.notes || '') + ' | 下一步: ' + (args.nextStep as string);
+          actChanges.outcome = args.result as string;
         }
         
         // Handle opportunity binding - find by ID or name

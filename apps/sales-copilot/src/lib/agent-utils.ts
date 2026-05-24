@@ -25,10 +25,10 @@ export type ResolutionItem = z.infer<typeof ResolutionItemSchema>;
 
 // I-8 Slice A: TemporalMode — semantic tense extracted from user's wording.
 // Carried inside draftActivity `arguments.temporalMode` (not top-level) so the
-// form-card can derive draftstatusKey and the visibility of result/nextStep
-// fields without coupling to language-specific tense markers.
-//   planned     → activity is in the future or about to happen → status=Confirmed, hide result/nextStep
-//   completed   → activity has already happened → status=Completed, show result/nextStep, LLM prefills
+// form-card can derive draftstatusKey and the visibility of the result field
+// from temporalMode alone — no need to couple to language-specific tense markers.
+//   planned     → activity is in the future or about to happen → status=Confirmed, hide result
+//   completed   → activity has already happened → status=Completed, show result, LLM prefills
 //   unspecified → no clear tense signal → keep current behavior (Draft, fields shown unfilled)
 export const TemporalModeSchema = z.enum(['planned', 'completed', 'unspecified']);
 export type TemporalMode = z.infer<typeof TemporalModeSchema>;
