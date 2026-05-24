@@ -359,7 +359,7 @@ export function CopilotPanel() {
                       entityType: message.matchSelection.entityType,
                       query: message.matchSelection.query,
                       pendingFn: message.matchSelection.pendingIntent?.function,
-                      locale: locale === 'zh-Hans' ? 'zh-Hans' : 'en',
+                      locale: locale === 'zh-Hans' ? 'zh-Hans' : 'en-US',
                     });
                     if (!reason) return null;
                     return (
@@ -438,7 +438,7 @@ export function CopilotPanel() {
                         entityType,
                         query: pr.query,
                         pendingFn: message.awaitingClarification?.originalIntent.function,
-                        locale: locale === 'zh-Hans' ? 'zh-Hans' : 'en',
+                        locale: locale === 'zh-Hans' ? 'zh-Hans' : 'en-US',
                       }) || message.content;
                       if (!reason) return null;
                       return (
