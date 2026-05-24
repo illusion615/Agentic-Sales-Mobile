@@ -1862,25 +1862,14 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       ));
     }
 
-    // Activity short-circuit: picking an existing activity means "this is the
-    // one I'm talking about" — don't draft a duplicate. Lock the card (already
-    // done above), append a brief ack, and stop. draftActivity always returns
-    // isNew:true regardless of activityId, so the old behavior here always
-    // produced a duplicate form.
-    if (entityType === 'activity' && pendingIntent.function === 'draftActivity') {
-      const ack: ChatMessage = {
-        id: `msg-${Date.now()}-activity-ack`,
-        type: 'agent',
-        role: 'assistant',
-        content: locale === 'zh-Hans'
-          ? `已关联到现有活动「${selectedRecord.name}」，未创建重复记录。`
-          : `Linked to existing activity "${selectedRecord.name}" — no duplicate created.`,
-        agentName: 'Sales Copilot',
-        timestamp: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, ack]);
-      return;
-    }
+    // Activity "select existing" semantic: don't draft a duplicate. We still
+    // need to walk any remainingResolutions and advance through subsequent
+    // intents — only the *final* draftActivity executeFunction call gets
+    // suppressed. (draftActivity always returns isNew:true regardless of
+    // activityId, which is why the old behavior produced a duplicate form.)
+    // batchDraft is NOT covered here because suppressing one item in a batch
+    // requires reshaping the batch payload — future work if boss hits it.
+    const bypassFinalActivityDraft = entityType === 'activity' && pendingIntent.function === 'draftActivity';
     setIsSending(true);
     
     // Create a thinking message
@@ -2236,6 +2225,25 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           }));
         }
       } else if (isDraftFunction) {
+        // bypassFinalActivityDraft: user picked an existing activity earlier.
+        // Convert the thinking message into a plain ack instead of running
+        // draftActivity (which would always produce a duplicate form).
+        if (bypassFinalActivityDraft) {
+          setMessages((prev) => prev.map((msg) => {
+            if (msg.id !== thinkingMsgId) return msg;
+            return {
+              ...msg,
+              type: 'agent' as const,
+              content: locale === 'zh-Hans'
+                ? `已关联到现有活动「${selectedRecord.name}」，未创建重复记录。`
+                : `Linked to existing activity "${selectedRecord.name}" — no duplicate created.`,
+              isThinking: false,
+              thinkingSteps: [
+                { stage: 'executing' as const, status: 'completed' as const, label: locale === 'zh-Hans' ? `关联现有活动` : `Linked existing activity` },
+              ],
+            };
+          }));
+        } else {
         // For single draft functions, execute directly and show form card
         const functionResult = await executeFunction(
           pendingIntent.function,
@@ -2280,6 +2288,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             };
           }));
         }
+        } // end bypassFinalActivityDraft else
       } else {
         // For non-draft functions (queries, summaries, etc.), use full processMessage flow
         // Reconstruct the original user message with the selected entity
