@@ -32,7 +32,6 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
     setIsExpanded,
     openPanel,
     closePanel,
-    toggleFullScreen,
     isConnected,
     isConnecting,
     messages,
@@ -188,11 +187,6 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
     if (!isOpen) {
       openPanel();
     }
-  };
-
-  // Handle full screen toggle
-  const handleFullScreen = () => {
-    toggleFullScreen();
   };
 
   // Handle close
@@ -832,129 +826,39 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
     </div>
   );
 
-  // Full screen overlay mode
-  if (mode === 'overlay' && isFullScreen) {
-    return (
-      <>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[60] bg-background flex flex-col"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border/30 safe-area-top">
-          <button
-            onClick={handleClose}
-            className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-muted/50 transition-colors"
-            aria-label={locale === 'zh-Hans' ? '关闭' : 'Close'}
-          >
-            <X className="w-5 h-5 text-foreground" />
-          </button>
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-primary" />
-            <span className="text-sm font-medium text-foreground">Ask Copilot</span>
-            {isConnected && <span className="w-2 h-2 bg-green-500 rounded-full" />}
-            {isConnecting && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
-            <button
-              type="button"
-              onClick={() => setFrameViewerOpen(true)}
-              className="ml-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold text-orange-700 bg-orange-100 hover:bg-orange-200 transition-colors"
-              title={locale === 'zh-Hans' ? 'Frame 影子模式 · 销售专家思考记录' : 'Frame shadow mode · sales-coach reasoning log'}
-              aria-label="Frame shadow log"
-            >
-              F
-            </button>
-          </div>
-          <button
-            onClick={() => startNewConversation()}
-            className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-muted/50 transition-colors"
-            aria-label={locale === 'zh-Hans' ? '新会话' : 'New session'}
-          >
-            <SquarePen className="w-5 h-5 text-foreground" />
-          </button>
-        </div>
-
-        {/* Context Chips */}
-        {shouldShowContext && (
-          <div className="px-4 py-2 border-b border-border/20 bg-muted/30">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs text-muted-foreground">
-                {locale === 'zh-Hans' ? '当前上下文:' : 'Context:'}
-              </span>
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 border border-primary/20">
-                <span className="text-xs font-medium text-primary">
-                  {pageContext.currentPage}
-                </span>
-                {((pageContext.pageData as Record<string, unknown>)?.accountName as string | undefined) && (
-                  <span className="text-xs text-primary/80">
-                    {' · '}{(pageContext.pageData as Record<string, unknown>).accountName as string}
-                  </span>
-                )}
-                {((pageContext.pageData as Record<string, unknown>)?.contactName as string | undefined) && (
-                  <span className="text-xs text-primary/80">
-                    {' · '}{(pageContext.pageData as Record<string, unknown>).contactName as string}
-                  </span>
-                )}
-                {((pageContext.pageData as Record<string, unknown>)?.opportunityName as string | undefined) && (
-                  <span className="text-xs text-primary/80">
-                    {' · '}{(pageContext.pageData as Record<string, unknown>).opportunityName as string}
-                  </span>
-                )}
-                {((pageContext.pageData as Record<string, unknown>)?.activitySubject as string | undefined) && (
-                  <span className="text-xs text-primary/80">
-                    {' · '}{(pageContext.pageData as Record<string, unknown>).activitySubject as string}
-                  </span>
-                )}
-                <button
-                  onClick={handleDismissContext}
-                  className="ml-0.5 w-4 h-4 flex items-center justify-center rounded-full hover:bg-primary/20 transition-colors"
-                  aria-label={locale === 'zh-Hans' ? '移除上下文' : 'Remove context'}
-                >
-                  <X className="w-3 h-3 text-primary" />
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Messages */}
-        {renderMessages()}
-
-        {/* Input */}
-        <div className="safe-area-bottom">
-          {renderInputExtras()}
-          {renderInputWrapper()}
-        </div>
-      </motion.div>
-      <FrameShadowViewer open={frameViewerOpen} onClose={() => setFrameViewerOpen(false)} locale={locale} />
-      </>
-    );
-  }
-
   // Expanded panel overlay mode
   if (mode === 'overlay') {
     // Reusable panel-chrome JSX (drag handle + header + context chips) used by expanded states.
     const panelChrome = (
       <>
-        {/* Drag handle */}
-        <div
-          className="flex justify-center py-2 cursor-grab active:cursor-grabbing touch-none"
-          onPointerDown={(e: React.PointerEvent) => dragControls.start(e)}
-        >
-          <div className="w-10 h-1 rounded-full bg-muted-foreground/30" />
-        </div>
+        {/* Drag handle — hidden in full-screen */}
+        {!isFullScreen && (
+          <div
+            className="flex justify-center py-2 cursor-grab active:cursor-grabbing touch-none"
+            onPointerDown={(e: React.PointerEvent) => dragControls.start(e)}
+          >
+            <div className="w-10 h-1 rounded-full bg-muted-foreground/30" />
+          </div>
+        )}
 
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-2 border-b border-border/30">
+        <div className={cn(
+          'flex items-center justify-between px-4 py-2 border-b border-border/30',
+          isFullScreen && 'safe-area-top pt-3'
+        )}>
           <button
             onClick={handleClose}
             className="w-8 h-8 flex items-center justify-center rounded-lg transition-all hover:brightness-125 active:brightness-75"
-            aria-label={locale === 'zh-Hans' ? '收起' : 'Collapse'}
+            aria-label={locale === 'zh-Hans' ? (isFullScreen ? '关闭' : '收起') : (isFullScreen ? 'Close' : 'Collapse')}
           >
-            <ChevronDown className="w-4 h-4 text-foreground" />
+            {isFullScreen ? (
+              <X className="w-5 h-5 text-foreground" />
+            ) : (
+              <ChevronDown className="w-4 h-4 text-foreground" />
+            )}
           </button>
           <div className="flex items-center gap-2">
+            {isFullScreen && <Sparkles className="w-5 h-5 text-primary" />}
             <span className="text-sm font-medium text-foreground">Ask Copilot</span>
             {isConnected && <span className="w-2 h-2 bg-green-500 rounded-full" />}
             {isConnecting && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
@@ -1045,7 +949,7 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
         <motion.div
           ref={panelRef}
           initial={false}
-          animate={{ height: isOpen ? '78vh' : 'auto' }}
+          animate={{ height: isFullScreen ? '100vh' : isOpen ? '78vh' : 'auto' }}
           transition={{ type: 'spring', damping: 32, stiffness: 280 }}
           drag={isOpen ? 'y' : false}
           dragControls={dragControls}
@@ -1053,6 +957,13 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
           dragConstraints={{ top: 0, bottom: 0 }}
           dragElastic={{ top: 0.3, bottom: 0.5 }}
           onDragEnd={(_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+            if (isFullScreen) {
+              // Full-screen: down-swipe collapses back to 78vh
+              if (info.offset.y > 80 || info.velocity.y > 500) {
+                openPanel(false);
+              }
+              return;
+            }
             if (info.offset.y < -80 || info.velocity.y < -500) {
               openPanel(true);
             } else if (info.offset.y > 80 || info.velocity.y > 500) {
@@ -1062,7 +973,7 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
           className={cn(
             'fixed bottom-0 left-0 right-0 z-[60] flex flex-col justify-end overflow-hidden safe-area-bottom',
             'bg-background/80 backdrop-blur-md border-t border-border/50',
-            isOpen && 'rounded-t-[20px]'
+            isOpen && !isFullScreen && 'rounded-t-[20px]'
           )}
           style={
             isOpen
