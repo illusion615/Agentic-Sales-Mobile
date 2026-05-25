@@ -138,6 +138,7 @@ function emitAnnounce(queue: IntentQueue, intent: QueueIntent, deps: RuntimeDeps
     queueId: queue.id,
     queueIntentId: intent.id,
     taskRole: 'announce',
+    taskAnnounce: { index: idx, total, label: `${label}${desc ? ' — ' + desc : ''}` },
   });
   return patchIntent(queue, intent.id, { announced: true });
 }
@@ -383,10 +384,15 @@ async function implicitNameResolution(
     const idVal = args[lk.idField];
     if (typeof nameVal !== 'string' || !nameVal.trim()) continue;
     if (typeof idVal === 'string' && idVal) continue;
+    // Use the entity-specific fuzzy-match function (fuzzyMatchAccount, etc.)
+    const fnName =
+      lk.entityType === 'account' ? 'fuzzyMatchAccount'
+      : lk.entityType === 'contact' ? 'fuzzyMatchContact'
+      : 'fuzzyMatchOpportunity';
     try {
       const res = await executeFunction(
-        'fuzzyMatch',
-        { entityType: lk.entityType, query: nameVal.trim() },
+        fnName,
+        { query: nameVal.trim() },
         { userId: deps.userId, userEmail: deps.userEmail },
       );
       if (!res.success || !res.data) continue;
@@ -394,7 +400,9 @@ async function implicitNameResolution(
       const top = (md.matches ?? []).find((m) => m.score >= 90);
       if (!top) continue;
       const patch: Record<string, string> = { [lk.idField]: top.id, [lk.name]: top.name };
-      if (lk.entityType === 'contact' && top.accountId && !args.accountId) {
+      // Propagate parent entity context from the match result so downstream
+      // lookups can skip (e.g. resolving opportunity gives us accountId).
+      if ((lk.entityType === 'contact' || lk.entityType === 'opportunity') && top.accountId && !args.accountId) {
         patch.accountId = top.accountId;
         if (top.accountName) patch.accountName = top.accountName;
       }
@@ -427,7 +435,10 @@ function buildResolvedPatch(
     return out;
   }
   if (entityType === 'opportunity') {
-    return { opportunityId: m.id, opportunityName: m.name };
+    const out: Record<string, string> = { opportunityId: m.id, opportunityName: m.name };
+    if (m.accountId) out.accountId = m.accountId;
+    if (m.accountName) out.accountName = m.accountName;
+    return out;
   }
   // activity — treat like opportunity slot
   return { activityId: m.id, activityName: m.name };
