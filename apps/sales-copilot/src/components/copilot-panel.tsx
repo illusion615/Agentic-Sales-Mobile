@@ -921,7 +921,7 @@ export function CopilotPanel() {
           ref={panelRef}
           initial={false}
           animate={isSideDocked
-            ? { width: isOpen ? 380 : 0 }
+            ? undefined
             : { height: isFullScreen ? '100vh' : isOpen ? '78vh' : 'auto' }
           }
           transition={{ type: 'spring', damping: 32, stiffness: 280 }}
@@ -953,9 +953,9 @@ export function CopilotPanel() {
             !isSideDocked && 'fixed bottom-0 left-0 right-0 z-[60] justify-end border-t border-border/50',
             !isSideDocked && isOpen && !isFullScreen && 'rounded-t-[20px]',
             // Side-docked mode: inline flex child, not fixed/absolute.
-            // Width is controlled by animation; height fills the parent flex container.
+            // flex-1 makes it share space 1:1 with the content area.
             // pt-14: push content below the fixed page header that spans full width.
-            isSideDocked && 'h-full shrink-0 border-border/50 pt-14',
+            isSideDocked && 'h-full flex-1 border-border/50 pt-14',
             isSideDocked && effectiveLayout === 'right' && 'border-l',
             isSideDocked && effectiveLayout === 'left' && 'border-r',
           )}
