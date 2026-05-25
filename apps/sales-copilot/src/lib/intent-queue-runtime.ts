@@ -145,42 +145,19 @@ function emitAnnounce(queue: IntentQueue, intent: QueueIntent, deps: RuntimeDeps
 
 type ResultAction = 'created' | 'updated' | 'cancelled' | 'failed' | 'completed';
 
+/**
+ * Per-step result narration is intentionally suppressed — the card's own
+ * Saved / Cancelled badge already communicates the outcome clearly.
+ * The final summary covers all steps in aggregate.
+ */
 function emitResult(
-  queue: IntentQueue,
-  intent: QueueIntent,
-  action: ResultAction,
-  recordName: string | undefined,
-  deps: RuntimeDeps,
+  _queue: IntentQueue,
+  _intent: QueueIntent,
+  _action: ResultAction,
+  _recordName: string | undefined,
+  _deps: RuntimeDeps,
 ): void {
-  if (intent.parentId) return;
-  const isZh = deps.locale === 'zh-Hans';
-  const { idx, total } = stepPosition(queue, intent);
-  const label = labelFor(intent, isZh);
-  const actionText = isZh
-    ? (action === 'created' ? (recordName ? `已新建 ${recordName}` : '已新建')
-      : action === 'updated' ? (recordName ? `已更新 ${recordName}` : '已更新')
-      : action === 'cancelled' ? '已取消'
-      : action === 'failed' ? '执行失败'
-      : '已完成')
-    : (action === 'created' ? (recordName ? `Created ${recordName}` : 'Created')
-      : action === 'updated' ? (recordName ? `Updated ${recordName}` : 'Updated')
-      : action === 'cancelled' ? 'Cancelled'
-      : action === 'failed' ? 'Failed'
-      : 'Done');
-  const icon = action === 'failed' ? '✗' : action === 'cancelled' ? '◌' : '✓';
-  const prefix = total > 1 && idx > 0
-    ? (isZh ? `第 ${idx} 步（${label}）` : `Step ${idx} (${label})`)
-    : label;
-  const content = `${icon} ${prefix}：${actionText}`;
-  deps.pushMessage({
-    id: `narrate-${queue.id}-${intent.id}-result-${Date.now()}`,
-    type: 'agent',
-    content,
-    timestamp: Date.now(),
-    queueId: queue.id,
-    queueIntentId: intent.id,
-    taskRole: 'substep',
-  });
+  // no-op: card state is sufficient
 }
 
 function emitSummary(queue: IntentQueue, deps: RuntimeDeps): IntentQueue {
