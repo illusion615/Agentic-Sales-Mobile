@@ -996,9 +996,42 @@ export function CopilotPanel() {
               ) : null}
             </div>
           )}
-          {/* Input bar — always rendered, always last child, so its on-screen position never moves */}
-          {renderInputWrapper()}
+          {/* Input bar — always rendered inside the panel container */}
+          {(!isSideDocked || isOpen) && renderInputWrapper()}
         </motion.div>
+
+        {/* Side-docked: render the bottom dock input bar OUTSIDE the side panel container */}
+        {isSideDocked && !isOpen && (
+          <div className="fixed bottom-0 left-0 right-0 z-[60] safe-area-bottom">
+            <div className="mx-auto w-full max-w-md flex flex-col gap-2 px-3 pt-2 pb-0">
+              {dockSlot !== null ? (
+                <div className="flex justify-center">{dockSlot}</div>
+              ) : dockChips.length > 0 ? (
+                <div className="flex items-center justify-center gap-2 flex-wrap">
+                  {dockChips.map((c) => {
+                    const Icon = c.icon;
+                    return (
+                      <button
+                        key={c.id}
+                        onClick={c.onClick}
+                        className={cn(
+                          'flex items-center gap-2 px-4 py-2.5',
+                          'rounded-full bg-background border border-border/60 shadow-sm',
+                          'text-xs font-medium text-foreground',
+                          'active:scale-95 transition-transform'
+                        )}
+                      >
+                        <Icon className="w-4 h-4 text-primary" />
+                        <span>{c.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
+            {renderInputWrapper()}
+          </div>
+        )}
 
         <FrameShadowViewer open={frameViewerOpen} onClose={() => setFrameViewerOpen(false)} locale={locale} />
       </>
