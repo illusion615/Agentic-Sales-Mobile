@@ -270,7 +270,9 @@ export function CopilotPanel() {
             return (
             <div key={message.id} id={`message-${message.id}`} className={cn(
               'mb-3',
-              message.type === 'user' ? 'flex justify-end' : ''
+              message.type === 'user' ? 'flex justify-end' : '',
+              // Indent sub-content under a task header for visual hierarchy.
+              message.queueId && message.taskRole !== 'announce' && message.taskRole !== 'summary' && 'pl-3 border-l-2 border-primary/10',
             )}>
               {/* Phase B: Task overview — "识别到 N 个意图：A、B、C" (plain text, no bubble) */}
               {message.taskRole === 'overview' && message.taskOverview && (

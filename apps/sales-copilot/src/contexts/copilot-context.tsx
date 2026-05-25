@@ -164,7 +164,7 @@ export interface ChatMessage {
   /** Groups every message belonging to a single task (announce + sub-steps + done line). */
   taskGroupId?: string;
   /** Role of this message inside its task group. Drives renderer choice. */
-  taskRole?: 'overview' | 'announce' | 'substep' | 'done-collapsed';
+  taskRole?: 'overview' | 'announce' | 'substep' | 'summary' | 'done-collapsed';
   /** Payload for the task-announce bubble (only set when taskRole === 'announce'). */
   taskAnnounce?: {
     index: number;      // 1-based

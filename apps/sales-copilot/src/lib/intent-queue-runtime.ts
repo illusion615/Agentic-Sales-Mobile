@@ -188,24 +188,65 @@ function emitSummary(queue: IntentQueue, deps: RuntimeDeps): IntentQueue {
   const top = topLevelIntents(queue);
   if (top.length <= 1) return { ...queue, summaryEmitted: true };
   const isZh = deps.locale === 'zh-Hans';
-  const lines = top.map((i, k) => {
-    const label = labelFor(i, isZh);
-    const name = i.result?.recordName;
-    const verb = i.status === 'confirmed'
-      ? (i.function.startsWith('update') ? (isZh ? '已更新' : 'updated') : (isZh ? '已新建' : 'created'))
-      : i.status === 'cancelled' ? (isZh ? '已取消' : 'cancelled')
-      : i.status === 'skipped' ? (isZh ? '已跳过' : 'skipped')
-      : i.status === 'failed' ? (isZh ? '执行失败' : 'failed')
-      : (isZh ? '已处理' : 'done');
-    return isZh
-      ? `${k + 1}. ${label}：${verb}${name ? ` ${name}` : ''}`
-      : `${k + 1}. ${label}: ${verb}${name ? ` ${name}` : ''}`;
-  });
-  const header = isZh ? `全部 ${top.length} 步已处理：` : `All ${top.length} steps processed:`;
+
+  // ---- Build a sales-contextual summary instead of a mechanical listing ----
+  const done = top.filter((i) => i.status === 'confirmed');
+  const skipped = top.filter((i) => i.status === 'cancelled' || i.status === 'skipped');
+  const failed = top.filter((i) => i.status === 'failed');
+
+  const parts: string[] = [];
+
+  // Headline
+  if (done.length === top.length) {
+    parts.push(isZh ? `✅ 全部 ${top.length} 项已完成。` : `✅ All ${top.length} items done.`);
+  } else {
+    const counts: string[] = [];
+    if (done.length) counts.push(isZh ? `${done.length} 项已完成` : `${done.length} completed`);
+    if (skipped.length) counts.push(isZh ? `${skipped.length} 项跳过` : `${skipped.length} skipped`);
+    if (failed.length) counts.push(isZh ? `${failed.length} 项失败` : `${failed.length} failed`);
+    parts.push(counts.join(isZh ? '，' : ', ') + '。');
+  }
+
+  // "What was recorded" — bullet list with key details from intent arguments
+  if (done.length > 0) {
+    const bullets = done.map((i) => {
+      const a = i.arguments;
+      const title = (a.title ?? a.name ?? a.fullName ?? i.result?.recordName ?? '') as string;
+      const account = (a.accountName ?? queue.resolvedContext.accountName ?? '') as string;
+      const date = (a.scheduledStart ?? a.scheduledDate ?? '') as string;
+      const contact = (a.contactName ?? '') as string;
+      let detail = title;
+      // Append key context for salespeople: date, account, contact
+      const extras: string[] = [];
+      if (date) extras.push(date);
+      if (account && !title.toLowerCase().includes(account.toLowerCase())) extras.push(account);
+      if (contact && !title.toLowerCase().includes(contact.toLowerCase())) extras.push(contact);
+      if (extras.length) detail += ` (${extras.join(' · ')})`;
+      return `• ${detail}`;
+    });
+    parts.push(isZh ? '已记录：' : 'Recorded:');
+    parts.push(...bullets);
+  }
+
+  // "Skipped items" — brief note so salesperson knows what wasn't done
+  if (skipped.length > 0) {
+    const items = skipped.map((i) => {
+      const title = (i.arguments.title ?? i.arguments.name ?? labelFor(i, isZh)) as string;
+      return title;
+    });
+    parts.push(isZh
+      ? `⚠️ 未创建：${items.join('、')}。如需跟进请手动操作。`
+      : `⚠️ Skipped: ${items.join(', ')}. Create manually if needed.`);
+  }
+
+  if (failed.length > 0) {
+    parts.push(isZh ? `❌ ${failed.length} 项执行失败，请稍后重试。` : `❌ ${failed.length} item(s) failed — retry later.`);
+  }
+
   deps.pushMessage({
     id: `narrate-${queue.id}-summary-${Date.now()}`,
     type: 'agent',
-    content: `${header}\n${lines.join('\n')}`,
+    content: parts.join('\n'),
     timestamp: Date.now(),
     queueId: queue.id,
     queueIntentId: 'summary',

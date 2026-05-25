@@ -1,15 +1,12 @@
 /**
- * Task announce bubble — full-width header that introduces (and gates the
- * visibility of) one task in a multi-intent execution.
+ * Task section header — a lightweight divider that introduces one step in a
+ * multi-intent queue. Not a bubble; just a subtle line + step label so that
+ * the content below it (cards, results) feels visually nested.
  *
- *   ▾ 任务 2/4   识别潜在商机     ← expanded (substeps shown below)
- *   ▸ 任务 2/4   识别潜在商机     ← collapsed (substeps hidden)
- *
- * When `onToggle` is provided the row becomes a button: clicking it folds /
- * unfolds the task's substeps, and the chevron rotates 90° to match state.
+ *   ── Step 1/4 · Log visit — Log "London hospital visit"
+ *       [match card / form card / result — all indented via CSS in copilot-panel]
  */
 import { motion } from 'motion/react';
-import { ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface TaskAnnounceBubbleProps {
@@ -21,46 +18,23 @@ interface TaskAnnounceBubbleProps {
   onToggle?: () => void;
 }
 
-export function TaskAnnounceBubble({ index, total, label, locale, collapsed, onToggle }: TaskAnnounceBubbleProps) {
+export function TaskAnnounceBubble({ index, total, label, locale }: TaskAnnounceBubbleProps) {
   const isZh = locale === 'zh-Hans';
-  const indexLabel = isZh ? `任务 ${index}/${total}` : `Task ${index}/${total}`;
-  const interactive = typeof onToggle === 'function';
+  const indexLabel = isZh ? `第 ${index}/${total} 步` : `Step ${index}/${total}`;
   return (
     <motion.div
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.18 }}
-    >
-      {interactive ? (
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-expanded={collapsed ? 'false' : 'true'}
-          className={cn(
-            'w-full flex items-center gap-2 px-3 py-2 rounded-xl bg-primary/5 border border-primary/15 text-left cursor-pointer hover:bg-primary/10 transition-colors',
-          )}
-        >
-          <div className="flex items-center gap-1.5 shrink-0 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[11px] font-medium">
-            <motion.span
-              animate={{ rotate: collapsed ? 0 : 90 }}
-              transition={{ duration: 0.15 }}
-              className="inline-flex"
-            >
-              <ChevronRight className="w-3 h-3" />
-            </motion.span>
-            <span>{indexLabel}</span>
-          </div>
-          <div className="min-w-0 text-sm font-medium text-foreground truncate">{label}</div>
-        </button>
-      ) : (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-primary/5 border border-primary/15">
-          <div className="flex items-center gap-1.5 shrink-0 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[11px] font-medium">
-            <ChevronRight className="w-3 h-3" />
-            <span>{indexLabel}</span>
-          </div>
-          <div className="min-w-0 text-sm font-medium text-foreground truncate">{label}</div>
-        </div>
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.15 }}
+      className={cn(
+        'flex items-center gap-2 pt-3 pb-1',
+        index > 1 && 'mt-1 border-t border-border/40',
       )}
+    >
+      <span className="shrink-0 text-[11px] font-semibold text-primary/70 tracking-wide uppercase">
+        {indexLabel}
+      </span>
+      <span className="text-xs text-muted-foreground truncate">{label}</span>
     </motion.div>
   );
 }
