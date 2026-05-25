@@ -915,7 +915,7 @@ export function CopilotPanel() {
           ref={panelRef}
           initial={false}
           animate={isSideDocked
-            ? { width: isOpen ? 380 : 0, height: '100vh' }
+            ? { width: isOpen ? 380 : 0 }
             : { height: isFullScreen ? '100vh' : isOpen ? '78vh' : 'auto' }
           }
           transition={{ type: 'spring', damping: 32, stiffness: 280 }}
@@ -941,22 +941,21 @@ export function CopilotPanel() {
             }
           }}
           className={cn(
-            'fixed z-[60] flex flex-col overflow-hidden safe-area-bottom',
+            'flex flex-col overflow-hidden safe-area-bottom',
             'bg-background/80 backdrop-blur-md',
-            // Float mode: bottom sheet
-            !isSideDocked && 'bottom-0 left-0 right-0 justify-end border-t border-border/50',
+            // Float mode: fixed bottom sheet overlay
+            !isSideDocked && 'fixed bottom-0 left-0 right-0 z-[60] justify-end border-t border-border/50',
             !isSideDocked && isOpen && !isFullScreen && 'rounded-t-[20px]',
-            // Side-docked mode: fixed side panel, full height
-            isSideDocked && 'top-0 bottom-0 w-[380px] border-border/50',
-            isSideDocked && effectiveLayout === 'right' && 'right-0 border-l',
-            isSideDocked && effectiveLayout === 'left' && 'left-0 border-r',
-            // When side-docked and closed, prevent it from intercepting clicks.
-            isSideDocked && !isOpen && 'pointer-events-none',
+            // Side-docked mode: inline flex child, not fixed/absolute.
+            // Width is controlled by animation; height fills the parent flex container.
+            isSideDocked && 'h-full shrink-0 border-border/50',
+            isSideDocked && effectiveLayout === 'right' && 'border-l',
+            isSideDocked && effectiveLayout === 'left' && 'border-r',
           )}
           style={
             isOpen && !isSideDocked
               ? { boxShadow: '0 -8px 32px -4px rgba(0, 0, 0, 0.15), 0 -4px 16px -4px rgba(0, 0, 0, 0.1)' }
-              : isSideDocked
+              : isSideDocked && isOpen
                 ? { boxShadow: '0 0 24px -4px rgba(0, 0, 0, 0.1)' }
                 : undefined
           }
