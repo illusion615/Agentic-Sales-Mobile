@@ -92,6 +92,33 @@ function labelFor(intent: QueueIntent, isZh: boolean): string {
   return isZh ? zh : en;
 }
 
+/** Short one-liner describing what this step will do (for the announce message). */
+function describeStep(intent: QueueIntent, isZh: boolean): string {
+  const args = intent.arguments;
+  const title = (args.title ?? args.name ?? args.fullName ?? '') as string;
+  const account = (args.accountName ?? '') as string;
+  switch (intent.function) {
+    case 'draftActivity':
+      return isZh
+        ? (title ? `记录「${title}」` : account ? `记录对${account}的拜访` : '将为你准备活动草稿')
+        : (title ? `Log "${title}"` : account ? `Log visit to ${account}` : 'Prepare activity draft');
+    case 'draftOpportunity':
+      return isZh
+        ? (title ? `新建商机「${title}」` : '将为你准备商机草稿')
+        : (title ? `Create opportunity "${title}"` : 'Prepare opportunity draft');
+    case 'draftContact':
+      return isZh
+        ? (title ? `新建联系人「${title}」` : '将为你准备联系人草稿')
+        : (title ? `Create contact "${title}"` : 'Prepare contact draft');
+    case 'draftAccount':
+      return isZh
+        ? (title ? `新建客户「${title}」` : '将为你准备客户草稿')
+        : (title ? `Create account "${title}"` : 'Prepare account draft');
+    default:
+      return '';
+  }
+}
+
 function emitAnnounce(queue: IntentQueue, intent: QueueIntent, deps: RuntimeDeps): IntentQueue {
   if (intent.announced || intent.parentId) return queue;
   const { idx, total } = stepPosition(queue, intent);
@@ -99,9 +126,10 @@ function emitAnnounce(queue: IntentQueue, intent: QueueIntent, deps: RuntimeDeps
   if (total <= 1) return patchIntent(queue, intent.id, { announced: true });
   const isZh = deps.locale === 'zh-Hans';
   const label = labelFor(intent, isZh);
+  const desc = describeStep(intent, isZh);
   const content = isZh
-    ? `正在处理第 ${idx} / ${total} 步：${label}`
-    : `Starting step ${idx} of ${total}: ${label}`;
+    ? `正在处理第 ${idx} / ${total} 步：${label}${desc ? ` — ${desc}` : ''}`
+    : `Step ${idx} of ${total}: ${label}${desc ? ' — ' + desc : ''}`;
   deps.pushMessage({
     id: `narrate-${queue.id}-${intent.id}-announce-${Date.now()}`,
     type: 'agent',
@@ -263,13 +291,18 @@ async function runOneResolution(
 ): Promise<IntentQueue> {
   const { entityType, query, scopeBy } = resolution;
 
+  // Activity duplicate-check is not useful for sales workflows — reps frequently
+  // visit the same account/topic. Skip it silently.
+  if (entityType === 'activity') {
+    return dropFirstResolution(queue, intent.id);
+  }
+
   // scopeBy: inject parent entity id into the match call.
   const scopeAccountId = scopeBy === 'account' ? queue.resolvedContext.accountId : undefined;
 
   const fnName =
     entityType === 'account' ? 'fuzzyMatchAccount'
     : entityType === 'contact' ? 'fuzzyMatchContact'
-    : entityType === 'activity' ? 'fuzzyMatchActivity'
     : 'fuzzyMatchOpportunity';
 
   try {
@@ -334,11 +367,15 @@ async function implicitNameResolution(
 
   const args = buildEffectiveArgs(intent, queue.resolvedContext);
   type Lookup = { name: string; idField: string; entityType: 'account' | 'contact' | 'opportunity' };
-  const lookups: Lookup[] = [{ name: 'accountName', idField: 'accountId', entityType: 'account' }];
+  // Order: opportunity → contact → account.
+  // Selecting an opportunity often provides the account; selecting a contact
+  // provides the account too. This minimises redundant user selections.
+  const lookups: Lookup[] = [];
   if (intent.function === 'draftActivity') {
-    lookups.push({ name: 'contactName', idField: 'contactId', entityType: 'contact' });
     lookups.push({ name: 'opportunityName', idField: 'opportunityId', entityType: 'opportunity' });
+    lookups.push({ name: 'contactName', idField: 'contactId', entityType: 'contact' });
   }
+  lookups.push({ name: 'accountName', idField: 'accountId', entityType: 'account' });
 
   let q = queue;
   for (const lk of lookups) {

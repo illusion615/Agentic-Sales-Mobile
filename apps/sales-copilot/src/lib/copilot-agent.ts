@@ -971,7 +971,7 @@ Rules:
    - **IMPORTANT**: When creating activities, entityType MUST be 'account' (to find the customer), NOT 'activity'
    - System will first find matches, then decide whether to use existing record or create new
    - **⭐ MULTI-ENTITY RESOLUTION CHAIN (resolutions[], I-3)**: When the user names multiple entities to match in a single sentence (e.g., "add a cardiac-consumables opportunity for Rachel Stenhouse at King's College Hospital" mentions account + contact + opportunity at once), do NOT use matchTarget — use a "resolutions" array listing each step in order:
-     - Fixed order: account → contact → opportunity → activity
+     - Fixed order: opportunity → contact → account (selecting an opportunity provides account context; selecting a contact provides its account — this minimises redundant user selections). Do NOT include activity-type resolutions — activity duplicate-checks are skipped.
      - Each item: { entityType, query, scopeBy? }; scopeBy indicates the parent scope to look within (contact/opportunity typically scopeBy:'account')
      - Set requiresMatching: true; matchTarget can be omitted (or kept identical to resolutions[0] for backward compat)
      - System resolves each step in sequence and auto-injects the resolved ID of earlier steps into later ones
