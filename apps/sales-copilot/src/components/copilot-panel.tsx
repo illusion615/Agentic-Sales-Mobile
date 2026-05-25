@@ -1,7 +1,7 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence, useDragControls, type PanInfo } from 'motion/react';
-import { Sparkles, ArrowUp, SquarePen, X, ChevronDown, ChevronLeft, ChevronRight, Copy, Volume2, VolumeX, Loader2, Square, Play, Pause, Paperclip, RotateCcw } from 'lucide-react';
+import { Sparkles, ArrowUp, SquarePen, X, ChevronDown, Copy, Volume2, VolumeX, Loader2, Square, Play, Pause, Paperclip, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useCopilot, type ChatMessage } from '@/contexts/copilot-context';
 import { getLocale, getChatFontClass, getSelectedVoice, findMatchingSystemVoice, getLLMConfig, getVoiceSummaryEnabled, generateVoiceSummary, getCopilotDockLayout, type CopilotDockLayout, type Locale } from '@/lib/i18n';
@@ -61,6 +61,11 @@ export function CopilotPanel() {
   // On mobile always fall back to float regardless of setting.
   const effectiveLayout: CopilotDockLayout = isMobile ? 'float' : dockLayout;
   const isSideDocked = effectiveLayout === 'left' || effectiveLayout === 'right';
+
+  // Side-docked mode: always keep the panel open (no collapse).
+  useEffect(() => {
+    if (isSideDocked && !isOpen) openPanel(false);
+  }, [isSideDocked, isOpen, openPanel]);
 
   // Render counter for loop diagnostics
   const renderCountRef = useRef(0);
@@ -792,7 +797,8 @@ export function CopilotPanel() {
     const panelChrome = (
       <>
         {/* Drag handle — hidden in full-screen */}
-        {!isFullScreen && (
+        {/* Drag handle — hidden in side-docked mode */}
+        {!isFullScreen && !isSideDocked && (
           <div
             className="flex justify-center py-2 cursor-grab active:cursor-grabbing touch-none"
             onPointerDown={(e: React.PointerEvent) => dragControls.start(e)}
@@ -806,6 +812,10 @@ export function CopilotPanel() {
           'flex items-center justify-between px-4 py-2 border-b border-border/30',
           isFullScreen && 'safe-area-top pt-3'
         )}>
+          {/* Collapse button — hidden in side-docked mode (always open) */}
+          {isSideDocked ? (
+            <div className="w-8" />
+          ) : (
           <button
             onClick={isFullScreen ? () => openPanel(false) : handleClose}
             className="w-8 h-8 flex items-center justify-center rounded-lg transition-all hover:brightness-125 active:brightness-75"
@@ -815,13 +825,9 @@ export function CopilotPanel() {
                 : (isFullScreen ? 'Back to panel' : 'Collapse')
             }
           >
-            {effectiveLayout === 'left'
-              ? <ChevronLeft className="w-4 h-4 text-foreground" />
-              : effectiveLayout === 'right'
-                ? <ChevronRight className="w-4 h-4 text-foreground" />
-                : <ChevronDown className="w-4 h-4 text-foreground" />
-            }
+            <ChevronDown className="w-4 h-4 text-foreground" />
           </button>
+          )}
           <div className="flex items-center gap-2">
             {isFullScreen && <Sparkles className="w-5 h-5 text-primary" />}
             <span className="text-sm font-medium text-foreground">Ask Copilot</span>
@@ -948,7 +954,8 @@ export function CopilotPanel() {
             !isSideDocked && isOpen && !isFullScreen && 'rounded-t-[20px]',
             // Side-docked mode: inline flex child, not fixed/absolute.
             // Width is controlled by animation; height fills the parent flex container.
-            isSideDocked && 'h-full shrink-0 border-border/50',
+            // pt-14: push content below the fixed page header that spans full width.
+            isSideDocked && 'h-full shrink-0 border-border/50 pt-14',
             isSideDocked && effectiveLayout === 'right' && 'border-l',
             isSideDocked && effectiveLayout === 'left' && 'border-r',
           )}
