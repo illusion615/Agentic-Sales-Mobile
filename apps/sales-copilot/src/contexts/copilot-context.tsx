@@ -7,7 +7,9 @@ import {
 } from '@/services/copilot-service';
 import { getLocale, getSimulateStreaming, type Locale } from '@/lib/i18n';
 import { toast } from 'sonner';
-import { processMessage, type ThinkingProgress, type AgentResponse } from '@/lib/copilot-agent';
+import { processMessage, type ThinkingProgress, type AgentResponse, type IntentResult } from '@/lib/copilot-agent';
+import { buildQueueFromIntent, findIntentByMessageId, type IntentQueue } from '@/lib/intent-queue';
+import * as QR from '@/lib/intent-queue-runtime';
 import { narrateTask, type PriorTaskOutcome } from '@/lib/task-narrator';
 import type { AwaitingClarification, ResolutionItem } from '@/lib/agent-utils';
 import { extractVisitDataFromText, type ExtractedVisitData } from '@/lib/visit-extraction';
@@ -27,6 +29,10 @@ export interface ChatMessage {
   type: 'user' | 'agent' | 'stage-card' | 'form-card' | 'batch-form-card' | 'match-selection' | 'clarification' | 'awaiting-clarification';
   role?: 'user' | 'assistant';
   content: string;
+  /** IntentQueue id this message belongs to (queue-driven flows). */
+  queueId?: string;
+  /** QueueIntent id this message represents (queue-driven flows). */
+  queueIntentId?: string;
   audioUrl?: string;
   audioDuration?: number;
   agentName?: string;
@@ -292,6 +298,23 @@ interface CopilotContextValue {
   // Stage 5+: resume parked intent after creating a new account or opportunity via the inline draft form.
   completeParkedIntentWithNewAccount: (accountId: string, accountName: string) => Promise<void>;
   completeParkedIntentWithNewOpportunity: (opportunityId: string, opportunityName: string, accountId?: string, accountName?: string) => Promise<void>;
+
+  // Unified queue handlers for form-card. When the message belongs to an active IntentQueue
+  // (carries queueIntentId), these dispatch to the queue runtime; otherwise they fall back to
+  // the parked-intent legacy resume path.
+  formCardSaved: (args: {
+    messageId: string;
+    type: 'activity' | 'opportunity' | 'account' | 'contact';
+    recordId: string;
+    recordName?: string;
+    accountId?: string;
+    accountName?: string;
+    contactId?: string;
+    contactName?: string;
+    opportunityId?: string;
+    opportunityName?: string;
+  }) => Promise<void>;
+  formCardCancelled: (messageId: string) => Promise<void>;
 }
 
 export interface PageContext {
@@ -308,7 +331,7 @@ const CopilotContext = createContext<CopilotContextValue | null>(null);
 // changes incompatibly; on mismatch we discard and start fresh instead of
 // rendering broken cards.
 const PERSIST_KEY = 'copilot-messages';
-const PERSIST_SCHEMA_VERSION = 2;
+const PERSIST_SCHEMA_VERSION = 3;
 const PERSIST_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 interface PersistEnvelope {
   v: number;
@@ -495,6 +518,62 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     blockedMsgId: string;
     additionalActions?: Array<{ function: string; arguments: Record<string, unknown>; reason?: string }>;
   } | null>(null);
+
+  // ===== IntentQueue: single source of truth for multi-step orchestration =====
+  // Replaces parkedIntentRef + replayAdditionalActions for any flow whose initial
+  // intent triggers queue mode (draft / batch / matching / awaitingClarification).
+  // Each card the queue produces carries queueId + queueIntentId so user actions
+  // (Save / Cancel / Pick / Skip) dispatch back into the queue runtime.
+  const queueRef = useRef<IntentQueue | null>(null);
+  const [, setQueueTick] = useState(0);
+  const bumpQueue = useCallback(() => setQueueTick((t) => t + 1), []);
+  const queryClientRef = useRef(queryClient);
+  useEffect(() => { queryClientRef.current = queryClient; }, [queryClient]);
+
+  const buildRuntimeDeps = useCallback((): QR.RuntimeDeps => ({
+    userId: user?.objectId,
+    userEmail: user?.userPrincipalName,
+    locale: (locale === 'zh-Hans' ? 'zh-Hans' : 'en-US') as 'zh-Hans' | 'en-US',
+    pushMessage: (msg) => {
+      const chatMsg = {
+        ...msg,
+        role: 'assistant' as const,
+        timestamp: typeof msg.timestamp === 'number' ? new Date(msg.timestamp).toISOString() : msg.timestamp,
+      } as unknown as ChatMessage;
+      setMessages((prev) => [...prev, chatMsg]);
+    },
+    patchMessage: (id, patch) => {
+      setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...(patch as Partial<ChatMessage>) } : m)));
+    },
+    invalidate: (keys) => {
+      if (!keys || keys.length === 0) return;
+      keys.forEach((k) => queryClientRef.current.invalidateQueries({ queryKey: [k] }));
+    },
+    toast: (kind, msg) => {
+      if (kind === 'success') toast.success(msg);
+      else if (kind === 'error') toast.error(msg);
+      else toast(msg);
+    },
+  }), [user, locale]);
+
+  const runAndStoreQueue = useCallback(async (q: IntentQueue) => {
+    queueRef.current = q;
+    bumpQueue();
+    const after = await QR.runQueue(q, buildRuntimeDeps());
+    queueRef.current = after;
+    bumpQueue();
+  }, [buildRuntimeDeps, bumpQueue]);
+
+  // Predicate: does this LLM intent need the queue to orchestrate it?
+  const shouldUseQueue = useCallback((intent: IntentResult | undefined): boolean => {
+    if (!intent || !intent.function) return false;
+    const draftFns = ['draftActivity', 'draftOpportunity', 'draftAccount', 'draftContact', 'batchDraft'];
+    if (draftFns.includes(intent.function)) return true;
+    if (intent.additionalActions && intent.additionalActions.length > 0) return true;
+    if (intent.requiresMatching) return true;
+    if (intent.resolutions && intent.resolutions.length > 0) return true;
+    return false;
+  }, []);
 
   // Persist messages to sessionStorage - only when all streaming/thinking is complete
   // Use a ref to track the last persisted snapshot and avoid redundant writes
@@ -1128,6 +1207,36 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       lastForGate.type === 'awaiting-clarification' &&
       lastForGate.awaitingClarification
     ) {
+      // Queue-driven awaiting card → dispatch to runtime.
+      if (lastForGate.queueIntentId && queueRef.current) {
+        const userReplyMsg: ChatMessage = {
+          id: `msg-${Date.now()}-user`,
+          type: 'user',
+          role: 'user',
+          content: text.trim(),
+          timestamp: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, userReplyMsg]);
+        setInputValue('');
+        try {
+          const result = await QR.handleAwaitingReply(
+            queueRef.current,
+            lastForGate.queueIntentId,
+            text.trim(),
+            buildRuntimeDeps(),
+          );
+          if (result.handled) {
+            queueRef.current = result.queue;
+            bumpQueue();
+            return;
+          }
+        } catch (err) {
+          console.error('[CopilotContext] queue awaiting reply error:', err);
+        }
+        // Not handled by queue → fall through to normal flow (mark resolved + re-detect intent).
+        setMessages((prev) => prev.map((m) => m.id === lastForGate.id ? { ...m, resolutionState: 'resolved' as const } : m));
+        // Fall through past the legacy gate by treating the rest as a fresh request.
+      } else {
       const trimmed = text.trim();
       const isCreate = /^(\u65b0\u5efa|create|\u521b\u5efa)/i.test(trimmed);
       const isSkip = /^(\u8df3\u8fc7|skip)/i.test(trimmed);
@@ -1300,6 +1409,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       const blockedId2 = lastForGate.id;
       setMessages((prev) => prev.map((m) => m.id === blockedId2 ? { ...m, resolutionState: 'resolved' as const } : m));
       // Fall through to normal flow below (which adds the user message and calls processMessage).
+      }
     }
 
     // Add user message immediately
@@ -1415,6 +1525,36 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             } : undefined,
           }, handleProgress);
           
+          // ===== IntentQueue intercept =====
+          // When the parsed intent triggers queue mode (draft / batch / matching / additionalActions),
+          // discard the agent's pre-rendered cards and hand off to the queue runtime instead.
+          // The thinking message becomes a brief agent ack and the queue pushes its own cards.
+          if (response.rawIntent && shouldUseQueue(response.rawIntent)) {
+            setIsSending(false);
+            setMessages((prev) => prev.map((msg) => {
+              if (msg.id !== thinkingMsgId) return msg;
+              const stepCount = 1 + (response.rawIntent?.additionalActions?.length ?? 0);
+              const ackContent = stepCount > 1
+                ? (locale === 'zh-Hans' ? `已识别 ${stepCount} 步任务，依次处理...` : `Detected ${stepCount} steps. Processing in order...`)
+                : (locale === 'zh-Hans' ? '正在准备...' : 'Preparing...');
+              return {
+                ...msg,
+                type: 'agent' as const,
+                content: ackContent,
+                functionCalled: response.functionCalled,
+                functionDisplayName: response.functionDisplayName,
+                isThinking: false,
+                // Drop pre-resolved thinkingSteps (e.g. "Found N high-confidence matches").
+                // In queue mode the same info already appears inside the cards we render,
+                // so showing it again above the ack is redundant noise.
+                thinkingSteps: undefined,
+              };
+            }));
+            const newQueue = buildQueueFromIntent(response.rawIntent);
+            await runAndStoreQueue(newQueue);
+            return;
+          }
+
           // Clarification is now handled naturally by the LLM as a regular response
           // No special clarificationQuestions handling needed - LLM will ask for more info naturally
 
@@ -1850,6 +1990,25 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     entityType: 'account' | 'contact' | 'opportunity' | 'activity',
     sourceMessageId?: string
   ) => {
+    // Queue intercept: when the card belongs to an active queue intent, route the pick
+    // to the runtime so the queue advances; bypass the legacy resolution cascade.
+    if (sourceMessageId) {
+      const srcMsg = messagesRef.current.find((m) => m.id === sourceMessageId);
+      const intentId = srcMsg?.queueIntentId;
+      const q = queueRef.current;
+      if (intentId && q && findIntentByMessageId(q, sourceMessageId)) {
+        const after = await QR.handlePick(q, intentId, {
+          id: selectedRecord.id,
+          name: selectedRecord.name,
+          accountId: selectedRecord.accountId,
+          accountName: selectedRecord.accountName,
+        }, buildRuntimeDeps());
+        queueRef.current = after;
+        bumpQueue();
+        return;
+      }
+    }
+
     // Lock the source match-selection card with a result line.
     if (sourceMessageId) {
       const resultText = locale === 'zh-Hans'
@@ -2442,7 +2601,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsSending(false);
     }
-  }, [user, locale, messages]);
+  }, [user, locale, messages, buildRuntimeDeps, bumpQueue]);
 
   // Create new record from pending intent (when user clicks 'Create New' instead of selecting a match)
   const createNewFromIntent = useCallback(async (
@@ -2548,6 +2707,20 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     queryName: string,
     blockedMsgId?: string
   ) => {
+    // Queue intercept
+    if (blockedMsgId) {
+      const srcMsg = messagesRef.current.find((m) => m.id === blockedMsgId);
+      const intentId = srcMsg?.queueIntentId;
+      const q = queueRef.current;
+      if (intentId && q && findIntentByMessageId(q, blockedMsgId)) {
+        const kind: 'contact' | 'account' | 'opportunity' =
+          entityKind === 'activity' ? 'opportunity' : entityKind;
+        const after = await QR.handleCreateNew(q, intentId, kind, queryName, buildRuntimeDeps());
+        queueRef.current = after;
+        bumpQueue();
+        return;
+      }
+    }
     // Activity branch: "create new anyway" — lock the card, then run the
     // original draftActivity. Original args carry no activityId, so the form
     // will be a fresh draft (matching the duplicate-check bypass semantic).
@@ -2662,7 +2835,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
 
     // Unreachable — entityKind is exhausted by the contact / account / opportunity / activity branches above.
     await skipResolutionAndDraftImpl(pendingIntent, entityKind);
-  }, [user, locale]);
+  }, [user, locale, buildRuntimeDeps, bumpQueue]);
 
   // Unified resolution — skip: strip the unresolved entity from args and run the original draft directly.
   // The resulting form-card has an empty lookup for the skipped entity so the user can pick it in-form.
@@ -2728,6 +2901,18 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     entityKind: 'contact' | 'account' | 'opportunity' | 'activity',
     blockedMsgId?: string
   ) => {
+    // Queue intercept
+    if (blockedMsgId) {
+      const srcMsg = messagesRef.current.find((m) => m.id === blockedMsgId);
+      const intentId = srcMsg?.queueIntentId;
+      const q = queueRef.current;
+      if (intentId && q && findIntentByMessageId(q, blockedMsgId)) {
+        const after = await QR.handleSkip(q, intentId, buildRuntimeDeps());
+        queueRef.current = after;
+        bumpQueue();
+        return;
+      }
+    }
     // Activity branch: "skip" = cancel the draft entirely. The activity IS the
     // thing being drafted, so there's nothing left to draft — just lock the
     // card and stop. No executeFunction call.
@@ -2756,7 +2941,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       ));
     }
     await skipResolutionAndDraftImpl(pendingIntent, entityKind);
-  }, [user, locale]);
+  }, [user, locale, buildRuntimeDeps, bumpQueue]);
 
   // Unified resolution — search other: re-run fuzzyMatch with a new query and patch matchSelection in place.
   // Used by the "Search other" inline input on the resolution card.
@@ -2768,6 +2953,18 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
   ) => {
     const trimmed = newQuery.trim();
     if (!trimmed) return;
+    // Queue intercept
+    {
+      const srcMsg = messagesRef.current.find((m) => m.id === messageId);
+      const intentId = srcMsg?.queueIntentId;
+      const q = queueRef.current;
+      if (intentId && q && findIntentByMessageId(q, messageId)) {
+        const after = await QR.handleSearchOther(q, intentId, trimmed, buildRuntimeDeps());
+        queueRef.current = after;
+        bumpQueue();
+        return;
+      }
+    }
     const matchFnName = entityType === 'account' ? 'fuzzyMatchAccount'
       : entityType === 'contact' ? 'fuzzyMatchContact'
       : entityType === 'activity' ? 'fuzzyMatchActivity'
@@ -2817,7 +3014,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.error('[CopilotContext] refreshResolution error:', err);
     }
-  }, [user]);
+  }, [user, buildRuntimeDeps, bumpQueue]);
   const updateFormCardStatus = useCallback((
     messageId: string,
     status: 'pending' | 'confirmed' | 'modified',
@@ -2857,6 +3054,68 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       return msg;
     }));
   }, []);
+
+  // ===== IntentQueue: unified form-card save / cancel dispatchers =====
+  // If the form-card belongs to an active queue intent, route to the runtime so the queue
+  // advances correctly. Otherwise fall through to the legacy parked-intent resume paths
+  // (kept for backward compatibility with persisted pre-refactor messages).
+  const formCardSaved = useCallback(async (args: {
+    messageId: string;
+    type: 'activity' | 'opportunity' | 'account' | 'contact';
+    recordId: string;
+    recordName?: string;
+    accountId?: string;
+    accountName?: string;
+    contactId?: string;
+    contactName?: string;
+    opportunityId?: string;
+    opportunityName?: string;
+  }): Promise<void> => {
+    const msg = messagesRef.current.find((m) => m.id === args.messageId);
+    const intentId = msg?.queueIntentId;
+    const q = queueRef.current;
+    if (intentId && q && findIntentByMessageId(q, args.messageId)) {
+      const after = await QR.handleSave(q, intentId, {
+        recordId: args.recordId,
+        recordName: args.recordName,
+        type: args.type,
+        accountId: args.accountId,
+        accountName: args.accountName,
+        contactId: args.contactId,
+        contactName: args.contactName,
+        opportunityId: args.opportunityId,
+        opportunityName: args.opportunityName,
+      }, buildRuntimeDeps());
+      queueRef.current = after;
+      bumpQueue();
+      return;
+    }
+    // Legacy path: delegate to existing completeParkedIntentWith* based on entity type.
+    if (args.type === 'contact') {
+      await completeParkedIntentWithNewContact(args.recordId, args.recordName ?? '', args.accountId, args.accountName);
+    } else if (args.type === 'account') {
+      await completeParkedIntentWithNewAccount(args.recordId, args.recordName ?? '');
+    } else if (args.type === 'opportunity') {
+      await completeParkedIntentWithNewOpportunity(args.recordId, args.recordName ?? '', args.accountId, args.accountName);
+    }
+    // Activity: no legacy parked resume — saving an activity ends the flow naturally.
+  }, [buildRuntimeDeps, bumpQueue, completeParkedIntentWithNewContact, completeParkedIntentWithNewAccount, completeParkedIntentWithNewOpportunity]);
+
+  const formCardCancelled = useCallback(async (messageId: string): Promise<void> => {
+    const msg = messagesRef.current.find((m) => m.id === messageId);
+    const intentId = msg?.queueIntentId;
+    const q = queueRef.current;
+    if (intentId && q && findIntentByMessageId(q, messageId)) {
+      const after = await QR.handleCancel(q, intentId, buildRuntimeDeps());
+      queueRef.current = after;
+      bumpQueue();
+      return;
+    }
+    // No legacy cancel path — just clear parked state if it was tied to this message.
+    if (parkedIntentRef.current?.blockedMsgId === messageId) {
+      parkedIntentRef.current = null;
+    }
+  }, [buildRuntimeDeps, bumpQueue]);
 
   const value: CopilotContextValue = useMemo(() => ({
     isOpen,
@@ -2900,6 +3159,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     completeParkedIntentWithNewContact,
     completeParkedIntentWithNewAccount,
     completeParkedIntentWithNewOpportunity,
+    formCardSaved,
+    formCardCancelled,
   }), [
     isOpen,
     isFullScreen,
@@ -2935,6 +3196,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     completeParkedIntentWithNewContact,
     completeParkedIntentWithNewAccount,
     completeParkedIntentWithNewOpportunity,
+    formCardSaved,
+    formCardCancelled,
   ]);
 
   return (

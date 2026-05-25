@@ -980,6 +980,17 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
         // Pass the created record ID to persist it in session storage
         copilot.updateFormCardStatus(messageId, 'confirmed', undefined, createdActivity.id);
         toast.success(locale === 'zh-Hans' ? '活动已创建' : 'Activity created');
+        copilot.formCardSaved({
+          messageId,
+          type: 'activity',
+          recordId: createdActivity.id,
+          accountId: targetAccount?.id,
+          accountName: targetAccount?.name1,
+          opportunityId: targetOpportunity?.id,
+          opportunityName: targetOpportunity?.name1,
+          contactId: targetContact?.id,
+          contactName: targetContact?.fullname,
+        });
       } else if (type === 'opportunity') {
         const stage = (formData.stage as string) || 'prospecting';
         
@@ -1029,13 +1040,15 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
         createdRecordIdRef.current = createdOpp.id;
         copilot.updateFormCardStatus(messageId, 'confirmed', undefined, createdOpp.id);
         toast.success(locale === 'zh-Hans' ? '商机已创建' : 'Opportunity created');
-        // Resume parked intent (e.g. draftActivity) with the new opportunityId.
-        copilot.completeParkedIntentWithNewOpportunity(
-          createdOpp.id,
-          oppName,
-          targetAccount.id,
-          targetAccount.name1 || '',
-        );
+        // Unified queue / legacy resume.
+        copilot.formCardSaved({
+          messageId,
+          type: 'opportunity',
+          recordId: createdOpp.id,
+          recordName: oppName,
+          accountId: targetAccount.id,
+          accountName: targetAccount.name1 || '',
+        });
       } else if (type === 'account') {
         const region = (formData.region as string) || '华东';
         const tier = (formData.tier as string) || 'C';
@@ -1055,11 +1068,13 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
         createdRecordIdRef.current = createdAccount.id;
         copilot.updateFormCardStatus(messageId, 'confirmed', undefined, createdAccount.id);
         toast.success(locale === 'zh-Hans' ? '客户已创建' : 'Account created');
-        // Resume parked intent with the new accountId.
-        copilot.completeParkedIntentWithNewAccount(
-          createdAccount.id,
-          formData.name as string || '',
-        );
+        // Unified queue / legacy resume.
+        copilot.formCardSaved({
+          messageId,
+          type: 'account',
+          recordId: createdAccount.id,
+          recordName: formData.name as string || '',
+        });
       } else if (type === 'contact') {
         // Create contact
         let targetAccount: Account | undefined;
@@ -1098,15 +1113,15 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
         copilot.updateFormCardStatus(messageId, 'confirmed', undefined, createdContact.id);
         toast.success(locale === 'zh-Hans' ? '联系人已创建' : 'Contact created');
 
-        // I-2 Round 3: if this contact was created via awaiting-clarification flow,
-        // resume the parked intent (e.g., the original activity creation) with the new contactId.
-        // Also forward the resolved account so the resumed Activity form pre-fills it correctly.
-        copilot.completeParkedIntentWithNewContact(
-          createdContact.id,
-          formData.fullName as string || '',
-          targetAccount.id,
-          targetAccount.name1 || '',
-        );
+        // Unified queue / legacy resume.
+        copilot.formCardSaved({
+          messageId,
+          type: 'contact',
+          recordId: createdContact.id,
+          recordName: formData.fullName as string || '',
+          accountId: targetAccount.id,
+          accountName: targetAccount.name1 || '',
+        });
       }
 
       setStatus('confirmed');
@@ -1124,6 +1139,9 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
   const handleCancel = () => {
     // Reset form data to original
     setFormData(formCard.data);
+    // Notify queue / context so a multi-step flow advances past this cancelled step
+    // instead of stalling the entire queue.
+    copilot.formCardCancelled(messageId);
   };
 
   // If already confirmed, show simplified view with click to navigate

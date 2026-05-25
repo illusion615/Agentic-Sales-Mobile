@@ -113,11 +113,17 @@ export interface AgentResponse {
    *  Lets the context layer detect intent boundaries inside the cascade and
    *  emit a fresh task-announce bubble when the index changes. */
   currentIntentIndex?: number;
+
+  /** Raw parsed intent from the LLM Pass-1. Exposed so the context layer can
+   *  build an IntentQueue from it and drive multi-step orchestration through
+   *  the queue runtime instead of the agent's internal cascade. Populated
+   *  whenever Pass-1 parsing succeeds (function may be null for direct responses). */
+  rawIntent?: IntentResult;
 }
 
 // IntentResult is now imported from agent-utils as ValidatedIntentResult
 // We still keep a local interface for backward compatibility
-interface IntentResult extends Partial<ValidatedIntentResult> {
+export interface IntentResult extends Partial<ValidatedIntentResult> {
   function: string | null;
   arguments?: Record<string, unknown>;
   directResponse?: string;
@@ -417,7 +423,34 @@ async function processAdditionalIntents(
  * 1. Intent detection + function call generation
  * 2. Natural language response generation using function result
  */
+// Module-level side-channel so the outer wrapper can attach rawIntent to the
+// response without threading it through ~30 nested return sites.
+let _lastParsedIntent: IntentResult | null = null;
+
 export async function processMessage(
+  userMessage: string,
+  context: {
+    userId?: string;
+    userEmail?: string;
+    locale?: string;
+    conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+    pageContext?: {
+      currentPage: string;
+      pageData?: unknown;
+      summary?: string;
+    };
+  },
+  onProgress?: (progress: ThinkingProgress) => void
+): Promise<AgentResponse> {
+  _lastParsedIntent = null;
+  const result = await processMessageInner(userMessage, context, onProgress);
+  if (_lastParsedIntent && !result.rawIntent) {
+    result.rawIntent = _lastParsedIntent;
+  }
+  return result;
+}
+
+async function processMessageInner(
   userMessage: string,
   context: {
     userId?: string;
@@ -1325,6 +1358,7 @@ User: "Log a meeting with Rachel at King's College Hospital"
 
     recordCircuitBreakerSuccess();
     intent = translated as IntentResult;
+    _lastParsedIntent = intent;
     console.log('[INTENT/frame] function=' + intent.function,
       'args=' + JSON.stringify(intent.arguments || {}),
       'extras=' + (intent.additionalActions?.length ?? 0),
@@ -1358,6 +1392,7 @@ User: "Log a meeting with Rachel at King's College Hospital"
 
     recordCircuitBreakerSuccess();
     intent = parseJsonResponse(intentResponse.content || '') as IntentResult | null;
+    if (intent) _lastParsedIntent = intent;
     console.log('[INTENT] Raw LLM response:', intentResponse.content);
     console.log('[INTENT] userQuery="' + userMessage + '" => function=' + (intent?.function || 'null') + ', args=' + JSON.stringify(intent?.arguments || {}));
 
