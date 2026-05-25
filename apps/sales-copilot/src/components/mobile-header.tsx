@@ -67,7 +67,7 @@ export function MobileHeader({
       </h1>
 
       {/* Right: Custom header right or More button */}
-      <div className="w-10 flex items-center justify-end">
+      <div className="min-w-10 flex items-center justify-end">
         {headerRight ? (
           headerRight
         ) : (
