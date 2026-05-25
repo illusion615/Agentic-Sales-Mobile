@@ -60,7 +60,7 @@ export interface ChatMessage {
     isNew: boolean;
     existingId?: string;
     data: Record<string, unknown>;
-    status?: 'pending' | 'confirmed' | 'modified';
+    status?: 'pending' | 'confirmed' | 'modified' | 'cancelled';
     createdRecordId?: string;
   };
   // Batch form cards for multiple drafts
@@ -70,7 +70,7 @@ export interface ChatMessage {
       isNew: boolean;
       data: Record<string, unknown>;
       batchIndex: number;
-      status?: 'pending' | 'confirmed' | 'modified';
+      status?: 'pending' | 'confirmed' | 'modified' | 'cancelled';
       createdRecordId?: string;
       userFacingLabel?: { zh: string; en: string };
       intentIndex?: number;
@@ -282,7 +282,7 @@ interface CopilotContextValue {
   // Update form card status in a message (for persisting confirmed/modified state)
   updateFormCardStatus: (
     messageId: string,
-    status: 'pending' | 'confirmed' | 'modified',
+    status: 'pending' | 'confirmed' | 'modified' | 'cancelled',
     batchIndex?: number,
     createdRecordId?: string
   ) => void;
@@ -3017,7 +3017,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
   }, [user, buildRuntimeDeps, bumpQueue]);
   const updateFormCardStatus = useCallback((
     messageId: string,
-    status: 'pending' | 'confirmed' | 'modified',
+    status: 'pending' | 'confirmed' | 'modified' | 'cancelled',
     batchIndex?: number,
     createdRecordId?: string
   ) => {

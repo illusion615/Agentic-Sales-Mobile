@@ -20,11 +20,11 @@ interface BatchFormCardProps {
       isNew: boolean;
       data: Record<string, unknown>;
       batchIndex: number;
-      status?: 'pending' | 'confirmed' | 'modified';
+      status?: 'pending' | 'confirmed' | 'modified' | 'cancelled';
     }>;
     totalCount: number;
   };
-  onStatusChange?: (index: number, status: 'confirmed' | 'modified') => void;
+  onStatusChange?: (index: number, status: 'confirmed' | 'modified' | 'cancelled') => void;
 }
 
 export function BatchFormCard({ messageId, batchFormCards, onStatusChange }: BatchFormCardProps) {
@@ -33,8 +33,8 @@ export function BatchFormCard({ messageId, batchFormCards, onStatusChange }: Bat
   const [expandedIndex, setExpandedIndex] = useState<number | null>(0); // First item expanded by default
   
   // Initialize statuses from batchFormCards (restored from session storage)
-  const [itemStatuses, setItemStatuses] = useState<Record<number, 'pending' | 'confirmed' | 'modified'>>(() => {
-    const initial: Record<number, 'pending' | 'confirmed' | 'modified'> = {};
+  const [itemStatuses, setItemStatuses] = useState<Record<number, 'pending' | 'confirmed' | 'modified' | 'cancelled'>>(() => {
+    const initial: Record<number, 'pending' | 'confirmed' | 'modified' | 'cancelled'> = {};
     batchFormCards.items.forEach((item, index: number) => {
       if (item.status) {
         initial[index] = item.status;
@@ -63,7 +63,7 @@ export function BatchFormCard({ messageId, batchFormCards, onStatusChange }: Bat
     return colors[type] || 'bg-muted text-muted-foreground';
   };
 
-  const handleItemStatusChange = (index: number, status: 'confirmed' | 'modified') => {
+  const handleItemStatusChange = (index: number, status: 'confirmed' | 'modified' | 'cancelled') => {
     setItemStatuses((prev) => ({ ...prev, [index]: status }));
     // Persist batch item status to message for session storage
     copilot.updateFormCardStatus(messageId, status, index);

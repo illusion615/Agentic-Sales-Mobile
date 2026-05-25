@@ -40,14 +40,14 @@ export interface FormCardData {
   isNew: boolean;
   existingId?: string;
   data: Record<string, unknown>;
-  status?: 'pending' | 'confirmed' | 'modified';
+  status?: 'pending' | 'confirmed' | 'modified' | 'cancelled';
   createdRecordId?: string;
 }
 
 interface FormCardProps {
   formCard: FormCardData;
   messageId: string;
-  onStatusChange?: (status: 'confirmed' | 'modified') => void;
+  onStatusChange?: (status: 'confirmed' | 'modified' | 'cancelled') => void;
 }
 
 // Editable field component
@@ -829,7 +829,7 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
   const copilot = useCopilot();
   const { data: user } = useUser();
   const [isConfirming, setIsConfirming] = useState(false);
-  const [status, setStatus] = useState<'pending' | 'confirmed' | 'modified'>(formCard.status || 'pending');
+  const [status, setStatus] = useState<'pending' | 'confirmed' | 'modified' | 'cancelled'>(formCard.status || 'pending');
   const [createdRecordId, setCreatedRecordId] = useState<string | null>(formCard.createdRecordId || null);
   // Use ref to keep the latest createdRecordId available immediately (for async operations)
   const createdRecordIdRef = useRef<string | null>(formCard.createdRecordId || null);
@@ -1135,14 +1135,44 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
     }
   };
 
-  // Handle cancel - just close/dismiss (in this case we keep it but user can start fresh)
+  // Handle cancel - collapse the card and advance the queue.
   const handleCancel = () => {
-    // Reset form data to original
-    setFormData(formCard.data);
+    setStatus('cancelled');
+    onStatusChange?.('cancelled');
+    copilot.updateFormCardStatus(messageId, 'cancelled');
     // Notify queue / context so a multi-step flow advances past this cancelled step
     // instead of stalling the entire queue.
     copilot.formCardCancelled(messageId);
   };
+
+  // If cancelled, show a compact collapsed card so subsequent cards are clearly the active one.
+  if (status === 'cancelled') {
+    return (
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="glass-card p-3 rounded-xl opacity-60"
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            {formCard.type === 'activity' && <Calendar className="w-4 h-4 text-muted-foreground" />}
+            {formCard.type === 'contact' && <User className="w-4 h-4 text-muted-foreground" />}
+            {formCard.type === 'opportunity' && <TrendingUp className="w-4 h-4 text-muted-foreground" />}
+            {formCard.type === 'account' && <Building2 className="w-4 h-4 text-muted-foreground" />}
+            <span className="text-sm font-medium text-muted-foreground line-through">
+              {formData.title as string || formData.name as string || formData.fullName as string || ''}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 text-muted-foreground bg-muted/30 px-2 py-1 rounded-md">
+            <X className="w-3.5 h-3.5" />
+            <span className="text-xs font-medium">
+              {locale === 'zh-Hans' ? '已取消' : 'Cancelled'}
+            </span>
+          </div>
+        </div>
+      </motion.div>
+    );
+  }
 
   // If already confirmed, show simplified view with click to navigate
   if (status === 'confirmed') {
