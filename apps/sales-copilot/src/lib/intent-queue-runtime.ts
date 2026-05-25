@@ -172,7 +172,7 @@ function emitSummary(queue: IntentQueue, deps: RuntimeDeps): IntentQueue {
       ? `${k + 1}. ${label}：${verb}${name ? ` ${name}` : ''}`
       : `${k + 1}. ${label}: ${verb}${name ? ` ${name}` : ''}`;
   });
-  const header = isZh ? `全部 ${top.length} 步已完成：` : `All ${top.length} steps completed:`;
+  const header = isZh ? `全部 ${top.length} 步已处理：` : `All ${top.length} steps processed:`;
   deps.pushMessage({
     id: `narrate-${queue.id}-summary-${Date.now()}`,
     type: 'agent',
@@ -603,7 +603,7 @@ async function renderFormCard(
     deps.pushMessage({
       id: messageId,
       type: 'form-card',
-      content: isZh ? '请确认以下信息' : 'Please confirm the following information',
+      content: '',
       timestamp: Date.now(),
       queueId: queue.id,
       queueIntentId: intent.id,

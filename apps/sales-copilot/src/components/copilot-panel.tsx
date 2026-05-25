@@ -353,8 +353,8 @@ export function CopilotPanel() {
               {/* Match Selection Card Message */}
               {message.type === 'match-selection' && message.matchSelection && (
                 <div className="max-w-full">
-                  {/* Reason text — moved out of the card so the card stays focused on matches+actions. */}
-                  {(() => {
+                  {/* Reason text — hidden once resolved to keep the conversation compact. */}
+                  {message.resolutionState !== 'resolved' && (() => {
                     const reason = buildMatchReasonText({
                       entityType: message.matchSelection.entityType,
                       query: message.matchSelection.query,
