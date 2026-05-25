@@ -3,7 +3,7 @@ import { motion, AnimatePresence, type PanInfo } from 'motion/react';
 import { ChevronRight, ChevronLeft, ChevronDown, Calendar, Target, Phone, MapPin, FileText, CheckCircle2, Clock, X, Lightbulb, AlertTriangle, TrendingUp, Sparkles, Mail, CheckSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatCurrencyCompact } from '@/lib/format-currency';
-import { getLocale } from '@/lib/i18n';
+import { getLocale, getWeekStartDay } from '@/lib/i18n';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
@@ -769,15 +769,21 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
               <div className="mt-2">
                 {/* Weekday headers */}
                 <div className="grid grid-cols-7 gap-0.5 mb-1">
-                  {(locale === 'zh-Hans' ? ['日', '一', '二', '三', '四', '五', '六'] : ['S', 'M', 'T', 'W', 'T', 'F', 'S']).map((day: string, i: number) => (
-                    <div key={i} className="text-center text-[11px] text-muted-foreground font-medium">{day}</div>
-                  ))}
+                  {(() => {
+                    const wso = getWeekStartDay();
+                    const zhHeaders = wso === 'monday' ? ['一', '二', '三', '四', '五', '六', '日'] : ['日', '一', '二', '三', '四', '五', '六'];
+                    const enHeaders = wso === 'monday' ? ['M', 'T', 'W', 'T', 'F', 'S', 'S'] : ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+                    return (locale === 'zh-Hans' ? zhHeaders : enHeaders).map((day: string, i: number) => (
+                      <div key={i} className="text-center text-[11px] text-muted-foreground font-medium">{day}</div>
+                    ));
+                  })()}
                 </div>
                 {/* Calendar days */}
                 <div className="grid grid-cols-7 gap-0.5">
                   {(() => {
                     const days: React.ReactNode[] = [];
-                    const firstDayOfWeek = calendarMonthData.firstDayOfMonth.getDay();
+                    const wsoNum = getWeekStartDay() === 'monday' ? 1 : 0;
+                    const firstDayOfWeek = (calendarMonthData.firstDayOfMonth.getDay() - wsoNum + 7) % 7;
                     const daysInMonth = calendarMonthData.lastDayOfMonth.getDate();
                     const today = new Date();
                     

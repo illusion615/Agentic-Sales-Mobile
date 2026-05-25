@@ -25,6 +25,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { Activity as DataverseActivity } from '@/generated/models/activity-model';import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
 import { useCopilot } from '@/contexts/copilot-context';
 import { getLocale } from '@/lib/i18n';
+import { getWeekStartDay } from '@/lib/i18n';
 import { PullToRefresh } from '@/components/pull-to-refresh';
 import {
   DropdownMenu,
@@ -182,8 +183,9 @@ export default function ActivitiesPage() {
       if (viewMode === 'day') {
         return isSameDay(activityDate, currentDate);
       } else if (viewMode === 'week') {
-        const weekStart = startOfWeek(currentDate, { weekStartsOn: 0 });
-        const weekEnd = endOfWeek(currentDate, { weekStartsOn: 0 });
+        const wso = getWeekStartDay() === 'monday' ? 1 : 0;
+        const weekStart = startOfWeek(currentDate, { weekStartsOn: wso as 0 | 1 });
+        const weekEnd = endOfWeek(currentDate, { weekStartsOn: wso as 0 | 1 });
         return activityDate >= weekStart && activityDate <= weekEnd;
       } else {
         const monthStart = startOfMonth(currentDate);
@@ -301,8 +303,9 @@ export default function ActivitiesPage() {
       }
       return format(currentDate, 'EEE, MMM d');
     } else if (viewMode === 'week') {
-      const weekStart = startOfWeek(currentDate, { weekStartsOn: 0 });
-      const weekEnd = endOfWeek(currentDate, { weekStartsOn: 0 });
+      const wso = getWeekStartDay() === 'monday' ? 1 : 0;
+      const weekStart = startOfWeek(currentDate, { weekStartsOn: wso as 0 | 1 });
+      const weekEnd = endOfWeek(currentDate, { weekStartsOn: wso as 0 | 1 });
       return `${format(weekStart, 'MMM d')} - ${format(weekEnd, 'MMM d')}`;
     } else {
       return format(currentDate, 'MMMM yyyy');
@@ -311,17 +314,20 @@ export default function ActivitiesPage() {
 
   // Get days for month calendar grid
   const getMonthDays = () => {
+    const wso = getWeekStartDay() === 'monday' ? 1 : 0;
     const monthStart = startOfMonth(currentDate);
     const monthEnd = endOfMonth(currentDate);
-    const startDay = getDay(monthStart);
+    const startDay = (getDay(monthStart) - wso + 7) % 7;
     const calendarStart = subDays(monthStart, startDay);
-    const days = eachDayOfInterval({ start: calendarStart, end: addDays(monthEnd, 6 - getDay(monthEnd)) });
+    const endDay = (getDay(monthEnd) - wso + 7) % 7;
+    const days = eachDayOfInterval({ start: calendarStart, end: addDays(monthEnd, 6 - endDay) });
     return days;
   };
 
   // Get days for week view
   const getWeekDays = () => {
-    const weekStart = startOfWeek(currentDate, { weekStartsOn: 0 });
+    const wso = getWeekStartDay() === 'monday' ? 1 : 0;
+    const weekStart = startOfWeek(currentDate, { weekStartsOn: wso as 0 | 1 });
     return eachDayOfInterval({ start: weekStart, end: addDays(weekStart, 6) });
   };
 
@@ -525,7 +531,10 @@ export default function ActivitiesPage() {
                   <div className="space-y-2">
                     {/* Month day headers */}
                     <div className="grid grid-cols-7 gap-1 text-center">
-                      {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day: string) => (
+                      {(getWeekStartDay() === 'monday'
+                        ? ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+                        : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+                      ).map((day: string) => (
                         <div key={day} className="text-xs font-medium text-muted-foreground py-1">
                           {day}
                         </div>

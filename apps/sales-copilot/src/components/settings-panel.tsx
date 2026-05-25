@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { ArrowLeft, Moon, Sun, Globe, HelpCircle, LogOut, Volume2, Play, Type, Palette, CircleDot, LayoutGrid, Speech, X, Zap, MessageSquare, Gauge, LayoutDashboard, Database, Bug, FileCode, ChevronRight, Monitor } from 'lucide-react';
+import { ArrowLeft, Moon, Sun, Globe, HelpCircle, LogOut, Volume2, Play, Type, Palette, CircleDot, LayoutGrid, Speech, X, Zap, MessageSquare, Gauge, LayoutDashboard, Database, Bug, FileCode, ChevronRight, Monitor, Calendar } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 
 import { useUser } from '@/hooks/use-user';
 import { useAppSettings } from '@/hooks/use-app-settings';
-import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, setSelectedVoice, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getOrganizeInStructureCard, setOrganizeInStructureCard, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, getCopilotDockLayout, setCopilotDockLayout, copilotDockLayoutLabels, type Locale, type VoiceOption, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget, type CopilotDockLayout } from '@/lib/i18n';
+import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, setSelectedVoice, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getOrganizeInStructureCard, setOrganizeInStructureCard, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, getCopilotDockLayout, setCopilotDockLayout, copilotDockLayoutLabels, getWeekStartDay, setWeekStartDay, type Locale, type VoiceOption, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget, type CopilotDockLayout, type WeekStartDay } from '@/lib/i18n';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
@@ -89,6 +89,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const [copilotDockLayout, setCopilotDockLayoutState] = useState<CopilotDockLayout>(() => getCopilotDockLayout());
   const [simulateStreaming, setSimulateStreamingState] = useState(() => getSimulateStreaming());
   const [homeHeaderWidget, setHomeHeaderWidgetState] = useState<HomeHeaderWidget>(() => getHomeHeaderWidget());
+  const [weekStartDay, setWeekStartDayState] = useState<WeekStartDay>(() => getWeekStartDay());
 
   // Track if database settings have been loaded
   const [dbSettingsLoaded, setDbSettingsLoaded] = useState(false);
@@ -216,6 +217,12 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
     const newWidget = widget as HomeHeaderWidget;
     setHomeHeaderWidgetState(newWidget);
     setHomeHeaderWidget(newWidget);
+  };
+
+  const handleWeekStartDayChange = (day: string) => {
+    const d = day as WeekStartDay;
+    setWeekStartDayState(d);
+    setWeekStartDay(d);
   };
 
 
@@ -413,6 +420,30 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                       <SelectItem value="pipeline-forecast">{locale === 'zh-Hans' ? '本季度成交/预测' : 'Pipeline/Forecast'}</SelectItem>
                     </SelectContent>
                   </Select>
+                }
+              />
+              <SettingsItem
+                icon={Calendar}
+                label={locale === 'zh-Hans' ? '每周第一天' : 'Week Starts On'}
+                rightElement={
+                  <div className="flex rounded-lg overflow-hidden border border-border/60">
+                    {(['sunday', 'monday'] as WeekStartDay[]).map((d) => (
+                      <button
+                        key={d}
+                        onClick={() => handleWeekStartDayChange(d)}
+                        className={cn(
+                          'px-3 py-1 text-xs font-medium transition-colors',
+                          weekStartDay === d
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-background hover:bg-muted text-muted-foreground'
+                        )}
+                      >
+                        {d === 'sunday'
+                          ? (locale === 'zh-Hans' ? '周日' : 'Sun')
+                          : (locale === 'zh-Hans' ? '周一' : 'Mon')}
+                      </button>
+                    ))}
+                  </div>
                 }
               />
             </div>

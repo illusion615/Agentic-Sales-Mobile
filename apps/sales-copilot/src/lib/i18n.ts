@@ -1196,6 +1196,18 @@ export function setCopilotDockLayout(layout: CopilotDockLayout): void {
   window.dispatchEvent(new CustomEvent('copilot-dock-layout-changed', { detail: layout }));
 }
 
+// Week start day setting
+export type WeekStartDay = 'sunday' | 'monday';
+
+export function getWeekStartDay(): WeekStartDay {
+  return localStorage.getItem('weekStartDay') === 'monday' ? 'monday' : 'sunday';
+}
+
+export function setWeekStartDay(day: WeekStartDay): void {
+  localStorage.setItem('weekStartDay', day);
+  window.dispatchEvent(new CustomEvent('weekstartday-changed', { detail: day }));
+}
+
 // Simulate streaming response setting
 export function getSimulateStreaming(): boolean {
   return localStorage.getItem('simulateStreaming') !== 'false'; // default true
