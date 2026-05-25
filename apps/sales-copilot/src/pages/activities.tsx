@@ -147,7 +147,7 @@ function ActivityItem({ activity }: { activity: DataverseActivity }) {
   );
 }
 
-type ViewMode = 'day' | 'week' | 'month';
+type ViewMode = 'week' | 'month';
 
 export default function ActivitiesPage() {
   const navigate = useNavigate();
@@ -155,7 +155,7 @@ export default function ActivitiesPage() {
   const initialView = searchParams.get('view') as ViewMode | null;
   const initialDateParam = searchParams.get('date');
   const initialDate = initialDateParam ? new Date(initialDateParam + 'T00:00:00') : new Date();
-  const [viewMode, setViewMode] = useState<ViewMode>(initialView && ['day', 'week', 'month'].includes(initialView) ? initialView : 'day');
+  const [viewMode, setViewMode] = useState<ViewMode>(initialView && ['week', 'month'].includes(initialView) ? initialView : 'week');
   const [currentDate, setCurrentDate] = useState(initialDate);
   const [swipeDirection, setSwipeDirection] = useState<'left' | 'right' | null>(null);
   const locale = getLocale();
@@ -180,9 +180,7 @@ export default function ActivitiesPage() {
     return activities.filter((activity: DataverseActivity) => {
       const activityDate = new Date(activity.scheduleddate);
       
-      if (viewMode === 'day') {
-        return isSameDay(activityDate, currentDate);
-      } else if (viewMode === 'week') {
+      if (viewMode === 'week') {
         const wso = getWeekStartDay() === 'monday' ? 1 : 0;
         const weekStart = startOfWeek(currentDate, { weekStartsOn: wso as 0 | 1 });
         const weekEnd = endOfWeek(currentDate, { weekStartsOn: wso as 0 | 1 });
@@ -216,7 +214,7 @@ export default function ActivitiesPage() {
   useEffect(() => {
     // For Day View only, ship a rich per-activity payload so the agent can
     // narrate a daily report without an extra fetch. Other views stay light.
-    const dayActivitiesPayload = viewMode === 'day'
+    const dayActivitiesPayload = viewMode === 'week'
       ? filteredActivities.map((a: DataverseActivity) => ({
           id: a.id,
           title: a.title,
@@ -234,7 +232,7 @@ export default function ActivitiesPage() {
     copilot.setPageContext({
       currentPage: locale === 'zh-Hans' ? '活动列表' : 'Activities List',
       summary: locale === 'zh-Hans'
-        ? `活动列表: ${viewMode === 'day' ? '今日' : viewMode === 'week' ? '本周' : '本月'}共${filteredActivities.length}个活动，${pendingCount}个待完成`
+        ? `活动列表: ${viewMode === 'week' ? '本周' : '本月'}共${filteredActivities.length}个活动，${pendingCount}个待完成`
         : `Activities list: ${filteredActivities.length} activities in ${viewMode} view, ${pendingCount} pending`,
       pageData: {
         viewMode,
@@ -257,9 +255,7 @@ export default function ActivitiesPage() {
   // Navigation functions
   const goBack = () => {
     setSwipeDirection('right');
-    if (viewMode === 'day') {
-      setCurrentDate(subDays(currentDate, 1));
-    } else if (viewMode === 'week') {
+    if (viewMode === 'week') {
       setCurrentDate(subWeeks(currentDate, 1));
     } else {
       setCurrentDate(subMonths(currentDate, 1));
@@ -268,9 +264,7 @@ export default function ActivitiesPage() {
 
   const goForward = () => {
     setSwipeDirection('left');
-    if (viewMode === 'day') {
-      setCurrentDate(addDays(currentDate, 1));
-    } else if (viewMode === 'week') {
+    if (viewMode === 'week') {
       setCurrentDate(addWeeks(currentDate, 1));
     } else {
       setCurrentDate(addMonths(currentDate, 1));
@@ -296,13 +290,7 @@ export default function ActivitiesPage() {
 
   // Get title based on view mode
   const getViewTitle = () => {
-    if (viewMode === 'day') {
-      const today = new Date();
-      if (isSameDay(currentDate, today)) {
-        return 'Today';
-      }
-      return format(currentDate, 'EEE, MMM d');
-    } else if (viewMode === 'week') {
+    if (viewMode === 'week') {
       const wso = getWeekStartDay() === 'monday' ? 1 : 0;
       const weekStart = startOfWeek(currentDate, { weekStartsOn: wso as 0 | 1 });
       const weekEnd = endOfWeek(currentDate, { weekStartsOn: wso as 0 | 1 });
@@ -342,7 +330,6 @@ export default function ActivitiesPage() {
   }
 
   const viewModeLabels: Record<ViewMode, string> = {
-    day: 'Day',
     week: 'Week',
     month: 'Month',
   };
@@ -365,18 +352,18 @@ export default function ActivitiesPage() {
       hideVoiceButton={true}
       headerRight={
         <div className="flex rounded-md overflow-hidden border border-border/60">
-          {(['day', 'week', 'month'] as ViewMode[]).map((mode: ViewMode) => (
+          {(['week', 'month'] as ViewMode[]).map((mode: ViewMode) => (
             <button
               key={mode}
               onClick={() => setViewMode(mode)}
               className={cn(
-                'px-2 py-1 text-[10px] font-medium transition-colors',
+                'px-2.5 py-1 text-[10px] font-medium transition-colors',
                 viewMode === mode
                   ? 'bg-primary text-primary-foreground'
                   : 'bg-background hover:bg-muted text-muted-foreground'
               )}
             >
-              {mode === 'day' ? 'D' : mode === 'week' ? 'W' : 'M'}
+              {mode === 'week' ? 'W' : 'M'}
             </button>
           ))}
         </div>
@@ -399,14 +386,14 @@ export default function ActivitiesPage() {
           <GlassCard className="flex items-center justify-between">
             <div>
               <h2 className="text-base font-semibold text-foreground">
-                {viewMode === 'day' ? "Today's Tasks" : `Tasks in ${viewModeLabels[viewMode]}`}
+                {viewMode === 'week' ? "Tasks in Week" : `Tasks in ${format(currentDate, 'MMMM')}`}
               </h2>
               <p className="text-xs text-muted-foreground">
                 {pendingCount} {pendingCount === 1 ? 'task' : 'tasks'} pending
               </p>
             </div>
             <div className="flex items-center gap-2">
-              {viewMode === 'day' && (
+              {viewMode === 'week' && (
                 <button
                   type="button"
                   onClick={handleGenerateDailyReport}
@@ -440,91 +427,81 @@ export default function ActivitiesPage() {
                 exit={{ opacity: 0, x: swipeDirection === 'left' ? -100 : swipeDirection === 'right' ? 100 : 0 }}
                 transition={{ duration: 0.2, ease: 'easeOut' as const }}
               >
-                {/* Day View */}
-                {viewMode === 'day' && (
-                  <div className="space-y-3">
-                    {filteredActivities.length === 0 ? (
-                      <Empty className="py-8">
-                        <EmptyHeader>
-                          <EmptyTitle>No activities</EmptyTitle>
-                          <EmptyDescription>No activities scheduled for this day</EmptyDescription>
-                        </EmptyHeader>
-                      </Empty>
-                    ) : (
-                      filteredActivities.map((activity: DataverseActivity) => (
-                        <motion.div
-                          key={activity.id}
-                          variants={itemVariants}
-                          initial="hidden"
-                          animate="show"
-                        >
-                          <ActivityItem activity={activity} />
-                        </motion.div>
-                      ))
-                    )}
-                  </div>
-                )}
+                {/* Week View: day selector strip + selected day's task list */}
+                {viewMode === 'week' && (() => {
+                  const weekDays = getWeekDays();
+                  const selectedDateKey = format(currentDate, 'yyyy-MM-dd');
+                  const selectedDayActivities = activitiesByDate[selectedDateKey] || [];
+                  return (
+                    <div className="space-y-3">
+                      {/* Week day selector strip */}
+                      <div className="grid grid-cols-7 gap-1">
+                        {weekDays.map((day: Date) => {
+                          const dateKey = format(day, 'yyyy-MM-dd');
+                          const dayCount = (activitiesByDate[dateKey] || []).length;
+                          const isSelected = isSameDay(day, currentDate);
+                          const isToday = isSameDay(day, new Date());
+                          return (
+                            <button
+                              key={dateKey}
+                              onClick={() => setCurrentDate(day)}
+                              className={cn(
+                                'flex flex-col items-center py-2 rounded-lg transition-all',
+                                isSelected
+                                  ? 'bg-primary/15 border border-primary'
+                                  : isToday
+                                    ? 'border border-primary/40'
+                                    : 'border border-transparent hover:bg-card/80'
+                              )}
+                            >
+                              <span className="text-[10px] font-medium text-muted-foreground uppercase">
+                                {format(day, 'EEE')}
+                              </span>
+                              <span className={cn(
+                                'text-base font-semibold w-8 h-8 flex items-center justify-center rounded-full mt-0.5',
+                                isSelected && 'bg-primary text-primary-foreground',
+                                isToday && !isSelected && 'text-primary'
+                              )}>
+                                {format(day, 'd')}
+                              </span>
+                              {dayCount > 0 && (
+                                <span className={cn(
+                                  'text-[9px] mt-0.5 font-medium',
+                                  isSelected ? 'text-primary' : 'text-muted-foreground'
+                                )}>
+                                  {dayCount}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
 
-                {/* Week View */}
-                {viewMode === 'week' && (
-                  <div className="grid grid-cols-7 gap-1">
-                    {getWeekDays().map((day: Date) => {
-                      const dateKey = format(day, 'yyyy-MM-dd');
-                      const dayActivities = activitiesByDate[dateKey] || [];
-                      const isCurrentDay = isSameDay(day, new Date());
-                      return (
-                        <div
-                          key={dateKey}
-                          className={cn(
-                            'min-h-[160px] p-1.5 rounded-lg border cursor-pointer transition-all',
-                            isCurrentDay
-                              ? 'border-primary bg-primary/5'
-                              : 'border-border/30 hover:bg-card/80'
-                          )}
-                          onClick={() => {
-                            setCurrentDate(day);
-                            setViewMode('day');
-                          }}
-                        >
-                          {/* Day header */}
-                          <div className="flex flex-col items-center mb-1.5">
-                            <span className="text-[9px] font-medium text-muted-foreground uppercase">
-                              {format(day, 'EEE')}
-                            </span>
-                            <span className={cn(
-                              'text-sm font-semibold w-7 h-7 flex items-center justify-center rounded-full',
-                              isCurrentDay && 'bg-primary text-primary-foreground'
-                            )}>
-                              {format(day, 'd')}
-                            </span>
-                          </div>
-                          {/* Activity list */}
-                          <div className="space-y-0.5">
-                            {dayActivities.slice(0, 4).map((activity: DataverseActivity) => {
-                              const color = activityColors[activity.type] || 'bg-muted';
-                              const title = activity.title || '';
-                              const shortTitle = title.length > 18 ? title.slice(0, 16) + '…' : title;
-                              return (
-                                <div
-                                  key={activity.id}
-                                  className={cn(color, 'text-white text-[9px] leading-tight px-1 py-0.5 rounded truncate')}
-                                  title={title}
-                                >
-                                  {shortTitle || formatTime(activity.scheduleddate)}
-                                </div>
-                              );
-                            })}
-                            {dayActivities.length > 4 && (
-                              <div className="text-[9px] text-muted-foreground text-center">
-                                +{dayActivities.length - 4}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                      {/* Selected day's task list */}
+                      <div className="space-y-2">
+                        {selectedDayActivities.length === 0 ? (
+                          <Empty className="py-8">
+                            <EmptyHeader>
+                              <EmptyTitle>No activities</EmptyTitle>
+                              <EmptyDescription>No activities scheduled for {format(currentDate, 'EEE, MMM d')}</EmptyDescription>
+                            </EmptyHeader>
+                          </Empty>
+                        ) : (
+                          selectedDayActivities.map((activity: DataverseActivity) => (
+                            <motion.div
+                              key={activity.id}
+                              variants={itemVariants}
+                              initial="hidden"
+                              animate="show"
+                            >
+                              <ActivityItem activity={activity} />
+                            </motion.div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Month View */}
                 {viewMode === 'month' && (
@@ -559,7 +536,6 @@ export default function ActivitiesPage() {
                             }`}
                             onClick={() => {
                               setCurrentDate(day);
-                              setViewMode('day');
                             }}
                           >
                             <span className="text-xs font-medium">{format(day, 'd')}</span>
