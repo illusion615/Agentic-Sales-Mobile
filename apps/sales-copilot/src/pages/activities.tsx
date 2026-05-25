@@ -19,6 +19,7 @@ import { FloatingQuickActions } from '@/components/floating-quick-actions';
 import { GlassCard, GlassListItem } from '@/components/glass-card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/utils';
 import { useActivityList } from '@/generated/hooks/use-activity';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Activity as DataverseActivity } from '@/generated/models/activity-model';import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
@@ -357,24 +358,22 @@ export default function ActivitiesPage() {
       title="Activities"
       hideVoiceButton={true}
       headerRight={
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-8 w-8">
-              <LayoutGrid className="w-4 h-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            {(['day', 'week', 'month'] as ViewMode[]).map((mode: ViewMode) => (
-              <DropdownMenuItem
-                key={mode}
-                onClick={() => setViewMode(mode)}
-                className={viewMode === mode ? 'bg-accent' : ''}
-              >
-                {viewModeLabels[mode]} View
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <div className="flex rounded-md overflow-hidden border border-border/60">
+          {(['day', 'week', 'month'] as ViewMode[]).map((mode: ViewMode) => (
+            <button
+              key={mode}
+              onClick={() => setViewMode(mode)}
+              className={cn(
+                'px-2 py-1 text-[10px] font-medium transition-colors',
+                viewMode === mode
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-background hover:bg-muted text-muted-foreground'
+              )}
+            >
+              {mode === 'day' ? 'D' : mode === 'week' ? 'W' : 'M'}
+            </button>
+          ))}
+        </div>
       }
     >
       <PullToRefresh onRefresh={handleRefresh} className="flex-1 overflow-y-auto pb-40">
@@ -462,117 +461,62 @@ export default function ActivitiesPage() {
 
                 {/* Week View */}
                 {viewMode === 'week' && (
-                  <div className="space-y-3">
-                    {/* First Row: Sun-Wed */}
-                    <div className="grid grid-cols-4 gap-2">
-                      {getWeekDays().slice(0, 4).map((day: Date) => {
-                        const dateKey = format(day, 'yyyy-MM-dd');
-                        const dayActivities = activitiesByDate[dateKey] || [];
-                        const isCurrentDay = isSameDay(day, new Date());
-                        return (
-                          <div
-                            key={dateKey}
-                            className={`min-h-[140px] p-2 rounded-xl border cursor-pointer transition-all ${
-                              isCurrentDay
-                                ? 'border-primary bg-primary/10 shadow-sm'
-                                : 'border-border/50 bg-card/50 hover:bg-card/80'
-                            }`}
-                            onClick={() => {
-                              setCurrentDate(day);
-                              setViewMode('day');
-                            }}
-                          >
-                            <div className="flex items-center justify-between mb-2">
-                              <span className="text-[10px] font-medium text-muted-foreground uppercase">
-                                {format(day, 'EEE')}
-                              </span>
-                              <span className={`text-sm font-semibold ${isCurrentDay ? 'text-primary' : 'text-foreground'}`}>
-                                {format(day, 'd')}
-                              </span>
-                            </div>
-                            <div className="space-y-1">
-                              {dayActivities.slice(0, 3).map((activity: DataverseActivity) => {
-                                const typeLabel = activity.type;
-                                const color = activityColors[typeLabel] || 'bg-muted';
-                                return (
-                                  <div
-                                    key={activity.id}
-                                    className={`${color} text-white text-[10px] px-1.5 py-1 rounded-md truncate`}
-                                  >
-                                    <span className="font-medium">{formatTime(activity.scheduleddate)}</span>
-                                  </div>
-                                );
-                              })}
-                              {dayActivities.length > 3 && (
-                                <div className="text-[10px] text-muted-foreground text-center">
-                                  +{dayActivities.length - 3} more
-                                </div>
-                              )}
-                              {dayActivities.length === 0 && (
-                                <div className="text-[10px] text-muted-foreground/50 text-center pt-4">
-                                  No tasks
-                                </div>
-                              )}
-                            </div>
+                  <div className="grid grid-cols-7 gap-1">
+                    {getWeekDays().map((day: Date) => {
+                      const dateKey = format(day, 'yyyy-MM-dd');
+                      const dayActivities = activitiesByDate[dateKey] || [];
+                      const isCurrentDay = isSameDay(day, new Date());
+                      return (
+                        <div
+                          key={dateKey}
+                          className={cn(
+                            'min-h-[160px] p-1.5 rounded-lg border cursor-pointer transition-all',
+                            isCurrentDay
+                              ? 'border-primary bg-primary/5'
+                              : 'border-border/30 hover:bg-card/80'
+                          )}
+                          onClick={() => {
+                            setCurrentDate(day);
+                            setViewMode('day');
+                          }}
+                        >
+                          {/* Day header */}
+                          <div className="flex flex-col items-center mb-1.5">
+                            <span className="text-[9px] font-medium text-muted-foreground uppercase">
+                              {format(day, 'EEE')}
+                            </span>
+                            <span className={cn(
+                              'text-sm font-semibold w-7 h-7 flex items-center justify-center rounded-full',
+                              isCurrentDay && 'bg-primary text-primary-foreground'
+                            )}>
+                              {format(day, 'd')}
+                            </span>
                           </div>
-                        );
-                      })}
-                    </div>
-                    {/* Second Row: Thu-Sat */}
-                    <div className="grid grid-cols-3 gap-2">
-                      {getWeekDays().slice(4, 7).map((day: Date) => {
-                        const dateKey = format(day, 'yyyy-MM-dd');
-                        const dayActivities = activitiesByDate[dateKey] || [];
-                        const isCurrentDay = isSameDay(day, new Date());
-                        return (
-                          <div
-                            key={dateKey}
-                            className={`min-h-[140px] p-2 rounded-xl border cursor-pointer transition-all ${
-                              isCurrentDay
-                                ? 'border-primary bg-primary/10 shadow-sm'
-                                : 'border-border/50 bg-card/50 hover:bg-card/80'
-                            }`}
-                            onClick={() => {
-                              setCurrentDate(day);
-                              setViewMode('day');
-                            }}
-                          >
-                            <div className="flex items-center justify-between mb-2">
-                              <span className="text-[10px] font-medium text-muted-foreground uppercase">
-                                {format(day, 'EEE')}
-                              </span>
-                              <span className={`text-sm font-semibold ${isCurrentDay ? 'text-primary' : 'text-foreground'}`}>
-                                {format(day, 'd')}
-                              </span>
-                            </div>
-                            <div className="space-y-1">
-                              {dayActivities.slice(0, 4).map((activity: DataverseActivity) => {
-                                const typeLabel = activity.type;
-                                const color = activityColors[typeLabel] || 'bg-muted';
-                                return (
-                                  <div
-                                    key={activity.id}
-                                    className={`${color} text-white text-[10px] px-1.5 py-1 rounded-md truncate`}
-                                  >
-                                    <span className="font-medium">{formatTime(activity.scheduleddate)}</span>
-                                  </div>
-                                );
-                              })}
-                              {dayActivities.length > 4 && (
-                                <div className="text-[10px] text-muted-foreground text-center">
-                                  +{dayActivities.length - 4} more
+                          {/* Activity list */}
+                          <div className="space-y-0.5">
+                            {dayActivities.slice(0, 4).map((activity: DataverseActivity) => {
+                              const color = activityColors[activity.type] || 'bg-muted';
+                              const title = activity.title || '';
+                              const shortTitle = title.length > 18 ? title.slice(0, 16) + '…' : title;
+                              return (
+                                <div
+                                  key={activity.id}
+                                  className={cn(color, 'text-white text-[9px] leading-tight px-1 py-0.5 rounded truncate')}
+                                  title={title}
+                                >
+                                  {shortTitle || formatTime(activity.scheduleddate)}
                                 </div>
-                              )}
-                              {dayActivities.length === 0 && (
-                                <div className="text-[10px] text-muted-foreground/50 text-center pt-6">
-                                  No tasks
-                                </div>
-                              )}
-                            </div>
+                              );
+                            })}
+                            {dayActivities.length > 4 && (
+                              <div className="text-[9px] text-muted-foreground text-center">
+                                +{dayActivities.length - 4}
+                              </div>
+                            )}
                           </div>
-                        );
-                      })}
-                    </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
 
