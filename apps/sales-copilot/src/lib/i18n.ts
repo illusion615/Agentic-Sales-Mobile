@@ -1177,6 +1177,25 @@ export function setCopilotInAllScreens(enabled: boolean): void {
   window.dispatchEvent(new CustomEvent('copilotinallscreens-changed', { detail: enabled }));
 }
 
+// Copilot dock layout setting (widescreen only)
+export type CopilotDockLayout = 'float' | 'right' | 'left';
+export const copilotDockLayoutLabels: Record<CopilotDockLayout, { zh: string; en: string }> = {
+  float: { zh: '浮动', en: 'Float' },
+  right: { zh: '右侧', en: 'Right' },
+  left:  { zh: '左侧', en: 'Left' },
+};
+
+export function getCopilotDockLayout(): CopilotDockLayout {
+  const v = localStorage.getItem('copilotDockLayout');
+  if (v === 'right' || v === 'left') return v;
+  return 'float';
+}
+
+export function setCopilotDockLayout(layout: CopilotDockLayout): void {
+  localStorage.setItem('copilotDockLayout', layout);
+  window.dispatchEvent(new CustomEvent('copilot-dock-layout-changed', { detail: layout }));
+}
+
 // Simulate streaming response setting
 export function getSimulateStreaming(): boolean {
   return localStorage.getItem('simulateStreaming') !== 'false'; // default true

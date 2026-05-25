@@ -1,10 +1,10 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence, useDragControls, type PanInfo } from 'motion/react';
-import { Sparkles, ArrowUp, SquarePen, X, ChevronDown, Copy, Volume2, VolumeX, Loader2, Square, Play, Pause, Paperclip, RotateCcw } from 'lucide-react';
+import { Sparkles, ArrowUp, SquarePen, X, ChevronDown, ChevronLeft, ChevronRight, Copy, Volume2, VolumeX, Loader2, Square, Play, Pause, Paperclip, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useCopilot, type ChatMessage } from '@/contexts/copilot-context';
-import { getLocale, getChatFontClass, getSelectedVoice, findMatchingSystemVoice, getLLMConfig, getVoiceSummaryEnabled, generateVoiceSummary, type Locale } from '@/lib/i18n';
+import { getLocale, getChatFontClass, getSelectedVoice, findMatchingSystemVoice, getLLMConfig, getVoiceSummaryEnabled, generateVoiceSummary, getCopilotDockLayout, type CopilotDockLayout, type Locale } from '@/lib/i18n';
 import { DynamicDataRenderer, tryParseJson } from '@/components/dynamic-data-renderer';
 import { FormCard } from '@/components/form-card';
 import { BatchFormCard } from '@/components/batch-form-card';
@@ -50,6 +50,17 @@ export function CopilotPanel() {
 
   const { chips: dockChips, slot: dockSlot } = useActionDock();
   const isMobile = useIsMobile();
+
+  // Dock layout: float (default bottom sheet) | left | right (side panel on widescreen)
+  const [dockLayout, setDockLayout] = useState<CopilotDockLayout>(() => getCopilotDockLayout());
+  useEffect(() => {
+    const handler = (e: Event) => setDockLayout((e as CustomEvent<CopilotDockLayout>).detail);
+    window.addEventListener('copilot-dock-layout-changed', handler);
+    return () => window.removeEventListener('copilot-dock-layout-changed', handler);
+  }, []);
+  // On mobile always fall back to float regardless of setting.
+  const effectiveLayout: CopilotDockLayout = isMobile ? 'float' : dockLayout;
+  const isSideDocked = effectiveLayout === 'left' || effectiveLayout === 'right';
 
   // Render counter for loop diagnostics
   const renderCountRef = useRef(0);
@@ -804,7 +815,12 @@ export function CopilotPanel() {
                 : (isFullScreen ? 'Back to panel' : 'Collapse')
             }
           >
-            <ChevronDown className="w-4 h-4 text-foreground" />
+            {effectiveLayout === 'left'
+              ? <ChevronLeft className="w-4 h-4 text-foreground" />
+              : effectiveLayout === 'right'
+                ? <ChevronRight className="w-4 h-4 text-foreground" />
+                : <ChevronDown className="w-4 h-4 text-foreground" />
+            }
           </button>
           <div className="flex items-center gap-2">
             {isFullScreen && <Sparkles className="w-5 h-5 text-primary" />}
@@ -883,7 +899,7 @@ export function CopilotPanel() {
     return (
       <>
         <AnimatePresence>
-          {isOpen && (
+          {isOpen && !isSideDocked && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -898,9 +914,12 @@ export function CopilotPanel() {
         <motion.div
           ref={panelRef}
           initial={false}
-          animate={{ height: isFullScreen ? '100vh' : isOpen ? '78vh' : 'auto' }}
+          animate={isSideDocked
+            ? { width: isOpen ? 380 : 0, height: '100vh' }
+            : { height: isFullScreen ? '100vh' : isOpen ? '78vh' : 'auto' }
+          }
           transition={{ type: 'spring', damping: 32, stiffness: 280 }}
-          drag={isOpen ? 'y' : false}
+          drag={isOpen && !isSideDocked ? 'y' : false}
           dragControls={dragControls}
           dragListener={false}
           dragConstraints={{ top: 0, bottom: 0 }}
@@ -922,14 +941,24 @@ export function CopilotPanel() {
             }
           }}
           className={cn(
-            'fixed bottom-0 left-0 right-0 z-[60] flex flex-col justify-end overflow-hidden safe-area-bottom',
-            'bg-background/80 backdrop-blur-md border-t border-border/50',
-            isOpen && !isFullScreen && 'rounded-t-[20px]'
+            'fixed z-[60] flex flex-col overflow-hidden safe-area-bottom',
+            'bg-background/80 backdrop-blur-md',
+            // Float mode: bottom sheet
+            !isSideDocked && 'bottom-0 left-0 right-0 justify-end border-t border-border/50',
+            !isSideDocked && isOpen && !isFullScreen && 'rounded-t-[20px]',
+            // Side-docked mode: fixed side panel, full height
+            isSideDocked && 'top-0 bottom-0 w-[380px] border-border/50',
+            isSideDocked && effectiveLayout === 'right' && 'right-0 border-l',
+            isSideDocked && effectiveLayout === 'left' && 'left-0 border-r',
+            // When side-docked and closed, prevent it from intercepting clicks.
+            isSideDocked && !isOpen && 'pointer-events-none',
           )}
           style={
-            isOpen
+            isOpen && !isSideDocked
               ? { boxShadow: '0 -8px 32px -4px rgba(0, 0, 0, 0.15), 0 -4px 16px -4px rgba(0, 0, 0, 0.1)' }
-              : undefined
+              : isSideDocked
+                ? { boxShadow: '0 0 24px -4px rgba(0, 0, 0, 0.1)' }
+                : undefined
           }
           data-component="copilot-unified-dock"
         >
@@ -939,7 +968,7 @@ export function CopilotPanel() {
               {renderMessages()}
               {renderInputExtras()}
             </>
-          ) : (
+          ) : isSideDocked ? null : (
             <div className="mx-auto w-full max-w-md flex flex-col gap-2 px-3 pt-2 pb-0">
               {dockSlot !== null ? (
                 <div className="flex justify-center">{dockSlot}</div>

@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { ArrowLeft, Moon, Sun, Globe, HelpCircle, LogOut, Volume2, Play, Type, Palette, CircleDot, LayoutGrid, Speech, X, Zap, MessageSquare, Gauge, LayoutDashboard, Database, Bug, FileCode, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Moon, Sun, Globe, HelpCircle, LogOut, Volume2, Play, Type, Palette, CircleDot, LayoutGrid, Speech, X, Zap, MessageSquare, Gauge, LayoutDashboard, Database, Bug, FileCode, ChevronRight, Monitor } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 
 import { useUser } from '@/hooks/use-user';
 import { useAppSettings } from '@/hooks/use-app-settings';
-import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, setSelectedVoice, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getOrganizeInStructureCard, setOrganizeInStructureCard, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, type Locale, type VoiceOption, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget } from '@/lib/i18n';
+import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, setSelectedVoice, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getOrganizeInStructureCard, setOrganizeInStructureCard, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, getCopilotDockLayout, setCopilotDockLayout, copilotDockLayoutLabels, type Locale, type VoiceOption, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget, type CopilotDockLayout } from '@/lib/i18n';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
@@ -86,6 +86,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const [organizeInStructureCard, setOrganizeInStructureCardState] = useState(() => getOrganizeInStructureCard());
   const [voiceSummaryEnabled, setVoiceSummaryEnabledState] = useState(() => getVoiceSummaryEnabled());
   const [copilotInAllScreens, setCopilotInAllScreensState] = useState(() => getCopilotInAllScreens());
+  const [copilotDockLayout, setCopilotDockLayoutState] = useState<CopilotDockLayout>(() => getCopilotDockLayout());
   const [simulateStreaming, setSimulateStreamingState] = useState(() => getSimulateStreaming());
   const [homeHeaderWidget, setHomeHeaderWidgetState] = useState<HomeHeaderWidget>(() => getHomeHeaderWidget());
 
@@ -198,6 +199,12 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const handleCopilotInAllScreensChange = (enabled: boolean) => {
     setCopilotInAllScreensState(enabled);
     setCopilotInAllScreens(enabled);
+  };
+
+  const handleCopilotDockLayoutChange = (layout: string) => {
+    const l = layout as CopilotDockLayout;
+    setCopilotDockLayoutState(l);
+    setCopilotDockLayout(l);
   };
 
   const handleSimulateStreamingChange = (enabled: boolean) => {
@@ -557,6 +564,37 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                   {locale === 'zh-Hans'
                     ? '启用后，Ask Copilot 输入框将显示在所有页面底部，包括设置页'
                     : 'When enabled, Ask Copilot input will appear at the bottom of all screens, including Settings'}
+                </p>
+              </div>
+
+              {/* Copilot dock layout (widescreen) */}
+              <div className="pt-3 border-t border-border/30">
+                <SettingsItem
+                  icon={Monitor}
+                  label={locale === 'zh-Hans' ? '宽屏模式 Copilot 布局' : 'Widescreen Copilot Layout'}
+                  rightElement={
+                    <div className="flex rounded-lg overflow-hidden border border-border/60">
+                      {(['float', 'left', 'right'] as CopilotDockLayout[]).map((opt) => (
+                        <button
+                          key={opt}
+                          onClick={() => handleCopilotDockLayoutChange(opt)}
+                          className={cn(
+                            'px-3 py-1 text-xs font-medium transition-colors',
+                            copilotDockLayout === opt
+                              ? 'bg-primary text-primary-foreground'
+                              : 'bg-background hover:bg-muted text-muted-foreground'
+                          )}
+                        >
+                          {locale === 'zh-Hans' ? copilotDockLayoutLabels[opt].zh : copilotDockLayoutLabels[opt].en}
+                        </button>
+                      ))}
+                    </div>
+                  }
+                />
+                <p className="text-xs text-muted-foreground mt-1 pl-8">
+                  {locale === 'zh-Hans'
+                    ? '在宽屏幕设备上将 Copilot 面板固定到左侧或右侧，或保持浮动弹出'
+                    : 'Dock the Copilot panel to the left or right side on wide screens, or keep it floating'}
                 </p>
               </div>
 
