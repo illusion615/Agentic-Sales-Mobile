@@ -227,49 +227,7 @@ export async function runShadowPipeline(ctx: FrameRunContext): Promise<ShadowRes
     };
   }
 
-  // Fast-path: single intent → deterministic skill mapping, skip Orchestrator LLM.
-  // The Frame already classified the intent; suggestSkillForIntent picks the function.
-  // We extract arguments from explicitNames + the intent summary.
-  if (frame.intents.length === 1) {
-    const singleIntent = frame.intents[0];
-    const fn = suggestSkillForIntent(singleIntent);
-    const args: Record<string, unknown> = {};
-    // Map explicit names from the frame to function arguments
-    for (const en of frame.explicitNames) {
-      if (en.kind === 'account') args.accountName = en.text;
-      else if (en.kind === 'contact') args.contactName = en.text;
-      else if (en.kind === 'opportunity') args.opportunityName = en.text;
-      else if (en.kind === 'product') args.productName = en.text;
-    }
-    // Add summary/title for draft intents
-    if (singleIntent.cognitiveTask === 'Log' || singleIntent.cognitiveTask === 'Plan') {
-      if (!args.title) args.title = singleIntent.summary;
-    }
-    // Add query for knowledge/recommend/analyze intents
-    if (singleIntent.cognitiveTask === 'Knowledge' || singleIntent.cognitiveTask === 'Recommend' || singleIntent.cognitiveTask === 'Analyze') {
-      if (!args.query) args.query = singleIntent.summary || ctx.userMessage;
-    }
-    const singlePlan: SubPromptOutput = {
-      steps: [{
-        seq: 1,
-        outputRef: '$intent_0',
-        function: fn ?? 'null',
-        arguments: args,
-        dependsOn: [],
-      }],
-    };
-    return {
-      frame,
-      frameLatencyMs,
-      skillsCount: skills.length,
-      plan: singlePlan,
-      planLatencyMs: 0,
-      planRaw: JSON.stringify(singlePlan),
-      totalLatencyMs: Date.now() - totalStart,
-    };
-  }
-
-  // 3. Orchestrator (LLM call for multi-intent argument filling)
+  // 3. Orchestrator (LLM call for argument filling — all intents, single or multi)
   const systemPrompt = buildOrchestratorPrompt(frame, skeleton, skillsText, locale);
   const userPrompt = buildUserBlock(ctx.userMessage, frame, ctx.pageContext, ctx.conversationHistory);
 
