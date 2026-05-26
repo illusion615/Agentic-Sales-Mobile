@@ -170,27 +170,10 @@ Do NOT split intents when:
 - Preparation, follow-up, or implicit sub-tasks of a scheduled activity are part of that activity, not separate intents. "Meet tomorrow and prepare for it" = 1 intent (the meeting).
 - Descriptions of what a customer wants, needs, or is buying are part of the Opportunity intent itself, not separate Product or Activity intents. The Opportunity's summary should absorb these details.
 
-Language-agnostic: judge by meaning, not by keywords. The user may write in any language or mix languages. Tense and time are inferred from meaning. When the user's message references context from the [Recent dialogue], resolve it naturally.
+Language-agnostic: judge by meaning, not by keywords. The user may write in any language or mix languages. Tense and time are inferred from meaning.
 
-# Anaphora / follow-up resolution (CRITICAL)
-When the user message contains pronouns (them, it, those, these, this, 它们, 这些, 那些) or short follow-up commands (list, show, details, more, explain, 列出, 展示, 详情), you MUST resolve the referent from [Recent dialogue] BEFORE classifying:
-
-1. Look at the most recent assistant message in [Recent dialogue]. If it contains a function tag like [getSalesSummary] or [getMyOpportunities], that tells you what entity type was discussed.
-2. Map the prior topic to a salesObject:
-   - Prior turn discussed opportunities / pipeline / deals → salesObject = Opportunity
-   - Prior turn discussed accounts / customers / companies → salesObject = Account
-   - Prior turn discussed contacts / people → salesObject = Contact
-   - Prior turn discussed activities / visits / meetings / calls → salesObject = Activity
-   - Prior turn discussed products / specs / features → salesObject = Product
-3. The user's follow-up inherits that salesObject. Do NOT default to a different entity.
-4. Common patterns:
-   - "list them" / "show them" / "列出来" after opportunity discussion → Opportunity, Find
-   - "tell me more" / "details" after account query → Account, Find
-   - "what about the second one" after a list → same salesObject, Find
-   - "update it" after discussing an opportunity → Opportunity, Update
-   - "suggest next steps" after opportunity summary → Opportunity, Analyze
-
-If [Recent dialogue] is empty or the referent is genuinely ambiguous, then — and only then — classify based on the user's message alone.
+# Follow-up / anaphora resolution
+The conversation history is provided as prior chat turns. When the user's message contains pronouns (them, it, those, these, this) or short follow-up commands (list, show, details, more), resolve the referent from the previous turns. The salesObject of a follow-up inherits from the topic of the prior exchange — do NOT default to a different entity type.
 
 # Sales objects (each intent picks exactly one)
 - Account     — a customer organization (hospital, company, distributor)
@@ -299,30 +282,7 @@ User: "how should I approach this deal"
 Expected intents: 1
   [0] Opportunity, Analyze, none — deal strategy advice                          label {zh:"打单策略建议",en:"Deal strategy"}
 
-# Follow-up / anaphora examples (with [Recent dialogue] context)
-
-[Recent dialogue] assistant: [getSalesSummary] Your pipeline has 9 opportunities worth $4.88M...
-User: "list them"
-Expected intents: 1
-  [0] Opportunity, Find, none — list the opportunities from the pipeline summary    label {zh:"列出商机",en:"List opportunities"}
-Note: "them" = the 9 opportunities. salesObject = Opportunity (from prior turn), NOT Activity.
-
-[Recent dialogue] assistant: [searchAccounts] Found 5 accounts in the Eastern region...
-User: "show me details on the first one"
-Expected intents: 1
-  [0] Account, Find, none — show details of the first account                       label {zh:"查看客户详情",en:"Account details"}
-
-[Recent dialogue] assistant: [getMyOpportunities] You have 3 opportunities in proposal stage...
-User: "any of them closing this month?"
-Expected intents: 1
-  [0] Opportunity, Find, none — filter opportunities closing this month             label {zh:"本月到期商机",en:"Closing this month"}
-
-[Recent dialogue] assistant: [getSalesSummary] Pipeline overview: 9 opps, $4.88M total...
-User: "suggest next steps"
-Expected intents: 1
-  [0] Opportunity, Analyze, none — suggest next steps for pipeline                  label {zh:"建议下一步",en:"Suggest next steps"}
-
-Now process the user message.`;
+Now classify the latest user message. Use the prior conversation turns (if any) to resolve pronouns and follow-up references.`;
 }
 
 // ----------------------------- Runner ------------------------------------
@@ -368,16 +328,22 @@ export async function runFrame(ctx: FrameRunContext): Promise<FrameRunOutcome> {
     }
   }
 
-  const tail = (ctx.conversationHistory ?? []).slice(-3);
-  const historyBlock = tail.length
-    ? `\n\n[Recent dialogue]\n${tail.map((m) => {
-        const fn = (m as { functionCalled?: string }).functionCalled;
-        const prefix = fn ? `[${fn}] ` : '';
-        return `${m.role}: ${prefix}${m.content}`;
-      }).join('\n')}`
-    : '';
+  // Build conversation context block — placed at the END of the system prompt
+  // for maximum attention weight. invokeFlowForLLM serialises all messages into
+  // a single string (role: content\n...), so multi-turn chat format has no
+  // benefit. Instead, embed context inside the system prompt where the LLM
+  // pays the most attention (recency bias).
+  const tail = (ctx.conversationHistory ?? []).slice(-4);
+  let contextBlock = '';
+  if (tail.length > 0) {
+    const turns = tail.map((m) => `${m.role}: ${m.content.slice(0, 300)}`).join('\n');
+    contextBlock = `\n\n# Conversation context\n${turns}\n\nThe user's next message follows. If it contains pronouns (them/it/those/these/this) or short commands (list/show/details/more), resolve the referent from the conversation above — the salesObject MUST match what was discussed, not a default.`;
+  }
 
-  const userBlock = `${pageBlock}${historyBlock}\n\n[User] ${ctx.userMessage}`;
+  const messages: Array<{ role: 'system' | 'user'; content: string }> = [
+    { role: 'system', content: system + pageBlock + contextBlock },
+    { role: 'user', content: ctx.userMessage },
+  ];
 
   // First attempt: strict JSON mode. On any failure, retry once in text mode
   // — the flow's server-side Parse-JSON action sometimes throws
@@ -385,20 +351,14 @@ export async function runFrame(ctx: FrameRunContext): Promise<FrameRunOutcome> {
   // when the model's JSON output is truncated. Text mode bypasses that
   // parser and lets our tolerant client parser handle the response.
   let resp = await invokeFlowForLLM({
-    messages: [
-      { role: 'system', content: system },
-      { role: 'user', content: userBlock },
-    ],
+    messages,
     responseFormat: 'json',
   });
   let parsed = resp.success && resp.content ? tryParseFrame(resp.content) : null;
   if (!parsed) {
     const firstError = resp.error;
     resp = await invokeFlowForLLM({
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: userBlock },
-      ],
+      messages,
       responseFormat: 'text',
     });
     if (resp.success && resp.content) parsed = tryParseFrame(resp.content);
