@@ -830,7 +830,7 @@ export function CopilotPanel() {
           )}
           <div className="flex items-center gap-2">
             {isFullScreen && <Sparkles className="w-5 h-5 text-primary" />}
-            <span className="text-sm font-medium text-foreground">Ask Copilot</span>
+            <span className="text-sm font-medium text-foreground">Sales Copilot</span>
             {isConnected && <span className="w-2 h-2 bg-green-500 rounded-full" />}
             {isConnecting && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
             <button
@@ -972,6 +972,29 @@ export function CopilotPanel() {
             <>
               {panelChrome}
               {renderMessages()}
+              {/* Side-docked: show page quick actions above input since collapsed dock is hidden */}
+              {isSideDocked && dockChips.length > 0 && (
+                <div className="px-3 py-2 border-t border-border/20 flex items-center gap-2 flex-wrap">
+                  {dockChips.map((c) => {
+                    const Icon = c.icon;
+                    return (
+                      <button
+                        key={c.id}
+                        onClick={c.onClick}
+                        className={cn(
+                          'flex items-center gap-1.5 px-3 py-1.5',
+                          'rounded-full bg-muted/50 border border-border/50',
+                          'text-xs font-medium text-foreground',
+                          'hover:bg-muted active:scale-95 transition-all'
+                        )}
+                      >
+                        <Icon className="w-3.5 h-3.5 text-primary" />
+                        <span>{c.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
               {renderInputExtras()}
             </>
           ) : isSideDocked ? null : (
