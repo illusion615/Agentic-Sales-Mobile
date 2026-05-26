@@ -309,7 +309,7 @@ export async function runFrame(ctx: FrameRunContext): Promise<FrameRunOutcome> {
     }
   }
 
-  const tail = (ctx.conversationHistory ?? []).slice(-4);
+  const tail = (ctx.conversationHistory ?? []).slice(-3);
   const historyBlock = tail.length
     ? `\n\n[Recent dialogue]\n${tail.map((m) => `${m.role}: ${m.content}`).join('\n')}`
     : '';

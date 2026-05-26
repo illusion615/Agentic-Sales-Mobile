@@ -1360,7 +1360,7 @@ User: "Log a meeting with Rachel at King's College Hospital"
     const intentMessages: Array<{ role: string; content: string }> = [
       { role: 'system', content: intentSystemPrompt },
     ];
-    const recentHistory = history.slice(-10);
+    const recentHistory = history.slice(-4);
     for (const msg of recentHistory) {
       intentMessages.push({ role: msg.role, content: msg.content });
     }
