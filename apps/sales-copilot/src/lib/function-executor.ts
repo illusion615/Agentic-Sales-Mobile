@@ -84,262 +84,191 @@ export async function executeFunction(
 
   try {
     switch (functionName) {
-      // ===== Account Functions =====
-      case 'searchAccounts': {
-        const query = (args.query as string || '').toLowerCase();
-        const limit = (args.limit as number) || 5;
+      // ===== Atomic Query: Accounts =====
+      case 'queryAccounts':
+      case 'searchAccounts':
+      case 'getAccountDetails':
+      case 'getAccountsByRegion':
+      case 'getAccountsByTier':
+      case 'getAccountsNeedingFollowUp': {
         const accounts = await AccountService.getAll();
-        const filtered = accounts
-          .filter((a: Account) => a.name1?.toLowerCase().includes(query))
-          .slice(0, limit);
-        return {
-          success: true,
-          data: filtered.map((a: Account) => ({
-            id: a.id,
-            name: a.name1,
-            industry: a.industry,
-            region: a.region,
-            tier: a.tier,
-            phone: a.phone,
-            email: a.email,
-          })),
-        };
-      }
+        let filtered = [...accounts];
 
-      case 'getAccountDetails': {
-        const accountId = args.accountId as string;
-        if (!accountId) return { success: false, error: '缺少 accountId 参数' };
-        const account = await AccountService.get(accountId);
-        return { success: true, data: account };
-      }
+        // Legacy function aliases → map old args to new filter params
+        const accountId = args.accountId as string | undefined;
+        const nameQuery = (args.name as string || args.query as string || '').toLowerCase();
+        const region = args.region as string | undefined;
+        const tier = args.tier as string | undefined;
+        const daysSinceLastContact = args.daysSinceLastContact as number | undefined;
+        const sortBy = args.sortBy as string | undefined;
+        const limit = (args.limit as number) || 20;
 
-      case 'getAccountsByRegion': {
-        const regionLabel = args.region as string;
-        const limit = (args.limit as number) || 10;
-        if (!regionLabel) return { success: false, error: '缺少 region 参数' };
-        const accounts = await AccountService.getAll();
-        const filtered = accounts
-          .filter((a: Account) => a.region === regionLabel)
-          .slice(0, limit);
-        return {
-          success: true,
-          data: filtered.map((a: Account) => ({
-            id: a.id,
-            name: a.name1,
-            industry: a.industry,
-            tier: a.tier,
-          })),
-        };
-      }
-
-      case 'getAccountsByTier': {
-        const tierLabel = args.tier as string;
-        const limit = (args.limit as number) || 10;
-        if (!tierLabel) return { success: false, error: '缺少 tier 参数' };
-        const accounts = await AccountService.getAll();
-        const filtered = accounts
-          .filter((a: Account) => a.tier === tierLabel)
-          .slice(0, limit);
-        return {
-          success: true,
-          data: filtered.map((a: Account) => ({
-            id: a.id,
-            name: a.name1,
-            industry: a.industry,
-            region: a.region,
-          })),
-        };
-      }
-
-      // ===== Opportunity Functions =====
-      case 'getMyOpportunities': {
-        const stageLabel = args.stage as string | undefined;
-        const limit = (args.limit as number) || 10;
-        const opportunities = await OpportunityService.getAll();
-        let filtered = opportunities;
-        if (stageLabel) {
-          filtered = opportunities.filter((o: Opportunity) => o.stage === stageLabel);
+        // Single account by ID
+        if (accountId) {
+          const account = await AccountService.get(accountId);
+          return { success: true, data: account };
         }
+
+        // Apply filters
+        if (nameQuery) filtered = filtered.filter((a: Account) => a.name1?.toLowerCase().includes(nameQuery));
+        if (region) filtered = filtered.filter((a: Account) => a.region === region);
+        if (tier) filtered = filtered.filter((a: Account) => a.tier === tier);
+        if (daysSinceLastContact) {
+          const cutoff = new Date();
+          cutoff.setDate(cutoff.getDate() - daysSinceLastContact);
+          filtered = filtered.filter((a: Account) => {
+            if (!a.lastcontactedon) return true;
+            return new Date(a.lastcontactedon) < cutoff;
+          });
+        }
+
+        // Sort
+        if (sortBy === 'lastContacted') {
+          filtered.sort((a, b) => {
+            const da = a.lastcontactedon ? new Date(a.lastcontactedon).getTime() : 0;
+            const db = b.lastcontactedon ? new Date(b.lastcontactedon).getTime() : 0;
+            return da - db;
+          });
+        } else if (sortBy === 'tier') {
+          const tierOrder: Record<string, number> = { S: 0, A: 1, B: 2, C: 3 };
+          filtered.sort((a, b) => (tierOrder[a.tier || 'C'] ?? 9) - (tierOrder[b.tier || 'C'] ?? 9));
+        }
+
+        return {
+          success: true,
+          data: filtered.slice(0, limit).map((a: Account) => ({
+            id: a.id, name: a.name1, industry: a.industry,
+            region: a.region, tier: a.tier, phone: a.phone,
+            email: a.email, lastContactedOn: a.lastcontactedon,
+          })),
+        };
+      }
+
+      // ===== Atomic Query: Opportunities =====
+      case 'queryOpportunities':
+      case 'getMyOpportunities':
+      case 'getTopOpportunities':
+      case 'getOpportunitiesByAccount':
+      case 'getOpportunitiesClosingSoon':
+      case 'getSalesSummary': {
+        const opportunities = await OpportunityService.getAll();
+        let filtered = [...opportunities];
+
+        const oppAccountId = args.accountId as string | undefined;
+        const stage = args.stage as string | undefined;
+        const closingWithinDays = args.closingWithinDays as number | undefined ?? (args.days as number | undefined);
+        const minAmount = args.minAmount as number | undefined;
+        const oppSortBy = args.sortBy as string | undefined;
+        const oppLimit = (args.limit as number) || 20;
+
         // Filter by owner if userId provided
         if (context.userId) {
           filtered = filtered.filter((o: Opportunity) => o.ownerid === context.userId);
         }
-        return {
-          success: true,
-          data: filtered.slice(0, limit).map((o: Opportunity) => ({
-            id: o.id,
-            name: o.name1,
-            account: o.account?.name1,
-            amount: o.totalamount,
-            stage: o.stage,
-            confidence: o.confidence,
-            expectedCloseDate: o.expectedclosedate,
-          })),
-        };
-      }
 
-      case 'getTopOpportunities': {
-        const limit = (args.limit as number) || 5;
-        const opportunities = await OpportunityService.getAll();
-        const sorted = [...opportunities].sort((a: Opportunity, b: Opportunity) => b.totalamount - a.totalamount);
-        return {
-          success: true,
-          data: sorted.slice(0, limit).map((o: Opportunity) => ({
-            id: o.id,
-            name: o.name1,
-            account: o.account?.name1,
-            amount: o.totalamount,
-            stage: o.stage,
-            stageLabel: o.stage,
-            confidence: o.confidence,
-            expectedCloseDate: o.expectedclosedate,
-          })),
-        };
-      }
-
-      case 'getOpportunitiesByAccount': {
-        const accountId = args.accountId as string;
-        if (!accountId) return { success: false, error: '缺少 accountId 参数' };
-        const opportunities = await OpportunityService.getAll();
-        const filtered = opportunities.filter((o: Opportunity) => o.account?.id === accountId);
-        return {
-          success: true,
-          data: filtered.map((o: Opportunity) => ({
-            id: o.id,
-            name: o.name1,
-            amount: o.totalamount,
-            stage: o.stage,
-            stageLabel: o.stage,
-            confidence: o.confidence,
-            expectedCloseDate: o.expectedclosedate,
-          })),
-        };
-      }
-
-      case 'getOpportunitiesClosingSoon': {
-        const days = (args.days as number) || 7;
-        const limit = (args.limit as number) || 10;
-        const opportunities = await OpportunityService.getAll();
-        const now = new Date();
-        const cutoff = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
-        const filtered = opportunities
-          .filter((o: Opportunity) => {
+        // Apply filters
+        if (oppAccountId) filtered = filtered.filter((o: Opportunity) => o.account?.id === oppAccountId);
+        if (stage) filtered = filtered.filter((o: Opportunity) => o.stage === stage);
+        if (minAmount) filtered = filtered.filter((o: Opportunity) => o.totalamount >= minAmount);
+        if (closingWithinDays) {
+          const now = new Date();
+          const cutoff = new Date(now.getTime() + closingWithinDays * 86400000);
+          filtered = filtered.filter((o: Opportunity) => {
             if (!o.expectedclosedate) return false;
-            const closeDate = new Date(o.expectedclosedate);
-            return closeDate >= now && closeDate <= cutoff;
-          })
-          .sort((a: Opportunity, b: Opportunity) => {
-            const dateA = new Date(a.expectedclosedate || 0);
-            const dateB = new Date(b.expectedclosedate || 0);
-            return dateA.getTime() - dateB.getTime();
-          })
-          .slice(0, limit);
-        return {
-          success: true,
-          data: filtered.map((o: Opportunity) => ({
-            id: o.id,
-            name: o.name1,
-            account: o.account?.name1,
-            amount: o.totalamount,
-            stage: o.stage,
-            stageLabel: o.stage,
-            expectedCloseDate: o.expectedclosedate,
-          })),
-        };
-      }
-
-      // ===== Activity Functions =====
-      case 'getTodayActivities': {
-        const typeLabel = args.type as string | undefined;
-        const activities = await ActivityService.getAll();
-        const today = new Date().toISOString().split('T')[0];
-        let filtered = activities.filter((a: Activity) => a.scheduleddate?.startsWith(today));
-        if (typeLabel) {
-          filtered = filtered.filter((a: Activity) => a.type === typeLabel);
+            const close = new Date(o.expectedclosedate);
+            return close >= now && close <= cutoff;
+          });
         }
+
+        // Sort
+        if (oppSortBy === 'amount' || functionName === 'getTopOpportunities') {
+          filtered.sort((a, b) => b.totalamount - a.totalamount);
+        } else if (oppSortBy === 'closeDate') {
+          filtered.sort((a, b) => new Date(a.expectedclosedate || 0).getTime() - new Date(b.expectedclosedate || 0).getTime());
+        }
+
         return {
           success: true,
-          data: filtered.map((a: Activity) => ({
-            id: a.id,
-            title: a.title,
-            type: a.type,
-            account: a.account?.name1,
-            scheduledDate: a.scheduleddate,
-            status: a.draftStatus,
-            notes: a.notes,
+          data: filtered.slice(0, oppLimit).map((o: Opportunity) => ({
+            id: o.id, name: o.name1, account: o.account?.name1,
+            amount: o.totalamount, stage: o.stage,
+            confidence: o.confidence, expectedCloseDate: o.expectedclosedate,
           })),
         };
       }
 
-      case 'getUpcomingActivities': {
-        const days = (args.days as number) || 7;
-        const limit = (args.limit as number) || 10;
-        const activities = await ActivityService.getAll();
-        const now = new Date();
-        const cutoff = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
-        const filtered = activities
-          .filter((a: Activity) => {
-            if (!a.scheduleddate) return false;
-            const schedDate = new Date(a.scheduleddate);
-            return schedDate >= now && schedDate <= cutoff;
-          })
-          .sort((a: Activity, b: Activity) => {
-            const dateA = new Date(a.scheduleddate || 0);
-            const dateB = new Date(b.scheduleddate || 0);
-            return dateA.getTime() - dateB.getTime();
-          })
-          .slice(0, limit);
-        return {
-          success: true,
-          data: filtered.map((a: Activity) => ({
-            id: a.id,
-            title: a.title,
-            type: a.type,
-            account: a.account?.name1,
-            scheduledDate: a.scheduleddate,
-            status: a.draftStatus,
-          })),
-        };
-      }
-
+      // ===== Atomic Query: Activities =====
+      case 'queryActivities':
+      case 'getTodayActivities':
+      case 'getUpcomingActivities':
       case 'getActivitiesByAccount': {
-        const accountId = args.accountId as string;
-        const limit = (args.limit as number) || 10;
-        if (!accountId) return { success: false, error: '缺少 accountId 参数' };
         const activities = await ActivityService.getAll();
-        const filtered = activities
-          .filter((a: Activity) => a.account?.id === accountId)
-          .slice(0, limit);
+        let filteredAct = [...activities];
+
+        const actAccountId = args.accountId as string | undefined;
+        const actType = args.type as string | undefined;
+        const dateRange = (args.dateRange as string) || (functionName === 'getTodayActivities' ? 'today' : undefined);
+        const actStatus = args.status as string | undefined;
+        const actSortBy = args.sortBy as string | undefined;
+        const actLimit = (args.limit as number) || 20;
+
+        // Apply filters
+        if (actAccountId) filteredAct = filteredAct.filter((a: Activity) => a.account?.id === actAccountId);
+        if (actType) filteredAct = filteredAct.filter((a: Activity) => a.type === actType);
+        if (actStatus) filteredAct = filteredAct.filter((a: Activity) => a.draftStatus === actStatus);
+        if (dateRange) {
+          const now = new Date();
+          const today = now.toISOString().split('T')[0];
+          if (dateRange === 'today') {
+            filteredAct = filteredAct.filter((a: Activity) => a.scheduleddate?.startsWith(today));
+          } else {
+            const days = dateRange === '7days' ? 7 : dateRange === '30days' ? 30 : 365;
+            const cutoff = new Date(now.getTime() + days * 86400000);
+            filteredAct = filteredAct.filter((a: Activity) => {
+              if (!a.scheduleddate) return false;
+              const d = new Date(a.scheduleddate);
+              return d >= now && d <= cutoff;
+            });
+          }
+        }
+
+        // Sort by date by default
+        if (actSortBy === 'type') {
+          filteredAct.sort((a, b) => (a.type || '').localeCompare(b.type || ''));
+        } else {
+          filteredAct.sort((a, b) => new Date(a.scheduleddate || 0).getTime() - new Date(b.scheduleddate || 0).getTime());
+        }
+
         return {
           success: true,
-          data: filtered.map((a: Activity) => ({
-            id: a.id,
-            title: a.title,
-            type: a.type,
-            scheduledDate: a.scheduleddate,
-            status: a.draftStatus,
-            notes: a.notes,
+          data: filteredAct.slice(0, actLimit).map((a: Activity) => ({
+            id: a.id, title: a.title, type: a.type,
+            account: a.account?.name1, scheduledDate: a.scheduleddate,
+            status: a.draftStatus, notes: a.notes,
           })),
         };
       }
 
+      // ===== Atomic Query: Contacts =====
+      case 'queryContacts':
       case 'getContactsByAccount': {
-        const accountId = args.accountId as string;
-        const limit = (args.limit as number) || 10;
-        if (!accountId) return { success: false, error: '缺少 accountId 参数' };
         const contacts = await ContactService.getAll();
-        const filtered = contacts
-          .filter((c: Contact) => c.account?.id === accountId)
-          .slice(0, limit);
+        let filteredContacts = [...contacts];
+
+        const ctAccountId = args.accountId as string | undefined;
+        const ctName = (args.name as string || '').toLowerCase();
+        const ctTitle = (args.title as string || '').toLowerCase();
+        const ctLimit = (args.limit as number) || 20;
+
+        if (ctAccountId) filteredContacts = filteredContacts.filter((c: Contact) => c.account?.id === ctAccountId);
+        if (ctName) filteredContacts = filteredContacts.filter((c: Contact) => c.fullname?.toLowerCase().includes(ctName));
+        if (ctTitle) filteredContacts = filteredContacts.filter((c: Contact) => c.title?.toLowerCase().includes(ctTitle));
+
         return {
           success: true,
-          data: filtered.map((c: Contact) => ({
-            id: c.id,
-            name: c.fullname,
-            title: c.title,
-            phone: c.phone,
-            email: c.email,
-            accountName: c.account?.name1,
+          data: filteredContacts.slice(0, ctLimit).map((c: Contact) => ({
+            id: c.id, name: c.fullname, title: c.title,
+            phone: c.phone, email: c.email, accountName: c.account?.name1,
           })),
         };
       }
@@ -725,55 +654,6 @@ export async function executeFunction(
         };
       }
 
-      // ===== Summary/Analytics Functions =====
-      case 'getSalesSummary': {
-        const opportunities = await OpportunityService.getAll();
-        const totalAmount = opportunities.reduce((sum: number, o: Opportunity) => sum + o.totalamount, 0);
-        // Bucket by *label* so downstream LLM templates render “qualification/proposal”, not raw “StageKey1”.
-        const byStage: Record<string, { count: number; amount: number }> = {};
-        opportunities.forEach((o: Opportunity) => {
-          const stageLabel = o.stage || 'unknown';
-          if (!byStage[stageLabel]) byStage[stageLabel] = { count: 0, amount: 0 };
-          byStage[stageLabel].count++;
-          byStage[stageLabel].amount += o.totalamount;
-        });
-        return {
-          success: true,
-          data: {
-            totalOpportunities: opportunities.length,
-            totalAmount,
-            averageAmount: opportunities.length > 0 ? totalAmount / opportunities.length : 0,
-            byStage,
-          },
-        };
-      }
-
-      case 'getAccountsNeedingFollowUp': {
-        const daysSinceLastContact = (args.daysSinceLastContact as number) || 7;
-        const limit = (args.limit as number) || 10;
-        const accounts = await AccountService.getAll();
-        const cutoffDate = new Date();
-        cutoffDate.setDate(cutoffDate.getDate() - daysSinceLastContact);
-        const filtered = accounts
-          .filter((a: Account) => {
-            if (!a.lastcontactedon) return true; // Never contacted
-            const lastContact = new Date(a.lastcontactedon);
-            return lastContact < cutoffDate;
-          })
-          .slice(0, limit);
-        return {
-          success: true,
-          data: filtered.map((a: Account) => ({
-            id: a.id,
-            name: a.name1,
-            lastContactedOn: a.lastcontactedon,
-            tier: a.tier,
-            phone: a.phone,
-          })),
-        };
-      }
-
-      // ===== Copilot Studio Tool (via SDK Connector) =====
       case 'externalKnowledgeQuery':
       case 'queryCopilotStudio': {
         // Safety net: auto-fill query from context if the orchestrator omitted it

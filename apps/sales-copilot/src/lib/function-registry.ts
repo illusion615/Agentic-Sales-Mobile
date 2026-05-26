@@ -97,164 +97,70 @@ export const availableFunctions: FunctionDefinition[] = [
     },
   },
 
-  // ===== Account Functions =====
+  // ===== Atomic Query Functions =====
+  // 4 generic query functions replace 14 specialized ones.
+  // The orchestrator fills in filter parameters based on user intent.
   {
-    name: 'searchAccounts',
-    displayName: { 'zh-Hans': '搜索客户', 'en-US': 'Search Accounts' },
-    description: '搜索客户/公司，支持按名称模糊查询。Search customers/companies by name.',
+    name: 'queryAccounts',
+    displayName: { 'zh-Hans': '查询客户', 'en-US': 'Query Accounts' },
+    description: 'Query accounts/customers with flexible filters. Use with no filters for full overview (e.g. "client status", "territory overview"). Use with filters for targeted queries (e.g. "show S-tier accounts in Eastern region"). 灵活查询客户，不传参数返回全量概览，传参数做精确筛选。',
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: '客户名称关键词 / Customer name keyword' },
-        limit: { type: 'number', description: '返回数量，默认5 / Max results, default 5' },
-      },
-      required: ['query'],
-    },
-  },
-  {
-    name: 'getAccountDetails',
-    displayName: { 'zh-Hans': '客户详情', 'en-US': 'Account Details' },
-    description: '获取指定客户的详细信息。Get details of a specific account.',
-    parameters: {
-      type: 'object',
-      properties: {
-        accountId: { type: 'string', description: '客户ID / Account ID' },
-      },
-      required: ['accountId'],
-    },
-  },
-  {
-    name: 'getAccountsByRegion',
-    displayName: { 'zh-Hans': '按区域筛选客户', 'en-US': 'Accounts by Region' },
-    description: '按区域筛选客户。Filter accounts by region.',
-    parameters: {
-      type: 'object',
-      properties: {
-        region: { type: 'string', description: '区域', enum: ['华东', '华北', '华南', '西南'] },
-        limit: { type: 'number', description: '返回数量，默认10' },
-      },
-      required: ['region'],
-    },
-  },
-  {
-    name: 'getAccountsByTier',
-    displayName: { 'zh-Hans': '按等级筛选客户', 'en-US': 'Accounts by Tier' },
-    description: '按客户等级筛选。Filter accounts by tier level.',
-    parameters: {
-      type: 'object',
-      properties: {
-        tier: { type: 'string', description: '客户等级', enum: ['S', 'A', 'B', 'C'] },
-        limit: { type: 'number', description: '返回数量，默认10' },
-      },
-      required: ['tier'],
-    },
-  },
-
-  // ===== Opportunity Functions =====
-  {
-    name: 'getMyOpportunities',
-    displayName: { 'zh-Hans': '我的商机', 'en-US': 'My Opportunities' },
-    description: '获取当前用户的商机列表，可按阶段筛选。Get my opportunities, optionally filter by stage.',
-    parameters: {
-      type: 'object',
-      properties: {
-        stage: {
-          type: 'string',
-          description: '商机阶段',
-          enum: ['prospecting', 'qualification', 'proposal', 'negotiation', 'won', 'lost'],
-        },
-        limit: { type: 'number', description: '返回数量，默认10' },
+        accountId: { type: 'string', description: 'Specific account ID for detail lookup / 指定客户ID查详情' },
+        name: { type: 'string', description: 'Filter by name keyword (fuzzy) / 按名称关键词模糊查询' },
+        region: { type: 'string', description: 'Filter by region / 按区域筛选' },
+        tier: { type: 'string', description: 'Filter by tier level / 按等级筛选', enum: ['S', 'A', 'B', 'C'] },
+        daysSinceLastContact: { type: 'number', description: 'Only accounts not contacted in N days (for follow-up analysis) / 超过N天未联系的客户' },
+        sortBy: { type: 'string', description: 'Sort field / 排序字段', enum: ['name', 'region', 'tier', 'lastContacted'] },
+        limit: { type: 'number', description: 'Max results, default 20 / 返回数量，默认20' },
       },
     },
   },
   {
-    name: 'getTopOpportunities',
-    displayName: { 'zh-Hans': '热门商机', 'en-US': 'Top Opportunities' },
-    description: '获取金额最高的商机。Get top opportunities by amount.',
+    name: 'queryOpportunities',
+    displayName: { 'zh-Hans': '查询商机', 'en-US': 'Query Opportunities' },
+    description: 'Query opportunities/deals with flexible filters. Use with no filters for pipeline overview (e.g. "pipeline status"). Use with filters for targeted queries (e.g. "opportunities closing this month", "deals in proposal stage"). 灵活查询商机，不传参数返回管线概览，传参数做精确筛选。',
     parameters: {
       type: 'object',
       properties: {
-        limit: { type: 'number', description: '返回数量，默认5' },
+        accountId: { type: 'string', description: 'Filter by account / 按客户筛选' },
+        stage: { type: 'string', description: 'Filter by stage / 按阶段筛选', enum: ['prospecting', 'qualification', 'proposal', 'negotiation', 'won', 'lost'] },
+        closingWithinDays: { type: 'number', description: 'Only opportunities closing within N days / 仅返回N天内到期的商机' },
+        minAmount: { type: 'number', description: 'Minimum deal amount / 最低金额' },
+        sortBy: { type: 'string', description: 'Sort field / 排序字段', enum: ['amount', 'closeDate', 'stage', 'name'] },
+        limit: { type: 'number', description: 'Max results, default 20 / 返回数量，默认20' },
       },
     },
   },
   {
-    name: 'getOpportunitiesByAccount',
-    displayName: { 'zh-Hans': '客户商机', 'en-US': 'Account Opportunities' },
-    description: '获取指定客户的所有商机。Get all opportunities for a specific account.',
+    name: 'queryActivities',
+    displayName: { 'zh-Hans': '查询活动', 'en-US': 'Query Activities' },
+    description: 'Query activities/visits/calls/meetings with flexible filters. Use with no filters for engagement overview. Use dateRange="today" for today\'s schedule, dateRange="7days" for weekly view. 灵活查询活动，不传参数返回互动概览。',
     parameters: {
       type: 'object',
       properties: {
-        accountId: { type: 'string', description: '客户ID / Account ID' },
-      },
-      required: ['accountId'],
-    },
-  },
-  {
-    name: 'getOpportunitiesClosingSoon',
-    displayName: { 'zh-Hans': '即将成交', 'en-US': 'Closing Soon' },
-    description: '获取即将到期的商机（按预计成交日期）。Get opportunities closing soon.',
-    parameters: {
-      type: 'object',
-      properties: {
-        days: { type: 'number', description: '未来多少天内，默认7' },
-        limit: { type: 'number', description: '返回数量，默认10' },
-      },
-    },
-  },
-
-  // ===== Activity Functions =====
-  {
-    name: 'getTodayActivities',
-    displayName: { 'zh-Hans': '今日活动', 'en-US': "Today's Activities" },
-    description: '获取今天的活动/拜访安排。Get today\'s scheduled activities.',
-    parameters: {
-      type: 'object',
-      properties: {
-        type: {
-          type: 'string',
-          description: '活动类型',
-          enum: ['visit', 'call', 'meeting', 'email', 'other'],
-        },
+        accountId: { type: 'string', description: 'Filter by account / 按客户筛选' },
+        type: { type: 'string', description: 'Filter by activity type / 按类型筛选', enum: ['visit', 'call', 'meeting', 'email', 'other'] },
+        dateRange: { type: 'string', description: 'Date range: "today", "7days", "30days", "all" / 日期范围', enum: ['today', '7days', '30days', 'all'] },
+        status: { type: 'string', description: 'Filter by status / 按状态筛选', enum: ['draft', 'confirmed', 'completed', 'cancelled'] },
+        sortBy: { type: 'string', description: 'Sort field / 排序字段', enum: ['date', 'type', 'account'] },
+        limit: { type: 'number', description: 'Max results, default 20 / 返回数量，默认20' },
       },
     },
   },
   {
-    name: 'getUpcomingActivities',
-    displayName: { 'zh-Hans': '近期活动', 'en-US': 'Upcoming Activities' },
-    description: '获取未来几天的活动安排。Get upcoming activities.',
+    name: 'queryContacts',
+    displayName: { 'zh-Hans': '查询联系人', 'en-US': 'Query Contacts' },
+    description: 'Query contacts with flexible filters. 灵活查询联系人。',
     parameters: {
       type: 'object',
       properties: {
-        days: { type: 'number', description: '未来多少天，默认7' },
-        limit: { type: 'number', description: '返回数量，默认10' },
+        accountId: { type: 'string', description: 'Filter by account / 按客户筛选' },
+        name: { type: 'string', description: 'Filter by name keyword / 按姓名关键词筛选' },
+        title: { type: 'string', description: 'Filter by job title keyword / 按职位关键词筛选' },
+        limit: { type: 'number', description: 'Max results, default 20 / 返回数量，默认20' },
       },
-    },
-  },
-  {
-    name: 'getActivitiesByAccount',
-    displayName: { 'zh-Hans': '客户活动', 'en-US': 'Account Activities' },
-    description: '获取指定客户的活动记录。Get activities for a specific account.',
-    parameters: {
-      type: 'object',
-      properties: {
-        accountId: { type: 'string', description: '客户ID / Account ID' },
-        limit: { type: 'number', description: '返回数量，默认10' },
-      },
-      required: ['accountId'],
-    },
-  },
-  {
-    name: 'getContactsByAccount',
-    displayName: { 'zh-Hans': '客户联系人', 'en-US': 'Account Contacts' },
-    description: '获取指定客户的所有联系人列表。Get all contacts for a specific account.',
-    parameters: {
-      type: 'object',
-      properties: {
-        accountId: { type: 'string', description: '客户ID / Account ID' },
-        limit: { type: 'number', description: '返回数量，默认10 / Max results, default 10' },
-      },
-      required: ['accountId'],
     },
   },
 
@@ -433,29 +339,6 @@ export const availableFunctions: FunctionDefinition[] = [
         opportunityIntent: { type: 'string', description: '商机/意向描述' },
       },
       required: ['result'],
-    },
-  },
-
-  // ===== Summary/Analytics Functions =====
-  {
-    name: 'getSalesSummary',
-    displayName: { 'zh-Hans': '销售摘要', 'en-US': 'Sales Summary' },
-    description: '获取销售汇总数据：商机总数、总金额、各阶段分布。Get sales summary statistics.',
-    parameters: {
-      type: 'object',
-      properties: {},
-    },
-  },
-  {
-    name: 'getAccountsNeedingFollowUp',
-    displayName: { 'zh-Hans': '待跟进客户', 'en-US': 'Accounts Needing Follow-up' },
-    description: '获取需要跟进的客户（超过N天未联系）。Get accounts that need follow-up.',
-    parameters: {
-      type: 'object',
-      properties: {
-        daysSinceLastContact: { type: 'number', description: '超过多少天未联系，默认7' },
-        limit: { type: 'number', description: '返回数量，默认10' },
-      },
     },
   },
 

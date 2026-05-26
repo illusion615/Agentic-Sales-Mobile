@@ -197,7 +197,7 @@ The conversation history is provided as prior chat turns. When the user's messag
 - Recommend  — ask the assistant to recommend a PRODUCT (features, specs, which model fits). salesObject MUST be Product.
 - Analyze    — ask the assistant for strategic advice, next-step suggestions, deal coaching, meeting preparation, follow-up strategy, account prioritization, or any request that needs CRM data synthesis + reasoning. Use for ANY "suggest / advise / analyze / coach / prepare / prioritize" intent that is NOT about product knowledge.
 - Knowledge  — ask a factual product or industry knowledge question (specs, warranty, regulations)
-- Report     — ask for a daily / weekly / pipeline summary or statistics
+- Report     — ask for a status overview, summary, or statistics about any entity type (accounts, pipeline, activities, territory, engagement)
 - Chat       — pure greeting / thanks / smalltalk
 
 # Output
@@ -417,8 +417,12 @@ export function fallbackUserFacingLabel(intent: Pick<IntentItem, 'salesObject' |
     'None|Analyze': { zh: '综合分析建议', en: 'Strategic analysis' },
     'Opportunity|Recommend': { zh: '商机建议', en: 'Opportunity advice' },
     'Account|Recommend': { zh: '客户建议', en: 'Account advice' },
+    'Opportunity|Report': { zh: '管线概览', en: 'Pipeline overview' },
+    'Account|Report': { zh: '客户概览', en: 'Account overview' },
+    'Activity|Report': { zh: '活动概览', en: 'Activity overview' },
+    'Contact|Report': { zh: '联系人概览', en: 'Contact overview' },
     'None|Chat': { zh: '日常对话', en: 'Chat' },
-    'None|Report': { zh: '生成报告', en: 'Generate report' },
+    'None|Report': { zh: '综合报告', en: 'Overview report' },
   };
   return table[key] ?? { zh: `${intent.cognitiveTask} ${intent.salesObject}`, en: `${intent.cognitiveTask} ${intent.salesObject}` };
 }
@@ -569,7 +573,9 @@ export function compareFrameVsLegacy(
  */
 export function suggestSkillForIntent(intent: IntentItem): string | null {
   const { salesObject, cognitiveTask } = intent;
-  if (salesObject === 'None') return null;
+  // For Chat/None, return null so the LLM generates a direct response.
+  // But for Report/Find/Analyze on None, fall through to the default query.
+  if (salesObject === 'None' && cognitiveTask !== 'Report' && cognitiveTask !== 'Find' && cognitiveTask !== 'Analyze') return null;
   const obj = salesObject;
   switch (cognitiveTask) {
     case 'Log':
@@ -588,21 +594,17 @@ export function suggestSkillForIntent(intent: IntentItem): string | null {
       if (obj === 'Opportunity') return 'updateOpportunity';
       return null;
     case 'Find':
-      if (obj === 'Account') return 'searchAccounts';
-      if (obj === 'Opportunity') return 'getMyOpportunities';
-      if (obj === 'Activity') return 'getTodayActivities';
-      if (obj === 'Contact') return 'getContactsByAccount';
-      return null;
+    case 'Report':
+    case 'Analyze':
+      if (obj === 'Account') return 'queryAccounts';
+      if (obj === 'Opportunity') return 'queryOpportunities';
+      if (obj === 'Activity') return 'queryActivities';
+      if (obj === 'Contact') return 'queryContacts';
+      return 'queryOpportunities';
     case 'Knowledge':
       return 'queryCopilotStudio';
     case 'Recommend':
-      // Recommend is exclusively for product recommendations (salesObject should be Product)
-      return obj === 'Product' ? 'queryCopilotStudio' : 'getSalesSummary';
-    case 'Analyze':
-      // Strategy, coaching, prioritization — uses CRM data + LLM synthesis
-      return 'getSalesSummary';
-    case 'Report':
-      return 'getSalesSummary';
+      return obj === 'Product' ? 'queryCopilotStudio' : 'queryOpportunities';
     default:
       return null;
   }

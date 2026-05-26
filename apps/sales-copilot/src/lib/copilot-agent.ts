@@ -1541,7 +1541,7 @@ Please provide a brief summary and analysis, do not list individual records.`;
   
   if (Array.isArray(resultData) && resultData.length > 0) {
     // Determine record type based on function name
-    if (fnName?.includes('Account') || fnName === 'searchAccounts' || fnName === 'getAccountsNeedingFollowUp') {
+    if (fnName === 'queryAccounts' || fnName === 'searchAccounts' || fnName === 'getAccountsNeedingFollowUp' || fnName?.includes('Account')) {
       recordList = {
         type: 'account',
         records: resultData.map((item: Record<string, unknown>) => ({
@@ -1552,7 +1552,7 @@ Please provide a brief summary and analysis, do not list individual records.`;
         })),
         title: isZh ? '客户列表' : 'Accounts',
       };
-    } else if (fnName?.includes('Opportunit') || fnName === 'getTopOpportunities' || fnName === 'getOpportunitiesClosingSoon') {
+    } else if (fnName === 'queryOpportunities' || fnName === 'getTopOpportunities' || fnName === 'getOpportunitiesClosingSoon' || fnName?.includes('Opportunit')) {
       recordList = {
         type: 'opportunity',
         records: resultData.map((item: Record<string, unknown>) => {
@@ -1576,7 +1576,7 @@ Please provide a brief summary and analysis, do not list individual records.`;
         }),
         title: isZh ? '商机列表' : 'Opportunities',
       };
-    } else if (fnName === 'getContactsByAccount') {
+    } else if (fnName === 'queryContacts' || fnName === 'getContactsByAccount') {
       recordList = {
         type: 'contact',
         records: resultData.map((item: Record<string, unknown>) => ({
@@ -1587,7 +1587,7 @@ Please provide a brief summary and analysis, do not list individual records.`;
         })),
         title: isZh ? '联系人列表' : 'Contacts',
       };
-    } else if (fnName?.includes('Activit') || fnName === 'getTodayActivities' || fnName === 'getUpcomingActivities') {
+    } else if (fnName === 'queryActivities' || fnName === 'getTodayActivities' || fnName === 'getUpcomingActivities' || fnName?.includes('Activit')) {
       recordList = {
         type: 'activity',
         records: resultData.map((item: Record<string, unknown>) => {
