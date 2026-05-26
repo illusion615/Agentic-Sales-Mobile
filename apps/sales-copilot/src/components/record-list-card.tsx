@@ -54,14 +54,30 @@ export function RecordListCard({ type, records, title }: RecordListCardProps) {
   const navigate = useNavigate();
   const locale = getLocale();
   const isZh = locale === 'zh-Hans';
-  const { closePanel } = useCopilot();
+  const { closePanel, setPageContext } = useCopilot();
   const { docked } = useCopilotSideDocked();
   
   const config = typeConfig[type];
   const Icon = config.icon;
   const displayTitle = title || (isZh ? config.labelZh : config.labelEn);
-  
+
+  // Page name labels for each record type
+  const pageLabels: Record<RecordType, { zh: string; en: string }> = {
+    account: { zh: '客户详情', en: 'Account Detail' },
+    opportunity: { zh: '商机详情', en: 'Opportunity Detail' },
+    activity: { zh: '活动详情', en: 'Activity Detail' },
+    contact: { zh: '联系人详情', en: 'Contact Detail' },
+  };
+
   const handleRecordClick = (record: RecordItem) => {
+    // Immediately set page context so the copilot panel updates before data loads
+    const label = pageLabels[type];
+    setPageContext({
+      currentPage: isZh ? label.zh : label.en,
+      summary: isZh ? `查看: ${record.title}` : `Viewing: ${record.title}`,
+      pageData: { [`${type}Id`]: record.id, [`${type}Name`]: record.title },
+    });
+
     // In docked desktop mode, keep the panel open; on mobile/float, close it
     if (!docked) {
       closePanel();
