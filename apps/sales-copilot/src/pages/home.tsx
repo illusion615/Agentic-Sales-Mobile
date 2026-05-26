@@ -393,6 +393,9 @@ export default function HomeDashboard() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Auto-play: track the message count at mount time so we only speak
+  // messages that arrive AFTER the panel opened. Existing messages are ignored.
+  const initialMessageCountRef = useRef<number | null>(null);
   const lastAutoPlayedIdRef = useRef<string | null>(null);
   const speechSynthesisRef = useRef<SpeechSynthesisUtterance | null>(null);
   
@@ -829,9 +832,16 @@ export default function HomeDashboard() {
   useEffect(() => {
     if (!getAutoPlayAgentResponse()) return;
     
+    // On first run, snapshot the current message count as baseline.
+    // Only messages arriving AFTER this point are eligible for auto-play.
+    if (initialMessageCountRef.current === null) {
+      initialMessageCountRef.current = chatMessages.length;
+      return;
+    }
+    // No new messages since baseline — nothing to play.
+    if (chatMessages.length <= initialMessageCountRef.current) return;
+    
     // Find the latest agent message that should be auto-played.
-    // Queue narration messages (announce, substep, ack) are skipped — only the
-    // final summary or regular (non-queue) agent responses trigger voice playback.
     const agentMessages = chatMessages.filter((m: ChatMessage) => {
       if (m.type !== 'agent') return false;
       // Skip thinking / streaming states
