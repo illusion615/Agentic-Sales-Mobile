@@ -80,6 +80,44 @@ export function CopilotPanel() {
   
   const inputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // TTS per-message playback
+  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
+  const playedMessageIdsRef = useRef<Set<string>>(new Set());
+
+  const stopSpeaking = useCallback(() => {
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    setSpeakingMessageId(null);
+  }, []);
+
+  const speakMessage = useCallback((messageId: string, text: string) => {
+    // Toggle off if already playing this message
+    if (speakingMessageId === messageId) {
+      stopSpeaking();
+      return;
+    }
+    stopSpeaking();
+    const plain = text
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/\*([^*]+)\*/g, '$1')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/#{1,6}\s+/g, '')
+      .replace(/`[^`]+`/g, '')
+      .replace(/```[\s\S]*?```/g, '')
+      .trim();
+    if (!plain || !('speechSynthesis' in window)) return;
+    const utt = new SpeechSynthesisUtterance(plain);
+    utt.lang = locale === 'zh-Hans' ? 'zh-CN' : 'en-US';
+    const voice = findMatchingSystemVoice(getSelectedVoice(), locale);
+    if (voice) utt.voice = voice;
+    utt.rate = 1.0;
+    utt.pitch = 1.0;
+    utt.onend = () => setSpeakingMessageId(null);
+    utt.onerror = () => setSpeakingMessageId(null);
+    setSpeakingMessageId(messageId);
+    playedMessageIdsRef.current.add(messageId);
+    window.speechSynthesis.speak(utt);
+  }, [speakingMessageId, locale, stopSpeaking]);
 
   const panelRef = useRef<HTMLDivElement>(null);
   const dragControls = useDragControls();
@@ -584,6 +622,27 @@ export function CopilotPanel() {
                         messageId={message.id}
                         additionalIntents={message.additionalIntents}
                       />
+                    )}
+                    {/* TTS play button */}
+                    {message.content && !isJson && !message.isThinking && !message.isStreaming && (
+                      <button
+                        onClick={() => speakMessage(message.id, message.content)}
+                        className="mt-1 p-1 rounded hover:bg-muted/50 transition-colors inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                        aria-label={speakingMessageId === message.id ? 'Stop' : 'Play'}
+                      >
+                        {speakingMessageId === message.id ? (
+                          <>
+                            <span className="flex items-end gap-0.5 h-3">
+                              <span className="w-0.5 bg-primary rounded-full animate-pulse" style={{ height: '60%' }} />
+                              <span className="w-0.5 bg-primary rounded-full animate-pulse" style={{ height: '100%', animationDelay: '0.15s' }} />
+                              <span className="w-0.5 bg-primary rounded-full animate-pulse" style={{ height: '40%', animationDelay: '0.3s' }} />
+                            </span>
+                            <span className="text-[10px] text-primary">Stop</span>
+                          </>
+                        ) : (
+                          <Volume2 className="w-3.5 h-3.5" />
+                        )}
+                      </button>
                     )}
                   </div>
                 );
