@@ -4,6 +4,7 @@ import { ChevronDown, ChevronUp, Building2, Target, Calendar, ArrowRight, User }
 import { cn } from '@/lib/utils';
 import { getLocale } from '@/lib/i18n';
 import { useCopilot } from '@/contexts/copilot-context';
+import { useCopilotSideDocked } from '@/components/global-copilot';
 
 export type RecordType = 'account' | 'opportunity' | 'activity' | 'contact';
 
@@ -49,23 +50,25 @@ const typeConfig = {
 };
 
 export function RecordListCard({ type, records, title }: RecordListCardProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(true);
   const navigate = useNavigate();
   const locale = getLocale();
   const isZh = locale === 'zh-Hans';
   const { closePanel } = useCopilot();
+  const { docked } = useCopilotSideDocked();
   
   const config = typeConfig[type];
   const Icon = config.icon;
   const displayTitle = title || (isZh ? config.labelZh : config.labelEn);
   
   const handleRecordClick = (record: RecordItem) => {
-    // Smoothly collapse the copilot panel first
-    closePanel();
-    // Small delay to allow panel collapse animation to start
+    // In docked desktop mode, keep the panel open; on mobile/float, close it
+    if (!docked) {
+      closePanel();
+    }
     setTimeout(() => {
       navigate(`${config.route}/${record.id}`);
-    }, 150);
+    }, docked ? 0 : 150);
   };
   
   if (records.length === 0) {
