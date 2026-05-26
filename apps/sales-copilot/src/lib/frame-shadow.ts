@@ -169,9 +169,7 @@ Do NOT split intents when:
 - Preparation, follow-up, or implicit sub-tasks of a scheduled activity are part of that activity, not separate intents. "Meet tomorrow and prepare for it" = 1 intent (the meeting).
 - Descriptions of what a customer wants, needs, or is buying are part of the Opportunity intent itself, not separate Product or Activity intents. The Opportunity's summary should absorb these details.
 
-Language-agnostic: judge by meaning, not by keywords. The user may write in any language or mix languages. Tense and time are inferred from meaning.
-
-⭐ **Pronoun / follow-up resolution (CRITICAL)**: When the user sends a short follow-up like "list them", "show those", "details", "expand", resolve pronouns by reading the [Recent dialogue] section. The assistant's last response tells you WHAT entity was discussed and with what filter. Example: assistant said "There are 9 opportunities at Oxford University Hospital" → user says "list them" → intent = Opportunity, Find, accountName="Oxford University Hospital". Do NOT default to Activity/today's tasks when the conversation context points elsewhere.
+Language-agnostic: judge by meaning, not by keywords. The user may write in any language or mix languages. Tense and time are inferred from meaning. When the user's message references context from the [Recent dialogue], resolve it naturally.
 
 # Sales objects (each intent picks exactly one)
 - Account     — a customer organization (hospital, company, distributor)

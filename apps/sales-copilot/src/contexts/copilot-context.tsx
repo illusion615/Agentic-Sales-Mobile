@@ -1454,7 +1454,18 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           // Use messagesRef to get current messages without depending on messages state
           const currentMessages = [...messages]; // Create copy at call time
           const conversationHistory = currentMessages
-            .filter((m: ChatMessage) => m.role === 'user' || m.role === 'assistant')
+            .filter((m: ChatMessage) => {
+              // Only include actual conversational messages, not UI narration or cards.
+              if (!m.role || (m.role !== 'user' && m.role !== 'assistant')) return false;
+              if (!m.content || !m.content.trim()) return false;
+              // Skip queue narration messages (announce, substep, overview) — they're UI chrome, not conversation.
+              if (m.taskRole === 'announce' || m.taskRole === 'substep' || m.taskRole === 'overview') return false;
+              // Skip thinking/streaming placeholders.
+              if (m.isThinking || m.isStreaming) return false;
+              // Skip non-text message types (cards etc.) — only agent text and user text.
+              if (m.type !== 'user' && m.type !== 'agent') return false;
+              return true;
+            })
             .map((m: ChatMessage) => ({
               role: m.role as 'user' | 'assistant',
               content: m.content,
@@ -2472,7 +2483,14 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         // Build conversation history
         const currentMessages = messages;
         const conversationHistory = currentMessages
-          .filter((m: ChatMessage) => m.role === 'user' || m.role === 'assistant')
+          .filter((m: ChatMessage) => {
+            if (!m.role || (m.role !== 'user' && m.role !== 'assistant')) return false;
+            if (!m.content || !m.content.trim()) return false;
+            if (m.taskRole === 'announce' || m.taskRole === 'substep' || m.taskRole === 'overview') return false;
+            if (m.isThinking || m.isStreaming) return false;
+            if (m.type !== 'user' && m.type !== 'agent') return false;
+            return true;
+          })
           .map((m: ChatMessage) => ({
             role: m.role as 'user' | 'assistant',
             content: m.content,
