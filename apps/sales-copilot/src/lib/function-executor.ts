@@ -82,6 +82,27 @@ export async function executeFunction(
 ): Promise<FunctionCallResult> {
   console.log('[FN] ENTER executeFunction, name=' + functionName + ', args=' + JSON.stringify(args));
 
+  // Shared helper: resolve accountName → accountId via fuzzy match.
+  // Used by queryOpportunities, queryActivities, queryContacts when the
+  // orchestrator passes a user-typed name instead of an exact ID.
+  const resolveAccountByName = async (name: string): Promise<string | undefined> => {
+    if (!name) return undefined;
+    const accounts = await AccountService.getAll();
+    let bestId: string | undefined;
+    let bestScore = 0;
+    for (const a of accounts) {
+      if (!a.name1) continue;
+      const s = calculateEnhancedMatchScore(name, a.name1);
+      if (s.score > bestScore) { bestScore = s.score; bestId = a.id; }
+    }
+    if (bestScore >= 50 && bestId) {
+      console.log(`[FN] resolveAccountByName: "${name}" → id=${bestId} (score=${bestScore})`);
+      return bestId;
+    }
+    console.log(`[FN] resolveAccountByName: "${name}" → no match (best score=${bestScore})`);
+    return undefined;
+  };
+
   try {
     switch (functionName) {
       // ===== Atomic Query: Accounts =====
@@ -144,7 +165,11 @@ export async function executeFunction(
         const opportunities = await OpportunityService.getAll();
         let filtered = [...opportunities];
 
-        const oppAccountId = args.accountId as string | undefined;
+        let oppAccountId = args.accountId as string | undefined;
+        // Fuzzy-resolve accountName → accountId if user typed a name
+        if (!oppAccountId && args.accountName) {
+          oppAccountId = await resolveAccountByName(args.accountName as string);
+        }
         const stage = args.stage as string | undefined;
         const closingWithinDays = args.closingWithinDays as number | undefined ?? (args.days as number | undefined);
         const minAmount = args.minAmount as number | undefined;
@@ -192,7 +217,11 @@ export async function executeFunction(
         const activities = await ActivityService.getAll();
         let filteredAct = [...activities];
 
-        const actAccountId = args.accountId as string | undefined;
+        let actAccountId = args.accountId as string | undefined;
+        // Fuzzy-resolve accountName → accountId if user typed a name
+        if (!actAccountId && args.accountName) {
+          actAccountId = await resolveAccountByName(args.accountName as string);
+        }
         const actType = args.type as string | undefined;
         const dateRange = args.dateRange as string | undefined;
         const actStatus = args.status as string | undefined;
@@ -241,7 +270,11 @@ export async function executeFunction(
         const contacts = await ContactService.getAll();
         let filteredContacts = [...contacts];
 
-        const ctAccountId = args.accountId as string | undefined;
+        let ctAccountId = args.accountId as string | undefined;
+        // Fuzzy-resolve accountName → accountId if user typed a name
+        if (!ctAccountId && args.accountName) {
+          ctAccountId = await resolveAccountByName(args.accountName as string);
+        }
         const ctName = (args.name as string || '').toLowerCase();
         const ctTitle = (args.title as string || '').toLowerCase();
         const ctLimit = (args.limit as number) || 20;

@@ -107,7 +107,8 @@ export const availableFunctions: FunctionDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
-        accountId: { type: 'string', description: 'Filter by account / 按客户筛选' },
+        accountId: { type: 'string', description: 'Filter by account ID / 按客户ID筛选' },
+        accountName: { type: 'string', description: 'Filter by account name (fuzzy matched) / 按客户名称筛选（模糊匹配）' },
         stage: { type: 'string', description: 'Filter by stage / 按阶段筛选', enum: ['prospecting', 'qualification', 'proposal', 'negotiation', 'won', 'lost'] },
         closingWithinDays: { type: 'number', description: 'Only opportunities closing within N days / 仅返回N天内到期的商机' },
         minAmount: { type: 'number', description: 'Minimum deal amount / 最低金额' },
@@ -123,7 +124,8 @@ export const availableFunctions: FunctionDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
-        accountId: { type: 'string', description: 'Filter by account / 按客户筛选' },
+        accountId: { type: 'string', description: 'Filter by account ID / 按客户ID筛选' },
+        accountName: { type: 'string', description: 'Filter by account name (fuzzy matched) / 按客户名称筛选（模糊匹配）' },
         type: { type: 'string', description: 'Filter by activity type / 按类型筛选', enum: ['visit', 'call', 'meeting', 'email', 'other'] },
         dateRange: { type: 'string', description: 'Date range: "today", "7days", "30days", "all" / 日期范围', enum: ['today', '7days', '30days', 'all'] },
         status: { type: 'string', description: 'Filter by status / 按状态筛选', enum: ['draft', 'confirmed', 'completed', 'cancelled'] },
@@ -139,7 +141,8 @@ export const availableFunctions: FunctionDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
-        accountId: { type: 'string', description: 'Filter by account / 按客户筛选' },
+        accountId: { type: 'string', description: 'Filter by account ID / 按客户ID筛选' },
+        accountName: { type: 'string', description: 'Filter by account name (fuzzy matched) / 按客户名称筛选（模糊匹配）' },
         name: { type: 'string', description: 'Filter by name keyword / 按姓名关键词筛选' },
         title: { type: 'string', description: 'Filter by job title keyword / 按职位关键词筛选' },
         limit: { type: 'number', description: 'Max results, default 20 / 返回数量，默认20' },
