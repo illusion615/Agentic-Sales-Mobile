@@ -1335,35 +1335,27 @@ User: "Log a meeting with Rachel at King's College Hospital"
 
     if (shadowResult.error || !shadowResult.plan) {
       recordCircuitBreakerFailure();
-      recordMetrics({ success: false, latencyMs: Date.now() - startTime });
-      return {
-        success: false,
-        content: '',
-        error: 'Frame mode failed: ' + (shadowResult.error ?? 'no plan produced'),
-        latencyMs: Date.now() - startTime,
-      };
+      console.warn('[CopilotAgent] Frame mode failed, falling back to legacy:', shadowResult.error);
+      // Fall through to legacy mode below instead of returning an error.
+    } else {
+      const translated = frameToIntent(shadowResult);
+      if (!translated) {
+        recordCircuitBreakerFailure();
+        console.warn('[CopilotAgent] Frame produced no actionable plan, falling back to legacy.');
+      } else {
+        recordCircuitBreakerSuccess();
+        intent = translated as IntentResult;
+        _lastParsedIntent = intent;
+        console.log('[INTENT/frame] function=' + intent.function,
+          'args=' + JSON.stringify(intent.arguments || {}),
+          'extras=' + (intent.additionalActions?.length ?? 0),
+          'resolutions=' + (intent.resolutions?.length ?? 0));
+      }
     }
+  }
 
-    const translated = frameToIntent(shadowResult);
-    if (!translated) {
-      recordCircuitBreakerFailure();
-      recordMetrics({ success: false, latencyMs: Date.now() - startTime });
-      return {
-        success: false,
-        content: '',
-        error: 'Frame mode produced no actionable plan (all intents non-actionable).',
-        latencyMs: Date.now() - startTime,
-      };
-    }
-
-    recordCircuitBreakerSuccess();
-    intent = translated as IntentResult;
-    _lastParsedIntent = intent;
-    console.log('[INTENT/frame] function=' + intent.function,
-      'args=' + JSON.stringify(intent.arguments || {}),
-      'extras=' + (intent.additionalActions?.length ?? 0),
-      'resolutions=' + (intent.resolutions?.length ?? 0));
-  } else {
+  // Legacy fallback — runs when frame mode is off, OR when frame mode failed above.
+  if (!intent) {
     // ===== Legacy mode: single LLM intent call (production path) =====
     const intentMessages: Array<{ role: string; content: string }> = [
       { role: 'system', content: intentSystemPrompt },
