@@ -171,6 +171,8 @@ Do NOT split intents when:
 
 Language-agnostic: judge by meaning, not by keywords. The user may write in any language or mix languages. Tense and time are inferred from meaning.
 
+⭐ **Pronoun / follow-up resolution (CRITICAL)**: When the user sends a short follow-up like "list them", "show those", "details", "expand", resolve pronouns by reading the [Recent dialogue] section. The assistant's last response tells you WHAT entity was discussed and with what filter. Example: assistant said "There are 9 opportunities at Oxford University Hospital" → user says "list them" → intent = Opportunity, Find, accountName="Oxford University Hospital". Do NOT default to Activity/today's tasks when the conversation context points elsewhere.
+
 # Sales objects (each intent picks exactly one)
 - Account     — a customer organization (hospital, company, distributor)
 - Contact     — a person (doctor, buyer, decision maker)

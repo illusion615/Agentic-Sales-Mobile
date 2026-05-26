@@ -577,7 +577,8 @@ ${functionList}
 规则:
 1. 如果用户询问客户、商机、活动等业务数据，选择最合适的函数
 2. 如果用户提到"这个"、"它"、"当前"等指代词，结合页面上下文和对话历史理解
-3. 如果是闲聊、打招呼（如"你好"、"hi"），设置 function 为 null 并直接回复
+3. ⭐ **代词/指代解析（最重要）**：当用户说"list them"、"show me those"、"详细列出"、"展开说说"等短指令时，必须回看上一轮助手回复中提到的实体类型和筛选条件。例如：助手上轮回复"Oxford University Hospital 下有 9 个商机"，用户接着说"list them"→ 应调用 getOpportunitiesByAccount(accountName='Oxford University Hospital')，而不是 getTodayActivities。始终优先从最近的助手回复中提取实体和上下文
+4. 如果是闲聊、打招呼（如"你好"、"hi"），设置 function 为 null 并直接回复
 4. **产品知识查询路由规则（重要）**：
    - 当用户在 **Product Center** 或 **Product Detail** 页面时，所有产品相关问题都使用 "queryCopilotStudio"
    - 产品相关问题包括：产品功能、规格参数、技术原理、使用方法、优势特点、与竞品对比、适用场景、注意事项等
@@ -926,7 +927,8 @@ ${functionList}
 Rules:
 1. If the user asks about customers, opportunities, activities, or other business data, choose the most appropriate function
 2. If the user mentions "this", "it", "current" etc., understand context from page data and conversation history
-3. If it's small talk or greeting (like "hello", "hi"), set function to null and respond directly
+3. ⭐ **Pronoun / anaphora resolution (MOST IMPORTANT)**: When the user says short follow-up commands like "list them", "show those", "details", "expand on that", you MUST look back at the assistant's most recent reply to identify WHAT entity type and filter conditions were discussed. Example: assistant just said "There are 9 opportunities at Oxford University Hospital" → user says "list them" → call getOpportunitiesByAccount(accountName='Oxford University Hospital'), NOT getTodayActivities. Always prioritise the assistant's last response for context over page context
+4. If it's small talk or greeting (like "hello", "hi"), set function to null and respond directly
 4. **PRODUCT KNOWLEDGE ROUTING RULE (IMPORTANT)**:
    - When user is on **Product Center** or **Product Detail** page, ALL product-related questions should use "queryCopilotStudio"
    - Product-related questions include: features, specifications, technical details, usage, advantages, comparisons, use cases, precautions, etc.
