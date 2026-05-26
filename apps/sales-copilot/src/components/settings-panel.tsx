@@ -395,7 +395,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
               {locale === 'zh-Hans' ? '通用' : 'General'}
             </h3>
-            <div className="space-y-2">
+            <div className="glass-card p-4 space-y-2">
               <SettingsItem
                 icon={Globe}
                 label={locale === 'zh-Hans' ? '语言' : 'Language'}
@@ -460,7 +460,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
               {locale === 'zh-Hans' ? '风格' : 'Style'}
             </h3>
-            <div className="space-y-2">
+            <div className="glass-card p-4 space-y-2">
               <SettingsItem
                 icon={isDark ? Moon : Sun}
                 label={locale === 'zh-Hans' ? '深色模式' : 'Dark Mode'}
@@ -572,17 +572,6 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                     />
                   }
                 />
-                <SettingsItem
-                  icon={Speech}
-                  label={t('voiceSummary', locale)}
-                  rightElement={
-                    <Switch
-                      checked={voiceSummaryEnabled}
-                      onCheckedChange={handleVoiceSummaryEnabledChange}
-                      className="data-[state=checked]:bg-primary"
-                    />
-                  }
-                />
               </div>
 
               {/* Display copilot in all screens toggle */}
@@ -684,7 +673,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
               {locale === 'zh-Hans' ? '语音' : 'Voice'}
             </h3>
-            <div className="space-y-2">
+            <div className="glass-card p-4 space-y-2">
               <SettingsItem
                 icon={Volume2}
                 label={t('voiceSetting', locale)}
@@ -768,6 +757,17 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                   <Switch
                     checked={autoPlayResponse}
                     onCheckedChange={handleAutoPlayChange}
+                    className="data-[state=checked]:bg-primary"
+                  />
+                }
+              />
+              <SettingsItem
+                icon={Speech}
+                label={t('voiceSummary', locale)}
+                rightElement={
+                  <Switch
+                    checked={voiceSummaryEnabled}
+                    onCheckedChange={handleVoiceSummaryEnabledChange}
                     className="data-[state=checked]:bg-primary"
                   />
                 }
