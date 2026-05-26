@@ -952,7 +952,7 @@ export function CopilotPanel() {
             'flex flex-col overflow-hidden safe-area-bottom',
             'bg-background/80 backdrop-blur-md',
             // Float mode: fixed bottom sheet overlay
-            !isSideDocked && 'fixed bottom-0 left-0 right-0 z-[60] justify-end border-t border-border/50',
+            !isSideDocked && 'fixed bottom-0 left-0 right-0 z-[60] border-t border-border/50',
             !isSideDocked && isOpen && !isFullScreen && 'rounded-t-[20px]',
             // Side-docked mode: inline flex child, not fixed/absolute.
             // flex-1 makes it share space 1:1 with the content area.
