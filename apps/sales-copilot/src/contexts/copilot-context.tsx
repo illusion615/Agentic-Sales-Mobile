@@ -1110,7 +1110,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Helper function to simulate streaming text effect
+  // Helper function to simulate streaming text effect — reveals word-by-word
+  // with smooth timing for a natural feel.
   const simulateStreamingText = useCallback((messageId: string, fullContent: string, agentName: string, timestamp: string, onComplete?: () => void) => {
     // Clean up any existing streaming interval
     if (streamingIntervalRef.current) {
@@ -1118,9 +1119,11 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       streamingIntervalRef.current = null;
     }
     
-    let currentIndex = 0;
-    const charsPerTick = 15; // Characters to add per tick (increased from 3 for performance)
-    const tickInterval = 50; // Milliseconds between ticks (increased from 20 for performance)
+    // Split into words, then reveal in word chunks for a natural pace.
+    const words = fullContent.split(/(\s+)/); // keep whitespace as separate tokens
+    let wordIndex = 0;
+    const wordsPerTick = 3; // words per frame
+    const tickInterval = 40; // ms between frames
     
     // Start with empty content, then gradually reveal
     setMessages((prev) => {
@@ -1131,7 +1134,6 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       // Check for duplicate
       const existingContents = new Set(filtered.filter((p) => p.type === 'agent').map((p) => p.content));
       if (existingContents.has(fullContent)) {
-        // Call onComplete even if duplicate to ensure isSending is cleared
         if (onComplete) onComplete();
         return filtered;
       }
@@ -1150,10 +1152,9 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     typingMessageIdRef.current = null;
     
     streamingIntervalRef.current = setInterval(() => {
-      currentIndex += charsPerTick;
-      const partialContent = fullContent.slice(0, currentIndex);
+      wordIndex += wordsPerTick;
       
-      if (currentIndex >= fullContent.length) {
+      if (wordIndex >= words.length) {
         // Done streaming
         if (streamingIntervalRef.current) {
           clearInterval(streamingIntervalRef.current);
@@ -1164,10 +1165,10 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             ? { ...msg, content: fullContent, isStreaming: false }
             : msg
         ));
-        // Call onComplete callback when streaming finishes
         if (onComplete) onComplete();
       } else {
-        // Update with partial content
+        // Update with partial content — join words up to current index
+        const partialContent = words.slice(0, wordIndex).join('');
         setMessages((prev) => prev.map((msg) =>
           msg.id === messageId
             ? { ...msg, content: partialContent }

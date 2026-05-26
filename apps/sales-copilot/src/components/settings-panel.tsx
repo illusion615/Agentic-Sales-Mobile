@@ -624,25 +624,6 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                 </p>
               </div>
 
-              {/* Simulate streaming toggle */}
-              <div className="pt-3 border-t border-border/30">
-                <SettingsItem
-                  icon={Zap}
-                  label={locale === 'zh-Hans' ? '模拟流式输出' : 'Simulate Streaming'}
-                  rightElement={
-                    <Switch
-                      checked={simulateStreaming}
-                      onCheckedChange={handleSimulateStreamingChange}
-                    />
-                  }
-                />
-                <p className="text-xs text-muted-foreground mt-1 pl-8">
-                  {locale === 'zh-Hans'
-                    ? '启用后，AI 回复将逐字显示，模拟打字效果'
-                    : 'When enabled, AI responses will appear word by word with typing effect'}
-                </p>
-              </div>
-
               {/* Copilot fullscreen by default toggle */}
               <div className="pt-3 border-t border-border/30">
                 <SettingsItem
