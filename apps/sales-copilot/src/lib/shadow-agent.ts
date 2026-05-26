@@ -157,6 +157,8 @@ ${describeBoundEntities(frame)}
 - Steps array length MUST equal the skeleton length, and each step's seq / outputRef / dependsOn must match the skeleton.
 - "function" should normally equal the suggestedFunction. Override only if the suggested skill is missing from the available skills list.
 - "arguments" must obey the parameter schema of the chosen skill.
+- For queryCopilotStudio / externalKnowledgeQuery: "query" is REQUIRED — use the intent summary as the query text.
+- For getSalesSummary with Analyze/Recommend cognitive tasks: pass the intent summary in "query" if the parameter accepts it, so the response generator knows the specific question.
 - For Activity steps: temporal=past → temporalMode="completed"; temporal=future → temporalMode="planned".
 - Use page-bound entity ids directly (no need to re-ask).
 - When a step depends on another (dependsOn includes "$intent_N"), reference the upstream output via "$intent_N.id" or "$intent_N.name" inside arguments.
@@ -243,6 +245,10 @@ export async function runShadowPipeline(ctx: FrameRunContext): Promise<ShadowRes
     // Add summary/title for draft intents
     if (singleIntent.cognitiveTask === 'Log' || singleIntent.cognitiveTask === 'Plan') {
       if (!args.title) args.title = singleIntent.summary;
+    }
+    // Add query for knowledge/recommend/analyze intents
+    if (singleIntent.cognitiveTask === 'Knowledge' || singleIntent.cognitiveTask === 'Recommend' || singleIntent.cognitiveTask === 'Analyze') {
+      if (!args.query) args.query = singleIntent.summary || ctx.userMessage;
     }
     const singlePlan: SubPromptOutput = {
       steps: [{

@@ -54,14 +54,16 @@ const SKILL_OBJECT_MAP: Record<string, FrameSalesObject[]> = {
   // External knowledge
   externalKnowledgeQuery: ['None'],
 
-  // Cross-entity / fallback skills (always available)
-  batchDraft: ['Account', 'Contact', 'Opportunity', 'Activity'],
-  getSalesSummary: ['None'],
+  // Cross-entity / fallback skills (always included regardless of salesObject)
+  // Note: these are NOT filtered by salesObject — see selectSkillsForIntents.
 };
+
+/** Skills that are always available regardless of salesObject targeting. */
+const ALWAYS_AVAILABLE = new Set(['batchDraft', 'getSalesSummary', 'externalKnowledgeQuery']);
 
 /**
  * Select skills relevant to the union of salesObjects across all intents.
- * Always includes `batchDraft` and `getSalesSummary` as cross-cutting fallbacks.
+ * Always includes cross-cutting fallback skills (batchDraft, getSalesSummary, externalKnowledgeQuery).
  */
 export function selectSkillsForIntents(intents: IntentItem[]): FunctionDefinition[] {
   const targets = new Set<FrameSalesObject>();
@@ -72,6 +74,7 @@ export function selectSkillsForIntents(intents: IntentItem[]): FunctionDefinitio
   if (targets.size === 0) targets.add('None');
 
   return availableFunctions.filter((fn) => {
+    if (ALWAYS_AVAILABLE.has(fn.name)) return true;
     const objectsForFn = SKILL_OBJECT_MAP[fn.name];
     if (!objectsForFn) return true; // unmapped → available to all
     return objectsForFn.some((obj) => targets.has(obj));

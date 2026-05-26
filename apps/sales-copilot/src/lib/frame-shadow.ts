@@ -42,6 +42,7 @@ export const FrameCognitiveTaskSchema = z.enum([
   'Find',
   'Update',
   'Recommend',
+  'Analyze',
   'Knowledge',
   'Report',
   'Chat',
@@ -190,9 +191,10 @@ Language-agnostic: judge by meaning, not by keywords. The user may write in any 
 - Plan       — schedule something to happen in the future
 - Find       — search for or list existing records
 - Update     — change a field on an existing record
-- Recommend  — ask the assistant to suggest products or next steps
-- Knowledge  — ask a product or industry knowledge question
-- Report     — ask for a daily / weekly / pipeline summary
+- Recommend  — ask the assistant to recommend a PRODUCT (features, specs, which model fits). salesObject MUST be Product.
+- Analyze    — ask the assistant for strategic advice, next-step suggestions, deal coaching, meeting preparation, follow-up strategy, account prioritization, or any request that needs CRM data synthesis + reasoning. Use for ANY "suggest / advise / analyze / coach / prepare / prioritize" intent that is NOT about product knowledge.
+- Knowledge  — ask a factual product or industry knowledge question (specs, warranty, regulations)
+- Report     — ask for a daily / weekly / pipeline summary or statistics
 - Chat       — pure greeting / thanks / smalltalk
 
 # Output
@@ -202,7 +204,7 @@ Return a single JSON object with this exact shape. Do not wrap in markdown.
   "intents": [
     {
       "salesObject": "Account|Contact|Opportunity|Activity|Product|None",
-      "cognitiveTask": "Log|Plan|Find|Update|Recommend|Knowledge|Report|Chat",
+      "cognitiveTask": "Log|Plan|Find|Update|Recommend|Analyze|Knowledge|Report|Chat",
       "temporal": "past|future|none",
       "summary": "one short sentence in the user's own language describing this single intent",
       "userFacingLabel": { "zh": "≤8 字中文动作短语，例如：登记客户拜访 / 识别潜在商机 / 计划后续任务", "en": "≤4 word imperative phrase, e.g. Log customer visit / Identify opportunity / Plan follow-up" },
@@ -262,6 +264,20 @@ Expected intents: 3
   [0] Activity, Log,  past   — 与张总开会
   [1] Activity, Plan, future — 准备报价单发给客户   (relatesTo: [0])
   [2] Activity, Plan, future — 下周二再约一次       (relatesTo: [0])
+
+User: "summarize this opportunity and suggest follow up"
+Expected intents: 2
+  [0] Opportunity, Report,  none — summarize this opportunity                    label {zh:"商机摘要",en:"Summarize opportunity"}
+  [1] Opportunity, Analyze, none — suggest follow-up actions   (relatesTo: [0])  label {zh:"建议跟进",en:"Suggest follow-up"}
+Note: "suggest follow up" is Analyze (strategy advice from CRM data), NOT Recommend (product recommendation) or Knowledge.
+
+User: "which accounts should I focus on this week"
+Expected intents: 1
+  [0] Account, Analyze, none — prioritize accounts for this week                 label {zh:"客户优先级分析",en:"Prioritize accounts"}
+
+User: "how should I approach this deal"
+Expected intents: 1
+  [0] Opportunity, Analyze, none — deal strategy advice                          label {zh:"打单策略建议",en:"Deal strategy"}
 
 Now process the user message.`;
 }
@@ -387,6 +403,13 @@ export function fallbackUserFacingLabel(intent: Pick<IntentItem, 'salesObject' |
     'Contact|Find': { zh: '查找联系人', en: 'Find contact' },
     'Product|Knowledge': { zh: '产品咨询', en: 'Product question' },
     'Product|Recommend': { zh: '推荐产品', en: 'Recommend product' },
+    'Opportunity|Analyze': { zh: '商机策略分析', en: 'Analyze opportunity' },
+    'Account|Analyze': { zh: '客户分析建议', en: 'Analyze account' },
+    'Activity|Analyze': { zh: '活动策略建议', en: 'Activity strategy' },
+    'Contact|Analyze': { zh: '联系人分析', en: 'Analyze contact' },
+    'None|Analyze': { zh: '综合分析建议', en: 'Strategic analysis' },
+    'Opportunity|Recommend': { zh: '商机建议', en: 'Opportunity advice' },
+    'Account|Recommend': { zh: '客户建议', en: 'Account advice' },
     'None|Chat': { zh: '日常对话', en: 'Chat' },
     'None|Report': { zh: '生成报告', en: 'Generate report' },
   };
@@ -564,8 +587,13 @@ export function suggestSkillForIntent(intent: IntentItem): string | null {
       if (obj === 'Contact') return 'getContactsByAccount';
       return null;
     case 'Knowledge':
-    case 'Recommend':
       return 'queryCopilotStudio';
+    case 'Recommend':
+      // Recommend is exclusively for product recommendations (salesObject should be Product)
+      return obj === 'Product' ? 'queryCopilotStudio' : 'getSalesSummary';
+    case 'Analyze':
+      // Strategy, coaching, prioritization — uses CRM data + LLM synthesis
+      return 'getSalesSummary';
     case 'Report':
       return 'getSalesSummary';
     default:

@@ -776,7 +776,8 @@ export async function executeFunction(
       // ===== Copilot Studio Tool (via SDK Connector) =====
       case 'externalKnowledgeQuery':
       case 'queryCopilotStudio': {
-        const query = args.query as string;
+        // Safety net: auto-fill query from context if the orchestrator omitted it
+        const query = (args.query as string) || (context.conversationHistory?.filter(m => m.role === 'user').pop()?.content) || '';
         console.log('[CS] ENTER queryCopilotStudio, query=' + query);
         if (!query) return { success: false, error: '缺少 query 参数' };
 
