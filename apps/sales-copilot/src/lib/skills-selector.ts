@@ -14,56 +14,40 @@ import type { IntentItem, FrameSalesObject } from './frame-shadow';
 
 /** Map each function to the sales object(s) it operates on. */
 const SKILL_OBJECT_MAP: Record<string, FrameSalesObject[]> = {
-  // Account
-  searchAccounts: ['Account'],
-  getAccountDetails: ['Account'],
-  getAccountsByRegion: ['Account'],
-  getAccountsByTier: ['Account'],
-  getAccountsNeedingFollowUp: ['Account'],
+  // Atomic query functions
+  queryAccounts: ['Account'],
+  queryOpportunities: ['Opportunity'],
+  queryActivities: ['Activity'],
+  queryContacts: ['Contact'],
+
+  // Draft
   draftAccount: ['Account'],
-  updateAccount: ['Account'],
-  fuzzyMatchAccount: ['Account'],
-
-  // Contact
-  getContactsByAccount: ['Contact'],
   draftContact: ['Contact'],
-  updateContact: ['Contact'],
-  fuzzyMatchContact: ['Contact'],
-
-  // Opportunity
-  getMyOpportunities: ['Opportunity'],
-  getTopOpportunities: ['Opportunity'],
-  getOpportunitiesByAccount: ['Opportunity'],
-  getOpportunitiesClosingSoon: ['Opportunity'],
   draftOpportunity: ['Opportunity'],
-  updateOpportunity: ['Opportunity'],
-  fuzzyMatchOpportunity: ['Opportunity'],
-
-  // Activity
-  getTodayActivities: ['Activity'],
-  getUpcomingActivities: ['Activity'],
-  getActivitiesByAccount: ['Activity'],
   draftActivity: ['Activity'],
+
+  // Update
+  updateAccount: ['Account'],
+  updateContact: ['Contact'],
+  updateOpportunity: ['Opportunity'],
   updateActivity: ['Activity'],
+
+  // Fuzzy match (internal pipeline, not user-facing)
+  fuzzyMatchAccount: ['Account'],
+  fuzzyMatchContact: ['Contact'],
+  fuzzyMatchOpportunity: ['Opportunity'],
   fuzzyMatchActivity: ['Activity'],
-  fillActivityForm: ['Activity'],
 
-  // Product (→ Copilot Studio)
+  // Product (Copilot Studio)
   queryCopilotStudio: ['Product'],
-
-  // External knowledge
-  externalKnowledgeQuery: ['None'],
-
-  // Cross-entity / fallback skills (always included regardless of salesObject)
-  // Note: these are NOT filtered by salesObject — see selectSkillsForIntents.
 };
 
 /** Skills that are always available regardless of salesObject targeting. */
-const ALWAYS_AVAILABLE = new Set(['batchDraft', 'externalKnowledgeQuery']);
+const ALWAYS_AVAILABLE = new Set(['externalKnowledgeQuery']);
 
 /**
  * Select skills relevant to the union of salesObjects across all intents.
- * Always includes cross-cutting fallback skills (batchDraft, getSalesSummary, externalKnowledgeQuery).
+ * Always includes cross-cutting fallback skills.
  */
 export function selectSkillsForIntents(intents: IntentItem[]): FunctionDefinition[] {
   const targets = new Set<FrameSalesObject>();

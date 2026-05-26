@@ -25,24 +25,7 @@ export interface FunctionDefinition {
  * Keep descriptions concise but clear for the LLM to understand
  */
 export const availableFunctions: FunctionDefinition[] = [
-  // ===== Multi-Entity Batch Functions =====
-  {
-    name: 'batchDraft',
-    displayName: { 'zh-Hans': '批量草拟', 'en-US': 'Batch Draft' },
-    description: '当用户在一句话中提到要创建多个记录时调用。例如："帮我添加一个客户和一个联系人"、"创建两条活动记录"。将每个记录作为items数组中的一个元素。When user mentions creating multiple records in one request, use this function. Each record becomes an item in the items array.',
-    parameters: {
-      type: 'object',
-      properties: {
-        items: {
-          type: 'array',
-          description: '要创建的记录数组，每个元素包含type和data',
-        },
-      },
-      required: ['items'],
-    },
-  },
-
-  // ===== Fuzzy Matching Functions =====
+  // ===== Atomic Query Functions =====
   {
     name: 'fuzzyMatchAccount',
     displayName: { 'zh-Hans': '模糊匹配客户', 'en-US': 'Fuzzy Match Account' },
@@ -320,25 +303,6 @@ export const availableFunctions: FunctionDefinition[] = [
         email: { type: 'string', description: '新的邮箱 / New email' },
       },
       required: [],
-    },
-  },
-  // ===== Form Fill Functions (legacy - for page forms) =====
-  {
-    name: 'fillActivityForm',
-    displayName: { 'zh-Hans': '填写活动表单', 'en-US': 'Fill Activity Form' },
-    description: '当用户在活动表单页面时，从描述中提取信息填充表单。仅在 Activity Capture 页面使用。',
-    parameters: {
-      type: 'object',
-      properties: {
-        title: { type: 'string', description: '活动标题，简洁概括（10字以内）' },
-        accountName: { type: 'string', description: '客户/公司名称' },
-        contactName: { type: 'string', description: '联系人姓名' },
-        visitDate: { type: 'string', description: '拜访日期，ISO格式 YYYY-MM-DD' },
-        result: { type: 'string', description: '拜访结果/讨论要点' },
-        nextStep: { type: 'string', description: '下一步行动计划' },
-        opportunityIntent: { type: 'string', description: '商机/意向描述' },
-      },
-      required: ['result'],
     },
   },
 

@@ -571,7 +571,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
   // Predicate: does this LLM intent need the queue to orchestrate it?
   const shouldUseQueue = useCallback((intent: IntentResult | undefined): boolean => {
     if (!intent || !intent.function) return false;
-    const draftFns = ['draftActivity', 'draftOpportunity', 'draftAccount', 'draftContact', 'batchDraft'];
+    const draftFns = ['draftActivity', 'draftOpportunity', 'draftAccount', 'draftContact'];
     if (draftFns.includes(intent.function)) return true;
     if (intent.additionalActions && intent.additionalActions.length > 0) return true;
     if (intent.requiresMatching) return true;
@@ -1680,45 +1680,10 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           // Check if response is a draft function (returns form card)
           const isDraftFunction = response.functionCalled && ['draftActivity', 'draftOpportunity', 'draftAccount', 'draftContact'].includes(response.functionCalled);
           
-          // Check if response is a batch draft function
-          const isBatchDraftFunction = response.functionCalled === 'batchDraft' && response.success && response.functionResult;
-          
           // Check if response is a fuzzy match function
           const isFuzzyMatchFunction = response.functionCalled && ['fuzzyMatchAccount', 'fuzzyMatchContact', 'fuzzyMatchOpportunity', 'fuzzyMatchActivity'].includes(response.functionCalled);
           
-          if (isBatchDraftFunction) {
-            // Create a batch-form-card message for multiple drafts
-            setIsSending(false);
-            const batchResult = response.functionResult as { isBatch: boolean; items: Array<{ type: string; isNew: boolean; data: Record<string, unknown>; batchIndex: number }>; totalCount: number };
-            
-            setMessages((prev) => prev.map((msg) => {
-              if (msg.id !== thinkingMsgId) return msg;
-              return {
-                ...msg,
-                type: 'batch-form-card' as const,
-                content: response.content || (locale === 'zh-Hans' ? `共${batchResult.totalCount}条记录待确认` : `${batchResult.totalCount} records to confirm`),
-                functionCalled: response.functionCalled,
-                functionDisplayName: response.functionDisplayName,
-                isThinking: false,
-                thinkingSteps: response.thinkingSteps?.map((s) => ({
-                  stage: s.stage,
-                  status: 'completed' as const,
-                  label: s.label,
-                  detail: s.detail,
-                })),
-                batchFormCards: {
-                  items: batchResult.items.map((item) => ({
-                    type: item.type as 'activity' | 'opportunity' | 'account' | 'contact',
-                    isNew: item.isNew,
-                    data: item.data,
-                    batchIndex: item.batchIndex,
-                    status: 'pending' as const,
-                  })),
-                  totalCount: batchResult.totalCount,
-                },
-              };
-            }));
-          } else if (isFuzzyMatchFunction && response.success && response.functionResult) {
+          if (isFuzzyMatchFunction && response.success && response.functionResult) {
             // Create a match-selection message for fuzzy matching
             setIsSending(false);
             const matchResult = response.functionResult as { 
@@ -1948,11 +1913,6 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             }
           }
           
-          // Check if this is a form fill action and execute callback
-          if (response.functionCalled === 'fillActivityForm' && response.functionResult && formFillCallbackRef.current) {
-            formFillCallbackRef.current(response.functionResult as Record<string, unknown>);
-          }
-          
           // Invalidate React Query cache if the operation modified data
           if (response.invalidateQueries && response.invalidateQueries.length > 0) {
             response.invalidateQueries.forEach((queryKey: string) => {
@@ -2046,8 +2006,6 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     // intents — only the *final* draftActivity executeFunction call gets
     // suppressed. (draftActivity always returns isNew:true regardless of
     // activityId, which is why the old behavior produced a duplicate form.)
-    // batchDraft is NOT covered here because suppressing one item in a batch
-    // requires reshaping the batch payload — future work if boss hits it.
     const bypassFinalActivityDraft = entityType === 'activity' && pendingIntent.function === 'draftActivity';
     setIsSending(true);
     
@@ -2111,7 +2069,6 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
 
       const fnDisplayName = getDisplayName(pendingIntent.function, locale === 'zh-Hans' ? 'zh-Hans' : 'en-US');
       const isDraftFunction = ['draftActivity', 'draftOpportunity', 'draftAccount', 'draftContact'].includes(pendingIntent.function);
-      const isBatchDraft = pendingIntent.function === 'batchDraft';
 
       // I-3 Slice 3: Walk remaining resolution chain before executing the final draft.
       // For each remaining ResolutionItem: scopeBy-inject, run fuzzyMatch, then:
@@ -2119,7 +2076,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       //   - multi/medium-high-conf → render matchSelection card (with shortened queue) + stop
       //   - no high-conf (draft only) → render awaiting-clarification card + stop
       const remainingResolutions = (pendingIntent as { remainingResolutions?: ResolutionItem[] }).remainingResolutions;
-      if ((isDraftFunction || isBatchDraft) && remainingResolutions && remainingResolutions.length > 0) {
+      if (isDraftFunction && remainingResolutions && remainingResolutions.length > 0) {
         console.log('[CopilotContext] I-3 cascade: walking', remainingResolutions.length, 'remaining resolutions');
         const resolvedSoFar: Record<string, string> = {};
         resolvedSoFar[entityType] = selectedRecord.id;
@@ -2354,56 +2311,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         console.log('[CopilotContext] cascade exhausted, final args:', JSON.stringify(updatedArguments, null, 2));
       }
 
-      if (isBatchDraft) {
-        // For batch draft, execute and show batch form cards
-        const functionResult = await executeFunction(
-          pendingIntent.function,
-          updatedArguments,
-          { userId: user?.objectId, userEmail: user?.userPrincipalName }
-        );
-        
-        if (functionResult.success && functionResult.data) {
-          const batchResult = functionResult.data as { isBatch: boolean; items: Array<{ type: string; isNew: boolean; data: Record<string, unknown>; batchIndex: number }>; totalCount: number };
-          setMessages((prev) => prev.map((msg) => {
-            if (msg.id !== thinkingMsgId) return msg;
-            return {
-              ...msg,
-              type: 'batch-form-card' as const,
-              content: locale === 'zh-Hans' ? `共${batchResult.totalCount}条记录待确认` : `${batchResult.totalCount} records to confirm`,
-              functionCalled: pendingIntent.function,
-              functionDisplayName: fnDisplayName,
-              isThinking: false,
-              thinkingSteps: [
-                { stage: 'executing' as const, status: 'completed' as const, label: locale === 'zh-Hans' ? `${fnDisplayName}：已准备表单` : `${fnDisplayName}: Forms ready` },
-              ],
-              batchFormCards: {
-                items: batchResult.items.map((item) => ({
-                  type: item.type as 'activity' | 'opportunity' | 'account' | 'contact',
-                  isNew: item.isNew,
-                  data: item.data,
-                  batchIndex: item.batchIndex,
-                  status: 'pending' as const,
-                })),
-                totalCount: batchResult.totalCount,
-              },
-            };
-          }));
-        } else {
-          // Show error for batch draft failure
-          setMessages((prev) => prev.map((msg) => {
-            if (msg.id !== thinkingMsgId) return msg;
-            return {
-              ...msg,
-              content: locale === 'zh-Hans'
-                ? `❌ 操作失败: ${functionResult.error}`
-                : `❌ Error: ${functionResult.error}`,
-              agentName: 'System',
-              isThinking: false,
-              thinkingSteps: undefined,
-            };
-          }));
-        }
-      } else if (isDraftFunction) {
+      if (isDraftFunction) {
         // bypassFinalActivityDraft: user picked an existing activity earlier.
         // Convert the thinking message into a plain ack instead of running
         // draftActivity (which would always produce a duplicate form).

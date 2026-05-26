@@ -214,7 +214,7 @@ export function intentRequiresConfirmation(intent: SingleIntent): boolean {
   if (intent.confidence < 0.7) return true;
   
   // Draft functions need confirmation (they show a form)
-  const draftFunctions = ['draftActivity', 'draftOpportunity', 'draftAccount', 'draftContact', 'batchDraft'];
+  const draftFunctions = ['draftActivity', 'draftOpportunity', 'draftAccount', 'draftContact'];
   if (draftFunctions.includes(intent.function)) return true;
   
   // Intents with missing fields need confirmation

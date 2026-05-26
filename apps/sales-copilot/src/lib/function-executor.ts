@@ -85,12 +85,7 @@ export async function executeFunction(
   try {
     switch (functionName) {
       // ===== Atomic Query: Accounts =====
-      case 'queryAccounts':
-      case 'searchAccounts':
-      case 'getAccountDetails':
-      case 'getAccountsByRegion':
-      case 'getAccountsByTier':
-      case 'getAccountsNeedingFollowUp': {
+      case 'queryAccounts': {
         const accounts = await AccountService.getAll();
         let filtered = [...accounts];
 
@@ -145,12 +140,7 @@ export async function executeFunction(
       }
 
       // ===== Atomic Query: Opportunities =====
-      case 'queryOpportunities':
-      case 'getMyOpportunities':
-      case 'getTopOpportunities':
-      case 'getOpportunitiesByAccount':
-      case 'getOpportunitiesClosingSoon':
-      case 'getSalesSummary': {
+      case 'queryOpportunities': {
         const opportunities = await OpportunityService.getAll();
         let filtered = [...opportunities];
 
@@ -181,7 +171,7 @@ export async function executeFunction(
         }
 
         // Sort
-        if (oppSortBy === 'amount' || functionName === 'getTopOpportunities') {
+        if (oppSortBy === 'amount') {
           filtered.sort((a, b) => b.totalamount - a.totalamount);
         } else if (oppSortBy === 'closeDate') {
           filtered.sort((a, b) => new Date(a.expectedclosedate || 0).getTime() - new Date(b.expectedclosedate || 0).getTime());
@@ -198,16 +188,13 @@ export async function executeFunction(
       }
 
       // ===== Atomic Query: Activities =====
-      case 'queryActivities':
-      case 'getTodayActivities':
-      case 'getUpcomingActivities':
-      case 'getActivitiesByAccount': {
+      case 'queryActivities': {
         const activities = await ActivityService.getAll();
         let filteredAct = [...activities];
 
         const actAccountId = args.accountId as string | undefined;
         const actType = args.type as string | undefined;
-        const dateRange = (args.dateRange as string) || (functionName === 'getTodayActivities' ? 'today' : undefined);
+        const dateRange = args.dateRange as string | undefined;
         const actStatus = args.status as string | undefined;
         const actSortBy = args.sortBy as string | undefined;
         const actLimit = (args.limit as number) || 20;
@@ -250,8 +237,7 @@ export async function executeFunction(
       }
 
       // ===== Atomic Query: Contacts =====
-      case 'queryContacts':
-      case 'getContactsByAccount': {
+      case 'queryContacts': {
         const contacts = await ContactService.getAll();
         let filteredContacts = [...contacts];
 
@@ -635,25 +621,6 @@ export async function executeFunction(
         };
       }
 
-      // ===== Form Fill Functions (legacy) =====
-      case 'fillActivityForm': {
-        // This function doesn't call any backend service
-        // It just returns the extracted data for the frontend to fill the form
-        const formData = {
-          title: args.title as string || '',
-          accountName: args.accountName as string || '',
-          contactName: args.contactName as string || '',
-          visitDate: args.visitDate as string || new Date().toISOString().split('T')[0],
-          result: args.result as string || '',
-          nextStep: args.nextStep as string || '',
-          opportunityIntent: args.opportunityIntent as string || '',
-        };
-        return {
-          success: true,
-          data: formData,
-        };
-      }
-
       case 'externalKnowledgeQuery':
       case 'queryCopilotStudio': {
         // Safety net: auto-fill query from context if the orchestrator omitted it
@@ -1020,145 +987,6 @@ export async function executeFunction(
         };
       }
 
-
-      // ===== Batch Draft Function =====
-      case 'batchDraft': {
-        const items = args.items as Array<{ type: string; data: Record<string, unknown> }>;
-        if (!items || !Array.isArray(items) || items.length === 0) {
-          return { success: false, error: '缺少 items 参数或 items 为空' };
-        }
-        
-        // Extract top-level account info to inject into items that don't have their own
-        const topLevelAccountId = args.accountId as string | undefined;
-        const topLevelAccountName = args.accountName as string | undefined;
-        console.log('[batchDraft] topLevelAccountId:', topLevelAccountId, 'topLevelAccountName:', topLevelAccountName);
-
-        // ---- Per-item account fuzzy match (Item 5 fix) ----
-        // The LLM often emits a batch like:
-        //   [{type:'activity', data:{accountName:'Manchester University NHS Foundation Trust'}},
-        //    {type:'activity', data:{accountName:'Oxford University Hospitals'}}, ...]
-        // with NO accountId on each item AND no top-level account. The form
-        // cards then can't link to a real account. Here we fuzzy-resolve each
-        // item's accountName → accountId once, sharing a single AccountService
-        // fetch across the loop.
-        let allAccountsCache: Account[] | null = null;
-        const resolveAccountIdByName = async (name: string): Promise<string | undefined> => {
-          if (!name) return undefined;
-          if (!allAccountsCache) {
-            try {
-              allAccountsCache = await AccountService.getAll();
-            } catch (err) {
-              console.warn('[batchDraft] AccountService.getAll failed during fuzzy match:', err);
-              allAccountsCache = [];
-            }
-          }
-          let bestId: string | undefined;
-          let bestScore = 0;
-          for (const a of allAccountsCache) {
-            const candidateName = a.name1 || '';
-            if (!candidateName) continue;
-            const s = calculateEnhancedMatchScore(name, candidateName);
-            if (s.score > bestScore) {
-              bestScore = s.score;
-              bestId = a.id;
-            }
-          }
-          // 70 = "high confidence" in agent-utils — same threshold the single
-          // fuzzyMatchAccount tool uses to auto-pick without disambiguation.
-          return bestScore >= 70 ? bestId : undefined;
-        };
-        
-        // Process each item and return batch form card data
-        const formCards = await Promise.all(items.map(async (item: { type: string; data: Record<string, unknown> }, index: number) => {
-          const itemType = item.type || 'activity';
-          const itemData = { ...(item.data || {}) };
-          
-          // Inject top-level account info if item doesn't have its own (for activity, opportunity, contact)
-          if (['activity', 'opportunity', 'contact'].includes(itemType)) {
-            if (!itemData.accountId && topLevelAccountId) {
-              itemData.accountId = topLevelAccountId;
-            }
-            if (!itemData.accountName && topLevelAccountName) {
-              itemData.accountName = topLevelAccountName;
-            }
-            // Fuzzy-resolve when we still have a name but no id (the common
-            // weekly-plan / batch-create case).
-            if (!itemData.accountId && typeof itemData.accountName === 'string' && itemData.accountName) {
-              const resolved = await resolveAccountIdByName(itemData.accountName);
-              if (resolved) {
-                itemData.accountId = resolved;
-                console.log('[batchDraft] item', index, 'fuzzy-matched accountName "' + itemData.accountName + '" -> accountId', resolved);
-              } else {
-                console.log('[batchDraft] item', index, 'no high-confidence account match for "' + itemData.accountName + '"');
-              }
-            }
-          }
-          console.log('[batchDraft] item', index, 'type:', itemType, 'accountId:', itemData.accountId, 'accountName:', itemData.accountName);
-          
-          return {
-            type: itemType as 'activity' | 'opportunity' | 'account' | 'contact',
-            isNew: true,
-            data: itemData,
-            batchIndex: index,
-          };
-        }));
-
-        // Weekly-plan dedup: if any activity item collides with an existing
-        // activity on the same account + same calendar day, attach a
-        // _duplicateOf hint so the form card can warn the user. Reads the
-        // already-fetched list from the query cache; if the cache is empty
-        // we skip silently (no extra round trip).
-        try {
-          const cachedLists = queryClient
-            .getQueriesData<Activity[]>({ queryKey: ['activity-list'] })
-            .map(([, data]) => data)
-            .filter((d): d is Activity[] => Array.isArray(d));
-          const existing: Activity[] = cachedLists.flat();
-          if (existing.length > 0) {
-            const dayOf = (iso: unknown): string => {
-              if (typeof iso !== 'string' || !iso) return '';
-              return iso.slice(0, 10);
-            };
-            for (const card of formCards) {
-              if (card.type !== 'activity') continue;
-              const itemAccountId = card.data.accountId as string | undefined;
-              const itemAccountName = card.data.accountName as string | undefined;
-              const itemDay = dayOf(card.data.scheduleddate ?? card.data.scheduledAt);
-              if (!itemDay) continue;
-              const match = existing.find((a) => {
-                if (dayOf(a.scheduleddate) !== itemDay) return false;
-                if (itemAccountId && a.account?.id === itemAccountId) return true;
-                if (
-                  !itemAccountId &&
-                  itemAccountName &&
-                  a.account?.name1 &&
-                  a.account.name1.toLowerCase() === itemAccountName.toLowerCase()
-                )
-                  return true;
-                return false;
-              });
-              if (match) {
-                (card.data as Record<string, unknown>)._duplicateOf = {
-                  existingId: match.id,
-                  subject: match.title,
-                  scheduleddate: match.scheduleddate,
-                };
-              }
-            }
-          }
-        } catch (err) {
-          console.warn('[batchDraft] dedup skipped:', err);
-        }
-        
-        return {
-          success: true,
-          data: {
-            isBatch: true,
-            items: formCards,
-            totalCount: formCards.length,
-          },
-        };
-      }
 
       default:
         return { success: false, error: `未知函数: ${functionName}` };

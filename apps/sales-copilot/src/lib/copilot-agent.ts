@@ -1293,7 +1293,7 @@ Please respond to the user in a friendly manner based on the error. Important ru
   }
 
   // ===== Check for draft functions - return directly without Pass 2 =====
-  const draftFunctions = ['draftActivity', 'draftOpportunity', 'draftAccount', 'draftContact', 'batchDraft'];
+  const draftFunctions = ['draftActivity', 'draftOpportunity', 'draftAccount', 'draftContact'];
   if (draftFunctions.includes(intent.function)) {
     console.log('[CopilotAgent] Draft function detected, returning form card data directly');
     
@@ -1328,7 +1328,7 @@ Please respond to the user in a friendly manner based on the error. Important ru
         content: isZh 
           ? `检测到 ${allItems.length} 个意图，请确认以下信息：\n${intent.multiIntentAnalysis?.summary || ''}`
           : `Detected ${allItems.length} intents, please confirm the following:\n${intent.multiIntentAnalysis?.summary || ''}`,
-        functionCalled: 'batchDraft',
+        functionCalled: 'multiIntent',
         functionDisplayName: isZh ? '多意图智能提取' : 'Multi-Intent Extraction',
         functionResult: {
           items: allItems,
@@ -1541,7 +1541,7 @@ Please provide a brief summary and analysis, do not list individual records.`;
   
   if (Array.isArray(resultData) && resultData.length > 0) {
     // Determine record type based on function name
-    if (fnName === 'queryAccounts' || fnName === 'searchAccounts' || fnName === 'getAccountsNeedingFollowUp' || fnName?.includes('Account')) {
+    if (fnName === 'queryAccounts') {
       recordList = {
         type: 'account',
         records: resultData.map((item: Record<string, unknown>) => ({
@@ -1552,7 +1552,7 @@ Please provide a brief summary and analysis, do not list individual records.`;
         })),
         title: isZh ? '客户列表' : 'Accounts',
       };
-    } else if (fnName === 'queryOpportunities' || fnName === 'getTopOpportunities' || fnName === 'getOpportunitiesClosingSoon' || fnName?.includes('Opportunit')) {
+    } else if (fnName === 'queryOpportunities') {
       recordList = {
         type: 'opportunity',
         records: resultData.map((item: Record<string, unknown>) => {
@@ -1576,7 +1576,7 @@ Please provide a brief summary and analysis, do not list individual records.`;
         }),
         title: isZh ? '商机列表' : 'Opportunities',
       };
-    } else if (fnName === 'queryContacts' || fnName === 'getContactsByAccount') {
+    } else if (fnName === 'queryContacts') {
       recordList = {
         type: 'contact',
         records: resultData.map((item: Record<string, unknown>) => ({
@@ -1587,7 +1587,7 @@ Please provide a brief summary and analysis, do not list individual records.`;
         })),
         title: isZh ? '联系人列表' : 'Contacts',
       };
-    } else if (fnName === 'queryActivities' || fnName === 'getTodayActivities' || fnName === 'getUpcomingActivities' || fnName?.includes('Activit')) {
+    } else if (fnName === 'queryActivities') {
       recordList = {
         type: 'activity',
         records: resultData.map((item: Record<string, unknown>) => {

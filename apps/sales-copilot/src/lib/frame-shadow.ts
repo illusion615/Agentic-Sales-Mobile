@@ -553,16 +553,10 @@ export function compareFrameVsLegacy(
       note: shadowIsChat ? 'both → chat/none' : 'legacy null vs shadow action',
     };
   }
-  // batchDraft is legacy's multi-record bag — count items in arguments.items if available.
+  // Non-chat: do basic count/object comparison
   const legacyTotal = 1 + legacyAdditionalActionCount;
-  const shadowTotal = frame.intents.length;
-  const intentCountMatch = legacyTotal === shadowTotal;
-
-  const expectedObject = LEGACY_FN_OBJECT[legacyFunctionName];
-  const primaryObjectMatch = expectedObject
-    ? frame.intents.some((i) => i.salesObject === expectedObject)
-    : null;
-  return { intentCountMatch, primaryObjectMatch };
+  const intentCountMatch = legacyTotal === frame.intents.length;
+  return { intentCountMatch, primaryObjectMatch: null };
 }
 
 // ----------------------- Skill mapping helpers ---------------------------

@@ -8,7 +8,7 @@
  *
  * One user turn → one IntentQueue. The queue holds every intent the user
  * implicitly or explicitly asked for (primary + LLM-inferred additionalActions
- * + items materialised from batchDraft + any sub-intents the runtime spawns
+ * + any sub-intents the runtime spawns
  * to satisfy a resolution like "create new contact for the parent activity").
  *
  * The reducer here is pure; the async executor (intent-queue-runtime.ts) owns
@@ -92,8 +92,6 @@ export function newQueueId(): string {
 /**
  * Build a queue from the LLM's IntentResult.
  * Primary intent always sits at index 0; additionalActions append in order.
- * batchDraft is special: each items[] entry becomes its own QueueIntent of
- * function = draft{Type} so the queue treats it like any other multi-intent run.
  */
 export function buildQueueFromIntent(intent: IntentResult): IntentQueue {
   const id = newQueueId();
@@ -121,29 +119,7 @@ export function buildQueueFromIntent(intent: IntentResult): IntentQueue {
   };
 
   // Primary intent
-  if (intent.function === 'batchDraft' && Array.isArray((intent.arguments as { items?: unknown[] })?.items)) {
-    // Expand batchDraft into individual draft intents — uniform handling, no special case below.
-    const items = (intent.arguments as {
-      items: Array<{ type: 'activity' | 'opportunity' | 'account' | 'contact'; data: Record<string, unknown> }>;
-      accountId?: string;
-      accountName?: string;
-    }).items;
-    const parentAccountId = (intent.arguments as { accountId?: string }).accountId;
-    const parentAccountName = (intent.arguments as { accountName?: string }).accountName;
-    items.forEach((item) => {
-      const fnName =
-        item.type === 'activity' ? 'draftActivity'
-        : item.type === 'opportunity' ? 'draftOpportunity'
-        : item.type === 'account' ? 'draftAccount'
-        : 'draftContact';
-      const args = {
-        ...item.data,
-        ...(parentAccountId && !item.data.accountId ? { accountId: parentAccountId } : {}),
-        ...(parentAccountName && !item.data.accountName ? { accountName: parentAccountName } : {}),
-      };
-      pushIntent(fnName, args);
-    });
-  } else if (intent.function) {
+  if (intent.function) {
     // I-3: normalize resolutions[] (or wrap legacy matchTarget) onto the primary intent.
     const primaryResolutions: ResolutionItem[] = intent.requiresMatching
       ? (intent.resolutions?.length
