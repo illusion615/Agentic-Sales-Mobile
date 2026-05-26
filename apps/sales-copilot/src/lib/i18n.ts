@@ -1208,6 +1208,15 @@ export function setWeekStartDay(day: WeekStartDay): void {
   window.dispatchEvent(new CustomEvent('weekstartday-changed', { detail: day }));
 }
 
+// Copilot fullscreen by default (mobile)
+export function getCopilotFullscreenDefault(): boolean {
+  return localStorage.getItem('copilotFullscreenDefault') === 'true';
+}
+
+export function setCopilotFullscreenDefault(enabled: boolean): void {
+  localStorage.setItem('copilotFullscreenDefault', String(enabled));
+}
+
 // Simulate streaming response setting
 export function getSimulateStreaming(): boolean {
   return localStorage.getItem('simulateStreaming') !== 'false'; // default true

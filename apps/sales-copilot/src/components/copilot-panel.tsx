@@ -4,7 +4,7 @@ import { motion, AnimatePresence, useDragControls, type PanInfo } from 'motion/r
 import { Sparkles, ArrowUp, SquarePen, X, ChevronDown, Copy, Volume2, VolumeX, Loader2, Square, Play, Pause, Paperclip, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useCopilot, type ChatMessage } from '@/contexts/copilot-context';
-import { getLocale, getChatFontClass, getSelectedVoice, findMatchingSystemVoice, getLLMConfig, getVoiceSummaryEnabled, generateVoiceSummary, getCopilotDockLayout, type CopilotDockLayout, type Locale } from '@/lib/i18n';
+import { getLocale, getChatFontClass, getSelectedVoice, findMatchingSystemVoice, getLLMConfig, getVoiceSummaryEnabled, generateVoiceSummary, getCopilotDockLayout, getCopilotFullscreenDefault, type CopilotDockLayout, type Locale } from '@/lib/i18n';
 import { DynamicDataRenderer, tryParseJson } from '@/components/dynamic-data-renderer';
 import { FormCard } from '@/components/form-card';
 import { BatchFormCard } from '@/components/batch-form-card';
@@ -198,7 +198,9 @@ export function CopilotPanel() {
   // too little vertical room to be useful for chatting.
   const handleInputFocus = () => {
     if (!isOpen) {
-      openPanel(isMobile);
+      // On mobile: respect "fullscreen by default" setting; otherwise open half-screen.
+      const goFullscreen = isMobile && getCopilotFullscreenDefault();
+      openPanel(goFullscreen);
     } else if (isMobile && !isFullScreen) {
       openPanel(true);
     }

@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { ArrowLeft, Moon, Sun, Globe, HelpCircle, LogOut, Volume2, Play, Type, Palette, CircleDot, LayoutGrid, Speech, X, Zap, MessageSquare, Gauge, LayoutDashboard, Database, Bug, FileCode, ChevronRight, Monitor, Calendar } from 'lucide-react';
+import { ArrowLeft, Moon, Sun, Globe, HelpCircle, LogOut, Volume2, Play, Type, Palette, CircleDot, LayoutGrid, Speech, X, Zap, MessageSquare, Gauge, LayoutDashboard, Database, Bug, FileCode, ChevronRight, Monitor, Calendar, Maximize } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 
 import { useUser } from '@/hooks/use-user';
 import { useAppSettings } from '@/hooks/use-app-settings';
-import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, setSelectedVoice, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getOrganizeInStructureCard, setOrganizeInStructureCard, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, getCopilotDockLayout, setCopilotDockLayout, copilotDockLayoutLabels, getWeekStartDay, setWeekStartDay, type Locale, type VoiceOption, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget, type CopilotDockLayout, type WeekStartDay } from '@/lib/i18n';
+import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, setSelectedVoice, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getOrganizeInStructureCard, setOrganizeInStructureCard, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, getCopilotDockLayout, setCopilotDockLayout, copilotDockLayoutLabels, getWeekStartDay, setWeekStartDay, getCopilotFullscreenDefault, setCopilotFullscreenDefault, type Locale, type VoiceOption, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget, type CopilotDockLayout, type WeekStartDay } from '@/lib/i18n';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
@@ -88,6 +88,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const [copilotInAllScreens, setCopilotInAllScreensState] = useState(() => getCopilotInAllScreens());
   const [copilotDockLayout, setCopilotDockLayoutState] = useState<CopilotDockLayout>(() => getCopilotDockLayout());
   const [simulateStreaming, setSimulateStreamingState] = useState(() => getSimulateStreaming());
+  const [copilotFullscreenDefault, setCopilotFullscreenDefaultState] = useState(() => getCopilotFullscreenDefault());
   const [homeHeaderWidget, setHomeHeaderWidgetState] = useState<HomeHeaderWidget>(() => getHomeHeaderWidget());
   const [weekStartDay, setWeekStartDayState] = useState<WeekStartDay>(() => getWeekStartDay());
 
@@ -211,6 +212,11 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const handleSimulateStreamingChange = (enabled: boolean) => {
     setSimulateStreamingState(enabled);
     setSimulateStreaming(enabled);
+  };
+
+  const handleCopilotFullscreenDefaultChange = (enabled: boolean) => {
+    setCopilotFullscreenDefaultState(enabled);
+    setCopilotFullscreenDefault(enabled);
   };
 
   const handleHomeHeaderWidgetChange = (widget: string) => {
@@ -645,6 +651,25 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                   {locale === 'zh-Hans'
                     ? '启用后，AI 回复将逐字显示，模拟打字效果'
                     : 'When enabled, AI responses will appear word by word with typing effect'}
+                </p>
+              </div>
+
+              {/* Copilot fullscreen by default toggle */}
+              <div className="pt-3 border-t border-border/30">
+                <SettingsItem
+                  icon={Maximize}
+                  label={locale === 'zh-Hans' ? '全屏展开 Copilot' : 'Fullscreen Copilot by Default'}
+                  rightElement={
+                    <Switch
+                      checked={copilotFullscreenDefault}
+                      onCheckedChange={handleCopilotFullscreenDefaultChange}
+                    />
+                  }
+                />
+                <p className="text-xs text-muted-foreground mt-1 pl-8">
+                  {locale === 'zh-Hans'
+                    ? '启用后，点击对话框将以全屏模式展开 Copilot（仅移动端）'
+                    : 'When enabled, tapping the input opens Copilot in fullscreen mode (mobile only)'}
                 </p>
               </div>
 
