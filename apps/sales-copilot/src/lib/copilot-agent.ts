@@ -434,6 +434,8 @@ export async function processMessage(
     userEmail?: string;
     locale?: string;
     conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+    lastFunctionResult?: unknown;
+    lastFunctionCalled?: string;
     pageContext?: {
       currentPage: string;
       pageData?: unknown;
@@ -457,6 +459,8 @@ async function processMessageInner(
     userEmail?: string;
     locale?: string;
     conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+    lastFunctionResult?: unknown;
+    lastFunctionCalled?: string;
     pageContext?: {
       currentPage: string;
       pageData?: unknown;
@@ -557,14 +561,82 @@ async function processMessageInner(
     );
   }
 
-  // ===== Single-Pass Intent Detection =====
-  // Removed Stage 1 (Intent Analyzer) - consolidated into single LLM call
-  // The LLM will naturally handle clarification by responding with helpful text
-  
-  // ===== Continue with existing intent detection (Pass 1) for backward compatibility =====
-  // The intent analyzer above handles greeting detection and clarification
-  // The code below continues with the original LLM-based intent detection for function execution
-  // Note: pageContextStr was already built earlier in the function
+  // ===== Context-First Analysis =====
+  // If the previous response has data and the user is asking a follow-up
+  // analysis question, answer from existing context instead of re-querying.
+  // This is faster (1 LLM call vs 3) and more accurate (uses the exact data
+  // the user is looking at).
+  if (context.lastFunctionResult && context.lastFunctionCalled) {
+    const msg = userMessage.toLowerCase();
+    const isShortFollowUp = msg.split(/\s+/).length <= 15;
+    const isAnalytical = /\b(which|what|who|how|why|compare|priorit|highest|lowest|most|least|best|worst|first|last|important|urgent|recommend|suggest|rank|sort|order|top|bottom|biggest|smallest|next|focus|关键|优先|最高|最低|最大|最小|比较|排序|哪个|谁|为什么|建议|推荐|重点|紧急)\b/i.test(msg);
+    const hasNewEntity = /\b(show|list|find|search|get|create|add|update|delete|查找|搜索|列出|创建|添加|更新|删除)\b/i.test(msg)
+      && msg.split(/\s+/).length > 5; // "show" alone in a short message is likely follow-up
+    const isFollowUpAnalysis = isShortFollowUp && isAnalytical && !hasNewEntity;
+
+    if (isFollowUpAnalysis) {
+      console.log('[CopilotAgent] Context-first: answering from existing data (fn=' + context.lastFunctionCalled + ')');
+      if (onProgress) {
+        onProgress({ stage: 'intent', status: 'completed', intentLabel: isZh ? '上下文分析' : 'Context Analysis' });
+        onProgress({ stage: 'generating', status: 'active' });
+      }
+
+      const dataStr = JSON.stringify(context.lastFunctionResult, null, 2).slice(0, 3000);
+      const historyTail = history.slice(-4).map((m) => `${m.role}: ${m.content.slice(0, 200)}`).join('\n');
+
+      const contextAnalysisPrompt = isZh
+        ? `你是一个资深销售教练。用户基于你之前给出的数据追问了一个问题。请直接基于已有数据回答，不要说"我需要查询"之类的话。
+
+之前的对话:
+${historyTail}
+
+之前返回的数据（用户正在看这些数据）:
+${dataStr}
+
+用户追问: ${userMessage}
+
+请基于上述数据给出具体的、可操作的分析和建议。如果数据中有明确的优先级/时间/金额等维度，用它们来支撑你的判断。`
+        : `You are a senior sales coach. The user is asking a follow-up question about data you already provided. Answer directly from the existing data — do NOT say you need to query anything.
+
+Previous conversation:
+${historyTail}
+
+Previously returned data (the user is looking at this):
+${dataStr}
+
+User's follow-up: ${userMessage}
+
+Provide specific, actionable analysis based on the data above. Use concrete dimensions (priority, timeline, amount, stage) to support your reasoning.`;
+
+      try {
+        const analysisResp = await invokeFlowForLLM({
+          messages: [
+            { role: 'system', content: contextAnalysisPrompt },
+            { role: 'user', content: userMessage },
+          ],
+        });
+
+        if (onProgress) {
+          onProgress({ stage: 'generating', status: 'completed' });
+        }
+
+        if (analysisResp.success && analysisResp.content) {
+          return {
+            success: true,
+            content: analysisResp.content,
+            functionCalled: context.lastFunctionCalled,
+            latencyMs: Date.now() - startTime,
+            thinkingSteps: [
+              { stage: 'intent', status: 'completed', label: isZh ? '上下文分析（基于已有数据）' : 'Context analysis (from existing data)' },
+              { stage: 'generating', status: 'completed', label: isZh ? '生成分析' : 'Generate analysis' },
+            ],
+          };
+        }
+      } catch (err) {
+        console.warn('[CopilotAgent] Context-first analysis failed, falling back to full pipeline:', err);
+      }
+    }
+  }
 
   // ===== Pass 1: Intent Detection via Frame Pipeline =====
   console.log('[CopilotAgent] Pass 1: Intent detection (frame mode)');

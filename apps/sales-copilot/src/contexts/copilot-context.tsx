@@ -1532,12 +1532,20 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             }));
           };
           
+          // Extract last function result for context-first analysis.
+          // Use recordList (the data cards the user sees) as the analysis context.
+          const lastAgentMsg = [...currentMessages].reverse().find(
+            (m: ChatMessage) => m.role === 'assistant' && m.type === 'agent' && m.recordList
+          );
+
           const { processMessage } = await import('@/lib/copilot-agent');
           const response = await processMessage(text.trim(), {
             userId: user?.objectId,
             userEmail: user?.userPrincipalName,
             locale,
             conversationHistory,
+            lastFunctionResult: lastAgentMsg?.recordList,
+            lastFunctionCalled: lastAgentMsg?.functionCalled,
             pageContext: pageContextRef.current ? {
               currentPage: pageContextRef.current.currentPage,
               pageData: pageContextRef.current.pageData,
