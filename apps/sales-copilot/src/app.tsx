@@ -10,7 +10,7 @@ import { queryClient } from '@/lib/query-client';
 import ErrorBoundary from '@/components/system/error-boundary';
 import { initColorTheme, initFontSize } from '@/lib/i18n';
 
-import HomeDashboard from '@/pages/home';
+const HomeDashboard = lazy(() => import('@/pages/home'));
 
 const SettingsPage = lazy(() => import('@/pages/settings'));
 const BriefMePage = lazy(() => import('@/pages/brief'));

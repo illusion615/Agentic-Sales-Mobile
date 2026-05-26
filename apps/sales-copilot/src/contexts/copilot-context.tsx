@@ -7,9 +7,13 @@ import {
 } from '@/services/copilot-service';
 import { getLocale, getSimulateStreaming, type Locale } from '@/lib/i18n';
 import { toast } from 'sonner';
-import { processMessage, type ThinkingProgress, type AgentResponse, type IntentResult } from '@/lib/copilot-agent';
+import { type ThinkingProgress, type AgentResponse, type IntentResult } from '@/lib/copilot-agent';
 import { buildQueueFromIntent, findIntentByMessageId, type IntentQueue } from '@/lib/intent-queue';
-import * as QR from '@/lib/intent-queue-runtime';
+import type * as QR from '@/lib/intent-queue-runtime';
+
+// Lazy-load the queue runtime — it pulls in function-executor.ts which is heavy.
+// Cached after first import so subsequent calls are instant.
+const loadQR = () => import('@/lib/intent-queue-runtime');
 import { narrateTask, type PriorTaskOutcome } from '@/lib/task-narrator';
 import type { AwaitingClarification, ResolutionItem } from '@/lib/agent-utils';
 import { extractVisitDataFromText, type ExtractedVisitData } from '@/lib/visit-extraction';
@@ -559,7 +563,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
   const runAndStoreQueue = useCallback(async (q: IntentQueue) => {
     queueRef.current = q;
     bumpQueue();
-    const after = await QR.runQueue(q, buildRuntimeDeps());
+    const after = await (await loadQR()).runQueue(q, buildRuntimeDeps());
     queueRef.current = after;
     bumpQueue();
   }, [buildRuntimeDeps, bumpQueue]);
@@ -1219,7 +1223,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         setMessages((prev) => [...prev, userReplyMsg]);
         setInputValue('');
         try {
-          const result = await QR.handleAwaitingReply(
+          const result = await (await loadQR()).handleAwaitingReply(
             queueRef.current,
             lastForGate.queueIntentId,
             text.trim(),
@@ -1513,6 +1517,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             }));
           };
           
+          const { processMessage } = await import('@/lib/copilot-agent');
           const response = await processMessage(text.trim(), {
             userId: user?.objectId,
             userEmail: user?.userPrincipalName,
@@ -1997,7 +2002,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       const intentId = srcMsg?.queueIntentId;
       const q = queueRef.current;
       if (intentId && q && findIntentByMessageId(q, sourceMessageId)) {
-        const after = await QR.handlePick(q, intentId, {
+        const after = await (await loadQR()).handlePick(q, intentId, {
           id: selectedRecord.id,
           name: selectedRecord.name,
           accountId: selectedRecord.accountId,
@@ -2522,6 +2527,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           // Now use processMessage for full response generation
           // But we need to pass the already-executed function result
           // So we'll call processMessage with a hint about the selected record
+          const { processMessage } = await import('@/lib/copilot-agent');
           const response = await processMessage(syntheticMessage, {
             userId: user?.objectId,
             userEmail: user?.userPrincipalName,
@@ -2715,7 +2721,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       if (intentId && q && findIntentByMessageId(q, blockedMsgId)) {
         const kind: 'contact' | 'account' | 'opportunity' =
           entityKind === 'activity' ? 'opportunity' : entityKind;
-        const after = await QR.handleCreateNew(q, intentId, kind, queryName, buildRuntimeDeps());
+        const after = await (await loadQR()).handleCreateNew(q, intentId, kind, queryName, buildRuntimeDeps());
         queueRef.current = after;
         bumpQueue();
         return;
@@ -2907,7 +2913,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       const intentId = srcMsg?.queueIntentId;
       const q = queueRef.current;
       if (intentId && q && findIntentByMessageId(q, blockedMsgId)) {
-        const after = await QR.handleSkip(q, intentId, buildRuntimeDeps());
+        const after = await (await loadQR()).handleSkip(q, intentId, buildRuntimeDeps());
         queueRef.current = after;
         bumpQueue();
         return;
@@ -2959,7 +2965,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       const intentId = srcMsg?.queueIntentId;
       const q = queueRef.current;
       if (intentId && q && findIntentByMessageId(q, messageId)) {
-        const after = await QR.handleSearchOther(q, intentId, trimmed, buildRuntimeDeps());
+        const after = await (await loadQR()).handleSearchOther(q, intentId, trimmed, buildRuntimeDeps());
         queueRef.current = after;
         bumpQueue();
         return;
@@ -3075,7 +3081,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     const intentId = msg?.queueIntentId;
     const q = queueRef.current;
     if (intentId && q && findIntentByMessageId(q, args.messageId)) {
-      const after = await QR.handleSave(q, intentId, {
+      const after = await (await loadQR()).handleSave(q, intentId, {
         recordId: args.recordId,
         recordName: args.recordName,
         type: args.type,
@@ -3106,7 +3112,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     const intentId = msg?.queueIntentId;
     const q = queueRef.current;
     if (intentId && q && findIntentByMessageId(q, messageId)) {
-      const after = await QR.handleCancel(q, intentId, buildRuntimeDeps());
+      const after = await (await loadQR()).handleCancel(q, intentId, buildRuntimeDeps());
       queueRef.current = after;
       bumpQueue();
       return;
