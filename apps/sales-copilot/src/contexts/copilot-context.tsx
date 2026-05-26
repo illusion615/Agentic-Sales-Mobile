@@ -1470,6 +1470,9 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             .map((m: ChatMessage) => ({
               role: m.role as 'user' | 'assistant',
               content: m.content,
+              // Carry function metadata so Frame can resolve anaphora
+              // ("list them" after getSalesSummary → "them" = opportunities)
+              ...(m.functionCalled ? { functionCalled: m.functionCalled } : {}),
             }));
           
           // Progress callback to update thinking message
