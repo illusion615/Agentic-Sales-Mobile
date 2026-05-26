@@ -196,10 +196,14 @@ export function CopilotPanel() {
     !dismissedContexts.has(pageContext.currentPage) &&
     pageContext.currentPage !== 'Home';
 
-  // Scroll to bottom when messages change
+  // Scroll to bottom when messages change.
+  // Use requestAnimationFrame to ensure the DOM has updated before scrolling,
+  // preventing overshoot when the queue pushes messages rapidly.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    });
+  }, [messages.length]);
 
   // Focus input and scroll to bottom when panel opens
   useEffect(() => {
