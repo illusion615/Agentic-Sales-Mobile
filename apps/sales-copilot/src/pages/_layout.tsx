@@ -8,17 +8,25 @@ import { ActionDockProvider } from '@/contexts/action-dock-context';
 function LayoutInner() {
   const { docked, side } = useCopilotSideDocked();
 
-  return (
-    <div className="h-full overflow-hidden flex flex-col">
-      {/* Main content area: when side-docked, content + panel sit side by side below the header */}
-      <div className={docked ? 'flex-1 flex overflow-hidden' : 'flex-1 overflow-hidden'}>
-        {docked && side === 'left' && <GlobalCopilot />}
-        <div className="flex-1 overflow-hidden">
-          <Outlet />
-        </div>
-        {docked && side === 'right' && <GlobalCopilot />}
-        {!docked && <GlobalCopilot />}
+  // Non-docked (mobile/float): simple container, pages handle their own scrolling.
+  if (!docked) {
+    return (
+      <div className="h-full overflow-hidden">
+        <Outlet />
+        <GlobalCopilot />
+        <Toaster richColors position="top-center" toastOptions={{ className: 'max-w-[280px] mx-auto' }} />
       </div>
+    );
+  }
+
+  // Side-docked (desktop left/right): flex layout for content + panel side by side.
+  return (
+    <div className="h-full overflow-hidden flex">
+      {side === 'left' && <GlobalCopilot />}
+      <div className="flex-1 overflow-hidden">
+        <Outlet />
+      </div>
+      {side === 'right' && <GlobalCopilot />}
       <Toaster richColors position="top-center" toastOptions={{ className: 'max-w-[280px] mx-auto' }} />
     </div>
   );

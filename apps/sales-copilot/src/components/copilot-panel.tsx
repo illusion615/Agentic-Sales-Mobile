@@ -163,11 +163,12 @@ export function CopilotPanel() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Focus input when panel opens
+  // Focus input and scroll to bottom when panel opens
   useEffect(() => {
     if (isOpen) {
       setTimeout(() => {
         inputRef.current?.focus();
+        messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
       }, 300);
     }
   }, [isOpen]);
@@ -952,7 +953,7 @@ export function CopilotPanel() {
             'flex flex-col overflow-hidden safe-area-bottom',
             'bg-background/80 backdrop-blur-md',
             // Float mode: fixed bottom sheet overlay
-            !isSideDocked && 'fixed bottom-0 left-0 right-0 z-[60] border-t border-border/50',
+            !isSideDocked && 'fixed bottom-0 left-0 right-0 z-[60] justify-end border-t border-border/50',
             !isSideDocked && isOpen && !isFullScreen && 'rounded-t-[20px]',
             // Side-docked mode: inline flex child, not fixed/absolute.
             // flex-1 makes it share space 1:1 with the content area.
