@@ -829,8 +829,19 @@ export default function HomeDashboard() {
   useEffect(() => {
     if (!getAutoPlayAgentResponse()) return;
     
-    // Find the latest agent message
-    const agentMessages = chatMessages.filter((m: ChatMessage) => m.type === 'agent');
+    // Find the latest agent message that should be auto-played.
+    // Queue narration messages (announce, substep, ack) are skipped — only the
+    // final summary or regular (non-queue) agent responses trigger voice playback.
+    const agentMessages = chatMessages.filter((m: ChatMessage) => {
+      if (m.type !== 'agent') return false;
+      // Skip thinking / streaming states
+      if (m.isThinking || m.isStreaming) return false;
+      // Queue messages: only allow the final summary
+      if (m.queueId) return m.taskRole === 'summary';
+      // Skip task overview / announce narration from legacy path
+      if (m.taskRole === 'overview' || m.taskRole === 'announce' || m.taskRole === 'substep') return false;
+      return true;
+    });
     if (agentMessages.length === 0) return;
     
     const latestMessage = agentMessages[agentMessages.length - 1];
