@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence, type PanInfo } from 'motion/react';
-import { ChevronRight, ChevronLeft, ChevronDown, Calendar, Target, Phone, MapPin, FileText, CheckCircle2, Clock, X, Lightbulb, AlertTriangle, TrendingUp, Sparkles, Mail, CheckSquare } from 'lucide-react';
+import { ChevronRight, ChevronLeft, ChevronDown, Calendar, Target, Phone, MapPin, FileText, CheckCircle2, Clock, X, Lightbulb, AlertTriangle, TrendingUp, Sparkles, Mail, CheckSquare, RefreshCw, Play, Square } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatCurrencyCompact } from '@/lib/format-currency';
 import { getLocale, getWeekStartDay } from '@/lib/i18n';
@@ -94,6 +94,16 @@ interface KPICardsProps {
   // override the internal state; otherwise the component manages it itself.
   insightsSheetOpen?: boolean;
   onInsightsSheetOpenChange?: (open: boolean) => void;
+  onRefreshInsights?: () => void;
+  isRefreshingInsights?: boolean;
+  insightRefreshStatus?: string;
+  onPlayInsights?: () => void;
+  onStopInsights?: () => void;
+  isInsightPlaybackActive?: boolean;
+  insightPlaybackElapsed?: string;
+  insightPlaybackParagraphLabel?: string;
+  insightPlaybackParagraphIndex?: number;
+  insightPlaybackParagraphCount?: number;
 }
 
 
@@ -175,7 +185,28 @@ function ProgressRingWithValue({
   );
 }
 
-export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityInsights = [], allActivities = [], onCalendarDayClick, onProcessOverdue, insightsSheetOpen: insightsSheetOpenProp, onInsightsSheetOpenChange }: KPICardsProps) {
+export function KPICards({
+  data,
+  onNavigate,
+  onMarkDone,
+  onReschedule,
+  activityInsights = [],
+  allActivities = [],
+  onCalendarDayClick,
+  onProcessOverdue,
+  insightsSheetOpen: insightsSheetOpenProp,
+  onInsightsSheetOpenChange,
+  onRefreshInsights,
+  isRefreshingInsights = false,
+  insightRefreshStatus = '',
+  onPlayInsights,
+  onStopInsights,
+  isInsightPlaybackActive = false,
+  insightPlaybackElapsed,
+  insightPlaybackParagraphLabel,
+  insightPlaybackParagraphIndex,
+  insightPlaybackParagraphCount,
+}: KPICardsProps) {
   const locale = getLocale();
 
   const [rescheduleSheetOpen, setRescheduleSheetOpen] = useState(false);
@@ -1077,6 +1108,8 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
                                 e.stopPropagation();
                                 setOverdueCurrentIndex(idx);
                               }}
+                              aria-label={locale === 'zh-Hans' ? `跳转到第 ${idx + 1} 条逾期事项` : `Jump to overdue item ${idx + 1}`}
+                              title={locale === 'zh-Hans' ? `跳转到第 ${idx + 1} 条逾期事项` : `Jump to overdue item ${idx + 1}`}
                               className={cn(
                                 "w-2 h-2 rounded-full transition-all",
                                 idx === overdueCurrentIndex
@@ -1307,16 +1340,62 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
       <Sheet open={insightsSheetOpen} onOpenChange={setInsightsSheetOpen}>
         <SheetContent side="bottom" className="rounded-t-2xl px-6 pb-8">
           <SheetHeader className="pb-2">
-            <SheetTitle className="flex items-center justify-between">
-              <span className="flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-primary" />
-                {locale === 'zh-Hans' ? '洞察' : 'Insights'}
-              </span>
-              {parsedActivityInsights.length > 1 && (
-                <span className="text-sm font-normal text-muted-foreground">
-                  {insightsSheetIndex + 1} / {parsedActivityInsights.length}
+            <SheetTitle className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <span className="flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-primary" />
+                  {locale === 'zh-Hans' ? '洞察' : 'Insights'}
                 </span>
-              )}
+                {(isRefreshingInsights || isInsightPlaybackActive) && (
+                  <div className="mt-2 space-y-1">
+                    {isRefreshingInsights && insightRefreshStatus && (
+                      <p className="text-xs font-normal text-muted-foreground">{insightRefreshStatus}</p>
+                    )}
+                    {isInsightPlaybackActive && (
+                      <div className="min-w-0 text-xs font-normal text-muted-foreground">
+                        <p className="truncate">
+                          {insightPlaybackElapsed ?? '0:00'}
+                          {typeof insightPlaybackParagraphIndex === 'number' && typeof insightPlaybackParagraphCount === 'number' && insightPlaybackParagraphCount > 0
+                            ? ` • ${locale === 'zh-Hans' ? '段落' : 'Paragraph'} ${insightPlaybackParagraphIndex + 1}/${insightPlaybackParagraphCount}`
+                            : ''}
+                        </p>
+                        {insightPlaybackParagraphLabel && (
+                          <p className="truncate">{insightPlaybackParagraphLabel}</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onRefreshInsights?.()}
+                  disabled={isRefreshingInsights || !onRefreshInsights}
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-muted/60 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                  aria-label={locale === 'zh-Hans' ? '重新生成洞察' : 'Regenerate insights'}
+                  title={locale === 'zh-Hans' ? '重新生成洞察' : 'Regenerate insights'}
+                >
+                  <RefreshCw className={cn('h-4 w-4', isRefreshingInsights && 'animate-spin')} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isInsightPlaybackActive) onStopInsights?.();
+                    else onPlayInsights?.();
+                  }}
+                  disabled={isInsightPlaybackActive ? !onStopInsights : !onPlayInsights}
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                  aria-label={isInsightPlaybackActive
+                    ? (locale === 'zh-Hans' ? '停止播报' : 'Stop playback')
+                    : (locale === 'zh-Hans' ? '播放洞察' : 'Play insights')}
+                  title={isInsightPlaybackActive
+                    ? (locale === 'zh-Hans' ? '停止播报' : 'Stop playback')
+                    : (locale === 'zh-Hans' ? '播放洞察' : 'Play insights')}
+                >
+                  {isInsightPlaybackActive ? <Square className="h-4 w-4" /> : <Play className="ml-0.5 h-4 w-4" />}
+                </button>
+              </div>
             </SheetTitle>
           </SheetHeader>
           
@@ -1383,6 +1462,8 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
                                 e.stopPropagation();
                                 setInsightsSheetIndex(idx);
                               }}
+                              aria-label={locale === 'zh-Hans' ? `跳转到第 ${idx + 1} 条洞察` : `Jump to insight ${idx + 1}`}
+                              title={locale === 'zh-Hans' ? `跳转到第 ${idx + 1} 条洞察` : `Jump to insight ${idx + 1}`}
                               className={cn(
                                 "w-2 h-2 rounded-full transition-all",
                                 idx === insightsSheetIndex

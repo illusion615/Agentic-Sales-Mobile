@@ -9,7 +9,7 @@ import { useActivityList, useUpdateActivity } from '@/generated/hooks/use-activi
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useAccountList } from '@/generated/hooks/use-account';
 
-import { useCopilotConversationList, useUpdateCopilotConversation, useCreateCopilotConversation } from '@/generated/hooks/use-copilot-conversation';
+import { useUpdateCopilotConversation, useCreateCopilotConversation } from '@/generated/hooks/use-copilot-conversation';
 import { useCreateBusinessInsight, useBusinessInsightList, useDeleteBusinessInsight } from '@/generated/hooks/use-business-insight';
 import { useLocale } from '@/lib/i18n';
 import { t, getGreeting, getChatFontClass, getThinkingDotStyle, getAutoPlayAgentResponse, getSelectedVoice, findMatchingSystemVoice, getVoiceSummaryEnabled, generateVoiceSummary, getAgentFramework, getHomeHeaderWidget, type Locale, type ThinkingDotStyle, type HomeHeaderWidget } from '@/lib/i18n';
@@ -17,7 +17,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '
 import { formatCurrencyCompact, formatCurrencyFull } from '@/lib/format-currency';
 
 import { SettingsPanel } from '@/components/settings-panel';
-import type { Activity } from '@/generated/models/activity-model';import type { Opportunity } from '@/generated/models/opportunity-model';import type { Account } from '@/generated/models/account-model';import type { CopilotConversation } from '@/generated/models/copilot-conversation-model';import { useCopilotConfigured } from '@/hooks/use-copilot-configured';
+import type { Activity } from '@/generated/models/activity-model';import type { Opportunity } from '@/generated/models/opportunity-model';import type { Account } from '@/generated/models/account-model';import { useCopilotConfigured } from '@/hooks/use-copilot-configured';
 import { useFirstMount } from '@/hooks/use-first-mount';
 import { DynamicDataRenderer, tryParseJson } from '@/components/dynamic-data-renderer';
 import { FormCard } from '@/components/form-card';
@@ -28,6 +28,13 @@ import { KPICards, type KPIData, type AgendaItem, type AtRiskClient } from '@/co
 import { MarkdownContent } from '@/components/markdown-content';
 import type { BusinessInsight } from '@/generated/models/business-insight-model';import { useCopilot, type ChatMessage } from '@/contexts/copilot-context';
 import { useRegisterDockChips, type ActionDockChip } from '@/contexts/action-dock-context';
+import {
+  clearCopilotConversationLogId,
+  getCopilotConversationLogBounds,
+  readCopilotConversationLogId,
+  toCopilotConversationLogMessages,
+  writeCopilotConversationLogId,
+} from '@/lib/copilot-conversation-log';
 
 
 
@@ -304,33 +311,6 @@ function StageCard({ stageCard, onClick }: { stageCard: NonNullable<ChatMessage[
 }
 
 
-// Parse saved messages from JSON
-function parseMessages(json: string): ChatMessage[] {
-  try {
-    const parsed = JSON.parse(json);
-    if (Array.isArray(parsed)) {
-      return parsed.map((msg: { 
-        role?: string; 
-        content?: string; 
-        timestamp?: string; 
-        agentName?: string;
-        functionDisplayName?: string;
-      }, idx: number) => ({
-        id: `msg-${idx}`,
-        type: msg.role === 'user' ? 'user' : 'agent',
-        role: msg.role === 'user' ? 'user' : 'assistant',
-        content: msg.content || '',
-        timestamp: msg.timestamp || new Date().toISOString(),
-        agentName: msg.agentName,
-        functionDisplayName: msg.functionDisplayName,
-      } as ChatMessage));
-    }
-  } catch {
-    // Invalid JSON
-  }
-  return [];
-}
-
 export default function HomeDashboard() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -387,6 +367,9 @@ export default function HomeDashboard() {
   const [briefMeCurrentTime, setBriefMeCurrentTime] = useState(0);
   const [briefMeTotalTime, setBriefMeTotalTime] = useState(0);
   const [briefMeCurrentIndex, setBriefMeCurrentIndex] = useState(0);
+  const [briefMeCurrentSegmentIndex, setBriefMeCurrentSegmentIndex] = useState(0);
+  const [briefMeSegmentCount, setBriefMeSegmentCount] = useState(0);
+  const [briefMeCurrentSegmentLabel, setBriefMeCurrentSegmentLabel] = useState('');
   const briefMeUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const briefMeStartTimeRef = useRef<number>(0);
   const briefMeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -399,9 +382,10 @@ export default function HomeDashboard() {
   const lastAutoPlayedIdRef = useRef<string | null>(null);
   const speechSynthesisRef = useRef<SpeechSynthesisUtterance | null>(null);
   
-  // FIX: Refs to prevent infinite loop in conversation load/save
-  const loadedConvRef = useRef<string | null>(null);
+  // Track the last log snapshot we wrote so background saves stay deduplicated.
   const lastSavedRef = useRef<string>('');
+  const lastQueuedLogRef = useRef<string>('');
+  const creatingConversationRef = useRef(false);
 
   // User data
   const { data: user } = useUser();
@@ -419,17 +403,15 @@ export default function HomeDashboard() {
   
   // Derive chat state from context for unified experience across all pages
   const chatMessages = copilot.messages;
-  const setChatMessages = copilot.setMessages;
   const inputValue = copilot.inputValue;
   const setInputValue = copilot.setInputValue;
-  const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
+  const [currentConversationId, setCurrentConversationId] = useState<string | null>(() => readCopilotConversationLogId());
 
   // Data queries
   const { data: activities = [], refetch: refetchActivities } = useActivityList();
   const { data: opportunities = [], refetch: refetchOpportunities } = useOpportunityList();
   const { data: accounts = [], refetch: refetchAccounts } = useAccountList();
 
-  const { data: conversations = [], isLoading: isLoadingConversations } = useCopilotConversationList();
   const updateConversation = useUpdateCopilotConversation();
   const createConversation = useCreateCopilotConversation();
   const { data: businessInsights = [], refetch: refetchBusinessInsights, isLoading: isLoadingBusinessInsights } = useBusinessInsightList({ filter: 'isactive eq true', orderBy: ['displayorder asc'] });
@@ -754,71 +736,78 @@ export default function HomeDashboard() {
     };
   }, [kpiSummary, locale, copilot.setPageContext]);
 
-  // Load conversation history - ONE-SHOT per conversation to prevent loops
+  // New session (or a freshly mounted empty local conversation) should start a new log record.
   useEffect(() => {
-    // Guard: Don't load if no conversations yet or still loading
-    if (!conversations || conversations.length === 0) return;
-    
-    const userConvos = conversations.filter((c: CopilotConversation) => c.ownerid === userId);
-    if (userConvos.length === 0) return;
-    
-    const latest = userConvos.sort((a: CopilotConversation, b: CopilotConversation) => 
-      new Date(b.lastactiveon).getTime() - new Date(a.lastactiveon).getTime()
-    )[0];
-    
-    // Guard: Already loaded this conversation - prevents loop
-    if (loadedConvRef.current === latest.id) return;
-    
-    // Set conversation ID
-    setCurrentConversationId(latest.id);
-    loadedConvRef.current = latest.id;
-    
-    // Only set messages if local state is empty (initial load)
-    if (chatMessages.length === 0) {
-      const parsed = parseMessages(latest.messagesjson);
-      setChatMessages(parsed);
-      // Also update lastSavedRef to prevent immediate save-back
-      lastSavedRef.current = latest.messagesjson || '';
-    }
-  }, [conversations, userId]); // NOT depending on chatMessages - load is one-shot
+    if (chatMessages.length !== 0) return;
+    setCurrentConversationId(null);
+    lastSavedRef.current = '';
+    lastQueuedLogRef.current = '';
+    creatingConversationRef.current = false;
+    clearCopilotConversationLogId();
+  }, [chatMessages.length]);
 
-  // Save messages to conversation - with content-comparison to prevent loops
+  // Write Dataverse conversation logs from the local session, but never hydrate UI from them.
   useEffect(() => {
-    if (!currentConversationId || chatMessages.length === 0) return;
-    
-    // Guard: Don't save while streaming is in progress
-    const isStreaming = chatMessages.some((m: ChatMessage) => m.isStreaming || m.isThinking);
-    if (isStreaming) return;
-    
-    // Convert ChatMessage[] to serializable format
-    const filteredMessages = chatMessages
-      .filter((m: ChatMessage) => !m.isThinking && !m.isStreaming)
-      .map((m: ChatMessage) => ({
-        role: m.role,
-        content: m.content,
-        timestamp: m.timestamp,
-        agentName: m.agentName,
-        functionDisplayName: m.functionDisplayName,
-      }));
-    
-    const messagesJson = JSON.stringify(filteredMessages);
-    // Guard: No change since last save - prevents loop
-    if (messagesJson === lastSavedRef.current) return;
-    lastSavedRef.current = messagesJson;
-    
-    // Debounce save by 500ms to avoid spamming during rapid updates
+    if (!userId) return;
+
+    const logMessages = toCopilotConversationLogMessages(chatMessages);
+    if (logMessages.length === 0) return;
+
+    const logBounds = getCopilotConversationLogBounds(logMessages);
+    if (!logBounds) return;
+
+    const messagesJson = JSON.stringify(logMessages);
+    if (messagesJson === lastSavedRef.current || messagesJson === lastQueuedLogRef.current) return;
+    lastQueuedLogRef.current = messagesJson;
+
+    let cancelled = false;
     const saveTimer = setTimeout(() => {
-      updateConversation.mutate({
-        id: currentConversationId,
-        changedFields: {
-          messagesjson: messagesJson,
-          lastactiveon: new Date().toISOString(),
-        },
-      });
+      void (async () => {
+        const shouldCreate = !currentConversationId;
+        if (shouldCreate && creatingConversationRef.current) return;
+        if (shouldCreate) creatingConversationRef.current = true;
+
+        try {
+          if (shouldCreate) {
+            const created = await createConversation.mutateAsync({
+              ownerid: userId,
+              startedon: logBounds.startedOn,
+              lastactiveon: logBounds.lastActiveOn,
+              messagesjson: messagesJson,
+            });
+            if (cancelled) return;
+            setCurrentConversationId(created.id);
+            writeCopilotConversationLogId(created.id);
+          } else {
+            await updateConversation.mutateAsync({
+              id: currentConversationId,
+              changedFields: {
+                messagesjson: messagesJson,
+                lastactiveon: logBounds.lastActiveOn,
+              },
+            });
+            if (cancelled) return;
+          }
+
+          lastSavedRef.current = messagesJson;
+        } catch (error) {
+          console.warn('[home] Failed to persist copilot conversation log:', error);
+          lastQueuedLogRef.current = '';
+          if (!cancelled && currentConversationId) {
+            setCurrentConversationId(null);
+            clearCopilotConversationLogId();
+          }
+        } finally {
+          if (shouldCreate) creatingConversationRef.current = false;
+        }
+      })();
     }, 500);
-    
-    return () => clearTimeout(saveTimer);
-  }, [chatMessages, currentConversationId, updateConversation]);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(saveTimer);
+    };
+  }, [chatMessages, createConversation, currentConversationId, updateConversation, userId]);
 
   // Note: Removed auto-expand behavior - user should manually open Copilot panel
   // Connection status indicator shows whether Copilot is configured (gray/orange/green)
@@ -1053,6 +1042,9 @@ export default function HomeDashboard() {
       setBriefMeExpanded(true);
       setBriefMeCurrentIndex(0);
       setBriefMeCurrentTime(0);
+      setBriefMeCurrentSegmentIndex(0);
+      setBriefMeSegmentCount(0);
+      setBriefMeCurrentSegmentLabel('');
       // Calculate total time (rough estimate: 150 words per minute at 1x speed)
       const totalWords = briefMeInsightTexts.join(' ').split(/\s+/).length;
       const estimatedSeconds = Math.ceil((totalWords / 150) * 60);
@@ -1090,6 +1082,7 @@ export default function HomeDashboard() {
       : textToSpeak.split(/(?<=[。！？.!?])/).map((s: string) => s.trim()).filter((s: string) => s.length > 0);
     
     let currentSegment = 0;
+    setBriefMeSegmentCount(segments.length);
     
     const speakNextSegment = () => {
       if (currentSegment >= segments.length) {
@@ -1112,6 +1105,8 @@ export default function HomeDashboard() {
       }
       
       const segment = segments[currentSegment];
+      setBriefMeCurrentSegmentIndex(currentSegment);
+      setBriefMeCurrentSegmentLabel(segment.length > 72 ? `${segment.slice(0, 72)}...` : segment);
       const utterance = new SpeechSynthesisUtterance(segment);
       utterance.lang = locale === 'zh-Hans' ? 'zh-CN' : 'en-US';
       utterance.rate = briefMeSpeed;
@@ -1184,6 +1179,9 @@ export default function HomeDashboard() {
     setBriefMeIsPlaying(false);
     setBriefMeCurrentTime(0);
     setBriefMeCurrentIndex(0);
+    setBriefMeCurrentSegmentIndex(0);
+    setBriefMeSegmentCount(0);
+    setBriefMeCurrentSegmentLabel('');
     if (briefMeTimerRef.current) {
       clearInterval(briefMeTimerRef.current);
     }
@@ -1261,6 +1259,11 @@ export default function HomeDashboard() {
   // Refresh business insight - uses configured agent framework
   const handleRefreshInsight = async () => {
     if (isRefreshingInsight) return;
+
+    if (briefMeExpanded) {
+      handleBriefMeStop();
+      setBriefMeExpanded(false);
+    }
     
     const agentFramework = getAgentFramework();
 
@@ -1561,45 +1564,45 @@ ${agentResponse}`;
         const validUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // Valid for 24 hours
         
         const savePromises = parsedInsights.map((item: { insight: string; rationale: string; type: string }, idx: number) => {
-          // Get category info for title and type based on insight type
-          const typeMapping: Record<string, { title: string; type: string }> = {
+          // Map generated insight categories to the Dataverse choice labels accepted by BusinessInsight.type.
+          const typeMapping: Record<string, { title: string; type: 'warning' | 'info' | 'success' }> = {
             'followup': {
               title: locale === 'zh-Hans' ? '今日跟进提醒' : 'Follow-up Alert',
-              type: 'call'
+              type: 'info'
             },
             'closing': {
               title: locale === 'zh-Hans' ? '本周成交预测' : 'Closing This Week',
-              type: 'meeting'
+              type: 'success'
             },
             'risk': {
               title: locale === 'zh-Hans' ? '风险商机警告' : 'At-Risk Alert',
-              type: 'visit'
+              type: 'warning'
             },
             'revisit': {
               title: locale === 'zh-Hans' ? '待回访客户' : 'Pending Revisit',
-              type: 'visit'
+              type: 'warning'
             },
             'performance': {
               title: locale === 'zh-Hans' ? '业绩达成分析' : 'Performance Analysis',
-              type: 'meeting'
+              type: 'success'
             },
             'opportunity': {
               title: locale === 'zh-Hans' ? '商机动态' : 'Opportunity Update',
-              type: 'call'
+              type: 'info'
             },
             'client': {
               title: locale === 'zh-Hans' ? '客户洞察' : 'Client Insight',
-              type: 'call'
+              type: 'success'
             },
             'activity': {
               title: locale === 'zh-Hans' ? '活动动态' : 'Activity Update',
-              type: 'call'
+              type: 'info'
             }
           };
           
           const categoryInfo = typeMapping[item.type] || {
             title: locale === 'zh-Hans' ? `智能洞察 #${idx + 1}` : `Smart Insight #${idx + 1}`,
-            type: 'call'
+            type: 'info' as const
           };
           
           return createBusinessInsight.mutateAsync({
@@ -1658,6 +1661,26 @@ ${agentResponse}`;
       setInsightRefreshStatus('');
     }
   };
+
+  const handleInsightsPanelPlay = useCallback(async () => {
+    if (briefMeIsPlaying) return;
+
+    if (briefMeExpanded) {
+      if ('speechSynthesis' in window && window.speechSynthesis.paused) {
+        handleBriefMeResume();
+      } else {
+        handleBriefMePlay();
+      }
+      return;
+    }
+
+    await handleBriefMe();
+  }, [briefMeExpanded, briefMeIsPlaying, handleBriefMe, handleBriefMePlay, handleBriefMeResume]);
+
+  const handleInsightsPanelStop = useCallback(() => {
+    handleBriefMeStop();
+    setBriefMeExpanded(false);
+  }, [handleBriefMeStop]);
 
   // State for clearing insights
   const [isClearingInsights, setIsClearingInsights] = useState(false);
@@ -1918,13 +1941,6 @@ ${agentResponse}`;
                   aria-label={locale === 'zh-Hans' ? '洞察' : 'Insights'}
                 >
                   <Bell className="w-5 h-5 text-foreground" />
-                  {businessInsights.length > 0 && (
-                    <span
-                      className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 inline-flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold border-2 border-background"
-                    >
-                      {businessInsights.length > 99 ? '99+' : businessInsights.length}
-                    </span>
-                  )}
                 </button>
               </div>
               {/* Settings with Connection Status */}
@@ -1964,6 +1980,16 @@ ${agentResponse}`;
               allActivities={activities}
               insightsSheetOpen={insightsSheetOpen}
               onInsightsSheetOpenChange={setInsightsSheetOpen}
+              onRefreshInsights={handleRefreshInsight}
+              isRefreshingInsights={isRefreshingInsight}
+              insightRefreshStatus={insightRefreshStatus}
+              onPlayInsights={handleInsightsPanelPlay}
+              onStopInsights={handleInsightsPanelStop}
+              isInsightPlaybackActive={briefMeIsPlaying}
+              insightPlaybackElapsed={formatBriefMeTime(briefMeCurrentTime)}
+              insightPlaybackParagraphLabel={briefMeCurrentSegmentLabel}
+              insightPlaybackParagraphIndex={briefMeCurrentSegmentIndex}
+              insightPlaybackParagraphCount={briefMeSegmentCount}
               onCalendarDayClick={(date: Date) => {
                 // Navigate to activities page with day view and selected date
                 // Use local date components to avoid timezone offset issues with toISOString()
@@ -1988,7 +2014,7 @@ ${agentResponse}`;
       {/* Brief Me is now non-blocking - audio plays in background while user can interact with page */}
 
       {/* Brief Me audio player (only visible when Brief Me is active) */}
-      {briefMeExpanded && (
+      {briefMeExpanded && !insightsSheetOpen && (
       <div className={cn(
         'fixed left-0 right-0 z-[60] safe-area-bottom pointer-events-none',
         isCopilotConfigured ? 'bottom-20' : 'bottom-0'
