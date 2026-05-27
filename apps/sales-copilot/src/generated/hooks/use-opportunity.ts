@@ -23,10 +23,16 @@ export function useOpportunityList(options?: IOperationOptions) {
  * @param id The id of the record (must be a valid UUID)
  */
 export function useOpportunity(id: string) {
+  const client = useQueryClient();
   return useQuery({
     queryKey: ["opportunity", id],
     queryFn: () => OpportunityService.get(id),
     enabled: !!id && UUID_REGEX.test(id),
+    placeholderData: () => {
+      const list = client.getQueryData<Opportunity[]>(["opportunity-list"]);
+      return list?.find((o) => o.id === id);
+    },
+    staleTime: 30_000,
   });
 }
 

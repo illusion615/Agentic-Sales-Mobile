@@ -38,6 +38,10 @@ export default defineConfig({
           if (id.includes('@radix-ui')) return 'vendor-radix';
           if (id.includes('recharts') || id.includes('/d3-')) return 'vendor-charts';
           if (id.includes('/jotai')) return 'vendor-state';
+          if (id.includes('@microsoft/power-apps')) return 'vendor-powerapps';
+          if (id.includes('date-fns')) return 'vendor-datefns';
+          if (id.includes('/zod')) return 'vendor-zod';
+          if (id.includes('sonner')) return 'vendor-sonner';
           return 'vendor-misc';
         },
       },

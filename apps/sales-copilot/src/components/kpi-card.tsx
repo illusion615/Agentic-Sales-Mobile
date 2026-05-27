@@ -78,6 +78,7 @@ export interface KPIData {
 
 interface KPICardsProps {
   data: KPIData;
+  isLoading?: boolean;
   onNavigate: (path: string) => void;
   onMarkDone?: (itemId: string) => void;
   onReschedule?: (itemId: string, newDate: Date) => void;
@@ -187,6 +188,7 @@ function ProgressRingWithValue({
 
 export function KPICards({
   data,
+  isLoading = false,
   onNavigate,
   onMarkDone,
   onReschedule,
@@ -554,6 +556,22 @@ export function KPICards({
       <div className="space-y-3">
       {/* Top Row - 3 KPI Cards */}
       <div className="grid grid-cols-3 gap-3">
+        {isLoading ? (
+          <>
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="glass-card p-3 animate-pulse" style={{ borderRadius: 20 }}>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="w-10 h-10 rounded-full bg-muted/50" />
+                  <div className="w-12 h-5 rounded-full bg-muted/50" />
+                </div>
+                <div className="w-20 h-3 rounded bg-muted/50 mb-1.5" />
+                <div className="w-14 h-5 rounded bg-muted/50 mb-1" />
+                <div className="w-24 h-2.5 rounded bg-muted/30" />
+              </div>
+            ))}
+          </>
+        ) : (
+        <>
         {/* Quarterly Performance (季度业绩完成率) */}
         <motion.div
           variants={itemVariants}
@@ -745,6 +763,8 @@ export function KPICards({
             </div>
           </div>
         </motion.div>
+        </>
+        )}
       </div>
 
       {/* Today's Agenda - Full Width Row */}

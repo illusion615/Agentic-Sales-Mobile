@@ -23,10 +23,16 @@ export function useAccountList(options?: IOperationOptions) {
  * @param id The id of the record (must be a valid UUID)
  */
 export function useAccount(id: string) {
+  const client = useQueryClient();
   return useQuery({
     queryKey: ["account", id],
     queryFn: () => AccountService.get(id),
     enabled: !!id && UUID_REGEX.test(id),
+    placeholderData: () => {
+      const list = client.getQueryData<Account[]>(["account-list"]);
+      return list?.find((a) => a.id === id);
+    },
+    staleTime: 30_000,
   });
 }
 

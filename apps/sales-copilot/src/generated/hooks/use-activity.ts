@@ -23,12 +23,18 @@ export function useActivityList(options?: IOperationOptions) {
  * @param id The id of the record (must be a valid UUID)
  */
 export function useActivity(id: string) {
+  const client = useQueryClient();
   return useQuery({
     queryKey: ["activity", id],
     queryFn: () => ActivityService.get(id),
     enabled: !!id && UUID_REGEX.test(id),
-    retry: false, // Don't retry on "record not found" errors
-    throwOnError: false, // Let component handle errors gracefully
+    retry: false,
+    throwOnError: false,
+    placeholderData: () => {
+      const list = client.getQueryData<Activity[]>(["activity-list"]);
+      return list?.find((a) => a.id === id);
+    },
+    staleTime: 30_000,
   });
 }
 

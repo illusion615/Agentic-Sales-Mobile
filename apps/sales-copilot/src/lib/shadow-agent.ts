@@ -153,12 +153,21 @@ ${skillsText}
 ${describeBoundEntities(frame)}
 
 # Output rules
-- Output ONE JSON object with shape: { "steps": [ { "seq", "outputRef"?, "dependsOn"?, "function", "arguments" }, ... ] }
+- Output ONE JSON object with shape: { "steps": [ { "seq", "outputRef"?, "dependsOn"?, "function", "arguments", "usePageContext"? }, ... ] }
 - Steps array length MUST equal the skeleton length, and each step's seq / outputRef / dependsOn must match the skeleton.
 - "function" should normally equal the suggestedFunction. Override only if the suggested skill is missing from the available skills list.
 - "arguments" must obey the parameter schema of the chosen skill.
 - For queryCopilotStudio / externalKnowledgeQuery: "query" is REQUIRED — use the intent summary as the query text.
 - For Activity steps: temporal=past → temporalMode="completed"; temporal=future → temporalMode="planned".
+- For draftActivity: "type" is REQUIRED. Infer from context: 拜访/visit/went to/现场 → "visit", 电话/call/phoned/rang → "call", 会议/meeting/met with/讨论会 → "meeting", 邮件/email/sent mail → "email", otherwise → "other".
+- For queryActivities: always set date filters. "today" → scheduledDate=YYYY-MM-DD (today). "this week" → dateFrom=weekStart dateTo=weekEnd. "completed today" → scheduledDate=today + status="completed". "pending" → status="draft" or "confirmed".
+- For queryOpportunities: "active/pipeline" → stage != won/lost. "at risk" → minConfidence=0 maxConfidence=49.
+
+# Page context data reuse
+- Check the [Page context] section below. If the page already has the data needed for a step (e.g., the user is on the Activities page viewing this week and the step needs this week's activities), set "usePageContext": true and omit query arguments. The executor will use the page data directly.
+- If the page data does NOT cover the step's needs (e.g., step needs next week's data but page shows this week), set "usePageContext": false (or omit it) and provide proper query arguments.
+- "usePageContext": true is only valid for query functions (queryActivities, queryOpportunities, queryAccounts, queryContacts), never for draft/update/delete functions.
+
 - Use page-bound entity ids directly (no need to re-ask).
 - When a step depends on another (dependsOn includes "$intent_N"), reference the upstream output via "$intent_N.id" or "$intent_N.name" inside arguments.
 - Amount conversion: 200k/200K → 200000, 50万 → 500000, 1.5M → 1500000.
@@ -178,7 +187,19 @@ function buildUserBlock(
     lines.push(`[Named entities]\n${frame.explicitNames.map((e) => `${e.kind}:${e.text}`).join(', ')}`);
   }
   if (pageContext) {
-    lines.push(`[Page] ${pageContext.currentPage}${pageContext.summary ? ` — ${pageContext.summary}` : ''}`);
+    lines.push(`[Page context] ${pageContext.currentPage}${pageContext.summary ? ` — ${pageContext.summary}` : ''}`);
+    // Include page data summary so orchestrator can decide usePageContext per step
+    if (pageContext.pageData) {
+      const pd = pageContext.pageData as Record<string, unknown>;
+      const dataKeys = Object.keys(pd);
+      const dataSummary = dataKeys.map((k) => {
+        const v = pd[k];
+        if (Array.isArray(v)) return `${k}: ${v.length} records`;
+        if (typeof v === 'number' || typeof v === 'string') return `${k}: ${v}`;
+        return `${k}: [object]`;
+      }).join(', ');
+      lines.push(`[Page data available] ${dataSummary}`);
+    }
   }
   const tail = (conversationHistory ?? []).slice(-2);
   if (tail.length) {

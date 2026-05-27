@@ -10,29 +10,25 @@ import {
   ChevronRight,
   MapPin,
   Plus,
-  LayoutGrid,
   ChevronLeft,
   Sparkles,
+  AlertTriangle,
+  CheckCircle2,
+  TrendingUp,
 } from 'lucide-react';
 import { MobileLayout } from '@/components/mobile-layout';
 import { FloatingQuickActions } from '@/components/floating-quick-actions';
-import { GlassCard, GlassListItem } from '@/components/glass-card';
+import { GlassCard } from '@/components/glass-card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { useActivityList } from '@/generated/hooks/use-activity';
 import { useQueryClient } from '@tanstack/react-query';
-import type { Activity as DataverseActivity } from '@/generated/models/activity-model';import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
+import type { Activity as DataverseActivity } from '@/generated/models/activity-model';
+import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
 import { useCopilot } from '@/contexts/copilot-context';
 import { getLocale } from '@/lib/i18n';
 import { getWeekStartDay } from '@/lib/i18n';
 import { PullToRefresh } from '@/components/pull-to-refresh';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addDays, addWeeks, addMonths, subDays, subWeeks, subMonths, isSameDay, isSameMonth, eachDayOfInterval, getDay } from 'date-fns';
 
 const activityIcons: Record<string, typeof Phone> = {
@@ -51,99 +47,109 @@ const activityColors: Record<string, string> = {
   other: 'bg-muted-foreground',
 };
 
-const containerVariants = {
-  hidden: { opacity: 0 },
-  show: {
-    opacity: 1,
-    transition: {
-      staggerChildren: 0.06,
-    },
-  },
-} as const;
-
-const itemVariants = {
-  hidden: { opacity: 0, x: -20 },
-  show: { opacity: 1, x: 0 },
-} as const;
+const activityDotColors: Record<string, string> = {
+  visit: 'bg-primary',
+  call: 'bg-[#0D8F8C]',
+  meeting: 'bg-[#6366F1]',
+  email: 'bg-[#10B981]',
+  other: 'bg-muted-foreground/60',
+};
 
 function formatTime(dateStr: string): string {
   const date = new Date(dateStr);
   return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
-function formatDate(dateStr: string): string {
-  const date = new Date(dateStr);
+function isOverdue(activity: DataverseActivity): boolean {
+  if (activity.draftStatus === 'completed') return false;
+  const scheduled = new Date(activity.scheduleddate);
   const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
-  
-  if (date.toDateString() === today.toDateString()) {
-    return 'Today';
-  }
-  if (date.toDateString() === yesterday.toDateString()) {
-    return 'Yesterday';
-  }
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  today.setHours(0, 0, 0, 0);
+  return scheduled < today;
 }
 
-function isToday(dateStr: string): boolean {
-  const date = new Date(dateStr);
+function getDaysOverdue(activity: DataverseActivity): number {
+  const scheduled = new Date(activity.scheduleddate);
   const today = new Date();
-  return date.toDateString() === today.toDateString();
+  today.setHours(0, 0, 0, 0);
+  scheduled.setHours(0, 0, 0, 0);
+  return Math.floor((today.getTime() - scheduled.getTime()) / (1000 * 60 * 60 * 24));
 }
 
-function ActivityItem({ activity }: { activity: DataverseActivity }) {
+// ─── Activity Card (enhanced) ───
+function ActivityItem({ activity, showOverdue = false }: { activity: DataverseActivity; showOverdue?: boolean }) {
   const navigate = useNavigate();
+  const locale = getLocale();
   const typeLabel = activity.type;
   const Icon = activityIcons[typeLabel] || CheckSquare;
   const color = activityColors[typeLabel] || 'bg-muted';
-  const statusLabel = activity.draftStatus;
-  const isCompleted = statusLabel === 'completed';
+  const isCompleted = activity.draftStatus === 'completed';
+  const overdue = showOverdue && isOverdue(activity);
+  const daysOver = overdue ? getDaysOverdue(activity) : 0;
 
   return (
-    <GlassListItem
+    <div
       onClick={() => navigate(`/activities/${activity.id}`)}
-      className="cursor-pointer hover:bg-muted/50 transition-colors"
+      className={cn(
+        'glass-card p-3 cursor-pointer hover:bg-muted/30 active:bg-muted/50 transition-colors',
+        overdue && 'border-red-500/30 bg-red-500/5'
+      )}
     >
-      <div className="flex items-center gap-3">
+      <div className="flex items-start gap-3">
         {/* Icon */}
-        <div
-          className={`w-10 h-10 rounded-xl ${color} flex items-center justify-center flex-shrink-0`}
-        >
-          <Icon className="w-5 h-5 text-white" />
+        <div className={cn('w-9 h-9 rounded-lg flex items-center justify-center shrink-0 mt-0.5', color)}>
+          <Icon className="w-4 h-4 text-white" />
         </div>
 
-        {/* Info */}
+        {/* Content */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5">
-            <h3
-              className={`text-sm font-medium truncate flex-1 ${
-                isCompleted
-                  ? 'text-muted-foreground line-through'
-                  : 'text-foreground'
-              }`}
-            >
-              {activity.title}
-            </h3>
-            <Badge variant="outline" className="text-[10px] capitalize flex-shrink-0">
-              {statusLabel}
-            </Badge>
+          {/* Title - up to 2 lines */}
+          <h3 className={cn(
+            'text-[13px] font-medium leading-snug line-clamp-2',
+            isCompleted ? 'text-muted-foreground line-through' : 'text-foreground'
+          )}>
+            {activity.title}
+          </h3>
+          
+          {/* Account + Opportunity */}
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <span className="text-[11px] text-muted-foreground truncate">
+              {activity.account?.name1 || ''}
+            </span>
+            {activity.opportunity?.name1 && (
+              <>
+                <span className="text-[11px] text-muted-foreground">·</span>
+                <span className="text-[11px] text-primary/70 truncate">
+                  {activity.opportunity.name1}
+                </span>
+              </>
+            )}
           </div>
-          <p className="text-xs text-muted-foreground">
-            {activity.account?.name1 || 'No account'}
-          </p>
+
+          {/* Status row: time + badges */}
+          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+            <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
+              <Clock className="w-2.5 h-2.5" />
+              {formatTime(activity.scheduleddate)}
+            </span>
+            <span className={cn(
+              'px-1.5 py-0 rounded text-[9px] font-medium',
+              isCompleted ? 'bg-green-500/15 text-green-600' : 'bg-muted text-muted-foreground'
+            )}>
+              {activity.draftStatus}
+            </span>
+            {overdue && (
+              <span className="flex items-center gap-0.5 text-[9px] font-medium text-red-500">
+                <AlertTriangle className="w-2.5 h-2.5" />
+                {daysOver}d {locale === 'zh-Hans' ? '逾期' : 'overdue'}
+              </span>
+            )}
+          </div>
         </div>
 
-        {/* Time & Arrow */}
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <span className="flex items-center gap-1 text-xs text-muted-foreground">
-            <Clock className="w-3 h-3" />
-            {formatTime(activity.scheduleddate)}
-          </span>
-          <ChevronRight className="w-4 h-4 text-muted-foreground" />
-        </div>
+        <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0 mt-2" />
       </div>
-    </GlassListItem>
+    </div>
   );
 }
 
@@ -160,7 +166,6 @@ export default function ActivitiesPage() {
   const [swipeDirection, setSwipeDirection] = useState<'left' | 'right' | null>(null);
   const locale = getLocale();
 
-  // Copilot context for agent awareness
   const copilot = useCopilot();
   const dragStartX = useRef<number>(0);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -170,7 +175,6 @@ export default function ActivitiesPage() {
     orderBy: ['scheduleddate desc'],
   });
 
-  // Pull to refresh handler
   const handleRefresh = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: ['activity-list'] });
   }, [queryClient]);
@@ -179,7 +183,6 @@ export default function ActivitiesPage() {
   const filteredActivities = useMemo(() => {
     return activities.filter((activity: DataverseActivity) => {
       const activityDate = new Date(activity.scheduleddate);
-      
       if (viewMode === 'week') {
         const wso = getWeekStartDay() === 'monday' ? 1 : 0;
         const weekStart = startOfWeek(currentDate, { weekStartsOn: wso as 0 | 1 });
@@ -193,37 +196,44 @@ export default function ActivitiesPage() {
     });
   }, [activities, viewMode, currentDate]);
 
-  // Group activities by date for week/month views
+  // ─── Stats ───
+  const completedCount = filteredActivities.filter((a: DataverseActivity) => a.draftStatus === 'completed').length;
+  const totalCount = filteredActivities.length;
+  const pendingCount = totalCount - completedCount;
+  const completionRate = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+  
+  // Overdue activities (not completed, scheduled before today)
+  const overdueActivities = useMemo(() => 
+    activities.filter((a: DataverseActivity) => isOverdue(a))
+      .sort((a, b) => new Date(a.scheduleddate).getTime() - new Date(b.scheduleddate).getTime()),
+    [activities]
+  );
+
+  // Group activities by date
   const activitiesByDate = useMemo(() => {
     const grouped: Record<string, DataverseActivity[]> = {};
     filteredActivities.forEach((activity: DataverseActivity) => {
       const dateKey = format(new Date(activity.scheduleddate), 'yyyy-MM-dd');
-      if (!grouped[dateKey]) {
-        grouped[dateKey] = [];
-      }
+      if (!grouped[dateKey]) grouped[dateKey] = [];
       grouped[dateKey].push(activity);
     });
     return grouped;
   }, [filteredActivities]);
 
-  const pendingCount = filteredActivities.filter(
-    (a: DataverseActivity) => a.draftStatus !== 'completed'
-  ).length;
+  // Selected day activities split into groups
+  const selectedDateKey = format(currentDate, 'yyyy-MM-dd');
+  const selectedDayActivities = activitiesByDate[selectedDateKey] || [];
+  const selectedDayPending = selectedDayActivities.filter((a) => a.draftStatus !== 'completed');
+  const selectedDayCompleted = selectedDayActivities.filter((a) => a.draftStatus === 'completed');
+  const [showCompleted, setShowCompleted] = useState(false);
 
-  // Set page context for Copilot agent awareness
+  // Copilot page context
   useEffect(() => {
-    // For Day View only, ship a rich per-activity payload so the agent can
-    // narrate a daily report without an extra fetch. Other views stay light.
     const dayActivitiesPayload = viewMode === 'week'
       ? filteredActivities.map((a: DataverseActivity) => ({
-          id: a.id,
-          title: a.title,
-          type: a.type,
-          status: a.draftStatus,
-          outcome: a.outcome ? a.outcome : undefined,
-          scheduledAt: a.scheduleddate,
-          accountName: a.account?.name1,
-          contactName: a.contact?.fullname,
+          id: a.id, title: a.title, type: a.type, status: a.draftStatus,
+          outcome: a.outcome || undefined, scheduledAt: a.scheduleddate,
+          accountName: a.account?.name1, contactName: a.contact?.fullname,
           opportunityName: a.opportunity?.name1,
           notes: a.notes ? String(a.notes).slice(0, 200) : undefined,
         }))
@@ -232,91 +242,61 @@ export default function ActivitiesPage() {
     copilot.setPageContext({
       currentPage: locale === 'zh-Hans' ? '活动列表' : 'Activities List',
       summary: locale === 'zh-Hans'
-        ? `活动列表: ${viewMode === 'week' ? '本周' : '本月'}共${filteredActivities.length}个活动，${pendingCount}个待完成`
-        : `Activities list: ${filteredActivities.length} activities in ${viewMode} view, ${pendingCount} pending`,
+        ? `活动列表: ${viewMode === 'week' ? '本周' : '本月'}共${totalCount}个活动，已完成${completedCount}个(${completionRate}%)，${pendingCount}个待完成，${overdueActivities.length}个逾期`
+        : `Activities: ${totalCount} total, ${completedCount} done (${completionRate}%), ${pendingCount} pending, ${overdueActivities.length} overdue`,
       pageData: {
-        viewMode,
-        currentDate: currentDate.toISOString(),
-        totalActivities: filteredActivities.length,
-        pendingCount,
-        activitiesByDate: Object.keys(activitiesByDate).map((dateKey) => ({
-          date: dateKey,
-          count: activitiesByDate[dateKey].length,
-        })),
+        viewMode, currentDate: currentDate.toISOString(), totalActivities: totalCount,
+        completedCount, pendingCount, overdueCount: overdueActivities.length,
+        activitiesByDate: Object.keys(activitiesByDate).map((dk) => ({ date: dk, count: activitiesByDate[dk].length })),
         ...(dayActivitiesPayload ? { dayActivities: dayActivitiesPayload } : {}),
       },
     });
-    
-    return () => {
-      copilot.setPageContext(null);
-    };
-  }, [viewMode, currentDate, filteredActivities.length, pendingCount, activitiesByDate, locale, copilot.setPageContext]);
+    return () => { copilot.setPageContext(null); };
+  }, [viewMode, currentDate, totalCount, completedCount, pendingCount, overdueActivities.length, activitiesByDate, locale, copilot.setPageContext]);
 
-  // Navigation functions
-  const goBack = () => {
-    setSwipeDirection('right');
-    if (viewMode === 'week') {
-      setCurrentDate(subWeeks(currentDate, 1));
-    } else {
-      setCurrentDate(subMonths(currentDate, 1));
-    }
-  };
+  // Navigation
+  const goBack = () => { setSwipeDirection('right'); viewMode === 'week' ? setCurrentDate(subWeeks(currentDate, 1)) : setCurrentDate(subMonths(currentDate, 1)); };
+  const goForward = () => { setSwipeDirection('left'); viewMode === 'week' ? setCurrentDate(addWeeks(currentDate, 1)) : setCurrentDate(addMonths(currentDate, 1)); };
 
-  const goForward = () => {
-    setSwipeDirection('left');
-    if (viewMode === 'week') {
-      setCurrentDate(addWeeks(currentDate, 1));
-    } else {
-      setCurrentDate(addMonths(currentDate, 1));
-    }
-  };
-
-  // Swipe handling
-  const handleDragStart = (e: React.PointerEvent) => {
-    dragStartX.current = e.clientX;
-  };
-
+  const handleDragStart = (e: React.PointerEvent) => { dragStartX.current = e.clientX; };
   const handleDragEnd = (e: React.PointerEvent) => {
-    const dragEndX = e.clientX;
-    const diff = dragStartX.current - dragEndX;
-    const threshold = 50;
-
-    if (diff > threshold) {
-      goForward();
-    } else if (diff < -threshold) {
-      goBack();
-    }
+    const diff = dragStartX.current - e.clientX;
+    if (diff > 50) goForward(); else if (diff < -50) goBack();
   };
 
-  // Get title based on view mode
   const getViewTitle = () => {
     if (viewMode === 'week') {
       const wso = getWeekStartDay() === 'monday' ? 1 : 0;
-      const weekStart = startOfWeek(currentDate, { weekStartsOn: wso as 0 | 1 });
-      const weekEnd = endOfWeek(currentDate, { weekStartsOn: wso as 0 | 1 });
-      return `${format(weekStart, 'MMM d')} - ${format(weekEnd, 'MMM d')}`;
-    } else {
-      return format(currentDate, 'MMMM yyyy');
+      const ws = startOfWeek(currentDate, { weekStartsOn: wso as 0 | 1 });
+      const we = endOfWeek(currentDate, { weekStartsOn: wso as 0 | 1 });
+      return `${format(ws, 'MMM d')} - ${format(we, 'MMM d')}`;
     }
+    return format(currentDate, 'MMMM yyyy');
   };
 
-  // Get days for month calendar grid
   const getMonthDays = () => {
     const wso = getWeekStartDay() === 'monday' ? 1 : 0;
-    const monthStart = startOfMonth(currentDate);
-    const monthEnd = endOfMonth(currentDate);
-    const startDay = (getDay(monthStart) - wso + 7) % 7;
-    const calendarStart = subDays(monthStart, startDay);
-    const endDay = (getDay(monthEnd) - wso + 7) % 7;
-    const days = eachDayOfInterval({ start: calendarStart, end: addDays(monthEnd, 6 - endDay) });
-    return days;
+    const ms = startOfMonth(currentDate);
+    const me = endOfMonth(currentDate);
+    const sd = (getDay(ms) - wso + 7) % 7;
+    const cs = subDays(ms, sd);
+    const ed = (getDay(me) - wso + 7) % 7;
+    return eachDayOfInterval({ start: cs, end: addDays(me, 6 - ed) });
   };
 
-  // Get days for week view
   const getWeekDays = () => {
     const wso = getWeekStartDay() === 'monday' ? 1 : 0;
-    const weekStart = startOfWeek(currentDate, { weekStartsOn: wso as 0 | 1 });
-    return eachDayOfInterval({ start: weekStart, end: addDays(weekStart, 6) });
+    const ws = startOfWeek(currentDate, { weekStartsOn: wso as 0 | 1 });
+    return eachDayOfInterval({ start: ws, end: addDays(ws, 6) });
+  };
+
+  const handleGenerateDailyReport = () => {
+    const dateLabel = format(currentDate, 'yyyy-MM-dd');
+    const prompt = locale === 'zh-Hans'
+      ? `生成 ${dateLabel} 的工作日报：根据当前页面上的任务列表，输出：1）今日完成情况；2）关键成果；3）未完成任务与原因；4）明日建议。`
+      : `Generate a daily report for ${dateLabel}: use the task list on this page and produce: 1) completion summary; 2) key wins; 3) pending tasks; 4) tomorrow's plan.`;
+    copilot.openPanel(true);
+    copilot.sendMessage(prompt);
   };
 
   if (isLoading) {
@@ -329,38 +309,19 @@ export default function ActivitiesPage() {
     );
   }
 
-  const viewModeLabels: Record<ViewMode, string> = {
-    week: 'Week',
-    month: 'Month',
-  };
-
-  // Open Copilot with a pre-canned daily-report ask. The Day View pageContext
-  // already includes per-activity titles, statuses, outcomes, account/contact/
-  // opportunity links, and notes, so the agent has full context to narrate.
-  const handleGenerateDailyReport = () => {
-    const dateLabel = format(currentDate, 'yyyy-MM-dd');
-    const prompt = locale === 'zh-Hans'
-      ? `生成 ${dateLabel} 的工作日报：根据当前页面上的任务列表（含完成状态、结果、关联的客户/联系人/商机、备注），输出四个部分：1）今日完成情况；2）关键成果（推动了哪些商机或客户）；3）未完成任务与原因；4）明日建议。`
-      : `Generate a daily report for ${dateLabel}: use the task list currently on this page (statuses, outcomes, linked accounts/contacts/opportunities, notes) and produce four sections: 1) today's completion; 2) key wins (which opportunities or accounts moved forward); 3) pending tasks and why; 4) suggestions for tomorrow.`;
-    copilot.openPanel(true);
-    copilot.sendMessage(prompt);
-  };
-
   return (
     <MobileLayout
       title="Activities"
       hideVoiceButton={true}
       headerRight={
         <div className="flex rounded-md overflow-hidden border border-border/60">
-          {(['week', 'month'] as ViewMode[]).map((mode: ViewMode) => (
+          {(['week', 'month'] as ViewMode[]).map((mode) => (
             <button
               key={mode}
               onClick={() => setViewMode(mode)}
               className={cn(
                 'px-2.5 py-1 text-[10px] font-medium transition-colors',
-                viewMode === mode
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-background hover:bg-muted text-muted-foreground'
+                viewMode === mode ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted text-muted-foreground'
               )}
             >
               {mode === 'week' ? 'W' : 'M'}
@@ -370,7 +331,7 @@ export default function ActivitiesPage() {
       }
     >
       <PullToRefresh onRefresh={handleRefresh} className="flex-1 overflow-y-auto pb-40">
-        <div className="py-4 space-y-4">
+        <div className="py-4 space-y-3">
           {/* Navigation Header */}
           <div className="flex items-center justify-between px-1">
             <Button variant="ghost" size="icon" onClick={goBack} className="h-8 w-8">
@@ -382,37 +343,54 @@ export default function ActivitiesPage() {
             </Button>
           </div>
 
-          {/* Task Summary */}
-          <GlassCard className="flex items-center justify-between">
-            <div>
-              <h2 className="text-base font-semibold text-foreground">
-                {viewMode === 'week' ? "Tasks in Week" : `Tasks in ${format(currentDate, 'MMMM')}`}
-              </h2>
-              <p className="text-xs text-muted-foreground">
-                {pendingCount} {pendingCount === 1 ? 'task' : 'tasks'} pending
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              {viewMode === 'week' && (
-                <button
-                  type="button"
-                  onClick={handleGenerateDailyReport}
-                  aria-label={locale === 'zh-Hans' ? '生成今日工作日报' : 'Generate daily report'}
-                  title={locale === 'zh-Hans' ? '生成今日工作日报' : 'Generate daily report'}
-                  className="h-9 w-9 rounded-full bg-primary/10 text-primary hover:bg-primary/20 transition-colors flex items-center justify-center"
-                >
-                  <Sparkles className="w-4 h-4" />
-                </button>
-              )}
-              <div className="w-12 h-12 rounded-full accent-gradient flex items-center justify-center">
-                <span className="text-white text-xl font-bold">
-                  {pendingCount}
-                </span>
+          {/* ─── Enhanced Summary Card ─── */}
+          <GlassCard className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-foreground">
+                  {viewMode === 'week' ? 'Weekly Progress' : `${format(currentDate, 'MMMM')} Progress`}
+                </h2>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {completedCount}/{totalCount} done · {pendingCount} pending
+                  {overdueActivities.length > 0 && (
+                    <span className="text-red-500"> · {overdueActivities.length} overdue</span>
+                  )}
+                </p>
               </div>
+              <div className="flex items-center gap-2">
+                {viewMode === 'week' && (
+                  <button
+                    type="button"
+                    onClick={handleGenerateDailyReport}
+                    aria-label="AI Report"
+                    className="h-8 w-8 rounded-full bg-primary/10 text-primary hover:bg-primary/20 transition-colors flex items-center justify-center"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                <div className="relative w-11 h-11">
+                  <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
+                    <circle cx="18" cy="18" r="15.5" fill="none" stroke="currentColor" strokeWidth="3" className="text-muted/30" />
+                    <circle cx="18" cy="18" r="15.5" fill="none" stroke="currentColor" strokeWidth="3"
+                      strokeDasharray={`${completionRate * 0.975} 100`}
+                      strokeLinecap="round"
+                      className="text-primary" />
+                  </svg>
+                  <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-foreground">
+                    {completionRate}%
+                  </span>
+                </div>
+              </div>
+            </div>
+            {/* Progress bar with type distribution */}
+            <div className="h-1.5 rounded-full bg-muted/30 overflow-hidden flex">
+              {totalCount > 0 && (
+                <div className="bg-green-500 h-full transition-all" style={{ width: `${completionRate}%` }} />
+              )}
             </div>
           </GlassCard>
 
-          {/* Swipeable Calendar Content */}
+          {/* Swipeable Calendar */}
           <div
             ref={containerRef}
             className="touch-pan-x select-none"
@@ -427,130 +405,140 @@ export default function ActivitiesPage() {
                 exit={{ opacity: 0, x: swipeDirection === 'left' ? -100 : swipeDirection === 'right' ? 100 : 0 }}
                 transition={{ duration: 0.2, ease: 'easeOut' as const }}
               >
-                {/* Week View: day selector strip + selected day's task list */}
+                {/* ─── Week View ─── */}
                 {viewMode === 'week' && (() => {
                   const weekDays = getWeekDays();
-                  const selectedDateKey = format(currentDate, 'yyyy-MM-dd');
-                  const selectedDayActivities = activitiesByDate[selectedDateKey] || [];
                   return (
                     <div className="space-y-3">
-                      {/* Week day selector strip */}
+                      {/* Day selector with type dots */}
                       <div className="grid grid-cols-7 gap-1">
                         {weekDays.map((day: Date) => {
                           const dateKey = format(day, 'yyyy-MM-dd');
-                          const dayCount = (activitiesByDate[dateKey] || []).length;
+                          const dayActs = activitiesByDate[dateKey] || [];
                           const isSelected = isSameDay(day, currentDate);
-                          const isToday = isSameDay(day, new Date());
+                          const isTodayDay = isSameDay(day, new Date());
+                          // Unique types for dots
+                          const uniqueTypes = [...new Set(dayActs.map((a) => a.type))];
                           return (
                             <button
                               key={dateKey}
                               onClick={() => setCurrentDate(day)}
                               className={cn(
                                 'flex flex-col items-center py-2 rounded-lg transition-all',
-                                isSelected
-                                  ? 'bg-primary/15 border border-primary'
-                                  : isToday
-                                    ? 'border border-primary/40'
-                                    : 'border border-transparent hover:bg-card/80'
+                                isSelected ? 'bg-primary/15 border border-primary' : isTodayDay ? 'border border-primary/40' : 'border border-transparent hover:bg-card/80'
                               )}
                             >
-                              <span className="text-[10px] font-medium text-muted-foreground uppercase">
-                                {format(day, 'EEE')}
-                              </span>
+                              <span className="text-[10px] font-medium text-muted-foreground uppercase">{format(day, 'EEE')}</span>
                               <span className={cn(
                                 'text-base font-semibold w-8 h-8 flex items-center justify-center rounded-full mt-0.5',
                                 isSelected && 'bg-primary text-primary-foreground',
-                                isToday && !isSelected && 'text-primary'
+                                isTodayDay && !isSelected && 'text-primary'
                               )}>
                                 {format(day, 'd')}
                               </span>
-                              {dayCount > 0 && (
-                                <span className={cn(
-                                  'text-[9px] mt-0.5 font-medium',
-                                  isSelected ? 'text-primary' : 'text-muted-foreground'
-                                )}>
-                                  {dayCount}
-                                </span>
+                              {/* Type color dots */}
+                              {uniqueTypes.length > 0 ? (
+                                <div className="flex gap-0.5 mt-0.5">
+                                  {uniqueTypes.slice(0, 4).map((t) => (
+                                    <span key={t} className={cn('w-1.5 h-1.5 rounded-full', activityDotColors[t] || 'bg-muted-foreground')} />
+                                  ))}
+                                </div>
+                              ) : (
+                                <div className="h-2 mt-0.5" /> // spacer
                               )}
                             </button>
                           );
                         })}
                       </div>
 
-                      {/* Selected day's task list */}
-                      <div className="space-y-2">
-                        {selectedDayActivities.length === 0 ? (
-                          <Empty className="py-8">
-                            <EmptyHeader>
-                              <EmptyTitle>No activities</EmptyTitle>
-                              <EmptyDescription>No activities scheduled for {format(currentDate, 'EEE, MMM d')}</EmptyDescription>
-                            </EmptyHeader>
-                          </Empty>
-                        ) : (
-                          selectedDayActivities.map((activity: DataverseActivity) => (
-                            <motion.div
-                              key={activity.id}
-                              variants={itemVariants}
-                              initial="hidden"
-                              animate="show"
-                            >
-                              <ActivityItem activity={activity} />
-                            </motion.div>
-                          ))
-                        )}
-                      </div>
+                      {/* ─── Selected day: Pending tasks ─── */}
+                      {selectedDayActivities.length === 0 ? (
+                        <Empty className="py-8">
+                          <EmptyHeader>
+                            <EmptyTitle>No activities</EmptyTitle>
+                            <EmptyDescription>No activities for {format(currentDate, 'EEE, MMM d')}</EmptyDescription>
+                          </EmptyHeader>
+                        </Empty>
+                      ) : (
+                        <div className="space-y-3">
+                          {/* Pending */}
+                          {selectedDayPending.length > 0 && (
+                            <div className="space-y-1.5">
+                              <div className="flex items-center gap-1.5 px-1">
+                                <TrendingUp className="w-3 h-3 text-primary" />
+                                <span className="text-[11px] font-semibold text-foreground">
+                                  {locale === 'zh-Hans' ? `待办 (${selectedDayPending.length})` : `To Do (${selectedDayPending.length})`}
+                                </span>
+                              </div>
+                              {selectedDayPending.map((a) => (
+                                <motion.div key={a.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+                                  <ActivityItem activity={a} />
+                                </motion.div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Completed (collapsible) */}
+                          {selectedDayCompleted.length > 0 && (
+                            <div className="space-y-1.5">
+                              <button
+                                onClick={() => setShowCompleted(!showCompleted)}
+                                className="flex items-center gap-1.5 px-1 w-full text-left"
+                              >
+                                <CheckCircle2 className="w-3 h-3 text-green-500" />
+                                <span className="text-[11px] font-semibold text-muted-foreground">
+                                  {locale === 'zh-Hans' ? `已完成 (${selectedDayCompleted.length})` : `Done (${selectedDayCompleted.length})`}
+                                </span>
+                                <ChevronRight className={cn('w-3 h-3 text-muted-foreground ml-auto transition-transform', showCompleted && 'rotate-90')} />
+                              </button>
+                              {showCompleted && selectedDayCompleted.map((a) => (
+                                <motion.div key={a.id} initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
+                                  <ActivityItem activity={a} />
+                                </motion.div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })()}
 
-                {/* Month View */}
+                {/* ─── Month View ─── */}
                 {viewMode === 'month' && (
                   <div className="space-y-2">
-                    {/* Month day headers */}
                     <div className="grid grid-cols-7 gap-1 text-center">
                       {(getWeekStartDay() === 'monday'
                         ? ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
                         : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
                       ).map((day: string) => (
-                        <div key={day} className="text-xs font-medium text-muted-foreground py-1">
-                          {day}
-                        </div>
+                        <div key={day} className="text-xs font-medium text-muted-foreground py-1">{day}</div>
                       ))}
                     </div>
-                    {/* Month calendar grid */}
                     <div className="grid grid-cols-7 gap-1">
                       {getMonthDays().map((day: Date) => {
                         const dateKey = format(day, 'yyyy-MM-dd');
-                        const dayActivities = activitiesByDate[dateKey] || [];
+                        const dayActs = activitiesByDate[dateKey] || [];
                         const isCurrentMonth = isSameMonth(day, currentDate);
                         const isCurrentDay = isSameDay(day, new Date());
+                        const hasOverdue = dayActs.some((a) => isOverdue(a));
                         return (
                           <div
                             key={dateKey}
-                            className={`aspect-square p-1 rounded-lg flex flex-col items-center cursor-pointer transition-colors ${
-                              isCurrentDay
-                                ? 'bg-primary text-primary-foreground'
-                                : isCurrentMonth
-                                ? 'bg-card/50 hover:bg-card'
-                                : 'bg-muted/30 text-muted-foreground'
-                            }`}
-                            onClick={() => {
-                              setCurrentDate(day);
-                            }}
+                            className={cn(
+                              'aspect-square p-1 rounded-lg flex flex-col items-center cursor-pointer transition-colors',
+                              isCurrentDay ? 'bg-primary text-primary-foreground' :
+                              hasOverdue ? 'bg-red-500/10 border border-red-500/20' :
+                              isCurrentMonth ? 'bg-card/50 hover:bg-card' : 'bg-muted/30 text-muted-foreground'
+                            )}
+                            onClick={() => { setCurrentDate(day); setViewMode('week'); }}
                           >
                             <span className="text-xs font-medium">{format(day, 'd')}</span>
-                            {dayActivities.length > 0 && (
+                            {dayActs.length > 0 && (
                               <div className="flex gap-0.5 mt-0.5">
-                                {dayActivities.slice(0, 3).map((activity: DataverseActivity, idx: number) => {
-                                  const typeLabel = activity.type;
-                                  const color = activityColors[typeLabel] || 'bg-muted';
-                                  return (
-                                    <div
-                                      key={activity.id}
-                                      className={`w-1.5 h-1.5 rounded-full ${isCurrentDay ? 'bg-primary-foreground' : color}`}
-                                    />
-                                  );
-                                })}
+                                {dayActs.slice(0, 3).map((a) => (
+                                  <div key={a.id} className={cn('w-1.5 h-1.5 rounded-full', isCurrentDay ? 'bg-primary-foreground' : activityDotColors[a.type] || 'bg-muted')} />
+                                ))}
                               </div>
                             )}
                           </div>
@@ -567,12 +555,7 @@ export default function ActivitiesPage() {
 
       <FloatingQuickActions
         actions={[
-          {
-            id: 'log-activity',
-            icon: Plus,
-            label: 'Log New Activity',
-            onClick: () => navigate('/activity-capture'),
-          },
+          { id: 'log-activity', icon: Plus, label: 'Log New Activity', onClick: () => navigate('/activity-capture') },
         ]}
       />
     </MobileLayout>

@@ -7,6 +7,7 @@ import { AccountService } from '@/generated/services/account-service';
 import { OpportunityService } from '@/generated/services/opportunity-service';
 import { ActivityService } from '@/generated/services/activity-service';
 import { ContactService } from '@/generated/services/contact-service';
+import { getAdminMode } from '@/lib/i18n';
 import type { Account } from '@/generated/models/account-model';
 import type { Opportunity } from '@/generated/models/opportunity-model';
 import type { Activity } from '@/generated/models/activity-model';
@@ -55,6 +56,7 @@ export interface FunctionCallResult {
   success: boolean;
   data?: unknown;
   error?: string;
+  message?: string;
   // Query keys to invalidate after mutation (for UI refresh)
   invalidateQueries?: string[];
 }
@@ -176,8 +178,8 @@ export async function executeFunction(
         const oppSortBy = args.sortBy as string | undefined;
         const oppLimit = (args.limit as number) || 20;
 
-        // Filter by owner if userId provided
-        if (context.userId) {
+        // Filter by owner if userId provided (skip in admin mode)
+        if (context.userId && !getAdminMode()) {
           filtered = filtered.filter((o: Opportunity) => o.ownerid === context.userId);
         }
 
@@ -1017,6 +1019,142 @@ export async function executeFunction(
               ? `找到 ${matches.length} 条可能匹配的活动记录`
               : '未找到类似的活动记录，这是新活动',
           },
+        };
+      }
+
+
+      // ===== Planning Functions =====
+      case 'suggestPlan': {
+        const targetDate = args.targetDate as string || (() => {
+          const tomorrow = new Date();
+          tomorrow.setDate(tomorrow.getDate() + 1);
+          return tomorrow.toISOString().split('T')[0];
+        })();
+        const period = args.period as string || 'day';
+        const focus = args.focus as string || '';
+        const maxTasks = (args.maxTasks as number) || 5;
+
+        // 1. Fetch active opportunities (sorted by close date urgency)
+        const allOpps = await OpportunityService.getAll();
+        const activeOpps = allOpps
+          .filter((o) => o.stage !== 'won' && o.stage !== 'lost')
+          .sort((a, b) => {
+            const da = a.expectedclosedate ? new Date(a.expectedclosedate).getTime() : Infinity;
+            const db = b.expectedclosedate ? new Date(b.expectedclosedate).getTime() : Infinity;
+            return da - db;
+          })
+          .slice(0, 15);
+
+        // 2. Fetch existing activities for target date/period
+        const allActivities = await ActivityService.getAll();
+        const targetStart = new Date(targetDate + 'T00:00:00');
+        const targetEnd = period === 'week'
+          ? new Date(targetStart.getTime() + 7 * 24 * 60 * 60 * 1000)
+          : new Date(targetStart.getTime() + 24 * 60 * 60 * 1000);
+        const existingActivities = allActivities.filter((a) => {
+          const d = new Date(a.scheduleddate);
+          return d >= targetStart && d < targetEnd;
+        });
+
+        // 3. Fetch accounts sorted by last contacted (least recent first)
+        const allAccounts = await AccountService.getAll();
+        const accountsNeedingContact = allAccounts
+          .filter((a) => a.lastcontactedon)
+          .sort((a, b) => new Date(a.lastcontactedon!).getTime() - new Date(b.lastcontactedon!).getTime())
+          .slice(0, 10);
+
+        // 4. Get conversation history for context (recent suggestions)
+        const recentHistory = (context.conversationHistory || []).slice(-4)
+          .map((m) => `${m.role}: ${m.content.slice(0, 300)}`).join('\n');
+
+        // 5. Build LLM prompt
+        const isZh = (context.locale || 'en') === 'zh-Hans';
+        const systemPrompt = isZh
+          ? `你是一个资深销售教练。基于以下数据为销售代表规划 ${targetDate} ${period === 'week' ? '起一周' : '当天'}的工作计划。
+
+要求：
+- 生成最多 ${maxTasks} 个具体的、可操作的任务建议
+- 每个任务必须包含：title（具体标题含客户名和目的）、type（visit/call/meeting/email/other）、accountName、scheduledDate（YYYY-MM-DD）、notes（规划理由）
+- 优先级排序：到期商机跟进 > 长期未联系客户回访 > 高价值商机推进 > 例行维护
+- 避免和已有活动冲突${focus ? `\n- 重点方向：${focus}` : ''}
+- 返回 JSON 数组：[{"title":"...", "type":"...", "accountName":"...", "scheduledDate":"...", "notes":"..."}]
+- 只返回 JSON，不要其他内容`
+          : `You are a senior sales coach. Based on the data below, plan ${period === 'week' ? 'a week of' : ''} tasks for ${targetDate}.
+
+Requirements:
+- Generate up to ${maxTasks} specific, actionable task suggestions
+- Each task must include: title (specific, with account name and purpose), type (visit/call/meeting/email/other), accountName, scheduledDate (YYYY-MM-DD), notes (reasoning)
+- Priority order: urgent opportunity follow-ups > long-overdue client revisits > high-value pipeline progression > routine maintenance
+- Avoid conflicts with existing activities${focus ? `\n- Focus area: ${focus}` : ''}
+- Return JSON array: [{"title":"...", "type":"...", "accountName":"...", "scheduledDate":"...", "notes":"..."}]
+- Return ONLY JSON, no other text`;
+
+        const dataPayload = `Pipeline (${activeOpps.length} active opportunities):
+${JSON.stringify(activeOpps.map((o) => ({
+  name: o.name1, account: o.account?.name1, amount: o.totalamount,
+  stage: o.stage, confidence: o.confidence, closeDate: o.expectedclosedate,
+  blocker: o.blocker, lastAction: o.lastaction,
+})), null, 0).slice(0, 2000)}
+
+Existing activities for ${targetDate}${period === 'week' ? ' week' : ''}:
+${JSON.stringify(existingActivities.map((a) => ({
+  title: a.title, type: a.type, account: a.account?.name1, date: a.scheduleddate,
+})), null, 0).slice(0, 1000)}
+
+Accounts needing contact (least recently contacted):
+${JSON.stringify(accountsNeedingContact.map((a) => ({
+  name: a.name1, lastContacted: a.lastcontactedon, tier: a.tier,
+})), null, 0).slice(0, 800)}
+
+Recent conversation:
+${recentHistory.slice(0, 500)}`;
+
+        const { invokeFlowForLLM } = await import('@/services/power-automate-service');
+        const llmResp = await invokeFlowForLLM({
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: dataPayload },
+          ],
+          responseFormat: 'text',
+        });
+
+        if (!llmResp.success || !llmResp.content) {
+          return { success: false, error: llmResp.error || 'LLM failed to generate plan' };
+        }
+
+        // Parse suggestions
+        const jsonMatch = llmResp.content.match(/\[[\s\S]*\]/);
+        if (!jsonMatch) {
+          return { success: false, error: 'Failed to parse plan suggestions' };
+        }
+
+        const suggestions = JSON.parse(jsonMatch[0]) as Array<{
+          title: string; type: string; accountName: string; scheduledDate: string; notes: string;
+        }>;
+
+        // Return as batch form card data (reuses existing multi-intent UI)
+        return {
+          success: true,
+          data: {
+            type: 'batch' as const,
+            items: suggestions.slice(0, maxTasks).map((s, idx) => ({
+              type: 'activity' as const,
+              isNew: true,
+              data: {
+                title: s.title,
+                type: s.type || 'visit',
+                accountName: s.accountName || '',
+                scheduledDate: s.scheduledDate || targetDate,
+                notes: s.notes || '',
+                temporalMode: 'planned',
+              },
+              batchIndex: idx,
+              reason: s.notes || '',
+            })),
+          },
+          message: isZh
+            ? `基于您的 pipeline 和客户数据，为 ${targetDate} 规划了 ${Math.min(suggestions.length, maxTasks)} 个建议任务：`
+            : `Based on your pipeline and client data, ${Math.min(suggestions.length, maxTasks)} tasks suggested for ${targetDate}:`,
         };
       }
 

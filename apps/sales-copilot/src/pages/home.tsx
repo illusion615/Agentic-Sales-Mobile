@@ -12,7 +12,7 @@ import { useAccountList } from '@/generated/hooks/use-account';
 import { useUpdateCopilotConversation, useCreateCopilotConversation } from '@/generated/hooks/use-copilot-conversation';
 import { useCreateBusinessInsight, useBusinessInsightList, useDeleteBusinessInsight } from '@/generated/hooks/use-business-insight';
 import { useLocale } from '@/lib/i18n';
-import { t, getGreeting, getChatFontClass, getThinkingDotStyle, getAutoPlayAgentResponse, getSelectedVoice, findMatchingSystemVoice, getVoiceSummaryEnabled, generateVoiceSummary, getAgentFramework, getHomeHeaderWidget, type Locale, type ThinkingDotStyle, type HomeHeaderWidget } from '@/lib/i18n';
+import { t, getGreeting, getChatFontClass, getThinkingDotStyle, getAutoPlayAgentResponse, getSelectedVoice, findMatchingSystemVoice, getVoiceSummaryEnabled, generateVoiceSummary, getAgentFramework, getHomeHeaderWidget, getAdminMode, type Locale, type ThinkingDotStyle, type HomeHeaderWidget } from '@/lib/i18n';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { formatCurrencyCompact, formatCurrencyFull } from '@/lib/format-currency';
 
@@ -407,10 +407,11 @@ export default function HomeDashboard() {
   const setInputValue = copilot.setInputValue;
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(() => readCopilotConversationLogId());
 
-  // Data queries
-  const { data: activities = [], refetch: refetchActivities } = useActivityList();
-  const { data: opportunities = [], refetch: refetchOpportunities } = useOpportunityList();
-  const { data: accounts = [], refetch: refetchAccounts } = useAccountList();
+  // Data queries — each loads independently, page renders immediately with loading states
+  const { data: activities = [], refetch: refetchActivities, isLoading: isLoadingActivities } = useActivityList();
+  const { data: opportunities = [], refetch: refetchOpportunities, isLoading: isLoadingOpportunities } = useOpportunityList();
+  const { data: accounts = [], refetch: refetchAccounts, isLoading: isLoadingAccounts } = useAccountList();
+  const isDataLoading = isLoadingActivities || isLoadingOpportunities || isLoadingAccounts;
 
   const updateConversation = useUpdateCopilotConversation();
   const createConversation = useCreateCopilotConversation();
@@ -423,6 +424,7 @@ export default function HomeDashboard() {
   // all business insights regardless of reference type.
 
   const userId = user?.objectId;
+  const isAdmin = getAdminMode();
 
   // Get source data for drawer
   const sourceData = useMemo(() => {
@@ -448,9 +450,9 @@ export default function HomeDashboard() {
     const weekEnd = new Date(today);
     weekEnd.setDate(weekEnd.getDate() + (7 - today.getDay()));
 
-    // Active opportunities (not won/lost)
+    // Active opportunities (not won/lost) - filtered to current user unless admin mode
     const activeOpps = opportunities.filter(
-      (o: Opportunity) => !isClosedStage(o.stage)
+      (o: Opportunity) => (isAdmin || o.ownerid === userId) && !isClosedStage(o.stage)
     );
 
     // Hot opportunities - top 3 active opportunities by amount
@@ -619,6 +621,7 @@ export default function HomeDashboard() {
     // NOT silently absorb it here, otherwise the same opp would be counted in
     // every quarter forever.
     const wonOpportunities = opportunities.filter((o: Opportunity) => {
+      if (!isAdmin && o.ownerid !== userId) return false;
       if (!isWonStage(o.stage)) return false;
       if (!o.closedon) return false;
       const d = new Date(o.closedon);
@@ -664,7 +667,7 @@ export default function HomeDashboard() {
       visitCount: visitCount,
       callCount: callCount,
     };
-  }, [activities, opportunities, accounts]);
+  }, [activities, opportunities, accounts, userId]);
 
   // Extract stable primitive values from kpiData to avoid object reference changes
   const kpiSummary = useMemo(() => ({
@@ -927,7 +930,6 @@ export default function HomeDashboard() {
   // Pull to refresh
   const handleRefresh = useCallback(async () => {
     await Promise.all([refetchActivities(), refetchOpportunities(), refetchAccounts()]);
-    toast.success(locale === 'zh-Hans' ? '已刷新' : 'Refreshed');
   }, [refetchActivities, refetchOpportunities, refetchAccounts, locale]);
 
   // Quick actions
@@ -1028,12 +1030,10 @@ export default function HomeDashboard() {
       // Check if we have business insights to play
       if (briefMeInsightTexts.length === 0) {
         // No insights available - generate them first
-        toast.info(locale === 'zh-Hans' ? '正在生成每日简报...' : 'Generating daily briefing...');
         await handleRefreshInsight();
         // After generation, refetch to get the new insights
         const { data: newInsights } = await refetchBusinessInsights();
         if (!newInsights || newInsights.length === 0) {
-          toast.error(locale === 'zh-Hans' ? '无法生成简报，请检查 AI 配置' : 'Failed to generate briefing. Please check AI settings.');
           return;
         }
       }
@@ -1059,7 +1059,6 @@ export default function HomeDashboard() {
   // Play insight at a specific index - used for auto-advance
   const playInsightAtIndex = useCallback((index: number) => {
     if (!('speechSynthesis' in window)) {
-      toast.error(locale === 'zh-Hans' ? '您的浏览器不支持语音播放' : 'Your browser does not support speech synthesis');
       return;
     }
     
@@ -1269,14 +1268,11 @@ export default function HomeDashboard() {
 
     // Only local-agent framework is supported for insight refresh
     if (agentFramework !== 'local-agent') {
-      toast.error(locale === 'zh-Hans' ? '请先配置并启用自定义 LLM 模型' : 'Please configure and enable a custom LLM first');
       return;
     }
     
     setIsRefreshingInsight(true);
     setInsightRefreshStatus(locale === 'zh-Hans' ? '正在收集数据...' : 'Gathering data...');
-    toast.info(t('refreshingInsight', locale));
-    
     try {
       let agentResponse = '';
       
@@ -1629,7 +1625,6 @@ ${agentResponse}`;
         // Refetch business insights to get the new data
         await refetchBusinessInsights();
         
-        toast.success(t('insightRefreshed', locale));
       } else {
         throw new Error(insightResult.error || 'Failed to generate insight');
       }
@@ -1637,25 +1632,7 @@ ${agentResponse}`;
       console.error('[Insight Refresh] Error:', error);
       // Show more specific error message
       const errorMessage = error instanceof Error ? error.message : 'Something went wrong';
-      if (errorMessage.includes('No response')) {
-        toast.error(locale === 'zh-Hans' 
-          ? '未收到代理响应，请稍后重试' 
-          : 'No response from the assistant. Please try again later.');
-      } else if (errorMessage.includes('Network error') || errorMessage.includes('Failed to fetch')) {
-        toast.error(locale === 'zh-Hans' 
-          ? '网络连接失败，请检查网络后重试' 
-          : 'Network connection failed. Please check your connection and try again.');
-      } else if (errorMessage.includes('CORS')) {
-        toast.error(locale === 'zh-Hans' 
-          ? 'CORS 错误：请检查 LLM 端点配置' 
-          : 'CORS error: Please check your LLM endpoint configuration');
-      } else if (errorMessage.includes('timed out') || errorMessage.includes('timeout')) {
-        toast.error(locale === 'zh-Hans' 
-          ? 'AI 响应超时，请稍后重试或检查 LLM 服务状态' 
-          : 'AI response timed out. Please try again or check your LLM service status.');
-      } else {
-        toast.error(t('insightRefreshFailed', locale));
-      }
+      // Errors are logged to console; no toast to avoid noise
     } finally {
       setIsRefreshingInsight(false);
       setInsightRefreshStatus('');
@@ -1941,6 +1918,13 @@ ${agentResponse}`;
                   aria-label={locale === 'zh-Hans' ? '洞察' : 'Insights'}
                 >
                   <Bell className="w-5 h-5 text-foreground" />
+                  {businessInsights.length > 0 && (
+                    <span
+                      className="absolute top-0.5 right-0 min-w-[16px] h-[16px] px-0.5 inline-flex items-center justify-center rounded-full bg-red-500 text-white text-[9px] font-bold border-[1.5px] border-background"
+                    >
+                      {businessInsights.length > 99 ? '99+' : businessInsights.length}
+                    </span>
+                  )}
                 </button>
               </div>
               {/* Settings with Connection Status */}
@@ -1973,6 +1957,7 @@ ${agentResponse}`;
           <motion.div variants={itemVariants}>
             <KPICards
               data={kpiData}
+              isLoading={isDataLoading}
               onNavigate={navigate}
               onMarkDone={handleMarkOverdueDone}
               onReschedule={handleRescheduleOverdue}
@@ -2017,7 +2002,7 @@ ${agentResponse}`;
       {briefMeExpanded && !insightsSheetOpen && (
       <div className={cn(
         'fixed left-0 right-0 z-[60] safe-area-bottom pointer-events-none',
-        isCopilotConfigured ? 'bottom-20' : 'bottom-0'
+        isCopilotConfigured ? 'bottom-36' : 'bottom-0'
       )}>
         <div className="flex flex-col items-center px-4 pb-4">
           <AnimatePresence mode="wait">

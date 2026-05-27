@@ -1222,6 +1222,16 @@ export function getSimulateStreaming(): boolean {
   return localStorage.getItem('simulateStreaming') !== 'false'; // default true
 }
 
+// Admin Mode — bypasses ownerid filtering, shows all data
+export function getAdminMode(): boolean {
+  return localStorage.getItem('adminMode') === 'true';
+}
+
+export function setAdminMode(enabled: boolean): void {
+  localStorage.setItem('adminMode', String(enabled));
+  window.dispatchEvent(new CustomEvent('adminmode-changed', { detail: enabled }));
+}
+
 export function setSimulateStreaming(enabled: boolean): void {
   localStorage.setItem('simulateStreaming', String(enabled));
   window.dispatchEvent(new CustomEvent('simulatestreaming-changed', { detail: enabled }));

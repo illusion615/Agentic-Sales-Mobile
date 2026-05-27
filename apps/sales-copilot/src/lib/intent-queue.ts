@@ -32,6 +32,9 @@ export interface QueueIntentResult {
   recordId?: string;
   recordName?: string;
   error?: string;
+  /** Query result data stored for aggregation in multi-query workflows. */
+  data?: unknown;
+  count?: number;
 }
 
 export interface QueueIntent {
@@ -78,6 +81,8 @@ export interface IntentQueue {
   done: boolean;
   /** Set true once the final "all steps completed" summary has been pushed. */
   summaryEmitted?: boolean;
+  /** Original user message that triggered this queue (for aggregation). */
+  userMessage?: string;
 }
 
 // ---------- factories ----------

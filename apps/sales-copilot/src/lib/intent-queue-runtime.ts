@@ -17,6 +17,7 @@
  */
 
 import { executeFunction } from './function-executor';
+import { invokeFlowForLLM } from '@/services/power-automate-service';
 import {
   advanceCursor,
   buildEffectiveArgs,
@@ -160,13 +161,60 @@ function emitResult(
   // no-op: card state is sufficient
 }
 
-function emitSummary(queue: IntentQueue, deps: RuntimeDeps): IntentQueue {
+async function emitSummary(queue: IntentQueue, deps: RuntimeDeps): Promise<IntentQueue> {
   if (queue.summaryEmitted) return queue;
   const top = topLevelIntents(queue);
   if (top.length <= 1) return { ...queue, summaryEmitted: true };
   const isZh = deps.locale === 'zh-Hans';
 
-  // ---- Build a sales-contextual summary instead of a mechanical listing ----
+  // ---- Check if all steps are query functions → aggregate with LLM ----
+  const queryFns = ['queryActivities', 'queryOpportunities', 'queryAccounts', 'queryContacts'];
+  const allQueries = top.every((i) => queryFns.includes(i.function));
+  
+  if (allQueries && top.some((i) => i.status === 'confirmed')) {
+    // Collect all query results for LLM aggregation
+    const stepSummaries = top.map((intent, idx) => {
+      const label = intent.userFacingLabel || intent.function;
+      const result = intent.result as { data?: unknown; count?: number } | undefined;
+      const data = result?.data;
+      const dataStr = data ? JSON.stringify(data, null, 0).slice(0, 2000) : 'no data';
+      return `Step ${idx + 1} (${label}): ${result?.count ?? 0} records\nData: ${dataStr}`;
+    }).join('\n\n');
+
+    // Get the original user message from the queue
+    const userMsg = queue.userMessage || '';
+    
+    const systemPrompt = isZh
+      ? `你是一个销售助手。用户请求了一个多步分析任务。以下是每一步的查询结果数据。请基于所有数据生成一份完整的、有洞察力的报告来回答用户的原始请求。使用 markdown 格式，分章节输出。`
+      : `You are a sales assistant. The user requested a multi-step analysis. Below are the query results from each step. Generate a complete, insightful report based on all the data to answer the user's original request. Use markdown format with clear sections.`;
+
+    try {
+      const llmResp = await invokeFlowForLLM({
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `Original request: ${userMsg}\n\n${stepSummaries}` },
+        ],
+      });
+
+      if (llmResp.success && llmResp.content) {
+        deps.pushMessage({
+          id: `narrate-${queue.id}-summary-${Date.now()}`,
+          type: 'agent',
+          content: llmResp.content,
+          timestamp: Date.now(),
+          queueId: queue.id,
+          queueIntentId: 'summary',
+          taskRole: 'summary',
+        });
+        return { ...queue, summaryEmitted: true };
+      }
+    } catch (e) {
+      console.error('[QueueRuntime] Aggregation LLM failed:', e);
+    }
+    // Fall through to default summary if LLM fails
+  }
+
+  // ---- Default summary for draft/create workflows ----
   const done = top.filter((i) => i.status === 'confirmed');
   const skipped = top.filter((i) => i.status === 'cancelled' || i.status === 'skipped');
   const failed = top.filter((i) => i.status === 'failed');
@@ -244,7 +292,7 @@ export async function runQueue(queue: IntentQueue, deps: RuntimeDeps): Promise<I
   for (let safety = 0; safety < 50; safety++) {
     const cur = currentIntent(q);
     if (!cur) {
-      q = emitSummary(q, deps);
+      q = await emitSummary(q, deps);
       return { ...q, done: true, cursor: -1 };
     }
     if (cur.status === 'awaiting-user' || cur.status === 'executing') {
@@ -611,8 +659,7 @@ async function executeIntent(
     if (intent.function.startsWith('update')) {
       emitResult(queue, intent, 'updated', undefined, deps);
     } else {
-      // query* — show short summary; detailed cards are not auto-built in queue mode
-      // (single-shot queries don't typically appear inside multi-intent runs).
+      // query* — show short summary; store data for potential aggregation
       const count = Array.isArray(res.data) ? res.data.length : 1;
       deps.pushMessage({
         id: `msg-${queue.id}-${intent.id}-res-${Date.now()}`,
@@ -625,7 +672,7 @@ async function executeIntent(
       emitResult(queue, intent, 'completed', undefined, deps);
     }
 
-    let q = patchIntent(queue, intent.id, { status: 'confirmed' });
+    let q = patchIntent(queue, intent.id, { status: 'confirmed', result: { data: res.data, count: Array.isArray(res.data) ? res.data.length : 1 } });
     q = advanceCursor(q);
     return await runQueue(q, deps);
   } catch (err) {

@@ -1140,7 +1140,25 @@ Provide specific, actionable analysis based on the data above. Use concrete dime
   }
   
   let functionResult;
-  try {
+  
+  // Check if this step should use page context data instead of querying Dataverse
+  const shouldUsePageContext = (intent as unknown as Record<string, unknown>).usePageContext === true
+    && context.pageContext?.pageData
+    && ['queryActivities', 'queryOpportunities', 'queryAccounts', 'queryContacts'].includes(intent.function);
+  
+  if (shouldUsePageContext) {
+    console.log('[CopilotAgent] Using page context data for', intent.function);
+    const pd = context.pageContext!.pageData as Record<string, unknown>;
+    // Extract the relevant data from page context
+    const contextData = pd.dayActivities || pd.activities || pd.opportunities || pd.accounts || pd.contacts || [];
+    const records = Array.isArray(contextData) ? contextData : [];
+    functionResult = {
+      success: true,
+      data: records,
+      message: `Found ${records.length} records from page context`,
+    };
+  } else {
+    try {
     // Always forward pageContext + conversationHistory + locale so that
     // queryCopilotStudio (and any future context-sensitive function) sees the
     // same situational data the LLM used. Other functions ignore the extras.
@@ -1171,6 +1189,7 @@ Provide specific, actionable analysis based on the data above. Use concrete dime
       ],
     };
   }
+  } // end else (Dataverse query path)
 
   // Notify progress: function execution completed
   if (onProgress) {
@@ -1362,6 +1381,37 @@ Please respond to the user in a friendly manner based on the error. Important ru
         items: additionalItems,
       };
     }
+  }
+
+  // ===== Check for suggestPlan - returns batch form cards =====
+  if (intent.function === 'suggestPlan' && functionResult.success) {
+    console.log('[CopilotAgent] suggestPlan detected, returning batch form cards');
+    const planData = functionResult.data as { type: string; items: Array<{ type: string; isNew: boolean; data: Record<string, unknown>; batchIndex: number; reason: string }> };
+    if (onProgress) {
+      onProgress({ stage: 'generating', status: 'completed' });
+    }
+    return {
+      success: true,
+      content: functionResult.message || '',
+      functionCalled: intent.function,
+      functionDisplayName: fnDisplayName,
+      latencyMs: Date.now() - startTime,
+      thinkingSteps: [
+        { stage: 'intent', status: 'completed', label: isZh ? `意图识别：${fnDisplayName}` : `Intent: ${fnDisplayName}` },
+        { stage: 'executing', status: 'completed', label: isZh ? `${fnDisplayName}：生成 ${planData.items.length} 个建议` : `${fnDisplayName}: ${planData.items.length} suggestions`, detail: isZh ? `${planData.items.length} 个任务` : `${planData.items.length} tasks` },
+      ],
+      additionalIntents: {
+        message: functionResult.message || '',
+        items: planData.items.map((item, idx) => ({
+          type: item.type as 'activity',
+          isNew: true,
+          data: item.data,
+          batchIndex: idx,
+          reason: item.reason,
+          intentIndex: idx,
+        })),
+      },
+    };
   }
 
   // ===== Check for draft functions - return directly without Pass 2 =====

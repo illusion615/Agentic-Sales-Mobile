@@ -23,10 +23,16 @@ export function useContactList(options?: IOperationOptions) {
  * @param id The id of the record (must be a valid UUID)
  */
 export function useContact(id: string) {
+  const client = useQueryClient();
   return useQuery({
     queryKey: ["contact", id],
     queryFn: () => ContactService.get(id),
     enabled: !!id && UUID_REGEX.test(id),
+    placeholderData: () => {
+      const list = client.getQueryData<Contact[]>(["contact-list"]);
+      return list?.find((c) => c.id === id);
+    },
+    staleTime: 30_000,
   });
 }
 

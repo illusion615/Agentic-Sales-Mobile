@@ -121,9 +121,10 @@ function deriveResolutions(
 
 function stepToIntentSlot(
   fnName: string,
-  args: Record<string, unknown>
-): { function: string; arguments: Record<string, unknown> } {
-  return { function: fnName, arguments: { ...args } };
+  args: Record<string, unknown>,
+  usePageContext?: boolean
+): { function: string; arguments: Record<string, unknown>; usePageContext?: boolean } {
+  return { function: fnName, arguments: { ...args }, ...(usePageContext ? { usePageContext } : {}) };
 }
 
 /**
@@ -146,11 +147,13 @@ export function frameToIntent(shadow: ShadowResult): TranslatedIntent | null {
     if (!head.function) return null;
     primaryFn = head.function;
     primaryArgs = { ...(head.arguments as Record<string, unknown>) };
+    const headUsePageContext = head.usePageContext;
     extras = sorted.slice(1)
       .filter((s) => s.function)
       .map((s) => ({
         function: s.function,
         arguments: { ...(s.arguments as Record<string, unknown>) },
+        ...(s.usePageContext ? { usePageContext: true } : {}),
       }));
   } else {
     const single = plan as SingleIntent;
@@ -159,7 +162,8 @@ export function frameToIntent(shadow: ShadowResult): TranslatedIntent | null {
     primaryArgs = { ...(single.arguments as Record<string, unknown>) };
   }
 
-  const slot = stepToIntentSlot(primaryFn, primaryArgs);
+  const headUseCtx = isDagPlan(plan) ? (plan as DagPlan).steps.sort((a, b) => a.seq - b.seq)[0]?.usePageContext : undefined;
+  const slot = stepToIntentSlot(primaryFn, primaryArgs, headUseCtx);
   const headResolutions = deriveResolutions(slot.function, slot.arguments, 0) ?? [];
 
   // Also derive resolutions for every extra step so multi-intent plans that

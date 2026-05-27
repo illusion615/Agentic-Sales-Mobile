@@ -67,12 +67,17 @@ export function CopilotPanel() {
     if (isSideDocked && !isOpen) openPanel(false);
   }, [isSideDocked, isOpen, openPanel]);
 
-  // Render counter for loop diagnostics
+  // Render counter — only warn on very rapid renders (>100 in 2 seconds)
   const renderCountRef = useRef(0);
+  const renderWindowRef = useRef(Date.now());
   renderCountRef.current++;
+  if (Date.now() - renderWindowRef.current > 2000) {
+    renderCountRef.current = 0;
+    renderWindowRef.current = Date.now();
+  }
   useEffect(() => {
-    if (renderCountRef.current > 500) {
-      console.warn('[LOOP WARNING] CopilotPanel render count:', renderCountRef.current);
+    if (renderCountRef.current > 100) {
+      console.warn('[LOOP WARNING] CopilotPanel rapid renders in 2s window:', renderCountRef.current);
     }
   });
 
@@ -80,6 +85,8 @@ export function CopilotPanel() {
   
   const inputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   
   // TTS per-message playback
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
@@ -201,7 +208,8 @@ export function CopilotPanel() {
   // preventing overshoot when the queue pushes messages rapidly.
   useEffect(() => {
     requestAnimationFrame(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      const container = messagesContainerRef.current;
+      if (container) container.scrollTop = container.scrollHeight;
     });
   }, [messages.length]);
 
@@ -210,7 +218,8 @@ export function CopilotPanel() {
     if (isOpen) {
       setTimeout(() => {
         inputRef.current?.focus();
-        messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+        const container = messagesContainerRef.current;
+        if (container) container.scrollTop = container.scrollHeight;
       }, 300);
     }
   }, [isOpen]);
@@ -237,13 +246,15 @@ export function CopilotPanel() {
   };
 
   // Handle input focus
-  // On mobile, jump straight to full-screen — the intermediate 78vh state has
-  // too little vertical room to be useful for chatting.
+  // When fullscreen-by-default is on (mobile): only fullscreen ↔ collapsed, no mid state.
+  // Otherwise: open to 78vh, then fullscreen on second tap.
   const handleInputFocus = () => {
+    const fullscreenDefault = isMobile && getCopilotFullscreenDefault();
     if (!isOpen) {
-      // On mobile: respect "fullscreen by default" setting; otherwise open half-screen.
-      const goFullscreen = isMobile && getCopilotFullscreenDefault();
-      openPanel(goFullscreen);
+      openPanel(fullscreenDefault);
+    } else if (fullscreenDefault && !isFullScreen) {
+      // Mid state shouldn't exist; jump to fullscreen
+      openPanel(true);
     } else if (isMobile && !isFullScreen) {
       openPanel(true);
     }
@@ -286,7 +297,7 @@ export function CopilotPanel() {
   const renderMessages = () => {
 
     return (
-    <div className="flex-1 overflow-y-auto scrollbar-hide px-3 py-3">
+    <div ref={messagesContainerRef} className="flex-1 overflow-y-auto scrollbar-hide px-3 py-3 min-h-0">
       {messages.length === 0 ? (
         <div className="flex flex-col h-full justify-center px-4">
           <p className="text-sm font-medium text-foreground mb-4">
@@ -389,7 +400,7 @@ export function CopilotPanel() {
               )}
               
               {/* Batch Form Card Message */}
-              {message.type === 'batch-form-card' && message.batchFormCards && (
+              {message.type === 'batch-form-card' && message.batchFormCards && !message.isStreaming && (
                 <div className="max-w-full">
                   {/* Show thinking steps if present */}
                   {message.thinkingSteps && message.thinkingSteps.length > 0 && (
@@ -615,7 +626,7 @@ export function CopilotPanel() {
                     ) : isJson ? (
                       <DynamicDataRenderer content={message.content} />
                     ) : (
-                      <div className={cn('text-foreground mb-3', getChatFontClass())}>
+                      <div className={cn('text-foreground mb-1', getChatFontClass())}>
                         <MarkdownContent content={message.content} />
                       </div>
                     )}
@@ -627,33 +638,49 @@ export function CopilotPanel() {
                         additionalIntents={message.additionalIntents}
                       />
                     )}
-                    {/* TTS play button */}
+                    {/* Action bar: timestamp + copy + play — right-aligned */}
                     {message.content && !isJson && !message.isThinking && !message.isStreaming && (
-                      <button
-                        onClick={() => speakMessage(message.id, message.content)}
-                        className="mt-1 p-1 rounded hover:bg-muted/50 transition-colors inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
-                        aria-label={speakingMessageId === message.id ? 'Stop' : 'Play'}
-                      >
-                        {speakingMessageId === message.id ? (
-                          <>
-                            <span className="flex items-end gap-0.5 h-3">
-                              <span className="w-0.5 bg-primary rounded-full animate-pulse" style={{ height: '60%' }} />
-                              <span className="w-0.5 bg-primary rounded-full animate-pulse" style={{ height: '100%', animationDelay: '0.15s' }} />
-                              <span className="w-0.5 bg-primary rounded-full animate-pulse" style={{ height: '40%', animationDelay: '0.3s' }} />
-                            </span>
-                            <span className="text-[10px] text-primary">Stop</span>
-                          </>
-                        ) : (
-                          <Volume2 className="w-3.5 h-3.5" />
-                        )}
-                      </button>
+                      <div className="flex items-center justify-between mt-0.5">
+                        <p className="text-[9px] text-muted-foreground">
+                          {new Date(message.timestamp).toLocaleTimeString(locale === 'zh-Hans' ? 'zh-CN' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                        <div className="flex items-center gap-0.5">
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(message.content);
+                            }}
+                            className="p-1 rounded hover:bg-muted/50 transition-colors text-muted-foreground hover:text-foreground"
+                            aria-label="Copy"
+                          >
+                            <Copy className="w-3 h-3" />
+                          </button>
+                          <button
+                            onClick={() => speakMessage(message.id, message.content)}
+                            className="p-1 rounded hover:bg-muted/50 transition-colors inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                            aria-label={speakingMessageId === message.id ? 'Stop' : 'Play'}
+                          >
+                            {speakingMessageId === message.id ? (
+                              <>
+                                <span className="flex items-end gap-0.5 h-3">
+                                  <span className="w-0.5 bg-primary rounded-full animate-pulse" style={{ height: '60%' }} />
+                                  <span className="w-0.5 bg-primary rounded-full animate-pulse" style={{ height: '100%', animationDelay: '0.15s' }} />
+                                  <span className="w-0.5 bg-primary rounded-full animate-pulse" style={{ height: '40%', animationDelay: '0.3s' }} />
+                                </span>
+                                <span className="text-[10px] text-primary">Stop</span>
+                              </>
+                            ) : (
+                              <Volume2 className="w-3 h-3" />
+                            )}
+                          </button>
+                        </div>
+                      </div>
                     )}
                   </div>
                 );
               })()}
               
               {/* Form Card Message */}
-              {message.type === 'form-card' && message.formCard && (
+              {message.type === 'form-card' && message.formCard && !message.isStreaming && (
                 <div className="max-w-full">
                   {/* Show thinking steps if present */}
                   {message.thinkingSteps && message.thinkingSteps.length > 0 && (
@@ -678,7 +705,7 @@ export function CopilotPanel() {
               )}
               
               {/* Record List Card (query results) */}
-              {message.recordList && (
+              {message.recordList && !message.isStreaming && (
                 <div className="max-w-full mt-3">
                   <RecordListCard
                     type={message.recordList.type}
@@ -700,7 +727,7 @@ export function CopilotPanel() {
 
   // Pills + attachment preview only (no input bar). Used above the bottom-anchored input wrapper.
   const renderInputExtras = () => (
-    <>
+    <div className="shrink-0">
       {/* Quick Action Pills - highlighted when showing clarification suggestions */}
       <div className={cn(
         'px-3 pb-2 pt-1 border-t',
@@ -779,13 +806,13 @@ export function CopilotPanel() {
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 
   // Bottom-anchored input wrapper. Same wrapper used in collapsed and expanded states
   // so the input bar's position and width stay locked.
   const renderInputWrapper = () => (
-    <div className="mx-auto w-full max-w-md px-3 pt-2 pb-3">
+    <div className="mx-auto w-full max-w-md px-3 pt-2 pb-3 shrink-0">
       {renderInputBar()}
     </div>
   );
@@ -861,7 +888,7 @@ export function CopilotPanel() {
   // Expanded panel overlay mode
   // ─── Unified ActionDock: single container morphs from collapsed dock to expanded panel ───
     const panelChrome = (
-      <>
+      <div className="shrink-0">
         {/* Drag handle — hidden in full-screen */}
         {/* Drag handle — hidden in side-docked mode */}
         {!isFullScreen && !isSideDocked && (
@@ -962,7 +989,7 @@ export function CopilotPanel() {
             </div>
           </div>
         )}
-      </>
+      </div>
     );
 
     // ─── Unified ActionDock: single container morphs from collapsed dock to expanded panel ───
@@ -1013,10 +1040,10 @@ export function CopilotPanel() {
             }
           }}
           className={cn(
-            'flex flex-col overflow-hidden safe-area-bottom',
+            'flex flex-col overflow-clip safe-area-bottom min-h-0',
             'bg-background/80 backdrop-blur-md',
             // Float mode: fixed bottom sheet overlay
-            !isSideDocked && 'fixed bottom-0 left-0 right-0 z-[60] justify-end border-t border-border/50',
+            !isSideDocked && 'fixed bottom-0 left-0 right-0 z-[60] border-t border-border/50',
             !isSideDocked && isOpen && !isFullScreen && 'rounded-t-[20px]',
             // Side-docked mode: inline flex child, not fixed/absolute.
             // flex-1 makes it share space 1:1 with the content area.
@@ -1040,7 +1067,7 @@ export function CopilotPanel() {
               {renderMessages()}
               {/* Side-docked: show page quick actions above input since collapsed dock is hidden */}
               {isSideDocked && dockChips.length > 0 && (
-                <div className="px-3 py-2 border-t border-border/20 flex items-center gap-2 flex-wrap">
+                <div className="px-3 py-2 border-t border-border/20 flex items-center gap-2 flex-wrap shrink-0">
                   {dockChips.map((c) => {
                     const Icon = c.icon;
                     return (
@@ -1064,7 +1091,7 @@ export function CopilotPanel() {
               {renderInputExtras()}
             </>
           ) : isSideDocked ? null : (
-            <div className="mx-auto w-full max-w-md flex flex-col gap-2 px-3 pt-2 pb-0">
+            <div className="mx-auto w-full max-w-md flex flex-col gap-2 px-3 pt-2 pb-0 overflow-y-auto flex-1">
               {dockSlot !== null ? (
                 <div className="flex justify-center">{dockSlot}</div>
               ) : dockChips.length > 0 ? (

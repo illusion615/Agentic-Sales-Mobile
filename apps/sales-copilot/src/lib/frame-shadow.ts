@@ -579,8 +579,8 @@ export function suggestSkillForIntent(intent: IntentItem): string | null {
       if (obj === 'Opportunity') return 'draftOpportunity';
       return null;
     case 'Plan':
-      if (obj === 'Activity') return 'draftActivity';
-      return null;
+      if (obj === 'Activity') return 'suggestPlan';
+      return 'suggestPlan';
     case 'Update':
       if (obj === 'Activity') return 'updateActivity';
       if (obj === 'Account') return 'updateAccount';

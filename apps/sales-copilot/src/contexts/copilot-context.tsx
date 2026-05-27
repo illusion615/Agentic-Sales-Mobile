@@ -1109,21 +1109,26 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
   const typingMessageIdRef = useRef<string | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const streamingRafRef = useRef<number | null>(null);
 
-  // Helper function to simulate streaming text effect — reveals word-by-word
-  // with smooth timing for a natural feel.
+  // Helper function to simulate streaming text effect — reveals character-by-character
+  // using requestAnimationFrame for buttery-smooth animation.
   const simulateStreamingText = useCallback((messageId: string, fullContent: string, agentName: string, timestamp: string, onComplete?: () => void) => {
-    // Clean up any existing streaming interval
+    // Clean up any existing streaming
+    if (streamingRafRef.current) {
+      cancelAnimationFrame(streamingRafRef.current);
+      streamingRafRef.current = null;
+    }
     if (streamingIntervalRef.current) {
       clearInterval(streamingIntervalRef.current);
       streamingIntervalRef.current = null;
     }
     
-    // Split into words, then reveal in word chunks for a natural pace.
-    const words = fullContent.split(/(\s+)/); // keep whitespace as separate tokens
-    let wordIndex = 0;
-    const wordsPerTick = 3; // words per frame
-    const tickInterval = 40; // ms between frames
+    const totalChars = fullContent.length;
+    // Target ~3 seconds for a typical response (~300 chars), min 1s, max 6s
+    const durationMs = Math.min(6000, Math.max(1000, totalChars * 10));
+    let startTime: number | null = null;
+    let lastRevealedIndex = 0;
     
     // Start with empty content, then gradually reveal
     setMessages((prev) => {
@@ -1151,31 +1156,38 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     
     typingMessageIdRef.current = null;
     
-    streamingIntervalRef.current = setInterval(() => {
-      wordIndex += wordsPerTick;
+    const animate = (now: number) => {
+      if (!startTime) startTime = now;
+      const elapsed = now - startTime;
+      // Ease-out curve: starts fast, slows down at the end
+      const progress = Math.min(1, 1 - Math.pow(1 - elapsed / durationMs, 2));
+      const charIndex = Math.floor(progress * totalChars);
       
-      if (wordIndex >= words.length) {
-        // Done streaming
-        if (streamingIntervalRef.current) {
-          clearInterval(streamingIntervalRef.current);
-          streamingIntervalRef.current = null;
-        }
-        setMessages((prev) => prev.map((msg) =>
-          msg.id === messageId
-            ? { ...msg, content: fullContent, isStreaming: false }
-            : msg
-        ));
-        if (onComplete) onComplete();
-      } else {
-        // Update with partial content — join words up to current index
-        const partialContent = words.slice(0, wordIndex).join('');
+      // Throttle: only update state every 3 chars minimum to reduce renders
+      if (charIndex > lastRevealedIndex + 2 || progress >= 1) {
+        lastRevealedIndex = charIndex;
+        const partialContent = fullContent.slice(0, charIndex);
         setMessages((prev) => prev.map((msg) =>
           msg.id === messageId
             ? { ...msg, content: partialContent }
             : msg
         ));
       }
-    }, tickInterval);
+      
+      if (progress >= 1) {
+        setMessages((prev) => prev.map((msg) =>
+          msg.id === messageId
+            ? { ...msg, content: fullContent, isStreaming: false }
+            : msg
+        ));
+        streamingRafRef.current = null;
+        if (onComplete) onComplete();
+      } else {
+        streamingRafRef.current = requestAnimationFrame(animate);
+      }
+    };
+    
+    streamingRafRef.current = requestAnimationFrame(animate);
   }, []);
 
   // With SDK connector, Copilot Studio is always available — mark connected when settings are ready
@@ -1579,6 +1591,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
               };
             }));
             const newQueue = buildQueueFromIntent(response.rawIntent);
+            newQueue.userMessage = userMessage.content;
             await runAndStoreQueue(newQueue);
             return;
           }
@@ -1827,8 +1840,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             
             if (shouldStream) {
               // Start streaming simulation for local agent
-              // Start streaming simulation for local agent
               // First, mark the message as streaming with initial empty content
+              // Note: recordList is NOT set yet — it will appear after streaming completes
               setMessages((prev) => prev.map((msg) => {
                 if (msg.id !== thinkingMsgId) return msg;
                 return {
@@ -1844,42 +1857,47 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                     label: s.label,
                     detail: s.detail,
                   })),
-                  recordList: response.recordList,
                 };
               }));
               
-              // Simulate streaming with interval
+              // Smooth rAF-based streaming
               const fullContent = response.content;
-              let currentIndex = 0;
-              const charsPerTick = 15; // Characters to add per tick (increased from 3 for performance)
-              const tickInterval = 50; // Milliseconds between ticks (increased from 20 for performance)
+              const totalChars = fullContent.length;
+              const durationMs = Math.min(6000, Math.max(1000, totalChars * 10));
+              let streamStart: number | null = null;
+              let lastIdx = 0;
               
-              const streamInterval = setInterval(() => {
-                currentIndex += charsPerTick;
-                const partialContent = fullContent.slice(0, currentIndex);
+              const animateStream = (now: number) => {
+                if (!streamStart) streamStart = now;
+                const elapsed = now - streamStart;
+                const progress = Math.min(1, 1 - Math.pow(1 - elapsed / durationMs, 2));
+                const charIdx = Math.floor(progress * totalChars);
                 
-                if (currentIndex >= fullContent.length) {
-                  clearInterval(streamInterval);
-                  // Streaming complete
-                  setMessages((prev) => {
-                    const found = prev.find((m) => m.id === thinkingMsgId);
-
-                    return prev.map((msg) =>
-                      msg.id === thinkingMsgId
-                        ? { ...msg, content: fullContent, isStreaming: false }
-                        : msg
-                    );
-                  });
-                  // Set isSending false only after streaming completes
-                  setIsSending(false);
-                } else {
+                // Throttle: only update state every 3 chars minimum
+                if (charIdx > lastIdx + 2 || progress >= 1) {
+                  lastIdx = charIdx;
                   setMessages((prev) => prev.map((msg) =>
                     msg.id === thinkingMsgId
-                      ? { ...msg, content: partialContent }
+                      ? { ...msg, content: fullContent.slice(0, charIdx) }
                       : msg
                   ));
                 }
-              }, tickInterval);
+                
+                if (progress >= 1) {
+                  // Streaming complete — now attach data cards (recordList etc.)
+                  setMessages((prev) => prev.map((msg) =>
+                    msg.id === thinkingMsgId
+                      ? { ...msg, content: fullContent, isStreaming: false, recordList: response.recordList }
+                      : msg
+                  ));
+                  streamingRafRef.current = null;
+                  setIsSending(false);
+                } else {
+                  streamingRafRef.current = requestAnimationFrame(animateStream);
+                }
+              };
+              
+              streamingRafRef.current = requestAnimationFrame(animateStream);
             } else {
               // No streaming - set content immediately
               setIsSending(false);

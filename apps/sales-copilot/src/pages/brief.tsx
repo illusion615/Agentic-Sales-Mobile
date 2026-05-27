@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { useUser } from '@/hooks/use-user';
 import { useBriefingList, useUpdateBriefing } from '@/generated/hooks/use-briefing';
-import { getLocale, getSelectedVoice, findMatchingSystemVoice, voiceOptions, type Locale, type VoiceOption } from '@/lib/i18n';
+import { getLocale, getSelectedVoice, findMatchingSystemVoice, voiceOptions, getAdminMode, type Locale, type VoiceOption } from '@/lib/i18n';
 import {
   parseBriefingPayload,
   priorityColors,
@@ -80,7 +80,8 @@ export default function BriefMePage() {
   // Get today's briefing
   const briefing = useMemo(() => {
     const userId = user?.objectId;
-    if (!userId) return undefined;
+    const isAdmin = getAdminMode();
+    if (!isAdmin && !userId) return undefined;
     
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -89,7 +90,7 @@ export default function BriefMePage() {
     let todayBriefing = briefings.find((b) => {
       const genDate = new Date(b.generatedon);
       genDate.setHours(0, 0, 0, 0);
-      return b.ownerid === userId && genDate.getTime() === today.getTime();
+      return (isAdmin || b.ownerid === userId) && genDate.getTime() === today.getTime();
     });
     
     // Offline fallback: use yesterday's
@@ -99,13 +100,13 @@ export default function BriefMePage() {
       todayBriefing = briefings.find((b) => {
         const genDate = new Date(b.generatedon);
         genDate.setHours(0, 0, 0, 0);
-        return b.ownerid === userId && genDate.getTime() === yesterday.getTime();
+        return (isAdmin || b.ownerid === userId) && genDate.getTime() === yesterday.getTime();
       });
     }
     
     // Fallback to any briefing for user
     if (!todayBriefing && briefings.length > 0) {
-      todayBriefing = briefings.find((b) => b.ownerid === userId) || briefings[0];
+      todayBriefing = briefings.find((b) => isAdmin || b.ownerid === userId) || briefings[0];
     }
     
     return todayBriefing;

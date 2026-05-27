@@ -24,6 +24,8 @@ export const DagStepSchema = z.object({
   function: z.string(),
   /** Arguments for the function. May contain $ref.field placeholders. */
   arguments: z.record(z.unknown()),
+  /** When true, skip Dataverse query and use page context data instead. */
+  usePageContext: z.boolean().optional(),
 });
 
 export type DagStep = z.infer<typeof DagStepSchema>;

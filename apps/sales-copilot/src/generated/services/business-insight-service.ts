@@ -34,7 +34,7 @@ function fromDv(dv: Crf5c_businessinsights): BusinessInsight {
     detailsjson: dv.crf5c_detailsjson,
     displayorder: dvNum(dv.crf5c_displayorder) ?? 0,
     generatedon: dv.crf5c_generatedon,
-    isactive: dv.crf5c_isactive === 1,
+    isactive: Boolean(dv.crf5c_isactive),
     ownerid: dv.crf5c_ownerid,
     rationale: dv.crf5c_rationale,
     referenceidsjson: dv.crf5c_referenceidsjson,
@@ -51,7 +51,7 @@ function toDv(r: Partial<Omit<BusinessInsight, 'id'>>): Record<string, unknown> 
   if (r.detailsjson !== undefined) dv.crf5c_detailsjson = r.detailsjson;
   if (r.displayorder !== undefined) dv.crf5c_displayorder = numToDv(r.displayorder);
   if (r.generatedon !== undefined) dv.crf5c_generatedon = r.generatedon;
-  if (r.isactive !== undefined) dv.crf5c_isactive = r.isactive ? 1 : 0;
+  if (r.isactive !== undefined) dv.crf5c_isactive = r.isactive;
   if (r.ownerid !== undefined) dv.crf5c_ownerid = r.ownerid;
   if (r.rationale !== undefined) dv.crf5c_rationale = r.rationale;
   if (r.referenceidsjson !== undefined) dv.crf5c_referenceidsjson = r.referenceidsjson;

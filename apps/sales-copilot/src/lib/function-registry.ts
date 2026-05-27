@@ -336,6 +336,23 @@ export const availableFunctions: FunctionDefinition[] = [
       required: ['query'],
     },
   },
+
+  // ===== Planning Functions =====
+  {
+    name: 'suggestPlan',
+    displayName: { 'zh-Hans': '智能规划', 'en-US': 'Suggest Plan' },
+    description: '基于 pipeline 紧迫度、客户回访需求和已有安排，为指定日期/时段智能规划销售任务。当用户说"帮我规划明天的日程"、"create tomorrow\'s tasks"、"plan next week"、"安排下周工作"时调用。Intelligently plan sales tasks for a target date/period based on pipeline urgency, client revisit needs, and existing schedule.',
+    parameters: {
+      type: 'object',
+      properties: {
+        targetDate: { type: 'string', description: '目标日期 YYYY-MM-DD，默认明天 / Target date, defaults to tomorrow' },
+        period: { type: 'string', description: '规划区间', enum: ['day', 'week'], },
+        focus: { type: 'string', description: '可选的重点方向，如 close deals / client visits / follow-ups' },
+        maxTasks: { type: 'number', description: '建议任务数量上限，默认5 / Max suggestions, default 5' },
+      },
+      required: [],
+    },
+  },
 ];
 
 /**

@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 
 import { useUser } from '@/hooks/use-user';
 import { useAppSettings } from '@/hooks/use-app-settings';
-import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, setSelectedVoice, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getOrganizeInStructureCard, setOrganizeInStructureCard, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, getCopilotDockLayout, setCopilotDockLayout, copilotDockLayoutLabels, getWeekStartDay, setWeekStartDay, getCopilotFullscreenDefault, setCopilotFullscreenDefault, type Locale, type VoiceOption, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget, type CopilotDockLayout, type WeekStartDay } from '@/lib/i18n';
+import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, setSelectedVoice, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getOrganizeInStructureCard, setOrganizeInStructureCard, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, getCopilotDockLayout, setCopilotDockLayout, copilotDockLayoutLabels, getWeekStartDay, setWeekStartDay, getCopilotFullscreenDefault, setCopilotFullscreenDefault, getAdminMode, setAdminMode, type Locale, type VoiceOption, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget, type CopilotDockLayout, type WeekStartDay } from '@/lib/i18n';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
@@ -89,6 +89,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const [copilotDockLayout, setCopilotDockLayoutState] = useState<CopilotDockLayout>(() => getCopilotDockLayout());
   const [simulateStreaming, setSimulateStreamingState] = useState(() => getSimulateStreaming());
   const [copilotFullscreenDefault, setCopilotFullscreenDefaultState] = useState(() => getCopilotFullscreenDefault());
+  const [adminMode, setAdminModeState] = useState(() => getAdminMode());
   const [homeHeaderWidget, setHomeHeaderWidgetState] = useState<HomeHeaderWidget>(() => getHomeHeaderWidget());
   const [weekStartDay, setWeekStartDayState] = useState<WeekStartDay>(() => getWeekStartDay());
 
@@ -217,6 +218,11 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const handleCopilotFullscreenDefaultChange = (enabled: boolean) => {
     setCopilotFullscreenDefaultState(enabled);
     setCopilotFullscreenDefault(enabled);
+  };
+
+  const handleAdminModeChange = (enabled: boolean) => {
+    setAdminModeState(enabled);
+    setAdminMode(enabled);
   };
 
   const handleHomeHeaderWidgetChange = (widget: string) => {
@@ -640,6 +646,25 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                   {locale === 'zh-Hans'
                     ? '启用后，点击对话框将以全屏模式展开 Copilot（仅移动端）'
                     : 'When enabled, tapping the input opens Copilot in fullscreen mode (mobile only)'}
+                </p>
+              </div>
+
+              {/* Admin Mode toggle */}
+              <div className="pt-3 border-t border-border/30">
+                <SettingsItem
+                  icon={Database}
+                  label={locale === 'zh-Hans' ? '管理员模式' : 'Admin Mode'}
+                  rightElement={
+                    <Switch
+                      checked={adminMode}
+                      onCheckedChange={handleAdminModeChange}
+                    />
+                  }
+                />
+                <p className="text-xs text-muted-foreground mt-1 pl-8">
+                  {locale === 'zh-Hans'
+                    ? '启用后显示所有数据，关闭后仅显示当前用户的数据'
+                    : 'When enabled, shows all data. When disabled, filters data to current user only.'}
                 </p>
               </div>
 
