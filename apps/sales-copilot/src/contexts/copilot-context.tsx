@@ -1533,8 +1533,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           };
           
           // Extract last function result for context-first analysis.
-          // Use recordList (the data cards the user sees) as the analysis context.
-          const lastAgentMsg = [...currentMessages].reverse().find(
+          // Use messagesRef for latest state (avoids stale closure after startNewConversation).
+          const lastAgentMsg = [...messagesRef.current].reverse().find(
             (m: ChatMessage) => m.role === 'assistant' && m.type === 'agent' && m.recordList
           );
 
@@ -1957,6 +1957,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     clearCopilotConversation();
     typingMessageIdRef.current = null;
     setMessages([]);
+    messagesRef.current = []; // Clear ref immediately (avoids stale closure in sendMessage)
+    queueRef.current = null;
     
     // Clear persisted messages
     try {
