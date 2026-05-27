@@ -1451,7 +1451,7 @@ Return JSON array format:
 Return only the JSON array, no other text.`;
       
       // Pass raw data directly to insight generation instead of agentResponse
-      const insightResult = await generateVoiceSummary(rawDataForInsights, locale, insightSystemPrompt);
+      const insightResult = await generateVoiceSummary(rawDataForInsights, locale, insightSystemPrompt, undefined, undefined, 'json');
       
       if (!insightResult.success || !insightResult.summary) {
         throw new Error(insightResult.error || 'Failed to generate insight');

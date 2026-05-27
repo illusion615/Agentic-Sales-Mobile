@@ -1125,10 +1125,10 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     }
     
     const totalChars = fullContent.length;
-    // Target ~3 seconds for a typical response (~300 chars), min 1s, max 6s
-    const durationMs = Math.min(6000, Math.max(1000, totalChars * 10));
-    let startTime: number | null = null;
-    let lastRevealedIndex = 0;
+    // Linear reveal: fixed chars per tick, no ease-out stalling
+    const charsPerTick = Math.max(3, Math.ceil(totalChars / 80)); // ~80 ticks total
+    const tickInterval = 30; // 30ms per tick → ~2.4s total
+    let revealedIndex = 0;
     
     // Start with empty content, then gradually reveal
     setMessages((prev) => {
@@ -1156,38 +1156,32 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     
     typingMessageIdRef.current = null;
     
-    const animate = (now: number) => {
-      if (!startTime) startTime = now;
-      const elapsed = now - startTime;
-      // Ease-out curve: starts fast, slows down at the end
-      const progress = Math.min(1, 1 - Math.pow(1 - elapsed / durationMs, 2));
-      const charIndex = Math.floor(progress * totalChars);
+    const animate = () => {
+      revealedIndex += charsPerTick;
       
-      // Throttle: only update state every 3 chars minimum to reduce renders
-      if (charIndex > lastRevealedIndex + 2 || progress >= 1) {
-        lastRevealedIndex = charIndex;
-        const partialContent = fullContent.slice(0, charIndex);
+      if (revealedIndex >= totalChars) {
+        // Done
+        setMessages((prev) => prev.map((msg) =>
+          msg.id === messageId
+            ? { ...msg, content: fullContent, isStreaming: false }
+            : msg
+        ));
+        if (streamingIntervalRef.current) {
+          clearInterval(streamingIntervalRef.current);
+          streamingIntervalRef.current = null;
+        }
+        if (onComplete) onComplete();
+      } else {
+        const partialContent = fullContent.slice(0, revealedIndex);
         setMessages((prev) => prev.map((msg) =>
           msg.id === messageId
             ? { ...msg, content: partialContent }
             : msg
         ));
       }
-      
-      if (progress >= 1) {
-        setMessages((prev) => prev.map((msg) =>
-          msg.id === messageId
-            ? { ...msg, content: fullContent, isStreaming: false }
-            : msg
-        ));
-        streamingRafRef.current = null;
-        if (onComplete) onComplete();
-      } else {
-        streamingRafRef.current = requestAnimationFrame(animate);
-      }
     };
     
-    streamingRafRef.current = requestAnimationFrame(animate);
+    streamingIntervalRef.current = setInterval(animate, tickInterval);
   }, []);
 
   // With SDK connector, Copilot Studio is always available — mark connected when settings are ready
@@ -1860,44 +1854,38 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                 };
               }));
               
-              // Smooth rAF-based streaming
+              // Smooth linear streaming
               const fullContent = response.content;
               const totalChars = fullContent.length;
-              const durationMs = Math.min(6000, Math.max(1000, totalChars * 10));
-              let streamStart: number | null = null;
-              let lastIdx = 0;
+              const charsPerTick = Math.max(3, Math.ceil(totalChars / 80));
+              const tickInterval = 30;
+              let revIdx = 0;
               
-              const animateStream = (now: number) => {
-                if (!streamStart) streamStart = now;
-                const elapsed = now - streamStart;
-                const progress = Math.min(1, 1 - Math.pow(1 - elapsed / durationMs, 2));
-                const charIdx = Math.floor(progress * totalChars);
+              const animateStream = () => {
+                revIdx += charsPerTick;
                 
-                // Throttle: only update state every 3 chars minimum
-                if (charIdx > lastIdx + 2 || progress >= 1) {
-                  lastIdx = charIdx;
-                  setMessages((prev) => prev.map((msg) =>
-                    msg.id === thinkingMsgId
-                      ? { ...msg, content: fullContent.slice(0, charIdx) }
-                      : msg
-                  ));
-                }
-                
-                if (progress >= 1) {
+                if (revIdx >= totalChars) {
+                  if (streamingIntervalRef.current) {
+                    clearInterval(streamingIntervalRef.current);
+                    streamingIntervalRef.current = null;
+                  }
                   // Streaming complete — now attach data cards (recordList etc.)
                   setMessages((prev) => prev.map((msg) =>
                     msg.id === thinkingMsgId
                       ? { ...msg, content: fullContent, isStreaming: false, recordList: response.recordList }
                       : msg
                   ));
-                  streamingRafRef.current = null;
                   setIsSending(false);
                 } else {
-                  streamingRafRef.current = requestAnimationFrame(animateStream);
+                  setMessages((prev) => prev.map((msg) =>
+                    msg.id === thinkingMsgId
+                      ? { ...msg, content: fullContent.slice(0, revIdx) }
+                      : msg
+                  ));
                 }
               };
               
-              streamingRafRef.current = requestAnimationFrame(animateStream);
+              streamingIntervalRef.current = setInterval(animateStream, tickInterval);
             } else {
               // No streaming - set content immediately
               setIsSending(false);

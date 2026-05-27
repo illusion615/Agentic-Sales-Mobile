@@ -164,7 +164,7 @@ Each card focuses on a different angle:
 Return format: [{"title":"Title","content":"Content (2-3 sentences, concise and actionable)"}]
 Return ONLY the JSON array.`;
 
-      const result = await generateVoiceSummary(JSON.stringify(clientData), locale, systemPrompt);
+      const result = await generateVoiceSummary(JSON.stringify(clientData), locale, systemPrompt, undefined, undefined, 'json');
       if (result.success && result.summary) {
         const jsonMatch = result.summary.match(/\[[\s\S]*\]/);
         if (jsonMatch) {

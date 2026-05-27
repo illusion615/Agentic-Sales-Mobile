@@ -66,7 +66,16 @@ export class BusinessInsightService {
   static async create(record: Omit<BusinessInsight, 'id'>): Promise<BusinessInsight> {
     const result = await Crf5c_businessinsightsService.create(toDv(record) as any);
     if (!result.success) throw result.error;
-    return fromDv(requireCreated(result.data, 'crf5c_businessinsightid', 'BusinessInsight'));
+    // Some Dataverse environments return success but no row body on create.
+    // In that case, return a synthetic record with the input data.
+    if (!result.data || typeof result.data !== 'object' || !(result.data as unknown as Record<string, unknown>).crf5c_businessinsightid) {
+      console.warn('[BusinessInsight] Create succeeded but no row returned — using synthetic record');
+      return {
+        id: `temp-${Date.now()}`,
+        ...record,
+      };
+    }
+    return fromDv(result.data);
   }
 
   static async update(id: string, changedFields: Partial<Omit<BusinessInsight, 'id'>>): Promise<BusinessInsight> {

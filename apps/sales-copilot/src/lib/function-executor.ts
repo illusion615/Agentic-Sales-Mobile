@@ -226,6 +226,9 @@ export async function executeFunction(
         }
         const actType = args.type as string | undefined;
         const dateRange = args.dateRange as string | undefined;
+        const scheduledDate = args.scheduledDate as string | undefined;
+        const dateFrom = args.dateFrom as string | undefined;
+        const dateTo = args.dateTo as string | undefined;
         const actStatus = args.status as string | undefined;
         const actSortBy = args.sortBy as string | undefined;
         const actLimit = (args.limit as number) || 20;
@@ -234,7 +237,21 @@ export async function executeFunction(
         if (actAccountId) filteredAct = filteredAct.filter((a: Activity) => a.account?.id === actAccountId);
         if (actType) filteredAct = filteredAct.filter((a: Activity) => a.type === actType);
         if (actStatus) filteredAct = filteredAct.filter((a: Activity) => a.draftStatus === actStatus);
-        if (dateRange) {
+        
+        // Date filtering — support multiple formats from LLM
+        if (scheduledDate) {
+          // Exact date match: scheduledDate=YYYY-MM-DD
+          filteredAct = filteredAct.filter((a: Activity) => a.scheduleddate?.startsWith(scheduledDate));
+        } else if (dateFrom || dateTo) {
+          // Date range: dateFrom/dateTo
+          filteredAct = filteredAct.filter((a: Activity) => {
+            if (!a.scheduleddate) return false;
+            const d = a.scheduleddate.split('T')[0];
+            if (dateFrom && d < dateFrom) return false;
+            if (dateTo && d > dateTo) return false;
+            return true;
+          });
+        } else if (dateRange) {
           const now = new Date();
           const today = now.toISOString().split('T')[0];
           if (dateRange === 'today') {
@@ -1115,7 +1132,7 @@ ${recentHistory.slice(0, 500)}`;
             { role: 'system', content: systemPrompt },
             { role: 'user', content: dataPayload },
           ],
-          responseFormat: 'text',
+          responseFormat: 'json',
         });
 
         if (!llmResp.success || !llmResp.content) {

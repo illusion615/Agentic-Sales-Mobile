@@ -165,7 +165,10 @@ Return ONLY the JSON array, no other text.`;
       const result = await generateVoiceSummary(
         JSON.stringify(pipelineData),
         locale,
-        systemPrompt
+        systemPrompt,
+        undefined,
+        undefined,
+        'json'
       );
 
       if (result.success && result.summary) {

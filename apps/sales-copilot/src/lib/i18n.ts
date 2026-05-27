@@ -955,8 +955,8 @@ export async function generateVoiceSummary(
   locale: Locale, 
   customSystemPrompt?: string,
   llmConfigOverride?: LLMConfig,
-
-  timeoutMs?: number
+  timeoutMs?: number,
+  responseFormat?: 'text' | 'json'
 ): Promise<VoiceSummaryResult> {
   const config = llmConfigOverride || getLLMConfig();
   
@@ -981,6 +981,7 @@ export async function generateVoiceSummary(
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt }
       ],
+      responseFormat: responseFormat,
     });
     
     if (result.success && result.content) {

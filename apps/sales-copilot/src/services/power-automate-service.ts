@@ -12,6 +12,7 @@
 
 import { PowerAppsFlow_LLMService } from '@/generated/services/PowerAppsFlow_LLMService';
 import { getLLMConfig } from '@/lib/i18n';
+import { jsonrepair } from 'jsonrepair';
 
 export interface FlowLLMResponse {
   success: boolean;
@@ -35,6 +36,7 @@ export function isFlowAvailable(): boolean {
  * Callers pass a `messages` array (OpenAI chat format). This function
  * serialises them into a single `text` string for the flow's Prompt input.
  *
+/**
  * Contains its own availability guard — callers do NOT need to pre-check config.
  */
 export async function invokeFlowForLLM(
@@ -78,9 +80,16 @@ export async function invokeFlowForLLM(
     const rawContent = result.data?.output ?? '';
     console.log('[Power Automate] Flow response length:', rawContent.length);
 
-    // Sanitize LLM output: fix invalid JSON escape sequences (e.g. \. \$ \+ \()
-    // LLMs frequently produce these in string values, breaking JSON.parse downstream.
-    const content = rawContent.replace(/\\(?!["\\/bfnrtu])/g, '\\\\');
+    // Repair malformed JSON from LLM output (unterminated strings, invalid
+    // escapes, trailing commas, etc.) using the battle-tested jsonrepair lib.
+    // For plain text responses this is a no-op (non-JSON passes through unchanged).
+    let content = rawContent;
+    try {
+      content = jsonrepair(rawContent);
+    } catch {
+      // jsonrepair throws on completely unparseable input — keep raw content
+      content = rawContent;
+    }
 
     return { success: true, content, latencyMs };
   } catch (error: unknown) {
