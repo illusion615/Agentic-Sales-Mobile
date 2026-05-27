@@ -60,9 +60,25 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
   const createAccountMutation = useCreateAccount();
   const createContactMutation = useCreateContact();
   
-  // Track status of each form
-  const [formStatuses, setFormStatuses] = useState<Record<number, 'pending' | 'confirmed' | 'skipped'>>({});
+  // Track status of each form — persist to localStorage so status survives panel close/reopen
+  const storageKey = `intent-status-${messageId}`;
+  const [formStatuses, setFormStatuses] = useState<Record<number, 'pending' | 'confirmed' | 'skipped'>>(() => {
+    try {
+      const stored = localStorage.getItem(storageKey);
+      if (stored) return JSON.parse(stored);
+    } catch { /* ignore */ }
+    return {};
+  });
   const [isSubmitting, setIsSubmitting] = useState<number | null>(null);
+
+  // Persist status changes
+  const updateStatus = (index: number, status: 'confirmed' | 'skipped') => {
+    setFormStatuses(prev => {
+      const next = { ...prev, [index]: status };
+      try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  };
   
   const handleConfirm = async (form: AdditionalIntentForm, index: number) => {
     setIsSubmitting(index);
@@ -84,7 +100,7 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
           break;
       }
       
-      setFormStatuses(prev => ({ ...prev, [index]: 'confirmed' }));
+      updateStatus(index, 'confirmed');
       toast.success(locale === 'zh-Hans' 
         ? `${EntityTypeLabels[form.type].zh}已创建` 
         : `${EntityTypeLabels[form.type].en} created`);
@@ -97,7 +113,7 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
   };
   
   const handleSkip = (index: number) => {
-    setFormStatuses(prev => ({ ...prev, [index]: 'skipped' }));
+    updateStatus(index, 'skipped');
   };
   
   // Get display info for an activity type
@@ -233,67 +249,67 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
                       )}>
                         {EntityTypeLabels[form.type][locale === 'zh-Hans' ? 'zh' : 'en']}
                       </span>
+                      {/* Status indicator inline */}
+                      {status === 'confirmed' && (
+                        <span className="text-xs text-green-600">
+                          {locale === 'zh-Hans' ? '已创建' : 'Created'}
+                        </span>
+                      )}
+                      {status === 'skipped' && (
+                        <span className="text-xs text-muted-foreground">
+                          {locale === 'zh-Hans' ? '已跳过' : 'Skipped'}
+                        </span>
+                      )}
                     </div>
                     <p className={cn(
-                      'text-sm font-medium mt-1 truncate',
+                      'text-sm font-medium mt-1',
                       status === 'skipped' ? 'text-muted-foreground' : 'text-foreground'
                     )}>
                       {title}
                     </p>
                     {subtitle && (
-                      <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                      <p className="text-xs text-muted-foreground mt-0.5">
                         {subtitle}
                       </p>
                     )}
                     {/* Reason */}
-                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-1.5 italic">
-                      <Lightbulb className="w-3 h-3 flex-shrink-0" />
+                    <div className="flex items-start gap-1.5 text-xs text-muted-foreground mt-1.5 italic">
+                      <Lightbulb className="w-3 h-3 flex-shrink-0 mt-0.5" />
                       <span>{form.reason}</span>
                     </div>
                   </div>
-                  
-                  {/* Actions */}
-                  {!status && (
-                    <div className="flex items-center gap-1 flex-shrink-0">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleSkip(idx)}
-                        disabled={isLoading}
-                        className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
-                      >
-                        <X className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        onClick={() => handleConfirm(form, idx)}
-                        disabled={isLoading}
-                        className="h-8 px-3"
-                      >
-                        {isLoading ? (
-                          <span className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
-                        ) : (
-                          <>
-                            <Check className="w-4 h-4 mr-1" />
-                            {locale === 'zh-Hans' ? '确认' : 'Confirm'}
-                          </>
-                        )}
-                      </Button>
-                    </div>
-                  )}
-                  
-                  {/* Status indicator */}
-                  {status === 'confirmed' && (
-                    <span className="text-xs text-green-600 flex-shrink-0">
-                      {locale === 'zh-Hans' ? '已创建' : 'Created'}
-                    </span>
-                  )}
-                  {status === 'skipped' && (
-                    <span className="text-xs text-muted-foreground flex-shrink-0">
-                      {locale === 'zh-Hans' ? '已跳过' : 'Skipped'}
-                    </span>
-                  )}
                 </div>
+                  
+                {/* Actions - below card content, full width */}
+                {!status && (
+                  <div className="flex items-center gap-2 mt-2.5 pt-2 border-t border-border/30">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleSkip(idx)}
+                      disabled={isLoading}
+                      className="flex-1 h-8 text-muted-foreground"
+                    >
+                      <X className="w-3.5 h-3.5 mr-1" />
+                      {locale === 'zh-Hans' ? '跳过' : 'Skip'}
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => handleConfirm(form, idx)}
+                      disabled={isLoading}
+                      className="flex-1 h-8"
+                    >
+                      {isLoading ? (
+                        <span className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <>
+                          <Check className="w-3.5 h-3.5 mr-1" />
+                          {locale === 'zh-Hans' ? '确认创建' : 'Confirm'}
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                )}
               </motion.div>
             );
           })}

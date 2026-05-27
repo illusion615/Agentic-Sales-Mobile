@@ -75,8 +75,12 @@ export async function invokeFlowForLLM(
       };
     }
 
-    const content = result.data?.output ?? '';
-    console.log('[Power Automate] Flow response length:', content.length);
+    const rawContent = result.data?.output ?? '';
+    console.log('[Power Automate] Flow response length:', rawContent.length);
+
+    // Sanitize LLM output: fix invalid JSON escape sequences (e.g. \. \$ \+ \()
+    // LLMs frequently produce these in string values, breaking JSON.parse downstream.
+    const content = rawContent.replace(/\\(?!["\\/bfnrtu])/g, '\\\\');
 
     return { success: true, content, latencyMs };
   } catch (error: unknown) {

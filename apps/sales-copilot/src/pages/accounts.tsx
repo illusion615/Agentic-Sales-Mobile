@@ -1,7 +1,7 @@
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { Building2, Phone, ChevronRight, AlertTriangle, Search, Users } from 'lucide-react';
+import { Building2, Phone, ChevronRight, AlertTriangle, Search, Users, Sparkles, RefreshCw, Loader2 } from 'lucide-react';
 import { MobileLayout } from '@/components/mobile-layout';
 import { cn } from '@/lib/utils';
 import { useAccountList } from '@/generated/hooks/use-account';
@@ -20,7 +20,7 @@ import {
 } from '@/components/ui/select';
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
 import { useCopilot } from '@/contexts/copilot-context';
-import { getLocale } from '@/lib/i18n';
+import { getLocale, generateVoiceSummary } from '@/lib/i18n';
 import { PullToRefresh } from '@/components/pull-to-refresh';
 import { useFirstMount } from '@/hooks/use-first-mount';
 
@@ -125,6 +125,77 @@ export default function ClientsPage() {
   const atRiskCount = enrichedAccounts.filter((a) => a.contactStatus.isAtRisk).length;
   const contactedThisWeek = enrichedAccounts.filter((a) => a.daysSince <= 7).length;
 
+  // ─── AI Summary ───
+  interface AISummarySlide { title: string; content: string }
+  const AI_CACHE_KEY = 'client-coverage-ai-summary';
+  const AI_TTL = 30 * 60 * 1000;
+  const [aiSlides, setAiSlides] = useState<AISummarySlide[]>([]);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [currentSlide, setCurrentSlide] = useState(0);
+  const carouselRef = useRef<HTMLDivElement>(null);
+
+  const generateAISummary = useCallback(async () => {
+    if (enrichedAccounts.length === 0) return;
+    setAiLoading(true);
+    try {
+      const clientData = enrichedAccounts.map((a) => ({
+        name: a.name1, tier: a.tier, industry: a.industry,
+        daysSinceContact: a.daysSince, status: a.contactStatus.label,
+        contactCount: a.contactCount, region: a.region,
+        creditStatus: a.creditStatus, paymentStatus: a.paymentStatus,
+      }));
+
+      const isZh = locale === 'zh-Hans';
+      const systemPrompt = isZh
+        ? `你是销售经理的AI助手。基于客户覆盖数据，生成恰好4个摘要卡片，JSON数组格式。
+每张卡片关注不同角度：
+1. 覆盖概况 - 客户总体健康度、联系频率分布
+2. 风险客户 - 需要紧急跟进的客户及建议行动
+3. 高价值客户 - S/A级客户的维护情况和建议
+4. 跟进策略 - 本周应优先联系哪些客户，按什么节奏
+返回格式：[{"title":"标题","content":"内容（2-3句，简洁可操作）"}]
+只返回JSON数组。`
+        : `You are an AI assistant for a sales manager. Based on client coverage data, generate exactly 4 summary cards as a JSON array.
+Each card focuses on a different angle:
+1. Coverage Overview - overall health, contact frequency distribution
+2. At-Risk Clients - clients needing urgent follow-up with suggested actions
+3. Key Accounts - S/A tier maintenance status and recommendations
+4. Follow-up Strategy - which clients to prioritize this week and at what cadence
+Return format: [{"title":"Title","content":"Content (2-3 sentences, concise and actionable)"}]
+Return ONLY the JSON array.`;
+
+      const result = await generateVoiceSummary(JSON.stringify(clientData), locale, systemPrompt);
+      if (result.success && result.summary) {
+        const jsonMatch = result.summary.match(/\[[\s\S]*\]/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]) as AISummarySlide[];
+          setAiSlides(parsed);
+          setCurrentSlide(0);
+          localStorage.setItem(AI_CACHE_KEY, JSON.stringify({ ts: Date.now(), slides: parsed }));
+        }
+      }
+    } catch (e) { console.error('[ClientCoverage] AI summary error:', e); }
+    finally { setAiLoading(false); }
+  }, [enrichedAccounts, locale]);
+
+  useEffect(() => {
+    if (enrichedAccounts.length === 0) return;
+    try {
+      const cached = localStorage.getItem(AI_CACHE_KEY);
+      if (cached) {
+        const { ts, slides } = JSON.parse(cached);
+        if (Date.now() - ts < AI_TTL && slides?.length > 0) { setAiSlides(slides); return; }
+      }
+    } catch { /* ignore */ }
+    generateAISummary();
+  }, [enrichedAccounts.length > 0]);
+
+  const handleCarouselScroll = () => {
+    if (!carouselRef.current) return;
+    const el = carouselRef.current;
+    setCurrentSlide(Math.round(el.scrollLeft / el.offsetWidth));
+  };
+
   // Set page context for Copilot agent awareness
   useEffect(() => {
     copilot.setPageContext({
@@ -181,6 +252,61 @@ export default function ClientsPage() {
               <p className="text-2xl font-bold text-rose-600 dark:text-rose-400">{atRiskCount}</p>
               <p className="text-xs text-muted-foreground">At Risk</p>
             </div>
+          </motion.div>
+
+          {/* AI Summary Carousel */}
+          <motion.div variants={itemVariants}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-primary" />
+                <span className="text-[11px] font-medium text-foreground">
+                  {locale === 'zh-Hans' ? 'AI 客户洞察' : 'AI Client Insights'}
+                </span>
+              </div>
+              <button
+                onClick={generateAISummary}
+                disabled={aiLoading}
+                className="flex items-center gap-1 text-[11px] text-primary hover:text-primary/80 disabled:opacity-50"
+              >
+                {aiLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                {locale === 'zh-Hans' ? '刷新' : 'Refresh'}
+              </button>
+            </div>
+            {aiLoading && aiSlides.length === 0 ? (
+              <div className="glass-card p-6 flex items-center justify-center gap-2" style={{ borderRadius: 16 }}>
+                <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                <span className="text-[11px] text-muted-foreground">
+                  {locale === 'zh-Hans' ? '正在分析客户数据...' : 'Analyzing client data...'}
+                </span>
+              </div>
+            ) : aiSlides.length > 0 ? (
+              <>
+                <div
+                  ref={carouselRef}
+                  onScroll={handleCarouselScroll}
+                  className="flex overflow-x-auto snap-x snap-mandatory scrollbar-hide gap-3"
+                  style={{ scrollbarWidth: 'none' }}
+                >
+                  {aiSlides.map((slide, idx) => (
+                    <div
+                      key={idx}
+                      className="glass-card p-3.5 snap-center shrink-0"
+                      style={{ width: 'calc(100vw - 48px)', maxWidth: '400px', borderRadius: 16 }}
+                    >
+                      <p className="text-[11px] font-semibold text-primary mb-1">{slide.title}</p>
+                      <p className="text-[11px] text-foreground leading-relaxed">{slide.content}</p>
+                    </div>
+                  ))}
+                </div>
+                {aiSlides.length > 1 && (
+                  <div className="flex justify-center gap-1.5 mt-2">
+                    {aiSlides.map((_, idx) => (
+                      <span key={idx} className={cn('w-1.5 h-1.5 rounded-full transition-colors', idx === currentSlide ? 'bg-primary' : 'bg-muted-foreground/30')} />
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : null}
           </motion.div>
 
           {/* Search & Filters */}

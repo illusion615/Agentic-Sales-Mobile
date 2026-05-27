@@ -24,6 +24,7 @@ import { z } from 'zod';
 import { invokeFlowForLLM } from '@/services/power-automate-service';
 import { getLocale } from '@/lib/i18n';
 
+
 // ----------------------------- Schema ------------------------------------
 
 export const FrameSalesObjectSchema = z.enum([
