@@ -52,6 +52,51 @@ export function requireCreated<T>(
 }
 
 /**
+ * Best-effort ID extractor for Dataverse create results.
+ * Returns undefined instead of throwing when data is missing (hosted mode 204).
+ */
+export function extractCreatedId<T>(
+  data: T | undefined | null,
+  pkField: keyof T & string,
+  _entity: string,
+): string | undefined {
+  if (!data || typeof data !== 'object') return undefined;
+  const row = data as Record<string, unknown>;
+  const pkValue = row[pkField];
+  if (typeof pkValue === 'string' && pkValue) return pkValue;
+  const genericId = row['id'];
+  if (typeof genericId === 'string' && genericId) return genericId;
+  return undefined;
+}
+
+/**
+ * Resilient create-and-return pattern for Dataverse.
+ * Tries response data first (browser mode), falls back to read-back query (hosted mode 204).
+ */
+export async function createWithReadback<TDv, TApp>(
+  createFn: (payload: Record<string, unknown>) => Promise<{ success: boolean; data: TDv; error?: unknown }>,
+  getAllFn: (opts: { filter: string; orderBy: string[]; top: number }) => Promise<{ success: boolean; data: TDv[] | null | undefined; error?: unknown }>,
+  dvPayload: Record<string, unknown>,
+  pkField: string,
+  entity: string,
+  readbackFilter: string,
+  mapFn: (row: TDv) => TApp,
+): Promise<TApp> {
+  const result = await createFn(dvPayload);
+  if (!result.success) throw result.error;
+  if (result.data && typeof result.data === 'object') {
+    const pk = (result.data as Record<string, unknown>)[pkField];
+    if (typeof pk === 'string' && pk) return mapFn(result.data);
+  }
+  console.warn(`[${entity}] createRecordAsync returned no data body — reading back via getAll`);
+  const readback = await getAllFn({ filter: readbackFilter, orderBy: ['createdon desc'], top: 1 });
+  if (readback.success && readback.data && readback.data.length > 0) {
+    return mapFn(readback.data[0]);
+  }
+  throw new Error(`Dataverse create for ${entity} succeeded but could not read back the record. Filter: ${readbackFilter}`);
+}
+
+/**
  * Convert a friendly choice label (e.g. 'prospecting', '正常') to the Dataverse
  * choice integer using the SDK-generated KeyToLabel map.
  */
