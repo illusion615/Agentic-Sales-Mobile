@@ -28,6 +28,7 @@ import { KPICards, type KPIData, type AgendaItem, type AtRiskClient } from '@/co
 import { MarkdownContent } from '@/components/markdown-content';
 import type { BusinessInsight } from '@/generated/models/business-insight-model';import { useCopilot, type ChatMessage } from '@/contexts/copilot-context';
 import { useRegisterDockChips, type ActionDockChip } from '@/contexts/action-dock-context';
+import { useCopilotSideDocked } from '@/components/global-copilot';
 import {
   clearCopilotConversationLogId,
   getCopilotConversationLogBounds,
@@ -400,6 +401,7 @@ export default function HomeDashboard() {
   // Shared copilot context - use context's messages and sendMessage
   const copilot = useCopilot();
   const isInitializingCopilot = copilot.isConnecting;
+  const { docked: isSideDocked } = useCopilotSideDocked();
   
   // Derive chat state from context for unified experience across all pages
   const chatMessages = copilot.messages;
@@ -1808,7 +1810,8 @@ ${agentResponse}`;
         ref={mainContentRef}
         className={cn(
           'flex-1 pt-safe px-4 overflow-y-auto scrollbar-hide transition-all duration-300',
-          'pb-44'
+          'pb-44',
+          isSideDocked && 'pt-14'
         )}
         onTouchStart={(e: React.TouchEvent) => {
           if (mainContentRef.current && mainContentRef.current.scrollTop <= 0) {
@@ -1893,10 +1896,17 @@ ${agentResponse}`;
         >
           {/* Greeting Header — sticky so it stays pinned while the page scrolls.
               -mx-4 px-4 extends the frosted background to the full width of <main>
-              (which itself has px-4). z-30 keeps it above scrolling cards. */}
+              (which itself has px-4). z-30 keeps it above scrolling cards.
+              In side-docked mode, switch to fixed positioning so the header
+              spans across both the content area and the copilot panel. */}
           <motion.div
             variants={itemVariants}
-            className="sticky top-0 z-30 -mx-4 px-4 py-2 flex items-center justify-between bg-background/80 backdrop-blur-md"
+            className={cn(
+              'flex items-center justify-between bg-background/80 backdrop-blur-md',
+              isSideDocked
+                ? 'fixed top-0 left-0 right-0 z-50 h-14 px-4 border-b border-border/50'
+                : 'sticky top-0 z-30 -mx-4 px-4 py-2'
+            )}
           >
             <HomeHeaderWidgetDisplay locale={locale} widget={homeHeaderWidget} kpiData={kpiData} />
             {/* Notification & Settings Icons */}

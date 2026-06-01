@@ -2,7 +2,7 @@ import { Crf5c_contactsService } from './Crf5c_contactsService';
 import type { Crf5c_contacts } from '../models/Crf5c_contactsModel';
 import type { IGetAllOptions } from '../models/CommonModels';
 import type { Contact } from '../models/contact-model';
-import { dvLookupName, requireCreated, requireId } from './_adapter-utils';
+import { dvLookupName, createWithReadback, requireId } from './_adapter-utils';
 
 function fromDv(dv: Crf5c_contacts): Contact {
   const d = dv as unknown as Record<string, unknown>;
@@ -31,9 +31,14 @@ function toDv(r: Partial<Omit<Contact, 'id'>>): Record<string, unknown> {
 
 export class ContactService {
   static async create(record: Omit<Contact, 'id'>): Promise<Contact> {
-    const result = await Crf5c_contactsService.create(toDv(record) as any);
-    if (!result.success) throw result.error;
-    return fromDv(requireCreated(result.data, 'crf5c_contactid', 'Contact'));
+    const dvPayload = toDv(record);
+    return createWithReadback(
+      (p) => Crf5c_contactsService.create(p as any),
+      (o) => Crf5c_contactsService.getAll(o),
+      dvPayload, 'crf5c_contactid', 'Contact',
+      `crf5c_fullname eq '${record.fullname}'`,
+      fromDv,
+    );
   }
 
   static async update(id: string, changedFields: Partial<Omit<Contact, 'id'>>): Promise<Contact> {

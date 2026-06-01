@@ -1,10 +1,10 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence, useDragControls, type PanInfo } from 'motion/react';
-import { Sparkles, ArrowUp, SquarePen, X, ChevronDown, Copy, Volume2, VolumeX, Loader2, Square, Play, Pause, Paperclip, RotateCcw } from 'lucide-react';
+import { Sparkles, ArrowUp, SquarePen, X, ChevronDown, Copy, Volume2, VolumeX, Loader2, Square, Play, Pause, Paperclip, RotateCcw, Mic, Plus, Camera } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useCopilot, type ChatMessage } from '@/contexts/copilot-context';
-import { getLocale, getChatFontClass, getSelectedVoice, findMatchingSystemVoice, getLLMConfig, getVoiceSummaryEnabled, generateVoiceSummary, getCopilotDockLayout, getCopilotFullscreenDefault, type CopilotDockLayout, type Locale } from '@/lib/i18n';
+import { getLocale, getChatFontClass, getSelectedVoice, findMatchingSystemVoice, getLLMConfig, getVoiceSummaryEnabled, getCopilotDockLayout, getCopilotFullscreenDefault, type CopilotDockLayout, type Locale } from '@/lib/i18n';
 import { DynamicDataRenderer, tryParseJson } from '@/components/dynamic-data-renderer';
 import { FormCard } from '@/components/form-card';
 import { BatchFormCard } from '@/components/batch-form-card';
@@ -83,7 +83,7 @@ export function CopilotPanel() {
 
   const locale: Locale = getLocale();
   
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -134,6 +134,9 @@ export function CopilotPanel() {
   const [playingInlineId, setPlayingInlineId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<Array<{ file: File; preview: string; type: 'image' | 'file' }>>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  // "+" attachment popover (collapses low-frequency actions away from the input)
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
   
   // Context chips that user can dismiss
   const [dismissedContexts, setDismissedContexts] = useState<Set<string>>(new Set());
@@ -191,11 +194,6 @@ export function CopilotPanel() {
   const handleRemoveAttachment = useCallback((index: number) => {
     setAttachments((prev) => prev.filter((_, i) => i !== index));
   }, []);
-
-  // Handle camera/attachment button click
-  const handleAttachmentClick = useCallback(() => {
-    fileInputRef.current?.click();
-  }, []);
   
   // Check if context should be shown
   const shouldShowContext = pageContext && 
@@ -224,8 +222,29 @@ export function CopilotPanel() {
     }
   }, [isOpen]);
 
+  // Auto-grow the input textarea up to 4 lines, then scroll inside.
+  const autoResizeInput = useCallback(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    // Reset height to measure the true scroll height, then clamp to maxHeight.
+    el.style.height = 'auto';
+    const cs = window.getComputedStyle(el);
+    const lineHeight = parseFloat(cs.lineHeight) || 20;
+    const padTop = parseFloat(cs.paddingTop) || 0;
+    const padBottom = parseFloat(cs.paddingBottom) || 0;
+    const maxHeight = lineHeight * 4 + padTop + padBottom;
+    const next = Math.min(el.scrollHeight, maxHeight);
+    el.style.height = `${next}px`;
+    el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  }, []);
+
+  // Re-measure whenever the value changes (typing, dictation, programmatic set).
+  useEffect(() => {
+    autoResizeInput();
+  }, [inputValue, autoResizeInput]);
+
   // Handle enter key - IME-safe (skip Enter during IME composition)
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // Native IME composition signal (isComposing) or keyCode 229 (IME processing)
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     // Component-level flag (set via onCompositionStart/End for browsers that don't set isComposing reliably)
@@ -264,6 +283,152 @@ export function CopilotPanel() {
   const handleClose = () => {
     closePanel();
   };
+
+  // ─── Press-to-talk voice input (Web Speech API) ───────────────────────────
+  // Hold the mic to dictate (release to stop); a quick tap toggles a hands-free
+  // continuous listen mode (tap again to stop). Also the iframe-mic-permission probe.
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+  const baseTextRef = useRef('');
+  // Mic gesture state machine: idle | hold (press-and-hold) | toggle (tap-to-toggle)
+  const listenModeRef = useRef<'idle' | 'hold' | 'toggle'>('idle');
+  const pressStartRef = useRef(0);
+  const suppressNextUpRef = useRef(false);
+  const speechSupported =
+    typeof window !== 'undefined' &&
+    ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+
+  const stopListening = useCallback(() => {
+    try {
+      recognitionRef.current?.stop();
+    } catch {
+      /* noop */
+    }
+  }, []);
+
+  const startListening = useCallback(() => {
+    if (isListening) return;
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      toast.error(
+        locale === 'zh-Hans'
+          ? '当前浏览器不支持语音识别'
+          : 'Speech recognition not supported in this browser'
+      );
+      return;
+    }
+
+    const recognition = new SR();
+    recognition.lang = locale === 'zh-Hans' ? 'zh-CN' : 'en-US';
+    recognition.continuous = true;
+    recognition.interimResults = true;
+
+    baseTextRef.current = inputValue ? inputValue.trimEnd() + ' ' : '';
+
+    recognition.onstart = () => {
+      setIsListening(true);
+    };
+
+    recognition.onresult = (event: any) => {
+      let transcript = '';
+      for (let i = 0; i < event.results.length; i++) {
+        transcript += event.results[i][0].transcript;
+      }
+      setInputValue(baseTextRef.current + transcript);
+    };
+
+    recognition.onerror = (event: any) => {
+      setIsListening(false);
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        toast.error(
+          locale === 'zh-Hans'
+            ? '麦克风权限被拒绝（可能是平台 iframe 未授权）'
+            : 'Microphone permission denied (host iframe may not allow it)'
+        );
+      } else if (event.error === 'no-speech') {
+        // silent — user simply didn't say anything
+      } else {
+        toast.error(
+          locale === 'zh-Hans'
+            ? `语音识别出错：${event.error}`
+            : `Speech recognition error: ${event.error}`
+        );
+      }
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+      listenModeRef.current = 'idle';
+      recognitionRef.current = null;
+    };
+
+    recognitionRef.current = recognition;
+    try {
+      recognition.start();
+    } catch (err) {
+      setIsListening(false);
+      toast.error(
+        locale === 'zh-Hans'
+          ? '无法启动语音识别'
+          : 'Failed to start speech recognition'
+      );
+    }
+  }, [isListening, inputValue, locale, setInputValue]);
+
+  // Stop recognition if the component unmounts mid-recording.
+  useEffect(() => {
+    return () => {
+      try {
+        recognitionRef.current?.abort();
+      } catch {
+        /* noop */
+      }
+    };
+  }, []);
+
+  // Mic gesture handlers: distinguish press-and-hold from tap-to-toggle by duration.
+  const TAP_THRESHOLD_MS = 300;
+  const handleMicPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault();
+      // If already in hands-free toggle mode, a tap stops it.
+      if (listenModeRef.current === 'toggle') {
+        stopListening();
+        listenModeRef.current = 'idle';
+        suppressNextUpRef.current = true;
+        return;
+      }
+      pressStartRef.current = Date.now();
+      listenModeRef.current = 'hold';
+      startListening();
+    },
+    [startListening, stopListening]
+  );
+
+  const handleMicPointerUp = useCallback(() => {
+    if (suppressNextUpRef.current) {
+      suppressNextUpRef.current = false;
+      return;
+    }
+    if (listenModeRef.current !== 'hold') return;
+    const duration = Date.now() - pressStartRef.current;
+    if (duration < TAP_THRESHOLD_MS) {
+      // Quick tap → switch to hands-free continuous listening (keep recording).
+      listenModeRef.current = 'toggle';
+    } else {
+      // Held → press-to-talk release stops dictation.
+      stopListening();
+      listenModeRef.current = 'idle';
+    }
+  }, [stopListening]);
+
+  const handleMicPointerLeave = useCallback(() => {
+    // Only the press-and-hold gesture cancels on leave; toggle mode persists.
+    if (listenModeRef.current === 'hold') {
+      stopListening();
+      listenModeRef.current = 'idle';
+    }
+  }, [stopListening]);
 
 
 
@@ -824,8 +989,8 @@ export function CopilotPanel() {
       <div className="absolute inset-0 rounded-2xl neon-glow-blur" />
       <div className="absolute inset-0 rounded-2xl neon-glow" />
 
-      <div className="relative flex items-center gap-2 p-2 rounded-[14px] bg-background" style={{ backgroundColor: 'var(--background)' }}>
-        {/* Hidden file input */}
+      <div className="relative flex items-end gap-2 p-2 rounded-[14px] bg-background" style={{ backgroundColor: 'var(--background)' }}>
+        {/* Hidden inputs: file/photo picker and camera capture */}
         <input
           ref={fileInputRef}
           type="file"
@@ -834,49 +999,125 @@ export function CopilotPanel() {
           onChange={handleFileSelect}
           className="hidden"
         />
-
-        {/* Camera/Attachment Button */}
-        <button
-          type="button"
-          onClick={handleAttachmentClick}
-          className="w-10 h-10 flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-          aria-label={locale === 'zh-Hans' ? '添加附件' : 'Add attachment'}
-        >
-          <Paperclip className="w-5 h-5" />
-        </button>
-        {/* Input Field */}
         <input
+          ref={cameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={handleFileSelect}
+          className="hidden"
+        />
+
+        {/* "+" Attachment menu — collapses low-frequency actions */}
+        <div className="relative shrink-0">
+          {showAttachMenu && (
+            <>
+              {/* Click-away overlay */}
+              <div
+                className="fixed inset-0 z-40"
+                onClick={() => setShowAttachMenu(false)}
+              />
+              <div className="absolute bottom-full left-0 mb-2 z-50 min-w-[160px] glass-card rounded-xl p-1.5 shadow-lg">
+                <button
+                  type="button"
+                  onClick={() => { setShowAttachMenu(false); cameraInputRef.current?.click(); }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-foreground hover:bg-muted/60 transition-colors"
+                >
+                  <Camera className="w-4 h-4 text-muted-foreground" />
+                  {locale === 'zh-Hans' ? '拍照' : 'Take photo'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowAttachMenu(false); fileInputRef.current?.click(); }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-foreground hover:bg-muted/60 transition-colors"
+                >
+                  <Paperclip className="w-4 h-4 text-muted-foreground" />
+                  {locale === 'zh-Hans' ? '照片或文件' : 'Photo or file'}
+                </button>
+              </div>
+            </>
+          )}
+          <button
+            type="button"
+            onClick={() => setShowAttachMenu((v) => !v)}
+            className={cn(
+              'w-10 h-10 flex items-center justify-center rounded-full transition-colors',
+              showAttachMenu
+                ? 'bg-muted/60 text-foreground'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+            )}
+            aria-label={locale === 'zh-Hans' ? '添加附件' : 'Add attachment'}
+            title={locale === 'zh-Hans' ? '添加附件' : 'Add attachment'}
+          >
+            <Plus className={cn('w-5 h-5 transition-transform', showAttachMenu && 'rotate-45')} />
+          </button>
+        </div>
+        {/* Input Field — auto-grows up to 4 lines, then scrolls internally */}
+        <textarea
           ref={inputRef}
-          type="text"
+          rows={1}
           value={inputValue}
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setInputValue(e.target.value)}
+          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setInputValue(e.target.value)}
           onKeyDown={handleKeyDown}
           onCompositionStart={handleCompositionStart}
           onCompositionEnd={handleCompositionEnd}
           onFocus={handleInputFocus}
           placeholder={locale === 'zh-Hans' ? '向 Copilot 提问...' : 'Ask Copilot...'}
-          className="flex-1 bg-transparent border-0 outline-none text-sm text-foreground placeholder:text-muted-foreground"
+          className="flex-1 bg-transparent border-0 outline-none text-sm text-foreground placeholder:text-muted-foreground resize-none leading-5 py-2 self-end"
         />
 
-        {/* Send Button */}
+        {/* Right action — mutually exclusive: Stop / Send / Mic */}
         {isSending ? (
           <button
             onClick={() => {}}
-            className="w-10 h-10 rounded-full flex items-center justify-center text-red-500 hover:bg-muted/50 transition-colors"
+            className="w-10 h-10 rounded-full flex items-center justify-center text-red-500 hover:bg-muted/50 transition-colors shrink-0"
+            aria-label={locale === 'zh-Hans' ? '停止' : 'Stop'}
+            title={locale === 'zh-Hans' ? '停止' : 'Stop'}
           >
             <Square className="w-4 h-4 fill-current" />
           </button>
-        ) : (
+        ) : !isListening && inputValue.trim() ? (
           <button
             onClick={() => inputValue.trim() && sendMessage(inputValue)}
-            disabled={!inputValue.trim()}
-            className={cn(
-              'w-10 h-10 flex items-center justify-center transition-all',
-              inputValue.trim()
-                ? 'text-primary hover:brightness-125'
-                : 'text-muted-foreground cursor-not-allowed'
-            )}
+            className="w-10 h-10 flex items-center justify-center transition-all text-primary hover:brightness-125 shrink-0"
             aria-label={locale === 'zh-Hans' ? '发送' : 'Send'}
+            title={locale === 'zh-Hans' ? '发送' : 'Send'}
+          >
+            <ArrowUp className="w-5 h-5" />
+          </button>
+        ) : speechSupported ? (
+          <button
+            type="button"
+            onPointerDown={handleMicPointerDown}
+            onPointerUp={handleMicPointerUp}
+            onPointerLeave={handleMicPointerLeave}
+            className={cn(
+              'w-10 h-10 flex items-center justify-center rounded-full transition-colors touch-none select-none shrink-0',
+              isListening
+                ? 'bg-red-500/15 text-red-500 animate-pulse'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+            )}
+            style={{ touchAction: 'none' }}
+            aria-label={
+              isListening
+                ? (locale === 'zh-Hans' ? '点击停止聆听' : 'Tap to stop listening')
+                : (locale === 'zh-Hans' ? '按住说话 · 轻点持续聆听' : 'Hold to talk · tap to keep listening')
+            }
+            title={
+              isListening
+                ? (locale === 'zh-Hans' ? '点击停止聆听' : 'Tap to stop listening')
+                : (locale === 'zh-Hans' ? '按住说话 · 轻点持续聆听' : 'Hold to talk · tap to keep listening')
+            }
+          >
+            <Mic className="w-5 h-5" />
+          </button>
+        ) : (
+          <button
+            onClick={() => {}}
+            disabled
+            className="w-10 h-10 flex items-center justify-center text-muted-foreground cursor-not-allowed shrink-0"
+            aria-label={locale === 'zh-Hans' ? '发送' : 'Send'}
+            title={locale === 'zh-Hans' ? '发送' : 'Send'}
           >
             <ArrowUp className="w-5 h-5" />
           </button>

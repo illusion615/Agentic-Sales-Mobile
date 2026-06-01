@@ -1,5 +1,5 @@
 /**
- * Frame Shadow — multi-intent classifier
+ * Frame — multi-intent classifier
  * --------------------------------------------------------------------------
  * The Frame stage reads what the salesperson said and emits a list of
  * INTENTS. One message can produce many intents (a past visit + a discovered
@@ -15,9 +15,8 @@
  *   - Frame is invoked with `responseFormat: 'json'` so the Flow forces the
  *     LLM into JSON-object mode (much fewer parse failures).
  *
- * The viewer (frame-shadow-viewer.tsx) renders the ring buffer of recent
- * runs for boss-facing inspection. Nothing in production routing depends on
- * this file yet; it runs in shadow alongside legacy.
+ * The viewer (frame-viewer.tsx) renders the ring buffer of recent
+ * runs for boss-facing inspection.
  */
 
 import { z } from 'zod';
@@ -136,6 +135,14 @@ export const FrameResultSchema = z.object({
   /** Page-bound entities, injected by the host (not produced by the LLM). */
   boundEntities: FrameBoundEntitiesSchema,
   explicitNames: z.array(FrameExplicitNameSchema).default([]),
+  /**
+   * True when the user's question can be fully answered using data already
+   * present in the conversation history (i.e. the previous query result the
+   * user is looking at). When true, the executor skips Dataverse and reuses
+   * the last function result as data source. Only applies to Find / Analyze /
+   * Report tasks; Log / Plan / Update / Draft always need fresh execution.
+   */
+  contextSufficient: z.boolean().default(false),
   reasoning: z.string().default(''),
   confidence: z.preprocess(
     (v) => (typeof v === 'string' ? Number(v) : v),
@@ -147,9 +154,6 @@ export type FrameResult = z.infer<typeof FrameResultSchema>;
 // ----------------------------- Prompt ------------------------------------
 
 function buildFramePrompt(): string {
-  // English-only system prompt. The user message preserves whatever language
-  // the salesperson typed; the LLM responds with `summary` strings in the
-  // user's language.
   return `You are a senior CRM sales coach. Read what a salesperson said and list every distinct thing they want the system to remember or do. Do not pick a single label — list them all.
 
 # Definition of one "intent"
@@ -170,6 +174,7 @@ Do NOT split intents when:
 - Modifiers describe the same underlying event ("visited Dr. Lisa at the cardiology department" = 1 intent, not 2).
 - Preparation, follow-up, or implicit sub-tasks of a scheduled activity are part of that activity, not separate intents. "Meet tomorrow and prepare for it" = 1 intent (the meeting).
 - Descriptions of what a customer wants, needs, or is buying are part of the Opportunity intent itself, not separate Product or Activity intents. The Opportunity's summary should absorb these details.
+- The user asks for ONE report/briefing/summary that lists multiple sections (e.g. "generate a daily report: 1) summary 2) wins 3) pending 4) tomorrow's plan"). The sections are the structure of the SAME Report intent, not separate intents. Do not split per section. Do not promote a section title like "tomorrow's plan" into an Activity+Plan intent — inside a report request it means "summarize what to do tomorrow", not "schedule a concrete activity".
 
 Language-agnostic: judge by meaning, not by keywords. The user may write in any language or mix languages. Tense and time are inferred from meaning.
 
@@ -192,11 +197,11 @@ The conversation history is provided as prior chat turns. When the user's messag
 
 # Cognitive tasks (each intent picks exactly one)
 - Log        — record something that already happened or already exists
-- Plan       — schedule something to happen in the future
+- Plan       — schedule ONE specific future activity the user is already committing to (concrete meeting, call, demo, or follow-up with known purpose/audience/timing). NOT for asking the assistant to brainstorm a schedule.
 - Find       — search for or list existing records
 - Update     — change a field on an existing record
 - Recommend  — ask the assistant to recommend a PRODUCT (features, specs, which model fits). salesObject MUST be Product.
-- Analyze    — ask the assistant for strategic advice, next-step suggestions, deal coaching, meeting preparation, follow-up strategy, account prioritization, or any request that needs CRM data synthesis + reasoning. Use for ANY "suggest / advise / analyze / coach / prepare / prioritize" intent that is NOT about product knowledge.
+- Analyze    — ask the assistant for strategic advice, next-step suggestions, deal coaching, meeting preparation, follow-up strategy, account prioritization, day/week planning brainstorm ("plan my tomorrow", "suggest tasks for next week"), or any request that needs CRM data synthesis + reasoning. Use for ANY "suggest / advise / analyze / coach / prepare / prioritize / plan my day" intent that is NOT about product knowledge.
 - Knowledge  — ask a factual product or industry knowledge question (specs, warranty, regulations)
 - Report     — ask for a status overview, summary, or statistics about any entity type (accounts, pipeline, activities, territory, engagement)
 - Chat       — pure greeting / thanks / smalltalk
@@ -218,9 +223,29 @@ Return a single JSON object with this exact shape. Do not wrap in markdown.
   "explicitNames": [
     { "kind": "account|contact|opportunity|product", "text": "name as the user said it" }
   ],
+  "contextSufficient": false,
   "reasoning": "one short sentence in English on how you split the intents",
   "confidence": 0-100
 }
+
+# contextSufficient field
+Set "contextSufficient": true ONLY when ALL of these conditions are met:
+1. The conversation history contains data from a previous query (the assistant previously returned records/results).
+2. The user's current question can be FULLY answered using that existing data — same entity type, same scope.
+3. The cognitiveTask is Find, Analyze, or Report. Never set true for Log, Plan, Update, or Draft tasks.
+
+Set "contextSufficient": false (default) when ANY of:
+- The user is asking about a DIFFERENT entity type than what was previously queried (e.g. history has opportunities but user asks about activities).
+- The user is asking for NEW data not present in the conversation history.
+- The user explicitly asks to refresh, re-query, or search for something new.
+- There is no prior query data in the conversation history.
+- The task requires creating, updating, or scheduling something (Log/Plan/Update).
+
+Examples:
+- Prior: queried opportunities. User: "which one has the highest amount?" → contextSufficient: true (same entity, analytical follow-up)
+- Prior: queried opportunities. User: "show me my activities" → contextSufficient: false (different entity type)
+- Prior: queried accounts. User: "tell me more about the first one" → contextSufficient: true (same entity, follow-up)
+- No prior data. User: "list my accounts" → contextSufficient: false (no history data)
 
 # Field rules
 - intents: always an array. Even a single intent (greeting, simple find) is one element.
@@ -282,6 +307,21 @@ Expected intents: 1
 User: "how should I approach this deal"
 Expected intents: 1
   [0] Opportunity, Analyze, none — deal strategy advice                          label {zh:"打单策略建议",en:"Deal strategy"}
+
+User: "help me plan my tomorrow"
+Expected intents: 1
+  [0] Activity, Analyze, none — brainstorm tomorrow's schedule                   label {zh:"规划明日任务",en:"Plan my day"}
+Note: NO concrete activity is named — the user wants the assistant to PROPOSE what to do. This is Analyze, not Plan. Plan is reserved for one specific future activity the user is already committing to.
+
+User: "let's set up a Q&A meeting next Tuesday with the customer"
+Expected intents: 1
+  [0] Activity, Plan, future — Q&A meeting with customer next Tuesday            label {zh:"安排答疑会议",en:"Schedule Q&A meeting"}
+Note: ONE concrete future activity is named (audience, purpose, timing all clear). This is Plan, NOT Analyze.
+
+User: "Generate a daily report for 2026-05-28: use the task list on this page and produce: 1) completion summary; 2) key wins; 3) pending tasks; 4) tomorrow's plan."
+Expected intents: 1
+  [0] Activity, Report, none — daily report with completion, wins, pending, tomorrow plan sections   label {zh:"生成每日简报",en:"Generate daily report"}
+Note: ONE Report intent. The numbered list defines the SECTIONS of the same report, not separate intents. "Tomorrow's plan" here is a section heading inside the report, NOT a request to schedule a concrete activity — never emit an Activity+Plan intent for it.
 
 Now classify the latest user message. Use the prior conversation turns (if any) to resolve pronouns and follow-up references.`;
 }
@@ -461,36 +501,19 @@ export function tryParseFrame(text: string): FrameResult | null {
 
 // ----------------------------- Ring buffer -------------------------------
 
-const RING_KEY = 'copilot-frame-shadow-log';
+const RING_KEY = 'copilot-pipeline-log';
 const RING_MAX = 50;
 
-export interface ShadowLogEntry {
+export interface PipelineLogEntry {
   ts: number;
   userMessage: string;
   page?: string;
   frame: FrameRunOutcome;
-  legacy?: {
-    functionName: string | null;
-    requiresMatching?: boolean;
-    matchTargetEntity?: string;
-    resolutionsCount?: number;
-    additionalActionsCount?: number;
-    confidence?: number;
-    raw?: string;
-  };
-  agreement?: ShadowAgreement;
 }
 
-export interface ShadowAgreement {
-  intentCountMatch: boolean | null;
-  /** Whether legacy's primary function maps to one of the shadow intents. */
-  primaryObjectMatch: boolean | null;
-  note?: string;
-}
-
-export function recordShadow(entry: ShadowLogEntry): void {
+export function recordPipelineRun(entry: PipelineLogEntry): void {
   try {
-    const list = readShadowLog();
+    const list = readPipelineLog();
     list.unshift(entry);
     while (list.length > RING_MAX) list.pop();
     sessionStorage.setItem(RING_KEY, JSON.stringify(list));
@@ -499,65 +522,23 @@ export function recordShadow(entry: ShadowLogEntry): void {
   }
 }
 
-export function readShadowLog(): ShadowLogEntry[] {
+export function readPipelineLog(): PipelineLogEntry[] {
   try {
     const raw = sessionStorage.getItem(RING_KEY);
     if (!raw) return [];
-    const parsed = JSON.parse(raw) as ShadowLogEntry[];
+    const parsed = JSON.parse(raw) as PipelineLogEntry[];
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
 }
 
-export function clearShadowLog(): void {
+export function clearPipelineLog(): void {
   try {
     sessionStorage.removeItem(RING_KEY);
   } catch {
     /* noop */
   }
-}
-
-// ------------------------ Frame ↔ Legacy compare -------------------------
-
-const LEGACY_FN_OBJECT: Record<string, FrameSalesObject> = {
-  draftActivity: 'Activity',
-  updateActivity: 'Activity',
-  draftAccount: 'Account',
-  updateAccount: 'Account',
-  draftContact: 'Contact',
-  updateContact: 'Contact',
-  draftOpportunity: 'Opportunity',
-  updateOpportunity: 'Opportunity',
-  queryCopilotStudio: 'Product',
-  externalKnowledgeQuery: 'None',
-};
-
-/**
- * Coarse comparison signal for the viewer only. Not used by production code.
- *  - intentCountMatch: do shadow intent count and legacy (1 + additionalActions) agree?
- *  - primaryObjectMatch: is legacy's main function's sales object present in shadow intents?
- */
-export function compareFrameVsLegacy(
-  frame: FrameResult,
-  legacyFunctionName: string | null | undefined,
-  legacyAdditionalActionCount = 0
-): ShadowAgreement {
-  // Legacy chose to chat (function = null)
-  if (legacyFunctionName == null) {
-    const shadowIsChat =
-      frame.intents.length === 1 &&
-      (frame.intents[0].cognitiveTask === 'Chat' || frame.intents[0].salesObject === 'None');
-    return {
-      intentCountMatch: shadowIsChat,
-      primaryObjectMatch: shadowIsChat ? true : null,
-      note: shadowIsChat ? 'both → chat/none' : 'legacy null vs shadow action',
-    };
-  }
-  // Non-chat: do basic count/object comparison
-  const legacyTotal = 1 + legacyAdditionalActionCount;
-  const intentCountMatch = legacyTotal === frame.intents.length;
-  return { intentCountMatch, primaryObjectMatch: null };
 }
 
 // ----------------------- Skill mapping helpers ---------------------------
@@ -580,8 +561,16 @@ export function suggestSkillForIntent(intent: IntentItem): string | null {
       if (obj === 'Opportunity') return 'draftOpportunity';
       return null;
     case 'Plan':
-      if (obj === 'Activity') return 'suggestPlan';
-      return 'suggestPlan';
+      // A "Plan" intent always refers to ONE concrete future activity the salesperson is
+      // committing to schedule (e.g. "meet Lisa next Tuesday"). It is functionally the
+      // same as Log — just with a future scheduledStart — so it routes to draftActivity.
+      // The "brainstorm tomorrow's tasks" use case is classified as Activity + Analyze
+      // by the Frame prompt and is the only path that maps to suggestPlan.
+      if (obj === 'Activity') return 'draftActivity';
+      if (obj === 'Account') return 'draftAccount';
+      if (obj === 'Contact') return 'draftContact';
+      if (obj === 'Opportunity') return 'draftOpportunity';
+      return 'draftActivity';
     case 'Update':
       if (obj === 'Activity') return 'updateActivity';
       if (obj === 'Account') return 'updateAccount';
@@ -590,10 +579,17 @@ export function suggestSkillForIntent(intent: IntentItem): string | null {
       return null;
     case 'Find':
     case 'Report':
-    case 'Analyze':
       if (obj === 'Account') return 'queryAccounts';
       if (obj === 'Opportunity') return 'queryOpportunities';
       if (obj === 'Activity') return 'queryActivities';
+      if (obj === 'Contact') return 'queryContacts';
+      return 'queryOpportunities';
+    case 'Analyze':
+      // Activity-scoped Analyze = "help me plan my day / suggest tasks" → suggestPlan.
+      // Other object types fall through to query so the LLM can synthesize from data.
+      if (obj === 'Activity') return 'suggestPlan';
+      if (obj === 'Account') return 'queryAccounts';
+      if (obj === 'Opportunity') return 'queryOpportunities';
       if (obj === 'Contact') return 'queryContacts';
       return 'queryOpportunities';
     case 'Knowledge':

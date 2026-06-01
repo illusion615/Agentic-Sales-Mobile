@@ -2,7 +2,7 @@ import { Crf5c_briefingsService } from './Crf5c_briefingsService';
 import type { Crf5c_briefings } from '../models/Crf5c_briefingsModel';
 import type { IGetAllOptions } from '../models/CommonModels';
 import type { Briefing } from '../models/briefing-model';
-import { dvNum, numToDv, requireCreated, requireId } from './_adapter-utils';
+import { dvNum, numToDv, createWithReadback, requireId } from './_adapter-utils';
 
 function fromDv(dv: Crf5c_briefings): Briefing {
   return {
@@ -27,9 +27,14 @@ function toDv(r: Partial<Omit<Briefing, 'id'>>): Record<string, unknown> {
 
 export class BriefingService {
   static async create(record: Omit<Briefing, 'id'>): Promise<Briefing> {
-    const result = await Crf5c_briefingsService.create(toDv(record) as any);
-    if (!result.success) throw result.error;
-    return fromDv(requireCreated(result.data, 'crf5c_briefingid', 'Briefing'));
+    const dvPayload = toDv(record);
+    return createWithReadback(
+      (p) => Crf5c_briefingsService.create(p as any),
+      (o) => Crf5c_briefingsService.getAll(o),
+      dvPayload, 'crf5c_briefingid', 'Briefing',
+      `crf5c_generatedon eq '${record.generatedon}'`,
+      fromDv,
+    );
   }
 
   static async update(id: string, changedFields: Partial<Omit<Briefing, 'id'>>): Promise<Briefing> {

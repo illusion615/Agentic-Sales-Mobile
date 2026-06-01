@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { frameToIntent, type TranslatedIntent } from '@/lib/frame-to-intent';
-import type { PipelineResult } from '@/lib/shadow-agent';
+import type { PipelineResult } from '@/lib/orchestrator';
 
-function makeShadow(plan: PipelineResult['plan'], reasoning = ''): PipelineResult {
+function makePipeline(plan: PipelineResult['plan'], reasoning = ''): PipelineResult {
   // Cast via unknown — frame-to-intent only reads `reasoning` and `confidence`
   // from the frame payload, so a partial mock is sufficient for these tests.
   const frame = {
@@ -23,15 +23,15 @@ function makeShadow(plan: PipelineResult['plan'], reasoning = ''): PipelineResul
 
 describe('frameToIntent', () => {
   it('returns null when plan is missing', () => {
-    expect(frameToIntent(makeShadow(null))).toBeNull();
+    expect(frameToIntent(makePipeline(null))).toBeNull();
   });
 
   it('translates a SingleIntent into primary fn + arguments without additionalActions', () => {
-    const shadow = makeShadow({
+    const pipeline = makePipeline({
       function: 'draftActivity',
       arguments: { title: 'Follow up', accountName: 'Acme' },
     });
-    const out = frameToIntent(shadow) as TranslatedIntent;
+    const out = frameToIntent(pipeline) as TranslatedIntent;
     expect(out).not.toBeNull();
     expect(out.function).toBe('draftActivity');
     expect(out.arguments.title).toBe('Follow up');
@@ -40,7 +40,7 @@ describe('frameToIntent', () => {
   });
 
   it('emits resolutions[] for draft entity-name fields without ids', () => {
-    const shadow = makeShadow({
+    const pipeline = makePipeline({
       function: 'draftActivity',
       arguments: {
         title: 'Demo',
@@ -49,7 +49,7 @@ describe('frameToIntent', () => {
         opportunityName: 'OR Refresh',
       },
     });
-    const out = frameToIntent(shadow)!;
+    const out = frameToIntent(pipeline)!;
     expect(out.requiresMatching).toBe(true);
     const kinds = (out.resolutions || []).map((r) => r.entityType);
     // Expect account first (so contact/opp can scope by it), then contact, opp, then activity dup-check.
@@ -61,7 +61,7 @@ describe('frameToIntent', () => {
   });
 
   it('skips resolution when an id is already provided alongside the name', () => {
-    const shadow = makeShadow({
+    const pipeline = makePipeline({
       function: 'draftActivity',
       arguments: {
         title: 'Demo',
@@ -69,13 +69,13 @@ describe('frameToIntent', () => {
         accountId: 'acc-123',
       },
     });
-    const out = frameToIntent(shadow)!;
+    const out = frameToIntent(pipeline)!;
     const kinds = (out.resolutions || []).map((r) => r.entityType);
     expect(kinds).not.toContain('account');
   });
 
   it('translates a multi-step DAG into primary + additionalActions and SETS hasMultipleIntents=true', () => {
-    const shadow = makeShadow({
+    const pipeline = makePipeline({
       steps: [
         {
           seq: 1,
@@ -94,7 +94,7 @@ describe('frameToIntent', () => {
         },
       ],
     }, 'Three intents detected');
-    const out = frameToIntent(shadow)!;
+    const out = frameToIntent(pipeline)!;
     expect(out.function).toBe('draftOpportunity');
     expect(out.additionalActions).toHaveLength(2);
     expect(out.additionalActions![0].function).toBe('draftActivity');
@@ -105,14 +105,14 @@ describe('frameToIntent', () => {
   });
 
   it('orders DAG steps by seq before slotting primary/additionalActions', () => {
-    const shadow = makeShadow({
+    const pipeline = makePipeline({
       steps: [
         { seq: 3, function: 'draftActivity', arguments: { title: 'Last' } },
         { seq: 1, function: 'draftOpportunity', arguments: { name: 'First' } },
         { seq: 2, function: 'draftActivity', arguments: { title: 'Middle' } },
       ],
     });
-    const out = frameToIntent(shadow)!;
+    const out = frameToIntent(pipeline)!;
     expect(out.function).toBe('draftOpportunity');
     expect(out.arguments.name).toBe('First');
     expect(out.additionalActions!.map((a) => a.arguments.title)).toEqual([
@@ -122,18 +122,18 @@ describe('frameToIntent', () => {
   });
 
   it('returns null for an empty DAG', () => {
-    const shadow = makeShadow({ steps: [] } as unknown as PipelineResult['plan']);
-    expect(frameToIntent(shadow)).toBeNull();
+    const pipeline = makePipeline({ steps: [] } as unknown as PipelineResult['plan']);
+    expect(frameToIntent(pipeline)).toBeNull();
   });
 
   it('falls back summary text when frame.reasoning is empty', () => {
-    const shadow = makeShadow({
+    const pipeline = makePipeline({
       steps: [
         { seq: 1, function: 'draftOpportunity', arguments: {} },
         { seq: 2, function: 'draftActivity', arguments: {} },
       ],
     }, '');
-    const out = frameToIntent(shadow)!;
+    const out = frameToIntent(pipeline)!;
     expect(out.multiIntentAnalysis?.summary).toMatch(/intents from frame/);
   });
 });

@@ -1,8 +1,8 @@
 /**
- * Pipeline Inspector (dev tool)
+ * Frame Shadow Viewer (方案 3 · Phase 1)
  * --------------------------------------------------------------------------
- * Renders the in-memory ring buffer of intent pipeline runs so developers can
- * inspect Frame→Orchestrator pipeline execution on
+ * Renders the in-memory ring buffer of Frame shadow runs so the boss can
+ * compare the sales-coach Frame output against the legacy intent prompt on
  * real user messages. Nothing in this component affects production behaviour.
  *
  * Triggered by a small "F" pill that floats in the copilot panel header.
@@ -12,38 +12,43 @@ import { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, RefreshCcw, Trash2, Activity as ActivityIcon } from 'lucide-react';
 import {
-  readPipelineLog,
-  clearPipelineLog,
-  type PipelineLogEntry,
-} from '@/lib/frame';
+  readShadowLog,
+  clearShadowLog,
+  type ShadowLogEntry,
+} from '@/lib/frame-shadow';
 import {
   readBenchmarkLog,
-  type BenchmarkEntry,
-} from '@/lib/orchestrator';
+  type ShadowBenchmarkEntry,
+} from '@/lib/shadow-agent';
 import { isDagPlan } from '@/lib/dag-schema';
 import type { Locale } from '@/lib/i18n';
 
-interface PipelineViewerProps {
+interface FrameShadowViewerProps {
   open: boolean;
   onClose: () => void;
   locale: Locale;
 }
 
-export function PipelineViewer({ open, onClose, locale }: PipelineViewerProps) {
-  const [entries, setEntries] = useState<PipelineLogEntry[]>([]);
-  const [benchmarks, setBenchmarks] = useState<BenchmarkEntry[]>([]);
+export function FrameShadowViewer({ open, onClose, locale }: FrameShadowViewerProps) {
+  const [entries, setEntries] = useState<ShadowLogEntry[]>([]);
+  const [benchmarks, setBenchmarks] = useState<ShadowBenchmarkEntry[]>([]);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
     if (!open) return;
-    setEntries(readPipelineLog());
+    setEntries(readShadowLog());
     setBenchmarks(readBenchmarkLog());
   }, [open, tick]);
 
   const stats = useMemo(() => {
     if (entries.length === 0) {
       return {
-        total: 0, frameOk: 0, pipelineAvgMs: 0,
+        total: 0, frameOk: 0,
+        // Speed
+        legacyAvgMs: 0, shadowAvgMs: 0, speedDelta: 0,
+        // Accuracy
+        funcMatch: 0, funcComparable: 0,
+        avgArgOverlap: 0,
       };
     }
     let frameOk = 0;
@@ -51,19 +56,44 @@ export function PipelineViewer({ open, onClose, locale }: PipelineViewerProps) {
       if (e.frame.success) frameOk += 1;
     }
     // Orchestrator benchmark stats
-    let pipelineLatencySum = 0;
-    let pipelineLatencyN = 0;
+    let funcMatch = 0;
+    let funcComparable = 0;
+    let argOverlapSum = 0;
+    let argOverlapN = 0;
+    let legacyLatencySum = 0;
+    let legacyLatencyN = 0;
+    let shadowLatencySum = 0;
+    let shadowLatencyN = 0;
     for (const b of benchmarks) {
-      if (b.result.totalLatencyMs) {
-        pipelineLatencySum += b.result.totalLatencyMs;
-        pipelineLatencyN += 1;
+      if (b.agreement.functionMatch !== null && b.agreement.functionMatch !== undefined) {
+        funcComparable += 1;
+        if (b.agreement.functionMatch) funcMatch += 1;
+      }
+      if (b.agreement.argumentOverlap !== null && b.agreement.argumentOverlap !== undefined) {
+        argOverlapSum += b.agreement.argumentOverlap;
+        argOverlapN += 1;
+      }
+      if (b.legacy?.latencyMs) {
+        legacyLatencySum += b.legacy.latencyMs;
+        legacyLatencyN += 1;
+      }
+      if (b.shadow.totalLatencyMs) {
+        shadowLatencySum += b.shadow.totalLatencyMs;
+        shadowLatencyN += 1;
       }
     }
-    const pipelineAvgMs = pipelineLatencyN ? Math.round(pipelineLatencySum / pipelineLatencyN) : 0;
+    const legacyAvgMs = legacyLatencyN ? Math.round(legacyLatencySum / legacyLatencyN) : 0;
+    const shadowAvgMs = shadowLatencyN ? Math.round(shadowLatencySum / shadowLatencyN) : 0;
+    const speedDelta = legacyAvgMs && shadowAvgMs ? Math.round(((legacyAvgMs - shadowAvgMs) / legacyAvgMs) * 100) : 0;
     return {
       total: entries.length,
       frameOk,
-      pipelineAvgMs,
+      legacyAvgMs,
+      shadowAvgMs,
+      speedDelta,
+      funcMatch: funcComparable ? Math.round((funcMatch / funcComparable) * 100) : 0,
+      funcComparable,
+      avgArgOverlap: argOverlapN ? Math.round((argOverlapSum / argOverlapN) * 100) : 0,
     };
   }, [entries, benchmarks]);
 
@@ -91,12 +121,12 @@ export function PipelineViewer({ open, onClose, locale }: PipelineViewerProps) {
                 <ActivityIcon className="h-5 w-5 text-orange-600" />
                 <div>
                   <div className="text-sm font-semibold text-stone-900">
-                    {locale === 'zh-Hans' ? 'Frame 意图分析 · 销售专家思考记录' : 'Frame Inspector · Sales-Coach Reasoning Log'}
+                    {locale === 'zh-Hans' ? 'Frame 影子模式 · 销售专家思考记录' : 'Frame Shadow Mode · Sales-Coach Reasoning Log'}
                   </div>
                   <div className="text-xs text-stone-500">
                     {locale === 'zh-Hans'
-                      ? `近 ${stats.total} 轮 · Pipeline avg ${stats.pipelineAvgMs}ms`
-                      : `Last ${stats.total} runs · Pipeline avg ${stats.pipelineAvgMs}ms`}
+                      ? `近 ${stats.total} 轮 · Legacy ${stats.legacyAvgMs}ms vs Shadow ${stats.shadowAvgMs}ms`
+                      : `Last ${stats.total} runs · Legacy ${stats.legacyAvgMs}ms vs Shadow ${stats.shadowAvgMs}ms`}
                   </div>
                 </div>
               </div>
@@ -112,7 +142,7 @@ export function PipelineViewer({ open, onClose, locale }: PipelineViewerProps) {
                   className="rounded-md p-1.5 text-stone-500 hover:bg-stone-200"
                   title={locale === 'zh-Hans' ? '清空' : 'Clear'}
                   onClick={() => {
-                    clearPipelineLog();
+                    clearShadowLog();
                     setTick((n) => n + 1);
                   }}
                 >
@@ -128,24 +158,45 @@ export function PipelineViewer({ open, onClose, locale }: PipelineViewerProps) {
               </div>
             </div>
 
-            {/* KPI Dashboard */}
+            {/* KPI Dashboard: Speed + Accuracy */}
             <div className="border-b border-stone-200 bg-stone-50/60 px-4 py-3 text-xs">
+              {/* Speed comparison */}
               <div className="mb-2 text-[10px] uppercase tracking-wide text-stone-400">
-                {locale === 'zh-Hans' ? '⚡ 流水线性能' : '⚡ Pipeline Performance'}
+                {locale === 'zh-Hans' ? '⚡ 速度（平均延迟）' : '⚡ Speed (avg latency)'}
+              </div>
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                <Tile
+                  label="Legacy"
+                  value={stats.legacyAvgMs ? `${stats.legacyAvgMs}ms` : '—'}
+                />
+                <Tile
+                  label="Shadow"
+                  value={stats.shadowAvgMs ? `${stats.shadowAvgMs}ms` : '—'}
+                />
+                <Tile
+                  label={locale === 'zh-Hans' ? '差值' : 'Delta'}
+                  value={stats.speedDelta ? `${stats.speedDelta > 0 ? '+' : ''}${stats.speedDelta}%` : '—'}
+                  hint={stats.speedDelta > 0 ? (locale === 'zh-Hans' ? 'Shadow 更快' : 'Shadow faster') : stats.speedDelta < 0 ? (locale === 'zh-Hans' ? 'Legacy 更快' : 'Legacy faster') : undefined}
+                />
+              </div>
+              {/* Accuracy comparison */}
+              <div className="mb-2 text-[10px] uppercase tracking-wide text-stone-400">
+                {locale === 'zh-Hans' ? '🎯 精度（Shadow vs Legacy 一致性）' : '🎯 Accuracy (Shadow vs Legacy agreement)'}
               </div>
               <div className="grid grid-cols-3 gap-2">
                 <Tile
-                  label={locale === 'zh-Hans' ? '平均延迟' : 'Avg Latency'}
-                  value={stats.pipelineAvgMs ? `${stats.pipelineAvgMs}ms` : '—'}
+                  label={locale === 'zh-Hans' ? '函数匹配' : 'Function Match'}
+                  value={`${stats.funcMatch}%`}
+                  hint={`${stats.funcComparable} ${locale === 'zh-Hans' ? '条可比' : 'comparable'}`}
                 />
                 <Tile
-                  label={locale === 'zh-Hans' ? '成功率' : 'Success Rate'}
-                  value={stats.total ? `${Math.round((stats.frameOk / stats.total) * 100)}%` : '—'}
-                  hint={`${stats.frameOk}/${stats.total}`}
+                  label={locale === 'zh-Hans' ? '参数重叠' : 'Arg Overlap'}
+                  value={`${stats.avgArgOverlap}%`}
                 />
                 <Tile
                   label={locale === 'zh-Hans' ? '样本量' : 'Samples'}
                   value={`${stats.total}`}
+                  hint={`${stats.frameOk} ${locale === 'zh-Hans' ? '成功' : 'ok'}`}
                 />
               </div>
             </div>
@@ -185,12 +236,12 @@ function Tile({ label, value, hint }: { label: string; value: string; hint?: str
   );
 }
 
-function EntryRow({ entry, benchmark, locale }: { entry: PipelineLogEntry; benchmark?: BenchmarkEntry; locale: Locale }) {
+function EntryRow({ entry, benchmark, locale }: { entry: ShadowLogEntry; benchmark?: ShadowBenchmarkEntry; locale: Locale }) {
   const [expanded, setExpanded] = useState(false);
   const f = entry.frame.result;
   const ok = entry.frame.success;
   const time = new Date(entry.ts).toLocaleTimeString();
-  const funcBadge = null; // legacy comparison removed
+  const funcBadge = benchmark ? badge(benchmark.agreement.functionMatch, locale) : null;
 
   return (
     <li className="rounded-lg border border-stone-200 bg-white">
@@ -213,15 +264,19 @@ function EntryRow({ entry, benchmark, locale }: { entry: PipelineLogEntry; bench
           {/* Speed per request */}
           {benchmark && (
             <>
-              <Chip muted>Pipeline: {benchmark.result.totalLatencyMs}ms</Chip>
+              <Chip muted>L: {benchmark.legacy?.latencyMs ?? '?'}ms</Chip>
+              <Chip muted>S: {benchmark.shadow.totalLatencyMs}ms</Chip>
+              {benchmark.legacy?.latencyMs && benchmark.shadow.totalLatencyMs ? (
+                <Chip>{benchmark.shadow.totalLatencyMs < benchmark.legacy.latencyMs ? '🟢' : '🔴'} {Math.abs(benchmark.shadow.totalLatencyMs - benchmark.legacy.latencyMs)}ms</Chip>
+              ) : null}
             </>
           )}
           <span className="text-stone-400">|</span>
           {/* Function routing */}
-          
-          
-          {benchmark?.result.plan ? (
-            <Chip>{benchmark.result.plan && isDagPlan(benchmark.result.plan) ? `DAG ×${benchmark.result.plan.steps.length}` : (benchmark.result.plan as { function: string }).function}</Chip>
+          <Chip outlined>L: {entry.legacy?.functionName ?? 'null'}</Chip>
+          <span className="text-stone-400">→</span>
+          {benchmark?.shadow.plan ? (
+            <Chip>{isDagPlan(benchmark.shadow.plan) ? `DAG ×${benchmark.shadow.plan.steps.length}` : (benchmark.shadow.plan as { function: string }).function}</Chip>
           ) : (
             <Chip danger>—</Chip>
           )}
@@ -274,24 +329,31 @@ function EntryRow({ entry, benchmark, locale }: { entry: PipelineLogEntry; bench
           ) : (
             <div className="text-rose-600">{entry.frame.error}</div>
           )}
-          
+          {entry.legacy?.raw && (
+            <details className="mt-2">
+              <summary className="cursor-pointer text-stone-500">Legacy raw JSON</summary>
+              <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-stone-900/90 p-2 text-[10px] text-stone-100">
+                {entry.legacy.raw}
+              </pre>
+            </details>
+          )}
           {benchmark && (
             <div className="mt-2 border-t border-stone-200 pt-2">
               <div className="mb-1 flex items-center gap-2 text-stone-500">
                 <span>{locale === 'zh-Hans' ? '🤖 Orchestrator 输出：' : '🤖 Orchestrator output:'}</span>
-                {benchmark.result.plan ? (
-                  <Chip>{benchmark.result.plan && isDagPlan(benchmark.result.plan) ? `DAG ${benchmark.result.plan.steps.length} steps` : benchmark.result.plan.function ?? 'null'}</Chip>
+                {benchmark.shadow.plan ? (
+                  <Chip>{isDagPlan(benchmark.shadow.plan) ? `DAG ${benchmark.shadow.plan.steps.length} steps` : benchmark.shadow.plan.function ?? 'null'}</Chip>
                 ) : (
-                  <Chip danger>{benchmark.result.error?.message?.slice(0, 60) ?? 'Failed'}</Chip>
+                  <Chip danger>{benchmark.shadow.error?.slice(0, 60) ?? 'Failed'}</Chip>
                 )}
-                <Chip muted>{benchmark.result.skillsCount} skills</Chip>
-                <Chip muted>{benchmark.result.planLatencyMs}ms</Chip>
+                <Chip muted>{benchmark.shadow.skillsCount} skills</Chip>
+                <Chip muted>{benchmark.shadow.planLatencyMs}ms</Chip>
               </div>
-              {benchmark.result.planRaw && (
+              {benchmark.shadow.planRaw && (
                 <details>
                   <summary className="cursor-pointer text-stone-500">{locale === 'zh-Hans' ? 'Orchestrator raw' : 'Orchestrator raw'}</summary>
                   <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-indigo-900/90 p-2 text-[10px] text-indigo-100">
-                    {benchmark.result.planRaw}
+                    {benchmark.shadow.planRaw}
                   </pre>
                 </details>
               )}

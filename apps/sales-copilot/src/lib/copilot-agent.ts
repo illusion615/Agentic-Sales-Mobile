@@ -1,21 +1,19 @@
 /**
- * Copilot Agent - Simplified Single-Pass Architecture
- * 
- * This agent uses a SINGLE LLM call with Function Calling to:
- * 1. Understand user intent
- * 2. Extract all parameters
- * 3. Decide on the action (call function, ask for info, or respond directly)
- * 
- * Key Principles:
- * - Single LLM call for intent detection and parameter extraction
- * - LLM handles clarification naturally (no special "clarification" state)
- * - Multi-intent extraction happens in the same pass
- * - Draft functions generate forms, update functions execute directly
+ * Copilot Agent — intent-driven orchestration pipeline.
+ *
+ * Pass 1: Frame (intent classification + contextSufficient)
+ * Pass 1.5: Orchestrator (DAG plan)
+ * Pass 2: Skill execution (handler registry)
+ * Pass 3: Response generation
+ *
+ * Auxiliary logic extracted to:
+ *   - copilot-agent-types.ts: shared interfaces
+ *   - copilot-studio-fallback.ts: CS fallback
  */
 
 import { invokeFlowForLLM } from '@/services/power-automate-service';
 import { getLocale } from '@/lib/i18n';
-import { getFunctionListForPrompt, getDisplayName } from './function-registry';
+import { getDisplayName, getFunctionListForPrompt } from './function-registry';
 import { executeFunction } from './function-executor';
 import { 
   parseAndValidateIntent,
@@ -26,146 +24,30 @@ import {
   getMatchThresholds,
   type ValidatedIntentResult,
   type SingleIntent,
-  type AwaitingClarification,
   type PendingResolution,
   type ResolutionCandidate,
 } from './agent-utils';
-import { recordPipelineRun } from './frame-shadow';
-import { runIntentPipeline, recordBenchmark, type PipelineResult } from './shadow-agent';
+import { recordPipelineRun } from './frame';
+import { runIntentPipeline, recordBenchmark, type PipelineResult } from './orchestrator';
 import { frameToIntent } from './frame-to-intent';
+import { agentError, toUserMessage, toDevLog, type AgentError } from './errors';
+import { fallbackToCopilotStudio } from './copilot-studio-fallback';
+import {
+  type ThinkingProgress,
+  type AgentResponse,
+  type IntentResult,
+  type FuzzyMatchData,
+  type IndexedResolution,
+  GREETING_PATTERN,
+  DAILY_REPORT_PATTERN,
+  buildIntentsOverview,
+} from './copilot-agent-types';
 
-// Greeting pattern for detecting simple greetings that don't need Copilot Studio
-const GREETING_PATTERN = /^(hi|hello|hey|你好|您好|嗨|早上好|下午好|晚上好|good\s*(morning|afternoon|evening))\b/i;
-// Phrases that ask the agent to produce a narrative report from the current
-// page data. When matched, a non-empty directResponse is allowed through.
-const DAILY_REPORT_PATTERN = /daily\s*report|today'?s?\s*report|工作日报|今日日报|今天的报告|生成今日|生成[\u4e00-\u9fa5]*?报/i;
-
-export interface ThinkingProgress {
-  stage: 'intent' | 'executing' | 'generating' | 'matching';
-  status: 'active' | 'completed';
-  intentLabel?: string;
-  functionDisplayName?: string;
-  detail?: string;
-}
-
-export interface AgentResponse {
-  success: boolean;
-  content: string;
-  functionCalled?: string;
-  functionDisplayName?: string;
-  functionResult?: unknown;
-  error?: string;
-  latencyMs?: number;
-  // Query keys to invalidate after mutation (for UI refresh)
-  invalidateQueries?: string[];
-  // Final thinking steps for display
-  thinkingSteps?: Array<{
-    stage: 'intent' | 'executing' | 'generating' | 'matching';
-    status: 'completed';
-    label: string;
-    detail?: string;
-  }>;
-
-  // Form card for draft records
-  formCard?: {
-    type: 'activity' | 'opportunity' | 'account';
-    isNew: boolean;
-    existingId?: string;
-    data: Record<string, unknown>;
-  };
-  // Record list for query results
-  recordList?: {
-    type: 'account' | 'opportunity' | 'activity' | 'contact';
-    records: Array<{
-      id: string;
-      title: string;
-      subtitle?: string;
-      meta?: string;
-    }>;
-    title?: string;
-  };
-  // Additional intents discovered from multi-intent analysis
-  additionalIntents?: {
-    message: string;
-    items: Array<{
-      type: 'activity' | 'opportunity' | 'account' | 'contact';
-      isNew: boolean;
-      data: Record<string, unknown>;
-      reason: string;
-      batchIndex: number;
-      userFacingLabel?: { zh: string; en: string };
-      intentIndex?: number;
-    }>;
-  };
-  // Intent analysis summary for debugging/display
-  intentAnalysis?: {
-    totalIntents: number;
-    summary: string;
-  };
-  // I-2 Stage 1: awaiting-clarification blocking state
-  awaitingClarification?: AwaitingClarification;
-
-  // Phase B: Per-intent labels for narrative UI. When present, context layer
-  // emits a single overview message ("识别到 N 个意图…") then per-task announce
-  // bubbles as the resolution cascade advances across intentIndex boundaries.
-  intentsOverview?: Array<{ intentIndex: number; userFacingLabel: { zh: string; en: string } }>;
-
-  /** Phase B: 0-based intent index that this blocking response belongs to.
-   *  Lets the context layer detect intent boundaries inside the cascade and
-   *  emit a fresh task-announce bubble when the index changes. */
-  currentIntentIndex?: number;
-
-  /** Raw parsed intent from the LLM Pass-1. Exposed so the context layer can
-   *  build an IntentQueue from it and drive multi-step orchestration through
-   *  the queue runtime instead of the agent's internal cascade. Populated
-   *  whenever Pass-1 parsing succeeds (function may be null for direct responses). */
-  rawIntent?: IntentResult;
-}
-
-// IntentResult is now imported from agent-utils as ValidatedIntentResult
-// We still keep a local interface for backward compatibility
-export interface IntentResult extends Partial<ValidatedIntentResult> {
-  function: string | null;
-  arguments?: Record<string, unknown>;
-  directResponse?: string;
-  /** Per-intent human-friendly label for narration UI (head). */
-  userFacingLabel?: { zh: string; en: string };
-  additionalActions?: Array<{
-    function: string;
-    arguments: Record<string, unknown>;
-    reason?: string;
-    userFacingLabel?: { zh: string; en: string };
-  }>;
-  requiresMatching?: boolean;
-  matchTarget?: {
-    entityType: 'account' | 'contact' | 'opportunity' | 'activity';
-    query: string;
-  };
-  // I-3 Slice 1: ordered resolution chain. When present, supersedes matchTarget.
-  resolutions?: Array<{
-    entityType: 'account' | 'contact' | 'opportunity' | 'activity';
-    query: string;
-    scopeBy?: 'account' | 'opportunity';
-    /** Which intent (0-based head, 1+ for additionalActions) this resolution belongs to. */
-    intentIndex?: number;
-  }>;
-  multiIntentAnalysis?: {
-    hasMultipleIntents: boolean;
-    summary?: string;
-  };
-}
+// Re-export types so existing importers don't break
+export type { ThinkingProgress, ThinkingStep, AgentResponse, IntentResult } from './copilot-agent-types';
 
 /**
- * Phase B: Build the per-intent overview that the UI uses to render the
- * upfront "identified N intents" announce. Only emits entries that have a
- * `userFacingLabel` (i.e. populated by frame mode); legacy mode without
- * labels returns an empty array and the UI silently skips the overview.
- */
-function buildIntentsOverview(intent: IntentResult): AgentResponse['intentsOverview'] {
-  const out: NonNullable<AgentResponse['intentsOverview']> = [];
-  if (intent.userFacingLabel) {
-    out.push({ intentIndex: 0, userFacingLabel: intent.userFacingLabel });
-  }
+ * Parse JSON from LLM response using Zod validation
   if (intent.additionalActions) {
     intent.additionalActions.forEach((a, i) => {
       if (a.userFacingLabel) {
@@ -195,115 +77,6 @@ function parseJsonResponse(text: string): IntentResult | null {
 /**
  * Fallback to Copilot Studio when intent recognition fails
  * Calls the existing queryCopilotStudio function executor
- */
-async function fallbackToCopilotStudio(
-  userQuery: string,
-  locale: string,
-  startTime: number,
-  context: {
-    userId?: string;
-    userEmail?: string;
-    // Forwarded so Copilot Studio sees page/account/product/dialog context.
-    pageContext?: { currentPage?: string; summary?: string; pageData?: unknown };
-    conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
-  },
-  onProgress?: (progress: ThinkingProgress) => void
-): Promise<AgentResponse> {
-  console.log('[FALLBACK_CS] ENTER fallbackToCopilotStudio, userQuery=', userQuery);
-  const isZh = locale === 'zh-Hans';
-  
-  // Notify progress: routing to Copilot Studio
-  if (onProgress) {
-    onProgress({ stage: 'intent', status: 'completed', intentLabel: isZh ? '转 Copilot Studio' : 'Copilot Studio' });
-  }
-  
-  const thinkingSteps: AgentResponse['thinkingSteps'] = [
-    { stage: 'intent', status: 'completed', label: isZh ? '转 Copilot Studio 查询' : 'Routing to Copilot Studio' }
-  ];
-  
-  // Notify progress: executing Copilot Studio query
-  if (onProgress) {
-    onProgress({ stage: 'executing', status: 'active', functionDisplayName: 'Copilot Studio' });
-  }
-  
-  try {
-    console.log('[FALLBACK_CS] Calling executeFunction(queryCopilotStudio)...');
-    const result = await executeFunction(
-      'queryCopilotStudio',
-      { query: userQuery },
-      {
-        userId: context.userId,
-        userEmail: context.userEmail,
-        pageContext: context.pageContext,
-        conversationHistory: context.conversationHistory,
-        locale,
-      }
-    );
-    console.log('[FALLBACK_CS] executeFunction returned:', JSON.stringify(result).slice(0, 500));
-    
-    // Notify progress: execution completed
-    if (onProgress) {
-      onProgress({ stage: 'executing', status: 'completed', functionDisplayName: 'Copilot Studio' });
-    }
-    
-    if (result.success && result.data) {
-      const data = result.data as { answer?: string; source?: string };
-      thinkingSteps.push({
-        stage: 'executing',
-        status: 'completed',
-        label: isZh ? 'Copilot Studio：查询成功' : 'Copilot Studio: Query successful'
-      });
-      
-      return {
-        success: true,
-        content: data.answer || (isZh ? '收到您的问题，但暂时没有相关信息。' : 'I received your question but have no relevant information at this time.'),
-        functionCalled: 'queryCopilotStudio',
-        functionDisplayName: 'Copilot Studio',
-        latencyMs: Date.now() - startTime,
-        thinkingSteps,
-      };
-    }
-    
-    // Copilot Studio failed - return friendly fallback
-    console.warn('[CopilotAgent] Copilot Studio failed:', result.error);
-    thinkingSteps.push({
-      stage: 'executing',
-      status: 'completed',
-      label: isZh ? 'Copilot Studio 不可用' : 'Copilot Studio unavailable'
-    });
-    
-    return {
-      success: true,
-      content: isZh ? '我不太理解你的问题，请换个方式问我吧。' : 'I am not sure I understand. Could you rephrase?',
-      latencyMs: Date.now() - startTime,
-      thinkingSteps,
-    };
-  } catch (error) {
-    console.error('[CopilotAgent] Copilot Studio exception:', error);
-    
-    // Notify progress: execution completed (even on error)
-    if (onProgress) {
-      onProgress({ stage: 'executing', status: 'completed', functionDisplayName: 'Copilot Studio' });
-    }
-    
-    thinkingSteps.push({
-      stage: 'executing',
-      status: 'completed',
-      label: isZh ? 'Copilot Studio 不可用，回退到通用提示' : 'Copilot Studio unavailable, using fallback'
-    });
-    
-    return {
-      success: true,
-      content: isZh ? '我不太理解你的问题，请换个方式问我吧。' : 'I am not sure I understand. Could you rephrase?',
-      latencyMs: Date.now() - startTime,
-      thinkingSteps,
-    };
-  }
-}
-
-/**
- * Process additional intents (inferred from user input)
- * Returns batch form items for user confirmation
  */
 async function processAdditionalIntents(
   intents: SingleIntent[],
@@ -366,7 +139,7 @@ async function processAdditionalIntents(
               context
             );
             if (matchRes.success && matchRes.data) {
-              const md = matchRes.data as { matches?: Array<{ id: string; name: string; score: number; accountId?: string; accountName?: string }> };
+              const md = matchRes.data as FuzzyMatchData;
               const top = (md.matches ?? []).find((m) => m.score >= getMatchThresholds().autoSelect);
               if (top) {
                 stepArgs[lookup.idField] = top.id;
@@ -562,83 +335,6 @@ async function processMessageInner(
     );
   }
 
-  // ===== Context-First Analysis =====
-  // If the previous response has data and the user is asking a follow-up
-  // analysis question, answer from existing context instead of re-querying.
-  // This is faster (1 LLM call vs 3) and more accurate (uses the exact data
-  // the user is looking at).
-  if (context.lastFunctionResult && context.lastFunctionCalled) {
-    const msg = userMessage.toLowerCase();
-    const isShortFollowUp = msg.split(/\s+/).length <= 15;
-    const isAnalytical = /\b(which|what|who|how|why|compare|priorit|highest|lowest|most|least|best|worst|first|last|important|urgent|recommend|suggest|rank|sort|order|top|bottom|biggest|smallest|next|focus|关键|优先|最高|最低|最大|最小|比较|排序|哪个|谁|为什么|建议|推荐|重点|紧急)\b/i.test(msg);
-    const hasNewEntity = /\b(show|list|find|search|get|create|add|update|delete|查找|搜索|列出|创建|添加|更新|删除)\b/i.test(msg)
-      && msg.split(/\s+/).length > 5; // "show" alone in a short message is likely follow-up
-    const isFollowUpAnalysis = isShortFollowUp && isAnalytical && !hasNewEntity;
-
-    if (isFollowUpAnalysis) {
-      console.log('[CopilotAgent] Context-first: answering from existing data (fn=' + context.lastFunctionCalled + ')');
-      if (onProgress) {
-        onProgress({ stage: 'intent', status: 'completed', intentLabel: isZh ? '上下文分析' : 'Context Analysis' });
-        onProgress({ stage: 'generating', status: 'active' });
-      }
-
-      const dataStr = JSON.stringify(context.lastFunctionResult, null, 2).slice(0, 3000);
-      const historyTail = history.slice(-4).map((m) => `${m.role}: ${m.content.slice(0, 200)}`).join('\n');
-
-      const contextAnalysisPrompt = isZh
-        ? `你是一个资深销售教练。用户基于你之前给出的数据追问了一个问题。请直接基于已有数据回答，不要说"我需要查询"之类的话。
-
-之前的对话:
-${historyTail}
-
-之前返回的数据（用户正在看这些数据）:
-${dataStr}
-
-用户追问: ${userMessage}
-
-请基于上述数据给出具体的、可操作的分析和建议。如果数据中有明确的优先级/时间/金额等维度，用它们来支撑你的判断。`
-        : `You are a senior sales coach. The user is asking a follow-up question about data you already provided. Answer directly from the existing data — do NOT say you need to query anything.
-
-Previous conversation:
-${historyTail}
-
-Previously returned data (the user is looking at this):
-${dataStr}
-
-User's follow-up: ${userMessage}
-
-Provide specific, actionable analysis based on the data above. Use concrete dimensions (priority, timeline, amount, stage) to support your reasoning.`;
-
-      try {
-        const analysisResp = await invokeFlowForLLM({
-          messages: [
-            { role: 'system', content: contextAnalysisPrompt },
-            { role: 'user', content: userMessage },
-          ],
-        });
-
-        if (onProgress) {
-          onProgress({ stage: 'generating', status: 'completed' });
-        }
-
-        if (analysisResp.success && analysisResp.content) {
-          return {
-            success: true,
-            content: analysisResp.content,
-            functionCalled: context.lastFunctionCalled,
-            latencyMs: Date.now() - startTime,
-            thinkingSteps: [
-              { stage: 'intent', status: 'completed', label: isZh ? '上下文分析（基于已有数据）' : 'Context analysis (from existing data)' },
-              { stage: 'generating', status: 'completed', label: isZh ? '生成分析' : 'Generate analysis' },
-            ],
-          };
-        }
-      } catch (err) {
-        console.warn('[CopilotAgent] Context-first analysis failed, falling back to full pipeline:', err);
-      }
-    }
-  }
-
   // ===== Pass 1: Intent Detection via Frame Pipeline =====
   console.log('[CopilotAgent] Pass 1: Intent detection (frame mode)');
 
@@ -662,12 +358,14 @@ Provide specific, actionable analysis based on the data above. Use concrete dime
     try {
       pipelineResult = await runIntentPipeline(pipelineCtx);
     } catch (err) {
+      const wrapped = agentError('unknown', 'orchestrator', 'Pipeline threw unexpectedly', err);
+      console.error('[CopilotAgent]', toDevLog(wrapped));
       recordCircuitBreakerFailure();
       recordMetrics({ success: false, latencyMs: Date.now() - startTime });
       return {
         success: false,
         content: '',
-        error: 'Frame pipeline threw: ' + (err instanceof Error ? err.message : String(err)),
+        error: toUserMessage(wrapped, isZh ? 'zh-Hans' : 'en'),
         latencyMs: Date.now() - startTime,
       };
     }
@@ -678,7 +376,7 @@ Provide specific, actionable analysis based on the data above. Use concrete dime
         ts: Date.now(),
         userMessage,
         page: context.pageContext?.currentPage,
-        frame: { success: !pipelineResult.error, result: pipelineResult.frame, latencyMs: pipelineResult.frameLatencyMs, error: pipelineResult.error ? String(pipelineResult.error) : undefined },
+        frame: { success: !pipelineResult.error, result: pipelineResult.frame, latencyMs: pipelineResult.frameLatencyMs, error: pipelineResult.error ? toDevLog(pipelineResult.error) : undefined },
       });
       recordBenchmark({
         ts: Date.now(),
@@ -691,14 +389,14 @@ Provide specific, actionable analysis based on the data above. Use concrete dime
     }
 
     if (pipelineResult.error || !pipelineResult.plan) {
+      const pipeErr = pipelineResult.error ?? agentError('unknown', 'orchestrator', 'No plan produced');
+      console.warn('[CopilotAgent]', toDevLog(pipeErr));
       recordCircuitBreakerFailure();
       recordMetrics({ success: false, latencyMs: Date.now() - startTime });
       return {
         success: false,
         content: '',
-        error: isZh
-          ? `意图识别失败: ${pipelineResult.error ?? '未生成执行计划'}。请重试。`
-          : `Intent detection failed: ${pipelineResult.error ?? 'no plan produced'}. Please retry.`,
+        error: toUserMessage(pipeErr, isZh ? 'zh-Hans' : 'en'),
         latencyMs: Date.now() - startTime,
       };
     } else {
@@ -844,12 +542,7 @@ Provide specific, actionable analysis based on the data above. Use concrete dime
       console.log('[CopilotAgent] Match result:', matchResult);
       
       if (matchResult.success && matchResult.data) {
-        const matchData = matchResult.data as {
-          matches: Array<{ id: string; name: string; score: number; matchType: string; accountId?: string; accountName?: string }>;
-          confidence: 'high' | 'medium' | 'low' | 'none';
-          needsConfirmation: boolean;
-          exactMatch?: { id: string; name: string; score: number; accountId?: string; accountName?: string };
-        };
+        const matchData = matchResult.data as FuzzyMatchData;
         
         // Notify progress: matching completed
         if (onProgress) {
@@ -863,7 +556,7 @@ Provide specific, actionable analysis based on the data above. Use concrete dime
           });
         }
         
-        // If high confidence exact match found (score >= 70), handle based on entity type
+        // If high confidence exact match found (score >= threshold.high), handle based on entity type
         if (matchData.confidence === 'high' && matchData.exactMatch && matchData.exactMatch.score >= getMatchThresholds().high) {
           console.log('[CopilotAgent] High confidence match found:', matchData.exactMatch.name, 'score:', matchData.exactMatch.score);
           
@@ -889,7 +582,7 @@ Provide specific, actionable analysis based on the data above. Use concrete dime
                   { stage: 'matching', status: 'completed', label: isZh ? `找到 ${highConfAccountMatches.length} 个匹配客户` : `Found ${highConfAccountMatches.length} matching account${highConfAccountMatches.length === 1 ? '' : 's'}` },
                 ],
               };
-              blockingIntentIndex = (currentResolution as { intentIndex?: number }).intentIndex;
+              blockingIntentIndex = (currentResolution as IndexedResolution).intentIndex;
               break;
             } else {
               // No high-confidence account matches - proceed directly to create new account
@@ -925,7 +618,7 @@ Provide specific, actionable analysis based on the data above. Use concrete dime
                   { stage: 'matching', status: 'completed', label: isZh ? `发现 ${highConfActivityMatches.length} 个类似活动` : `Found ${highConfActivityMatches.length} similar activit${highConfActivityMatches.length === 1 ? 'y' : 'ies'}` },
                 ],
               };
-              blockingIntentIndex = (currentResolution as { intentIndex?: number }).intentIndex;
+              blockingIntentIndex = (currentResolution as IndexedResolution).intentIndex;
               break;
             } else {
               // No high-confidence activity matches - proceed directly to create new activity
@@ -947,7 +640,7 @@ Provide specific, actionable analysis based on the data above. Use concrete dime
           
           // For draft functions with contact matching, inject the matched contact AND its account data
           if ((intent.function === 'draftActivity') && entityType === 'contact') {
-            const contactMatch = matchData.exactMatch as { id: string; name: string; accountId?: string; accountName?: string };
+            const contactMatch = matchData.exactMatch!;
             intent.arguments = {
               ...(intent.arguments || {}),
               contactId: contactMatch.id,
@@ -964,7 +657,7 @@ Provide specific, actionable analysis based on the data above. Use concrete dime
         }
         
         // If medium/low confidence or multiple matches, show selection card
-        // Filter to only show high-confidence matches (score >= 70)
+        // Filter to only show high-confidence matches (score >= threshold.high)
         const highConfidenceMatches = matchData.matches.filter((m: { score: number }) => m.score >= getMatchThresholds().high);
         
         // If there are high-confidence matches and needs confirmation, show selection
@@ -989,16 +682,16 @@ Provide specific, actionable analysis based on the data above. Use concrete dime
                 contactId: autoMatch.id,
                 contactName: autoMatch.name,
                 // Inject account info from the matched contact
-                accountId: (autoMatch as { accountId?: string }).accountId || (intent.arguments?.accountId as string) || '',
-                accountName: (autoMatch as { accountName?: string }).accountName || (intent.arguments?.accountName as string) || '',
+                accountId: autoMatch.accountId || (intent.arguments?.accountId as string) || '',
+                accountName: autoMatch.accountName || (intent.arguments?.accountName as string) || '',
               };
               resolvedSoFar.contact = autoMatch.id;
-              if ((autoMatch as { accountId?: string }).accountId) resolvedSoFar.account = (autoMatch as { accountId?: string }).accountId!;
+              if (autoMatch.accountId) resolvedSoFar.account = autoMatch.accountId;
               console.log(`[CopilotAgent] Injected contact with account info:`, {
                 contactId: autoMatch.id,
                 contactName: autoMatch.name,
-                accountId: (autoMatch as { accountId?: string }).accountId,
-                accountName: (autoMatch as { accountName?: string }).accountName,
+                accountId: autoMatch.accountId,
+                accountName: autoMatch.accountName,
               });
             } else if (entityType === 'opportunity') {
               intent.arguments = {
@@ -1046,7 +739,7 @@ Provide specific, actionable analysis based on the data above. Use concrete dime
                 { stage: 'matching', status: 'completed', label: isZh ? `找到 ${highConfidenceMatches.length} 个高置信度匹配` : `Found ${highConfidenceMatches.length} high-confidence matches` },
               ],
             };
-            blockingIntentIndex = (currentResolution as { intentIndex?: number }).intentIndex;
+            blockingIntentIndex = (currentResolution as IndexedResolution).intentIndex;
             break;
           }
         } else {
@@ -1103,7 +796,7 @@ Provide specific, actionable analysis based on the data above. Use concrete dime
                 { stage: 'matching', status: 'completed', label: isZh ? `未找到 ${kindZh} 匹配，等待用户决断` : `No ${pendingKind} match, awaiting user` },
               ],
             };
-            blockingIntentIndex = (currentResolution as { intentIndex?: number }).intentIndex;
+            blockingIntentIndex = (currentResolution as IndexedResolution).intentIndex;
             break;
           }
           // No high-confidence matches, proceed with creating new record
@@ -1142,6 +835,12 @@ Provide specific, actionable analysis based on the data above. Use concrete dime
   const shouldUsePageContext = (intent as unknown as Record<string, unknown>).usePageContext === true
     && context.pageContext?.pageData
     && ['queryActivities', 'queryOpportunities', 'queryAccounts', 'queryContacts'].includes(intent.function);
+
+  // Check if Frame determined the conversation history data can satisfy this request
+  const CONTEXT_REUSABLE_FUNCTIONS = ['queryActivities', 'queryOpportunities', 'queryAccounts', 'queryContacts'];
+  const shouldUseConversationContext = intent.contextSufficient === true
+    && context.lastFunctionResult
+    && CONTEXT_REUSABLE_FUNCTIONS.includes(intent.function);
   
   if (shouldUsePageContext) {
     console.log('[CopilotAgent] Using page context data for', intent.function);
@@ -1153,6 +852,18 @@ Provide specific, actionable analysis based on the data above. Use concrete dime
       success: true,
       data: records,
       message: `Found ${records.length} records from page context`,
+    };
+  } else if (shouldUseConversationContext) {
+    // Frame LLM determined the user is asking a follow-up that can be answered
+    // from the previous query result. Reuse that data instead of re-querying
+    // Dataverse, then let the normal Pass 3 + recordList pipeline handle output.
+    console.log('[CopilotAgent] Context-sufficient: reusing lastFunctionResult for', intent.function);
+    const lastData = context.lastFunctionResult;
+    const records = Array.isArray(lastData) ? lastData : [];
+    functionResult = {
+      success: true,
+      data: records,
+      message: `Found ${records.length} records from conversation context`,
     };
   } else {
     try {
@@ -1381,34 +1092,54 @@ Please respond to the user in a friendly manner based on the error. Important ru
   }
 
   // ===== Check for suggestPlan - returns batch form cards =====
-  if (intent.function === 'suggestPlan' && functionResult.success) {
-    console.log('[CopilotAgent] suggestPlan detected, returning batch form cards');
-    const planData = functionResult.data as { type: string; items: Array<{ type: string; isNew: boolean; data: Record<string, unknown>; batchIndex: number; reason: string }> };
-    if (onProgress) {
-      onProgress({ stage: 'generating', status: 'completed' });
+  if (intent.function === 'suggestPlan') {
+    if (functionResult.success) {
+      console.log('[CopilotAgent] suggestPlan detected, returning batch form cards');
+      const planData = functionResult.data as { type: string; items: Array<{ type: string; isNew: boolean; data: Record<string, unknown>; batchIndex: number; reason: string }> };
+      if (onProgress) {
+        onProgress({ stage: 'generating', status: 'completed' });
+      }
+      return {
+        success: true,
+        content: functionResult.message || '',
+        functionCalled: intent.function,
+        functionDisplayName: fnDisplayName,
+        latencyMs: Date.now() - startTime,
+        thinkingSteps: [
+          { stage: 'intent', status: 'completed', label: isZh ? `意图识别：${fnDisplayName}` : `Intent: ${fnDisplayName}` },
+          { stage: 'executing', status: 'completed', label: isZh ? `${fnDisplayName}：生成 ${planData.items.length} 个建议` : `${fnDisplayName}: ${planData.items.length} suggestions`, detail: isZh ? `${planData.items.length} 个任务` : `${planData.items.length} tasks` },
+        ],
+        additionalIntents: {
+          message: functionResult.message || '',
+          items: planData.items.map((item, idx) => ({
+            type: item.type as 'activity',
+            isNew: true,
+            data: item.data,
+            batchIndex: idx,
+            reason: item.reason,
+            intentIndex: idx,
+          })),
+        },
+      };
+    } else {
+      // suggestPlan failed — return error message, don't ask for clarification
+      if (onProgress) {
+        onProgress({ stage: 'generating', status: 'completed' });
+      }
+      return {
+        success: true,
+        content: isZh
+          ? `抱歉，生成工作计划时遇到问题：${functionResult.error || '请稍后重试'}。您可以尝试说"帮我规划明天的日程"或"plan tomorrow focusing on closing deals"。`
+          : `Sorry, I encountered an issue generating the plan: ${functionResult.error || 'please try again'}. You can try "plan tomorrow focusing on closing deals" or "帮我规划明天的日程".`,
+        functionCalled: intent.function,
+        functionDisplayName: fnDisplayName,
+        latencyMs: Date.now() - startTime,
+        thinkingSteps: [
+          { stage: 'intent', status: 'completed', label: isZh ? `意图识别：${fnDisplayName}` : `Intent: ${fnDisplayName}` },
+          { stage: 'executing', status: 'completed', label: isZh ? `${fnDisplayName}：执行失败` : `${fnDisplayName}: Failed` },
+        ],
+      };
     }
-    return {
-      success: true,
-      content: functionResult.message || '',
-      functionCalled: intent.function,
-      functionDisplayName: fnDisplayName,
-      latencyMs: Date.now() - startTime,
-      thinkingSteps: [
-        { stage: 'intent', status: 'completed', label: isZh ? `意图识别：${fnDisplayName}` : `Intent: ${fnDisplayName}` },
-        { stage: 'executing', status: 'completed', label: isZh ? `${fnDisplayName}：生成 ${planData.items.length} 个建议` : `${fnDisplayName}: ${planData.items.length} suggestions`, detail: isZh ? `${planData.items.length} 个任务` : `${planData.items.length} tasks` },
-      ],
-      additionalIntents: {
-        message: functionResult.message || '',
-        items: planData.items.map((item, idx) => ({
-          type: item.type as 'activity',
-          isNew: true,
-          data: item.data,
-          batchIndex: idx,
-          reason: item.reason,
-          intentIndex: idx,
-        })),
-      },
-    };
   }
 
   // ===== Check for draft functions - return directly without Pass 2 =====

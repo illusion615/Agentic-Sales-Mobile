@@ -17,10 +17,10 @@
  * Returns null when the shadow result has no actionable plan.
  */
 
-import type { PipelineResult } from './shadow-agent';
+import type { PipelineResult } from './orchestrator';
 import type { DagPlan, SingleIntent } from './dag-schema';
 import { isDagPlan } from './dag-schema';
-import { fallbackUserFacingLabel, type UserFacingLabel, type IntentItem } from './frame-shadow';
+import { fallbackUserFacingLabel, type UserFacingLabel, type IntentItem } from './frame';
 
 export interface TranslatedIntent {
   function: string;
@@ -47,6 +47,8 @@ export interface TranslatedIntent {
     summary?: string;
   };
   confidence?: number;
+  /** When true, the previous query result in conversation history can satisfy this request. */
+  contextSufficient?: boolean;
 }
 
 const DRAFT_FUNCTIONS = new Set([
@@ -129,10 +131,10 @@ function stepToIntentSlot(
 
 /**
  * Translate a PipelineResult into a legacy IntentResult shape, or null when
- * the shadow plan is empty / non-actionable.
+ * the pipeline result has no actionable plan.
  */
-export function frameToIntent(shadow: PipelineResult): TranslatedIntent | null {
-  const plan = shadow.plan;
+export function frameToIntent(pipeline: PipelineResult): TranslatedIntent | null {
+  const plan = pipeline.plan;
   if (!plan) return null;
 
   let primaryFn: string;
@@ -177,7 +179,7 @@ export function frameToIntent(shadow: PipelineResult): TranslatedIntent | null {
 
   // Frame intent labels: map by index. DAG sort by seq aligns 1:1 with frame.intents[]
   // in the common case; we tolerate length mismatch by falling back to template.
-  const frameIntents = shadow.frame.intents as IntentItem[] | undefined;
+  const frameIntents = pipeline.frame.intents as IntentItem[] | undefined;
   const labelFor = (i: number): UserFacingLabel | undefined => {
     const it = frameIntents?.[i];
     if (!it) return undefined;
@@ -198,14 +200,15 @@ export function frameToIntent(shadow: PipelineResult): TranslatedIntent | null {
           // and only the primary step executes.
           multiIntentAnalysis: {
             hasMultipleIntents: true,
-            summary: shadow.frame.reasoning || `${extrasWithLabels.length + 1} intents from frame`,
+            summary: pipeline.frame.reasoning || `${extrasWithLabels.length + 1} intents from frame`,
           },
         }
       : {}),
     ...(mergedResolutions.length
       ? { requiresMatching: true, resolutions: mergedResolutions }
       : {}),
-    confidence: shadow.frame.confidence,
+    confidence: pipeline.frame.confidence,
+    contextSufficient: pipeline.frame.contextSufficient ?? false,
   };
 }
 

@@ -2,7 +2,7 @@ import { Crf5c_agentlogsService } from './Crf5c_agentlogsService';
 import type { Crf5c_agentlogs } from '../models/Crf5c_agentlogsModel';
 import type { IGetAllOptions } from '../models/CommonModels';
 import type { AgentLog } from '../models/agent-log-model';
-import { requireCreated, requireId } from './_adapter-utils';
+import { createWithReadback, requireId } from './_adapter-utils';
 
 function fromDv(dv: Crf5c_agentlogs): AgentLog {
   return {
@@ -31,9 +31,14 @@ function toDv(r: Partial<Omit<AgentLog, 'id'>>): Record<string, unknown> {
 
 export class AgentLogService {
   static async create(record: Omit<AgentLog, 'id'>): Promise<AgentLog> {
-    const result = await Crf5c_agentlogsService.create(toDv(record) as any);
-    if (!result.success) throw result.error;
-    return fromDv(requireCreated(result.data, 'crf5c_agentlogid', 'AgentLog'));
+    const dvPayload = toDv(record);
+    return createWithReadback(
+      (p) => Crf5c_agentlogsService.create(p as any),
+      (o) => Crf5c_agentlogsService.getAll(o),
+      dvPayload, 'crf5c_agentlogid', 'AgentLog',
+      `crf5c_sessionid eq '${record.sessionID}'`,
+      fromDv,
+    );
   }
 
   static async update(id: string, changedFields: Partial<Omit<AgentLog, 'id'>>): Promise<AgentLog> {

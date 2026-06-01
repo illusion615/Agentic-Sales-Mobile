@@ -10,7 +10,7 @@
  */
 
 import { availableFunctions, type FunctionDefinition } from './function-registry';
-import type { IntentItem, FrameSalesObject } from './frame-shadow';
+import type { IntentItem, FrameSalesObject } from './frame';
 
 /** Map each function to the sales object(s) it operates on. */
 const SKILL_OBJECT_MAP: Record<string, FrameSalesObject[]> = {
@@ -43,6 +43,12 @@ const SKILL_OBJECT_MAP: Record<string, FrameSalesObject[]> = {
 
   // Product (Copilot Studio)
   queryCopilotStudio: ['Product'],
+
+  // LLM-backed AI skills
+  generateInsight: ['Account', 'Opportunity', 'Activity'],
+  generateBriefTranscript: ['Account', 'Opportunity', 'Activity'],
+  summarizeEntities: ['Account', 'Opportunity', 'Activity', 'Contact'],
+  analyzeOpportunity: ['Opportunity', 'Activity'],
 };
 
 /** Skills that are always available regardless of salesObject targeting. */

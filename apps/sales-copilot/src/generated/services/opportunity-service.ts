@@ -10,7 +10,7 @@ import {
   OpportunityStageKeyToLabel,
   type Opportunity,
 } from '../models/opportunity-model';
-import { labelToDv, dvNum, numToDv, mapOptions, dvChoice, dvLookupName, requireCreated, requireId } from './_adapter-utils';
+import { labelToDv, dvNum, numToDv, mapOptions, dvChoice, dvLookupName, createWithReadback, requireId } from './_adapter-utils';
 
 const FIELD_MAP: Record<string, string> = {
   id: 'crf5c_opportunity1id',
@@ -65,9 +65,14 @@ function toDv(r: Partial<Omit<Opportunity, 'id'>>): Record<string, unknown> {
 
 export class OpportunityService {
   static async create(record: Omit<Opportunity, 'id'>): Promise<Opportunity> {
-    const result = await Crf5c_opportunity1sService.create(toDv(record) as any);
-    if (!result.success) throw result.error;
-    return fromDv(requireCreated(result.data, 'crf5c_opportunity1id', 'Opportunity'));
+    const dvPayload = toDv(record);
+    return createWithReadback(
+      (p) => Crf5c_opportunity1sService.create(p as any),
+      (o) => Crf5c_opportunity1sService.getAll(o),
+      dvPayload, 'crf5c_opportunity1id', 'Opportunity',
+      `crf5c_name1 eq '${record.name1}'`,
+      fromDv,
+    );
   }
 
   static async update(id: string, changedFields: Partial<Omit<Opportunity, 'id'>>): Promise<Opportunity> {

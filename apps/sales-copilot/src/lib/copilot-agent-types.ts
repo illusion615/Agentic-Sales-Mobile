@@ -3,11 +3,18 @@
  * Extracted from copilot-agent.ts to reduce file size and enable reuse.
  */
 
-import type { ValidatedIntentResult, SingleIntent, PendingResolution } from './agent-utils';
+import type { ValidatedIntentResult, SingleIntent, PendingResolution, AwaitingClarification } from './agent-utils';
 
 export const GREETING_PATTERN = /^(hi|hello|hey|你好|您好|嗨|早上好|下午好|晚上好|good\s*(morning|afternoon|evening))\b/i;
 
 export const DAILY_REPORT_PATTERN = /daily\s*report|today'?s?\s*report|工作日报|今日日报|今天的报告|生成今日|生成[\u4e00-\u9fa5]*?报/i;
+
+export interface ThinkingStep {
+  stage: 'intent' | 'matching' | 'executing' | 'generating';
+  status: 'pending' | 'active' | 'completed';
+  label: string;
+  detail?: string;
+}
 
 export interface ThinkingProgress {
   stage: 'intent' | 'executing' | 'generating' | 'matching';
@@ -26,12 +33,7 @@ export interface AgentResponse {
   functionResult?: unknown;
   invalidateQueries?: string[];
   latencyMs?: number;
-  thinkingSteps?: Array<{
-    stage: string;
-    status: string;
-    label?: string;
-    detail?: string;
-  }>;
+  thinkingSteps?: ThinkingStep[];
   recordList?: {
     type: 'account' | 'opportunity' | 'activity' | 'contact';
     records: Array<{
@@ -65,22 +67,7 @@ export interface AgentResponse {
   /** Raw parsed intent from LLM Pass-1. */
   rawIntent?: IntentResult;
   /** Awaiting clarification state for resolution cascade. */
-  awaitingClarification?: {
-    kind: 'awaiting-clarification';
-    pendingResolutions: Array<{
-      entityType: string;
-      query: string;
-      scopeBy?: string;
-      intentIndex?: number;
-    }>;
-    originalIntent: {
-      function: string;
-      arguments: Record<string, unknown>;
-      additionalActions?: Array<{ function: string; arguments: Record<string, unknown>; reason?: string }>;
-    };
-    remainingResolutions?: Array<unknown>;
-    resolvedSoFar?: Record<string, string>;
-  };
+  awaitingClarification?: AwaitingClarification;
 }
 
 export interface IntentResult extends Partial<ValidatedIntentResult> {

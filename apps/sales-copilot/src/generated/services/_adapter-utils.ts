@@ -1,3 +1,5 @@
+import { withRetry } from '@/lib/retry';
+
 /**
  * Shared adapter utilities for mapping between
  * Dataverse column names/types and app-facing friendly types.
@@ -7,11 +9,15 @@ const CHOICE_BASE = 995340000;
 
 /**
  * Guard for mutation/read ops: refuse to forward an empty id to the generated
- * Crf5c_*Service layer (which would blindly call `id.toString()` and emit the
- * unreadable "undefined is not an object (evaluating 'e.toString')" error).
+ * Crf5c_*Service layer.
  */
 export function requireId(id: string | undefined | null, op: string, entity: string): asserts id is string {
-  if (!id) throw new Error(`${entity}Service.${op}() called with empty id`);
+  if (!id) {
+    const err = new Error(`${entity}Service.${op}() called with empty id`);
+    (err as Error & { agentErrorType: string; agentErrorContext: Record<string, unknown> }).agentErrorType = 'validation';
+    (err as Error & { agentErrorContext: Record<string, unknown> }).agentErrorContext = { op, entity };
+    throw err;
+  }
 }
 
 /**
@@ -31,29 +37,37 @@ export function requireCreated<T>(
 ): T {
   const pk = String(pkField);
   if (!data || typeof data !== 'object') {
-    throw new Error(
-      `Dataverse create for ${entity} returned success but no row body ` +
-      `(expected PK ${pk}). Likely cause: table not deployed to this environment, ` +
-      `or the SDK swallowed an underlying error. Check the network log for the create call.`
+    const err = new Error(
+      `Dataverse create for ${entity} returned success but no row body (expected PK ${pk}).`
     );
+    (err as Error & { agentErrorType: string; agentErrorContext: Record<string, unknown> }).agentErrorType = 'dataverse';
+    (err as Error & { agentErrorContext: Record<string, unknown> }).agentErrorContext = { entity, pk, cause: 'no_row_body' };
+    throw err;
   }
   const row = data as Record<string, unknown>;
   const pkValue = row[pk];
   if (typeof pkValue === 'string' && pkValue) return data;
 
   const keys = Object.keys(row);
-  throw new Error(
-    `Dataverse create for ${entity} returned a row without its primary key ` +
-    `(expected ${pk}). Row keys actually returned: [${keys.join(', ') || '<empty>'}]. ` +
-    `This violates the SDK type contract — check (1) table is deployed to this ` +
-    `environment, (2) connector grants Read after Create, (3) required fields ` +
-    `in the create payload aren't being silently rejected.`
+  const err = new Error(
+    `Dataverse create for ${entity} returned a row without its primary key (expected ${pk}). Row keys: [${keys.join(', ') || '<empty>'}].`
   );
+  (err as Error & { agentErrorType: string; agentErrorContext: Record<string, unknown> }).agentErrorType = 'dataverse';
+  (err as Error & { agentErrorContext: Record<string, unknown> }).agentErrorContext = { entity, pk, returnedKeys: keys, cause: 'pk_missing' };
+  throw err;
 }
 
 /**
  * Best-effort ID extractor for Dataverse create results.
- * Returns undefined instead of throwing when data is missing (hosted mode 204).
+ *
+ * The Power Apps SDK `createRecordAsync` behaves differently between runtimes:
+ *   - Browser dev mode (npx power-apps run): returns full row with PK field
+ *   - Power Apps hosted: may return `{ success: true, data: undefined }` because
+ *     Dataverse returns 204 No Content (no `Prefer: return=representation` header)
+ *
+ * This function tries multiple strategies and returns undefined if none work,
+ * instead of throwing — letting the caller handle the missing-ID case
+ * (typically via a read-back query).
  */
 export function extractCreatedId<T>(
   data: T | undefined | null,
@@ -62,8 +76,10 @@ export function extractCreatedId<T>(
 ): string | undefined {
   if (!data || typeof data !== 'object') return undefined;
   const row = data as Record<string, unknown>;
+  // Strategy 1: PK field by its canonical column name
   const pkValue = row[pkField];
   if (typeof pkValue === 'string' && pkValue) return pkValue;
+  // Strategy 2: generic 'id' field (some SDK versions)
   const genericId = row['id'];
   if (typeof genericId === 'string' && genericId) return genericId;
   return undefined;
@@ -71,7 +87,21 @@ export function extractCreatedId<T>(
 
 /**
  * Resilient create-and-return pattern for Dataverse.
- * Tries response data first (browser mode), falls back to read-back query (hosted mode 204).
+ *
+ * 1. Calls `createFn(dvPayload)` → if response data has PK, return it.
+ * 2. If hosted Power Apps SDK returns no data (204 No Content), do a read-back
+ *    query using `getAllFn` with the caller-provided filter to find the
+ *    just-created record.
+ * 3. If read-back also fails, throw with a diagnostic error.
+ *
+ * Usage in each service:
+ *   return createWithReadback(
+ *     (p) => Crf5c_XxxService.create(p),
+ *     (o) => Crf5c_XxxService.getAll(o),
+ *     dvPayload, 'crf5c_xxxid', 'Xxx',
+ *     `crf5c_somefield eq '${record.someField}'`,
+ *     fromDv,
+ *   );
  */
 export async function createWithReadback<TDv, TApp>(
   createFn: (payload: Record<string, unknown>) => Promise<{ success: boolean; data: TDv; error?: unknown }>,
@@ -84,12 +114,16 @@ export async function createWithReadback<TDv, TApp>(
 ): Promise<TApp> {
   const result = await createFn(dvPayload);
   if (!result.success) throw result.error;
+
+  // Best case: SDK returned the full row with PK (browser dev mode)
   if (result.data && typeof result.data === 'object') {
     const pk = (result.data as Record<string, unknown>)[pkField];
     if (typeof pk === 'string' && pk) return mapFn(result.data);
   }
+
+  // Hosted Power Apps: create succeeded but no data body (204 No Content).
+  // Read back the just-created record with retry (Dataverse eventual consistency).
   console.warn(`[${entity}] createRecordAsync returned no data body — reading back via getAll`);
-  const { withRetry } = await import('@/lib/retry');
   const readback = await withRetry(
     () => getAllFn({ filter: readbackFilter, orderBy: ['createdon desc'], top: 1 }),
     { attempts: 3, backoffMs: 300, jitterMs: 200 },
@@ -97,7 +131,11 @@ export async function createWithReadback<TDv, TApp>(
   if (readback.success && readback.data && readback.data.length > 0) {
     return mapFn(readback.data[0]);
   }
-  throw new Error(`Dataverse create for ${entity} succeeded but could not read back the record. Filter: ${readbackFilter}`);
+
+  throw new Error(
+    `Dataverse create for ${entity} succeeded but could not read back the record. ` +
+    `Filter used: ${readbackFilter}. This may indicate a Read permission issue on the table.`
+  );
 }
 
 /**

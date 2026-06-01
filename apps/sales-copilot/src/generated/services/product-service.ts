@@ -2,7 +2,7 @@ import { Crf5c_productsService } from './Crf5c_productsService';
 import type { Crf5c_products } from '../models/Crf5c_productsModel';
 import type { IGetAllOptions } from '../models/CommonModels';
 import type { Product } from '../models/product-model';
-import { dvNum, numToDv, mapOptions, requireCreated, requireId } from './_adapter-utils';
+import { dvNum, numToDv, mapOptions, createWithReadback, requireId } from './_adapter-utils';
 
 const FIELD_MAP: Record<string, string> = {
   id: 'crf5c_productid',
@@ -45,9 +45,14 @@ function toDv(r: Partial<Omit<Product, 'id'>>): Record<string, unknown> {
 
 export class ProductService {
   static async create(record: Omit<Product, 'id'>): Promise<Product> {
-    const result = await Crf5c_productsService.create(toDv(record) as any);
-    if (!result.success) throw result.error;
-    return fromDv(requireCreated(result.data, 'crf5c_productid', 'Product'));
+    const dvPayload = toDv(record);
+    return createWithReadback(
+      (p) => Crf5c_productsService.create(p as any),
+      (o) => Crf5c_productsService.getAll(o),
+      dvPayload, 'crf5c_productid', 'Product',
+      `crf5c_productname eq '${record.productName}'`,
+      fromDv,
+    );
   }
 
   static async update(id: string, changedFields: Partial<Omit<Product, 'id'>>): Promise<Product> {

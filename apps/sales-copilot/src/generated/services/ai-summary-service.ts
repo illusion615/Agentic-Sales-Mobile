@@ -10,7 +10,7 @@ import {
   AISummaryStatusKeyToLabel,
   type AISummary,
 } from '../models/ai-summary-model';
-import { dvChoice, labelToDv, requireCreated, requireId } from './_adapter-utils';
+import { dvChoice, labelToDv, createWithReadback, requireId } from './_adapter-utils';
 
 function fromDv(dv: Crf5c_aisummaries): AISummary {
   const d = dv as unknown as Record<string, unknown>;
@@ -40,9 +40,14 @@ function toDv(r: Partial<Omit<AISummary, 'id'>>): Record<string, unknown> {
 
 export class AISummaryService {
   static async create(record: Omit<AISummary, 'id'>): Promise<AISummary> {
-    const result = await Crf5c_aisummariesService.create(toDv(record) as any);
-    if (!result.success) throw result.error;
-    return fromDv(requireCreated(result.data, 'crf5c_aisummaryid', 'AISummary'));
+    const dvPayload = toDv(record);
+    return createWithReadback(
+      (p) => Crf5c_aisummariesService.create(p as any),
+      (o) => Crf5c_aisummariesService.getAll(o),
+      dvPayload, 'crf5c_aisummaryid', 'AISummary',
+      `crf5c_entityid eq '${record.entityID}'`,
+      fromDv,
+    );
   }
 
   static async update(id: string, changedFields: Partial<Omit<AISummary, 'id'>>): Promise<AISummary> {

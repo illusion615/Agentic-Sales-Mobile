@@ -166,8 +166,8 @@ async function emitSummary(queue: IntentQueue, deps: RuntimeDeps): Promise<Inten
   if (top.length <= 1) return { ...queue, summaryEmitted: true };
   const isZh = deps.locale === 'zh-Hans';
 
-  // ---- Check if all steps are query functions → aggregate with LLM ----
-  const queryFns = ['queryActivities', 'queryOpportunities', 'queryAccounts', 'queryContacts'];
+  // ---- Check if all steps are query/analysis functions → aggregate with LLM ----
+  const queryFns = ['queryActivities', 'queryOpportunities', 'queryAccounts', 'queryContacts', 'suggestPlan', 'analyzePipeline'];
   const allQueries = top.every((i) => queryFns.includes(i.function));
   
   if (allQueries && top.some((i) => i.status === 'confirmed')) {
@@ -182,10 +182,6 @@ async function emitSummary(queue: IntentQueue, deps: RuntimeDeps): Promise<Inten
 
     // Get the original user message from the queue
     const userMsg = queue.userMessage || '';
-    
-    const systemPrompt = isZh
-      ? `你是一个销售助手。用户请求了一个多步分析任务。以下是每一步的查询结果数据。请基于所有数据生成一份完整的、有洞察力的报告来回答用户的原始请求。使用 markdown 格式，分章节输出。`
-      : `You are a sales assistant. The user requested a multi-step analysis. Below are the query results from each step. Generate a complete, insightful report based on all the data to answer the user's original request. Use markdown format with clear sections.`;
 
     try {
       const dagResult = await executeFunction('summarizeDAGResults', {
@@ -229,24 +225,27 @@ async function emitSummary(queue: IntentQueue, deps: RuntimeDeps): Promise<Inten
   }
 
   // "What was recorded" — bullet list with key details from intent arguments
+  // Only include items that have a meaningful title (created records, not queries)
   if (done.length > 0) {
     const bullets = done.map((i) => {
       const a = i.arguments;
       const title = (a.title ?? a.name ?? a.fullName ?? i.result?.recordName ?? '') as string;
+      if (!title) return null;
       const account = (a.accountName ?? queue.resolvedContext.accountName ?? '') as string;
       const date = (a.scheduledStart ?? a.scheduledDate ?? '') as string;
       const contact = (a.contactName ?? '') as string;
       let detail = title;
-      // Append key context for salespeople: date, account, contact
       const extras: string[] = [];
       if (date) extras.push(date);
       if (account && !title.toLowerCase().includes(account.toLowerCase())) extras.push(account);
       if (contact && !title.toLowerCase().includes(contact.toLowerCase())) extras.push(contact);
       if (extras.length) detail += ` (${extras.join(' · ')})`;
       return `• ${detail}`;
-    });
-    parts.push(isZh ? '已记录：' : 'Recorded:');
-    parts.push(...bullets);
+    }).filter((b): b is string => b !== null);
+    if (bullets.length > 0) {
+      parts.push(isZh ? '已记录：' : 'Recorded:');
+      parts.push(...bullets);
+    }
   }
 
   // "Skipped items" — brief note so salesperson knows what wasn't done

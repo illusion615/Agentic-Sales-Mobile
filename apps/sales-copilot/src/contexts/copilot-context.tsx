@@ -7,7 +7,7 @@ import {
 } from '@/services/copilot-service';
 import { getLocale, getSimulateStreaming, type Locale } from '@/lib/i18n';
 import { toast } from 'sonner';
-import { type ThinkingProgress, type AgentResponse, type IntentResult } from '@/lib/copilot-agent';
+import { type ThinkingProgress, type AgentResponse, type IntentResult, type ThinkingStep } from '@/lib/copilot-agent';
 import { buildQueueFromIntent, findIntentByMessageId, type IntentQueue } from '@/lib/intent-queue';
 import type * as QR from '@/lib/intent-queue-runtime';
 
@@ -25,13 +25,7 @@ import {
 type IntentsOverview = NonNullable<AgentResponse['intentsOverview']>;
 
 export type { ExtractedVisitData } from '@/lib/visit-extraction';
-
-export interface ThinkingStep {
-  stage: 'intent' | 'matching' | 'executing' | 'generating';
-  status: 'pending' | 'active' | 'completed';
-  label: string;
-  detail?: string;
-}
+export type { ThinkingStep } from '@/lib/copilot-agent';
 
 export interface ChatMessage {
   id: string;

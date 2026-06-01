@@ -968,9 +968,13 @@ export async function generateVoiceSummary(
     ? '你是一个助手，负责将内容总结为简短的语音播报。请用简洁自然的中文口语风格，概括主要信息，不超过3句话。'
     : 'You are an assistant that summarizes content into brief voice announcements. Use concise, natural spoken language, summarizing key information in no more than 3 sentences.');
   
-  const userPrompt = locale === 'zh-Hans'
-    ? `请将以下内容总结为简短的语音播报：\n\n${content}`
-    : `Please summarize the following content into a brief voice announcement:\n\n${content}`;
+  // When a custom system prompt is provided, pass content directly as user message
+  // (don't wrap in "voice announcement" framing which conflicts with JSON/analysis prompts)
+  const userPrompt = customSystemPrompt
+    ? content
+    : (locale === 'zh-Hans'
+      ? `请将以下内容总结为简短的语音播报：\n\n${content}`
+      : `Please summarize the following content into a brief voice announcement:\n\n${content}`);
 
   // Power Automate uses SDK connector — no endpoint needed
   if (config.provider === 'power-automate') {

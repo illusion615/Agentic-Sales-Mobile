@@ -310,43 +310,78 @@ export interface CircuitBreakerState {
   openedAt: number;
 }
 
-const CB_PREFIX = 'copilot-circuit-breaker';
+const CIRCUIT_BREAKER_PREFIX = 'copilot-circuit-breaker';
 const MAX_FAILURES = 3;
-const RECOVERY_TIME_MS = 30000;
+const RECOVERY_TIME_MS = 30000; // 30 seconds
 
-function cbKey(ch: CircuitBreakerChannel = 'llm'): string { return `${CB_PREFIX}-${ch}`; }
+function cbKey(channel: CircuitBreakerChannel = 'llm'): string {
+  return `${CIRCUIT_BREAKER_PREFIX}-${channel}`;
+}
 
+/**
+ * Get current circuit breaker state for a channel
+ */
 export function getCircuitBreakerState(channel: CircuitBreakerChannel = 'llm'): CircuitBreakerState {
   try {
     const stored = sessionStorage.getItem(cbKey(channel));
     if (stored) {
       const state = JSON.parse(stored) as CircuitBreakerState;
+      
+      // Check if recovery time has passed
       if (state.isOpen && Date.now() - state.openedAt > RECOVERY_TIME_MS) {
+        // Half-open: allow one attempt
         return { ...state, isOpen: false };
       }
       return state;
     }
-  } catch { /* ignore */ }
+  } catch {
+    // Ignore parse errors
+  }
   return { failures: 0, lastFailure: 0, isOpen: false, openedAt: 0 };
 }
 
+/**
+ * Record a failure in the circuit breaker for a channel
+ */
 export function recordCircuitBreakerFailure(channel: CircuitBreakerChannel = 'llm'): void {
   const state = getCircuitBreakerState(channel);
   const now = Date.now();
+  
+  // Reset failures if last failure was more than 60 seconds ago
   const failures = now - state.lastFailure > 60000 ? 1 : state.failures + 1;
+  
   const newState: CircuitBreakerState = {
-    failures, lastFailure: now,
+    failures,
+    lastFailure: now,
     isOpen: failures >= MAX_FAILURES,
     openedAt: failures >= MAX_FAILURES ? now : state.openedAt,
   };
-  try { sessionStorage.setItem(cbKey(channel), JSON.stringify(newState)); } catch { /* ignore */ }
-  if (newState.isOpen) console.warn(`[CircuitBreaker:${channel}] OPEN for`, RECOVERY_TIME_MS / 1000, 's');
+  
+  try {
+    sessionStorage.setItem(cbKey(channel), JSON.stringify(newState));
+  } catch {
+    // Ignore storage errors
+  }
+  
+  if (newState.isOpen) {
+    console.warn(`[CircuitBreaker:${channel}] OPEN - calls disabled for`, RECOVERY_TIME_MS / 1000, 'seconds');
+  }
 }
 
+/**
+ * Record a success in the circuit breaker (reset state) for a channel
+ */
 export function recordCircuitBreakerSuccess(channel: CircuitBreakerChannel = 'llm'): void {
-  try { sessionStorage.removeItem(cbKey(channel)); } catch { /* ignore */ }
+  try {
+    sessionStorage.removeItem(cbKey(channel));
+  } catch {
+    // Ignore storage errors
+  }
 }
 
+/**
+ * Check if circuit breaker is open (blocking calls) for a channel
+ */
 export function isCircuitBreakerOpen(channel: CircuitBreakerChannel = 'llm'): boolean {
   return getCircuitBreakerState(channel).isOpen;
 }

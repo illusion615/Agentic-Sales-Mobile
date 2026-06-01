@@ -11,7 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import { resolveRefs, isDagPlan, DagPlanSchema, SingleIntentSchema } from '@/lib/dag-schema';
 import { selectSkillsForIntents, formatSkillsForPrompt } from '@/lib/skills-selector';
-import { tryParseFrame, type IntentItem } from '@/lib/frame-shadow';
+import { tryParseFrame, type IntentItem } from '@/lib/frame';
 
 function makeIntent(
   salesObject: IntentItem['salesObject'],

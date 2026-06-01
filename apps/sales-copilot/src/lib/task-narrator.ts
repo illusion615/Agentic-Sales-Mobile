@@ -98,25 +98,13 @@ function buildPrompt(input: TaskNarrationInput): string {
     : input.prior
         .map((p, i) => `${i + 1}. ${p.label} → ${p.outcome}`)
         .join('\n');
-  const lang = isZh ? '中文' : 'English';
-  const example = isZh
-    ? '示例：用 Royal London Hospital 作为客户，创建新商机'
-    : 'Example: Create a new opportunity for Royal London Hospital';
   return [
-    isZh
-      ? '你是销售助手的对话叙述者。下面是用户的多步任务执行进度。请用一句自然的话宣告即将开始的"下一步任务"，要带上从前序任务中已经确定的关键实体（如客户/联系人/商机名称），让用户清楚这一步会做什么。'
-      : 'You are the narrator for a sales assistant\'s multi-step task flow. Announce the NEXT task in one natural sentence, carrying forward the key entities (account / contact / opportunity names) that prior tasks have already resolved.',
-    '',
     isZh ? `任务进度：${input.taskIndex}/${input.total}` : `Task progress: ${input.taskIndex} of ${input.total}`,
     isZh ? `下一步原始标题：${input.label}` : `Next task raw label: ${input.label}`,
     isZh ? `技能函数：${input.fnName}` : `Skill function: ${input.fnName}`,
     '',
     isZh ? '前序任务结果：' : 'Prior task outcomes:',
     priorBlock,
-    '',
-    isZh
-      ? `要求：用${lang}回复，只输出一句话（不超过 40 字），不要前缀编号、不要加引号、不要解释。${example}`
-      : `Requirements: Reply in ${lang}, output ONE sentence only (max 20 words). No prefix, no quotes, no explanation. ${example}`,
   ].join('\n');
 }
 

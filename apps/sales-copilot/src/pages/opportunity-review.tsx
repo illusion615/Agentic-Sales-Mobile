@@ -5,7 +5,7 @@ import { ArrowLeft, MoreHorizontal, AlertTriangle, TrendingUp, TrendingDown, Min
 import { cn } from '@/lib/utils';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useUser } from '@/hooks/use-user';
-import { getLocale, generateVoiceSummary, getAdminMode, type Locale } from '@/lib/i18n';
+import { getLocale, getAdminMode, type Locale } from '@/lib/i18n';
 import { useFirstMount } from '@/hooks/use-first-mount';
 import type { Opportunity } from '@/generated/models/opportunity-model';
 
@@ -142,47 +142,23 @@ export default function OpportunityReviewPage() {
         lastAction: o.lastaction || '',
       }));
 
-      const systemPrompt = locale === 'zh-Hans'
-        ? `你是销售经理的AI助手。基于以下销售pipeline数据，生成恰好4个摘要卡片，用JSON数组格式返回。
-每张卡片关注不同角度：
-1. 整体概览 - pipeline健康度和关键数字
-2. 需要行动 - 最紧急需要处理的商机
-3. 风险预警 - 有风险的商机和建议
-4. 近期机会 - 最有希望近期成交的商机
+      const { executeFunction } = await import('@/lib/function-executor');
+      const result = await executeFunction('summarizeEntities', {
+        data: JSON.stringify(pipelineData),
+        entityType: 'opportunity',
+      }, { locale });
 
-返回格式：[{"title":"标题","content":"内容（2-3句话，简洁有力）"}]
-只返回JSON数组，不要其他内容。`
-        : `You are an AI assistant for a sales manager. Based on the following pipeline data, generate exactly 4 summary cards as a JSON array.
-Each card focuses on a different angle:
-1. Overview - pipeline health and key metrics
-2. Action Required - most urgent opportunities needing attention
-3. Risk Alert - at-risk opportunities and recommendations
-4. Near-term Wins - opportunities most likely to close soon
-
-Return format: [{"title":"Title","content":"Content (2-3 sentences, concise and actionable)"}]
-Return ONLY the JSON array, no other text.`;
-
-      const result = await generateVoiceSummary(
-        JSON.stringify(pipelineData),
-        locale,
-        systemPrompt,
-        undefined,
-        undefined,
-        'json'
-      );
-
-      if (result.success && result.summary) {
-        const jsonMatch = result.summary.match(/\[[\s\S]*\]/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]) as AISummarySlide[];
+      if (result.success && result.data) {
+        const parsed = result.data as AISummarySlide[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
           setAiSlides(parsed);
           setCurrentSlide(0);
-          // Cache
-          localStorage.setItem(AI_SUMMARY_CACHE_KEY, JSON.stringify({
-            ts: Date.now(),
-            slides: parsed,
-          }));
+          localStorage.setItem(AI_SUMMARY_CACHE_KEY, JSON.stringify({ ts: Date.now(), slides: parsed }));
+        } else {
+          console.warn('[OppReview] AI summary: unexpected data shape');
         }
+      } else {
+        console.warn('[OppReview] AI summary failed:', result.error || 'no summary');
       }
     } catch (e) {
       console.error('[OppReview] AI summary error:', e);
@@ -353,7 +329,7 @@ Return ONLY the JSON array, no other text.`;
                   {formatCurrency(totalPipeline)}
                 </p>
               </div>
-              <div className="flex gap-4 text-center">
+              <div className="grid grid-cols-3 gap-2 text-center min-w-[150px]">
                 <div>
                   <p className="text-title font-bold text-foreground">{activeOpps.length}</p>
                   <p className="text-[10px] text-muted-foreground">

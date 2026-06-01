@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence, type PanInfo } from 'motion/react';
-import { ChevronRight, ChevronLeft, ChevronDown, Calendar, Target, Phone, MapPin, FileText, CheckCircle2, Clock, X, Lightbulb, AlertTriangle, TrendingUp, Sparkles, Mail, CheckSquare, RefreshCw, Play, Square } from 'lucide-react';
+import { ChevronRight, ChevronLeft, ChevronDown, Calendar, Target, Phone, MapPin, FileText, CheckCircle2, Clock, X, Lightbulb, AlertTriangle, TrendingUp, Sparkles, Mail, CheckSquare, RefreshCw, Play, Square, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatCurrencyCompact } from '@/lib/format-currency';
 import { getLocale, getWeekStartDay } from '@/lib/i18n';
@@ -80,8 +80,8 @@ interface KPICardsProps {
   data: KPIData;
   isLoading?: boolean;
   onNavigate: (path: string) => void;
-  onMarkDone?: (itemId: string) => void;
-  onReschedule?: (itemId: string, newDate: Date) => void;
+  onMarkDone?: (itemId: string) => void | Promise<void>;
+  onReschedule?: (itemId: string, newDate: Date) => void | Promise<void>;
   // Activity-related business insights to display in agenda card
   activityInsights?: BusinessInsight[];
   // All activities for calendar month view
@@ -218,6 +218,7 @@ export function KPICards({
   // Remove insightCurrentIndex as it's no longer needed for swipe between calendar and insights
   const [overdueSheetOpen, setOverdueSheetOpen] = useState(false);
   const [overdueCurrentIndex, setOverdueCurrentIndex] = useState(0);
+  const [overdueProcessing, setOverdueProcessing] = useState<string | null>(null); // tracks which action is in-flight
   const [showCelebration, setShowCelebration] = useState(false);
   const [prevOverdueCount, setPrevOverdueCount] = useState<number | null>(null);
   const [agendaExpanded, setAgendaExpanded] = useState(false);
@@ -1155,7 +1156,8 @@ export function KPICards({
                 <Button
                   variant="outline"
                   className="h-12 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700 hover:bg-emerald-100 dark:hover:bg-emerald-800/50"
-                  onClick={() => {
+                  disabled={overdueProcessing !== null}
+                  onClick={async () => {
                     const sortedOverdue = data.overdueItems?.slice().sort((a: AgendaItem, b: AgendaItem) => {
                       const dateA = a.scheduledDate?.getTime() ?? 0;
                       const dateB = b.scheduledDate?.getTime() ?? 0;
@@ -1163,7 +1165,12 @@ export function KPICards({
                     }) ?? [];
                     const currentItem = sortedOverdue[overdueCurrentIndex];
                     if (onMarkDone && currentItem) {
-                      onMarkDone(currentItem.id);
+                      setOverdueProcessing('done');
+                      try {
+                        await onMarkDone(currentItem.id);
+                      } finally {
+                        setOverdueProcessing(null);
+                      }
                       if (overdueCurrentIndex >= overdueCount - 1) {
                         setOverdueCurrentIndex(Math.max(0, overdueCount - 2));
                       }
@@ -1173,13 +1180,15 @@ export function KPICards({
                     }
                   }}
                 >
-                  <CheckCircle2 className="w-4 h-4 mr-2" />
-                  {locale === 'zh-Hans' ? '标记完成' : 'Mark Done'}
+                  {overdueProcessing === 'done'
+                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{locale === 'zh-Hans' ? '处理中...' : 'Processing...'}</>
+                    : <><CheckCircle2 className="w-4 h-4 mr-2" />{locale === 'zh-Hans' ? '标记完成' : 'Mark Done'}</>}
                 </Button>
                 <Button
                   variant="outline"
                   className="h-12 bg-destructive/10 text-destructive border-destructive/40 hover:bg-destructive/20"
-                  onClick={() => {
+                  disabled={overdueProcessing !== null}
+                  onClick={async () => {
                     const sortedOverdue = data.overdueItems?.slice().sort((a: AgendaItem, b: AgendaItem) => {
                       const dateA = a.scheduledDate?.getTime() ?? 0;
                       const dateB = b.scheduledDate?.getTime() ?? 0;
@@ -1187,7 +1196,12 @@ export function KPICards({
                     }) ?? [];
                     const currentItem = sortedOverdue[overdueCurrentIndex];
                     if (onMarkDone && currentItem) {
-                      onMarkDone(currentItem.id);
+                      setOverdueProcessing('cancel');
+                      try {
+                        await onMarkDone(currentItem.id);
+                      } finally {
+                        setOverdueProcessing(null);
+                      }
                       if (overdueCurrentIndex >= overdueCount - 1) {
                         setOverdueCurrentIndex(Math.max(0, overdueCount - 2));
                       }
@@ -1197,8 +1211,9 @@ export function KPICards({
                     }
                   }}
                 >
-                  <X className="w-4 h-4 mr-2" />
-                  {locale === 'zh-Hans' ? '取消任务' : 'Cancel Task'}
+                  {overdueProcessing === 'cancel'
+                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{locale === 'zh-Hans' ? '处理中...' : 'Processing...'}</>
+                    : <><X className="w-4 h-4 mr-2" />{locale === 'zh-Hans' ? '取消任务' : 'Cancel Task'}</>}
                 </Button>
               </div>
               
@@ -1219,7 +1234,8 @@ export function KPICards({
                 <Button
                   variant="outline"
                   className="h-12"
-                  onClick={() => {
+                  disabled={overdueProcessing !== null}
+                  onClick={async () => {
                     const sortedOverdue = data.overdueItems?.slice().sort((a: AgendaItem, b: AgendaItem) => {
                       const dateA = a.scheduledDate?.getTime() ?? 0;
                       const dateB = b.scheduledDate?.getTime() ?? 0;
@@ -1227,7 +1243,12 @@ export function KPICards({
                     }) ?? [];
                     const currentItem = sortedOverdue[overdueCurrentIndex];
                     if (currentItem && onReschedule) {
-                      onReschedule(currentItem.id, quickDates.today);
+                      setOverdueProcessing('today');
+                      try {
+                        await onReschedule(currentItem.id, quickDates.today);
+                      } finally {
+                        setOverdueProcessing(null);
+                      }
                       if (overdueCurrentIndex >= overdueCount - 1) {
                         setOverdueCurrentIndex(Math.max(0, overdueCount - 2));
                       }
@@ -1237,12 +1258,15 @@ export function KPICards({
                     }
                   }}
                 >
-                  {locale === 'zh-Hans' ? '今天' : 'Today'}
+                  {overdueProcessing === 'today'
+                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{locale === 'zh-Hans' ? '处理中...' : 'Processing...'}</>
+                    : locale === 'zh-Hans' ? '今天' : 'Today'}
                 </Button>
                 <Button
                   variant="outline"
                   className="h-12"
-                  onClick={() => {
+                  disabled={overdueProcessing !== null}
+                  onClick={async () => {
                     const sortedOverdue = data.overdueItems?.slice().sort((a: AgendaItem, b: AgendaItem) => {
                       const dateA = a.scheduledDate?.getTime() ?? 0;
                       const dateB = b.scheduledDate?.getTime() ?? 0;
@@ -1250,7 +1274,12 @@ export function KPICards({
                     }) ?? [];
                     const currentItem = sortedOverdue[overdueCurrentIndex];
                     if (currentItem && onReschedule) {
-                      onReschedule(currentItem.id, quickDates.tomorrow);
+                      setOverdueProcessing('tomorrow');
+                      try {
+                        await onReschedule(currentItem.id, quickDates.tomorrow);
+                      } finally {
+                        setOverdueProcessing(null);
+                      }
                       if (overdueCurrentIndex >= overdueCount - 1) {
                         setOverdueCurrentIndex(Math.max(0, overdueCount - 2));
                       }
@@ -1260,12 +1289,15 @@ export function KPICards({
                     }
                   }}
                 >
-                  {locale === 'zh-Hans' ? '明天' : 'Tomorrow'}
+                  {overdueProcessing === 'tomorrow'
+                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{locale === 'zh-Hans' ? '处理中...' : 'Processing...'}</>
+                    : locale === 'zh-Hans' ? '明天' : 'Tomorrow'}
                 </Button>
                 <Button
                   variant="outline"
                   className="h-12"
-                  onClick={() => {
+                  disabled={overdueProcessing !== null}
+                  onClick={async () => {
                     const sortedOverdue = data.overdueItems?.slice().sort((a: AgendaItem, b: AgendaItem) => {
                       const dateA = a.scheduledDate?.getTime() ?? 0;
                       const dateB = b.scheduledDate?.getTime() ?? 0;
@@ -1273,7 +1305,12 @@ export function KPICards({
                     }) ?? [];
                     const currentItem = sortedOverdue[overdueCurrentIndex];
                     if (currentItem && onReschedule) {
-                      onReschedule(currentItem.id, quickDates.dayAfter);
+                      setOverdueProcessing('dayafter');
+                      try {
+                        await onReschedule(currentItem.id, quickDates.dayAfter);
+                      } finally {
+                        setOverdueProcessing(null);
+                      }
                       if (overdueCurrentIndex >= overdueCount - 1) {
                         setOverdueCurrentIndex(Math.max(0, overdueCount - 2));
                       }
@@ -1283,11 +1320,14 @@ export function KPICards({
                     }
                   }}
                 >
-                  {locale === 'zh-Hans' ? '后天' : 'Day after'}
+                  {overdueProcessing === 'dayafter'
+                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{locale === 'zh-Hans' ? '处理中...' : 'Processing...'}</>
+                    : locale === 'zh-Hans' ? '后天' : 'Day after'}
                 </Button>
                 <Button
                   variant="outline"
                   className="h-12"
+                  disabled={overdueProcessing !== null}
                   onClick={() => {
                     const sortedOverdue = data.overdueItems?.slice().sort((a: AgendaItem, b: AgendaItem) => {
                       const dateA = a.scheduledDate?.getTime() ?? 0;

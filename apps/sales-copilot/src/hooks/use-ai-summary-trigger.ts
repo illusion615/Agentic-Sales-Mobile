@@ -3,7 +3,6 @@ import { useCreateAISummary, useUpdateAISummary, useAISummaryList } from '@/gene
 import type { AISummary } from '@/generated/models/ai-summary-model';
 import { useAppSettings } from './use-app-settings';
 import { useUser } from './use-user';
-import { invokeFlowForLLM } from '@/services/power-automate-service';
 
 // Entity type labels (DV FormattedValue)
 export const ENTITY_TYPES = {
@@ -30,7 +29,6 @@ interface TriggerSummaryParams {
   relatedData?: Record<string, unknown>;
 }
 
-// Removed FlowRequestPayload - now using invokeFlowForLLM directly
 /**
  * Extract entity name from data
  */
@@ -174,87 +172,31 @@ Focus on momentum and next steps.`;
 }
 
 /**
- * Extract summary from various Power Automate response formats
- */
-function extractSummaryFromResponse(result: Record<string, unknown>): { summary: string; actionItems: string } | null {
-  // Direct format: { summary: '...', actionItems: '...' }
-  if (typeof result.summary === 'string') {
-    return {
-      summary: result.summary,
-      actionItems: typeof result.actionItems === 'string' ? result.actionItems : '',
-    };
-  }
-  
-  // Nested format: { body: { summary: '...', actionItems: '...' } }
-  if (result.body && typeof result.body === 'object') {
-    const body = result.body as Record<string, unknown>;
-    if (typeof body.summary === 'string') {
-      return {
-        summary: body.summary,
-        actionItems: typeof body.actionItems === 'string' ? body.actionItems : '',
-      };
-    }
-  }
-  
-  // Copilot Studio format: { text: '...' } or { message: '...' }
-  if (typeof result.text === 'string') {
-    return {
-      summary: result.text,
-      actionItems: '',
-    };
-  }
-  
-  if (typeof result.message === 'string' && !result.error) {
-    return {
-      summary: result.message,
-      actionItems: '',
-    };
-  }
-  
-  // Response format: { response: '...' }
-  if (typeof result.response === 'string') {
-    return {
-      summary: result.response,
-      actionItems: '',
-    };
-  }
-  
-  return null;
-}
-
-/**
- * Fire the Power Automate flow in the background using the standard invokeFlowForLLM
+ * Fire the AI summary skill in the background
  */
 async function triggerFlowInBackground(
   userPrompt: string,
+  entityType: EntityType,
   summaryId: string,
   updateSummary: (params: { id: string; changedFields: Partial<Omit<AISummary, 'id'>> }) => Promise<unknown>
 ) {
   try {
-    // Use the standard invokeFlowForLLM function which handles all the formatting
-    const result = await invokeFlowForLLM({
-      messages: [
-        { role: 'user', content: userPrompt }
-      ],
-    });
+    const { executeFunction } = await import('@/lib/function-executor');
+    const result = await executeFunction('generateEntitySummary', {
+      data: userPrompt,
+      entityType,
+    }, {});
     
     if (!result.success) {
-      throw new Error(result.error || 'Flow request failed');
+      throw new Error(result.error || 'Skill execution failed');
     }
-    
-    // Parse the response content
-    let summaryContent: { summary: string; actionItems: string } | null = null;
-    
-    if (result.content) {
-      try {
-        const parsed = JSON.parse(result.content) as Record<string, unknown>;
-        summaryContent = extractSummaryFromResponse(parsed);
-      } catch {
-        // Response might be plain text
-        summaryContent = { summary: result.content, actionItems: '' };
-      }
-    }
-    
+
+    // generateEntitySummary declares a `text` contract (z.string().min(1)), so the
+    // executor guarantees a validated markdown string here — no shape-guessing needed.
+    const summaryContent = typeof result.data === 'string'
+      ? { summary: result.data, actionItems: '' }
+      : null;
+
     if (summaryContent) {
       await updateSummary({
         id: summaryId,
@@ -266,25 +208,28 @@ async function triggerFlowInBackground(
         },
       });
     } else {
-      // Flow succeeded but no summary returned - mark as completed with note
       await updateSummary({
         id: summaryId,
         changedFields: {
           status: STATUSES.completed,
-          summary: 'AI analysis request sent successfully. The flow will update this summary when processing completes.',
+          summary: 'AI analysis completed.',
           expiresOn: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
         },
       });
     }
   } catch (error: unknown) {
     // Mark as failed if the flow call fails
-    await updateSummary({
-      id: summaryId,
-      changedFields: {
-        status: STATUSES.failed,
-        summary: `Failed to generate summary: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      },
-    });
+    try {
+      await updateSummary({
+        id: summaryId,
+        changedFields: {
+          status: STATUSES.failed,
+          summary: `Failed to generate summary: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        },
+      });
+    } catch (updateErr) {
+      console.error('[AISummary] Failed to update status to failed:', updateErr);
+    }
   }
 }
 
@@ -361,9 +306,15 @@ export function useEntityAISummary(entityType: EntityType, entityId: string) {
     })[0] ?? null;
   
   const isExpired = summary?.expiresOn ? new Date(summary.expiresOn) < new Date() : false;
-  const isGenerating = summary?.status === STATUSES.generating || summary?.status === STATUSES.pending;
+  // Timeout guard: if generating/pending for > 60s, treat as failed
+  const generatingTooLong = !!(
+    (summary?.status === STATUSES.generating || summary?.status === STATUSES.pending)
+    && summary?.generatedOn
+    && (Date.now() - new Date(summary.generatedOn).getTime()) > 60_000
+  );
+  const isGenerating = (summary?.status === STATUSES.generating || summary?.status === STATUSES.pending) && !generatingTooLong;
   const isCompleted = summary?.status === STATUSES.completed;
-  const isFailed = summary?.status === STATUSES.failed;
+  const isFailed = summary?.status === STATUSES.failed || generatingTooLong;
   
   return {
     summary,
@@ -418,7 +369,7 @@ export function useAISummaryTrigger() {
         const userPrompt = buildAIPrompt(entityType, entityData, relatedData);
         
         // Fire and forget - don't wait for the flow to complete
-        triggerFlowInBackground(userPrompt, summaryRecord.id, updateAISummary.mutateAsync);
+        triggerFlowInBackground(userPrompt, entityType, summaryRecord.id, updateAISummary.mutateAsync);
       } else {
         // No flow configured or no user - generate a placeholder summary
         const placeholderSummary = generatePlaceholderSummary(entityType, entityData);

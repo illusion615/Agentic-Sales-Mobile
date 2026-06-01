@@ -7,16 +7,17 @@
  */
 
 import { availableFunctions } from './function-registry';
-import { getHandler } from './functions/handler-registry';
+import { agentError, toDevLog } from '@/lib/errors';
+import { getHandler, type FunctionCallResult } from './functions/handler-registry';
 // Register all domain handlers (query, draft, etc.)
 import './functions';
 
-// Re-export for existing consumers
-export type { FunctionCallResult } from './functions/handler-registry';
-type FnCallResult = import('./functions/handler-registry').FunctionCallResult;
+export { type FunctionCallResult } from './functions/handler-registry';
 
 /**
  * Execute a function by name with given arguments.
+ * Named handlers are dispatched via the handler registry (lib/functions/).
+ * Only the generic LLM-backed skill fallback remains in this file.
  */
 export async function executeFunction(
   functionName: string,
@@ -24,11 +25,15 @@ export async function executeFunction(
   context: {
     userId?: string;
     userEmail?: string;
-    pageContext?: { currentPage?: string; summary?: string; pageData?: unknown };
+    pageContext?: {
+      currentPage?: string;
+      summary?: string;
+      pageData?: unknown;
+    };
     conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
     locale?: string;
   }
-): Promise<FnCallResult> {
+): Promise<import('./functions/handler-registry').FunctionCallResult> {
   console.log('[FN] ENTER executeFunction, name=' + functionName + ', args=' + JSON.stringify(args));
 
   // ---- Registry dispatch ----
@@ -46,130 +51,123 @@ export async function executeFunction(
       const systemPrompt = isZh ? skillDef.promptTemplate['zh-Hans'] : skillDef.promptTemplate['en-US'];
       const userContent = args.data as string || args.visitData as string || JSON.stringify(args);
 
-      let fullUser = userContent;
-      if (args.existingOpportunities) {
-        fullUser += `\n\nExisting opportunities (for deduplication):\n${args.existingOpportunities as string}`;
-      }
-      if (args.entityType) {
-        fullUser = `Entity type: ${args.entityType as string}\n\n${fullUser}`;
-      }
+          // Append extra context if provided (e.g. existingOpportunities for analyzeOpportunity)
+          let fullUser = userContent;
+          if (args.existingOpportunities) {
+            fullUser += `\n\nExisting opportunities (for deduplication):\n${args.existingOpportunities as string}`;
+          }
+          if (args.entityType) {
+            fullUser = `Entity type: ${args.entityType as string}\n\n${fullUser}`;
+          }
 
-      const responseFormat = skillDef.responseFormat;
-      if (!responseFormat) {
-        return { success: false, error: `[fn:${functionName}] LLM skill missing responseFormat contract` };
-      }
+          // The response format is part of the skill's declared contract — no silent default.
+          const responseFormat = skillDef.responseFormat;
+          if (!responseFormat) {
+            return { success: false, error: `[fn:${functionName}] LLM skill missing responseFormat contract` };
+          }
 
-      const { invokeFlowForLLM } = await import('@/services/power-automate-service');
-      const llmResp = await invokeFlowForLLM({
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: fullUser },
-        ],
-        responseFormat,
-      });
+          const { invokeFlowForLLM } = await import('@/services/power-automate-service');
+          const llmResp = await invokeFlowForLLM({
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: fullUser },
+            ],
+            responseFormat,
+          });
 
-      if (!llmResp.success || !llmResp.content) {
-        return { success: false, error: llmResp.error || 'LLM skill call failed' };
-      }
+          if (!llmResp.success || !llmResp.content) {
+            return { success: false, error: llmResp.error || 'LLM skill call failed' };
+          }
 
-      // Schema validation
-      const validate = (value: unknown): FnCallResult => {
-        if (!skillDef.outputSchema) return { success: true, data: value };
-        const result = skillDef.outputSchema.safeParse(value);
-        if (!result.success) {
-          console.warn(`[FunctionExecutor] Skill "${functionName}" output failed schema:`, result.error.issues.slice(0, 3));
-          return { success: false, error: `Skill "${functionName}" output failed its declared schema` };
-        }
-        return { success: true, data: result.data };
-      };
+          // Parse strictly per the declared responseFormat, then validate against the
+          // declared outputSchema. Both are contract-driven — the executor never guesses
+          // per-skill shapes, and callers receive a validated, typed payload.
+          const validate = (value: unknown): FunctionCallResult => {
+            if (!skillDef.outputSchema) return { success: true, data: value };
+            const result = skillDef.outputSchema.safeParse(value);
+            if (!result.success) {
+              const err = agentError('parse', 'executor',
+                `Skill "${functionName}" output failed its declared schema`,
+                result.error,
+                { functionName, responseFormat, issues: result.error.issues.slice(0, 5) },
+              );
+              console.warn('[FunctionExecutor]', toDevLog(err));
+              return { success: false, error: toDevLog(err) };
+            }
+            return { success: true, data: result.data };
+          };
 
-      if (responseFormat === 'text') {
-        const textResult = validate(llmResp.content.trim());
-        if (textResult.success) return textResult;
-      }
+          if (responseFormat === 'text') {
+            // If the schema expects a string, validate directly.
+            // Otherwise the LLM returned JSON-in-text — fall through to the
+            // JSON parsing path below so it gets parsed first.
+            const textResult = validate(llmResp.content.trim());
+            if (textResult.success) return textResult;
+            // Fall through to JSON parse path
+          }
 
-      // JSON parse with tolerance
-      let parsed: unknown = null;
-      try {
-        parsed = JSON.parse(llmResp.content);
-      } catch {
-        let cleaned = llmResp.content;
-        if (cleaned.includes('```')) {
-          cleaned = cleaned.replace(/```json?\n?/g, '').replace(/```$/g, '').trim();
-        }
-        try { parsed = JSON.parse(cleaned); } catch {
-          const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
-          const objMatch = cleaned.match(/\{[\s\S]*\}/);
+          // JSON: tolerant parse (handles markdown fences / surrounding prose),
+          // then hand the parsed value to schema validation above.
+          let parsed: unknown = null;
           try {
-            parsed = arrayMatch ? JSON.parse(arrayMatch[0]) : objMatch ? JSON.parse(objMatch[0]) : null;
-          } catch { /* give up */ }
-        }
-      }
-
-      if (parsed == null) {
-        return { success: false, error: `Skill "${functionName}" returned unparseable JSON` };
-      }
-
-      // Unwrap common AI Builder wrappers
-      const firstResult = validate(parsed);
-      if (!firstResult.success && parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        const obj = parsed as Record<string, unknown>;
-        for (const key of ['cards', 'items', 'data', 'results', 'suggestions', 'insights', 'summaries']) {
-          if (Array.isArray(obj[key])) {
-            const unwrapped = validate(obj[key]);
-            if (unwrapped.success) return unwrapped;
+            parsed = JSON.parse(llmResp.content);
+          } catch {
+            let cleaned = llmResp.content;
+            if (cleaned.includes('```')) {
+              cleaned = cleaned.replace(/```json?\n?/g, '').replace(/```$/g, '').trim();
+            }
+            try { parsed = JSON.parse(cleaned); } catch {
+              const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
+              const objMatch = cleaned.match(/\{[\s\S]*\}/);
+              try {
+                parsed = arrayMatch ? JSON.parse(arrayMatch[0]) : objMatch ? JSON.parse(objMatch[0]) : null;
+              } catch { /* give up */ }
+            }
           }
-        }
-        for (const v of Object.values(obj)) {
-          if (Array.isArray(v)) {
-            const unwrapped = validate(v);
-            if (unwrapped.success) return unwrapped;
-            break;
-          }
-        }
-      }
-      return firstResult;
-    }
 
-    return { success: false, error: `未知函数: ${functionName}` };
+          if (parsed == null) {
+            const err = agentError('parse', 'executor',
+              `Skill "${functionName}" returned unparseable JSON`,
+              undefined,
+              { functionName, preview: llmResp.content.slice(0, 200) },
+            );
+            return { success: false, error: toDevLog(err) };
+          }
+
+          // AI Builder structured output may wrap the payload in an object
+          // (e.g. {"cards":[...]} when the schema expects a top-level array).
+          // If validation fails and parsed is an object, try unwrapping:
+          // 1. Find the first array-valued property and re-validate
+          // 2. Try known wrapper keys
+          const firstResult = validate(parsed);
+          if (!firstResult.success && parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            const obj = parsed as Record<string, unknown>;
+            // Try known wrapper keys first
+            for (const key of ['cards', 'items', 'data', 'results', 'suggestions', 'insights', 'summaries']) {
+              if (Array.isArray(obj[key])) {
+                const unwrapped = validate(obj[key]);
+                if (unwrapped.success) return unwrapped;
+              }
+            }
+            // Fallback: first array property
+            for (const v of Object.values(obj)) {
+              if (Array.isArray(v)) {
+                const unwrapped = validate(v);
+                if (unwrapped.success) return unwrapped;
+                break;
+              }
+            }
+          }
+          return firstResult;
+        }
+
+        return { success: false, error: `未知函数: ${functionName}` };
   } catch (error: unknown) {
     console.error('[FunctionExecutor] Error:', error);
+    const detail = error instanceof Error ? error.message : '执行函数时发生错误';
     return {
       success: false,
-      error: error instanceof Error ? error.message : '执行函数时发生错误',
+      error: `[fn:${functionName}] ${detail}`,
     };
   }
-}
-
-/**
- * Escape special characters for OData queries
- * - Single quotes must be doubled in OData string literals
- * - Newlines and other control characters should be normalized
- */
-function escapeODataString(value: string): string {
-  return value
-    .replace(/'/g, "''") // Escape single quotes
-    .replace(/\r\n/g, ' ') // Replace CRLF with space
-    .replace(/\r/g, ' ') // Replace CR with space
-    .replace(/\n/g, ' '); // Replace LF with space to avoid OData issues
-}
-
-/**
- * Sanitize object fields that contain strings to be OData-safe
- * Also filters out undefined values that could cause issues
- */
-function sanitizeForOData<T extends Record<string, unknown>>(obj: T): T {
-  const sanitized: Record<string, unknown> = {};
-  for (const key in obj) {
-    const value = obj[key];
-    // Skip undefined values
-    if (value === undefined) continue;
-    
-    if (typeof value === 'string') {
-      sanitized[key] = escapeODataString(value);
-    } else if (value !== null) {
-      sanitized[key] = value;
-    }
-  }
-  return sanitized as T;
 }

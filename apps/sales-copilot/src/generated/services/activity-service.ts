@@ -12,7 +12,7 @@ import {
   ActivityTypeKeyToLabel,
   type Activity,
 } from '../models/activity-model';
-import { labelToDv, mapOptions, dvChoice, dvLookupName, requireCreated, requireId } from './_adapter-utils';
+import { labelToDv, mapOptions, dvChoice, dvLookupName, createWithReadback, requireId } from './_adapter-utils';
 
 const FIELD_MAP: Record<string, string> = {
   id: 'crf5c_activity1id',
@@ -70,9 +70,14 @@ function toDv(r: Partial<Omit<Activity, 'id'>>): Record<string, unknown> {
 
 export class ActivityService {
   static async create(record: Omit<Activity, 'id'>): Promise<Activity> {
-    const result = await Crf5c_activity1sService.create(toDv(record) as any);
-    if (!result.success) throw result.error;
-    return fromDv(requireCreated(result.data, 'crf5c_activity1id', 'Activity'));
+    const dvPayload = toDv(record);
+    return createWithReadback(
+      (p) => Crf5c_activity1sService.create(p as any),
+      (o) => Crf5c_activity1sService.getAll(o),
+      dvPayload, 'crf5c_activity1id', 'Activity',
+      `crf5c_title eq '${record.title}'`,
+      fromDv,
+    );
   }
 
   static async update(id: string, changedFields: Partial<Omit<Activity, 'id'>>): Promise<Activity> {

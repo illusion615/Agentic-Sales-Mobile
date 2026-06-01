@@ -20,7 +20,7 @@ import {
 } from '@/components/ui/select';
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
 import { useCopilot } from '@/contexts/copilot-context';
-import { getLocale, generateVoiceSummary } from '@/lib/i18n';
+import { getLocale } from '@/lib/i18n';
 import { PullToRefresh } from '@/components/pull-to-refresh';
 import { useFirstMount } from '@/hooks/use-first-mount';
 
@@ -145,33 +145,20 @@ export default function ClientsPage() {
         creditStatus: a.creditStatus, paymentStatus: a.paymentStatus,
       }));
 
-      const isZh = locale === 'zh-Hans';
-      const systemPrompt = isZh
-        ? `你是销售经理的AI助手。基于客户覆盖数据，生成恰好4个摘要卡片，JSON数组格式。
-每张卡片关注不同角度：
-1. 覆盖概况 - 客户总体健康度、联系频率分布
-2. 风险客户 - 需要紧急跟进的客户及建议行动
-3. 高价值客户 - S/A级客户的维护情况和建议
-4. 跟进策略 - 本周应优先联系哪些客户，按什么节奏
-返回格式：[{"title":"标题","content":"内容（2-3句，简洁可操作）"}]
-只返回JSON数组。`
-        : `You are an AI assistant for a sales manager. Based on client coverage data, generate exactly 4 summary cards as a JSON array.
-Each card focuses on a different angle:
-1. Coverage Overview - overall health, contact frequency distribution
-2. At-Risk Clients - clients needing urgent follow-up with suggested actions
-3. Key Accounts - S/A tier maintenance status and recommendations
-4. Follow-up Strategy - which clients to prioritize this week and at what cadence
-Return format: [{"title":"Title","content":"Content (2-3 sentences, concise and actionable)"}]
-Return ONLY the JSON array.`;
+      const { executeFunction } = await import('@/lib/function-executor');
+      const result = await executeFunction('summarizeEntities', {
+        data: JSON.stringify(clientData),
+        entityType: 'account',
+      }, { locale });
 
-      const result = await generateVoiceSummary(JSON.stringify(clientData), locale, systemPrompt, undefined, undefined, 'json');
-      if (result.success && result.summary) {
-        const jsonMatch = result.summary.match(/\[[\s\S]*\]/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]) as AISummarySlide[];
+      if (result.success && result.data) {
+        const parsed = result.data as AISummarySlide[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
           setAiSlides(parsed);
           setCurrentSlide(0);
           localStorage.setItem(AI_CACHE_KEY, JSON.stringify({ ts: Date.now(), slides: parsed }));
+        } else {
+          console.warn('[ClientCoverage] AI summary: unexpected data shape');
         }
       }
     } catch (e) { console.error('[ClientCoverage] AI summary error:', e); }

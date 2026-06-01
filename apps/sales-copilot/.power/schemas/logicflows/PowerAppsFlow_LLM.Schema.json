@@ -89,7 +89,9 @@
               "x-ms-dynamically-added": true,
               "enum": [
                 "text",
-                "json"
+                "json",
+                "dag",
+                "json-generic"
               ]
             }
           },

@@ -10,28 +10,55 @@ import { queryClient } from '@/lib/query-client';
 import ErrorBoundary from '@/components/system/error-boundary';
 import { initColorTheme, initFontSize } from '@/lib/i18n';
 
-const HomeDashboard = lazy(() => import('@/pages/home'));
+// When the app is redeployed, the currently-loaded index.html holds references
+// to chunk filenames that no longer exist on the server. The next lazy() import
+// fails with "Importing a module script failed". Reload once to grab the new
+// index. The session flag stops infinite reload loops if the failure is real.
+const RELOAD_FLAG = 'sc:chunkReloadAt';
+function lazyWithReload<T extends { default: React.ComponentType<unknown> }>(
+  loader: () => Promise<T>,
+) {
+  return lazy(() =>
+    loader().catch((err) => {
+      const msg = String((err as Error)?.message || err);
+      const isChunkErr = /module script failed|Failed to fetch dynamically imported module|Loading chunk|ChunkLoadError/i.test(msg);
+      if (isChunkErr) {
+        const last = Number(sessionStorage.getItem(RELOAD_FLAG) || '0');
+        // Reload at most once per minute to avoid loops on genuine failures.
+        if (Date.now() - last > 60_000) {
+          sessionStorage.setItem(RELOAD_FLAG, String(Date.now()));
+          window.location.reload();
+          // Return a never-resolving promise so React keeps Suspense up until reload.
+          return new Promise<T>(() => {});
+        }
+      }
+      throw err;
+    })
+  );
+}
 
-const SettingsPage = lazy(() => import('@/pages/settings'));
-const BriefMePage = lazy(() => import('@/pages/brief'));
-const ActivityCapturePage = lazy(() => import('@/pages/activity-capture'));
-const OpportunityReviewPage = lazy(() => import('@/pages/opportunity-review'));
-const OpportunityDraftReviewPage = lazy(() => import('@/pages/opportunity-draft-review'));
-const AccountsPage = lazy(() => import('@/pages/accounts'));
-const AccountDetailPage = lazy(() => import('@/pages/account-detail'));
-const OpportunitiesPage = lazy(() => import('@/pages/opportunities'));
-const ActivitiesPage = lazy(() => import('@/pages/activities'));
-const ActivityDetailPage = lazy(() => import('@/pages/activity-detail'));
-const ContactsPage = lazy(() => import('@/pages/contacts'));
-const ContactDetailPage = lazy(() => import('@/pages/contact-detail'));
-const OpportunityDetailPage = lazy(() => import('@/pages/opportunity-detail'));
-const PerformanceReportPage = lazy(() => import('@/pages/performance-report'));
-const ProductsPage = lazy(() => import('@/pages/products'));
-const ProductDetailPage = lazy(() => import('@/pages/product-detail'));
-const VisitLogPage = lazy(() => import('@/pages/visit-log'));
-const DataImportPage = lazy(() => import('@/pages/data-import'));
-const CodeReviewPage = lazy(() => import('@/pages/code-review'));
-const HelpFeedbackPage = lazy(() => import('@/pages/help-feedback'));
+const HomeDashboard = lazyWithReload(() => import('@/pages/home'));
+
+const SettingsPage = lazyWithReload(() => import('@/pages/settings'));
+const BriefMePage = lazyWithReload(() => import('@/pages/brief'));
+const ActivityCapturePage = lazyWithReload(() => import('@/pages/activity-capture'));
+const OpportunityReviewPage = lazyWithReload(() => import('@/pages/opportunity-review'));
+const OpportunityDraftReviewPage = lazyWithReload(() => import('@/pages/opportunity-draft-review'));
+const AccountsPage = lazyWithReload(() => import('@/pages/accounts'));
+const AccountDetailPage = lazyWithReload(() => import('@/pages/account-detail'));
+const OpportunitiesPage = lazyWithReload(() => import('@/pages/opportunities'));
+const ActivitiesPage = lazyWithReload(() => import('@/pages/activities'));
+const ActivityDetailPage = lazyWithReload(() => import('@/pages/activity-detail'));
+const ContactsPage = lazyWithReload(() => import('@/pages/contacts'));
+const ContactDetailPage = lazyWithReload(() => import('@/pages/contact-detail'));
+const OpportunityDetailPage = lazyWithReload(() => import('@/pages/opportunity-detail'));
+const PerformanceReportPage = lazyWithReload(() => import('@/pages/performance-report'));
+const ProductsPage = lazyWithReload(() => import('@/pages/products'));
+const ProductDetailPage = lazyWithReload(() => import('@/pages/product-detail'));
+const VisitLogPage = lazyWithReload(() => import('@/pages/visit-log'));
+const DataImportPage = lazyWithReload(() => import('@/pages/data-import'));
+const CodeReviewPage = lazyWithReload(() => import('@/pages/code-review'));
+const HelpFeedbackPage = lazyWithReload(() => import('@/pages/help-feedback'));
 
 function RouteFallback() {
   return (

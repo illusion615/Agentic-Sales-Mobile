@@ -22,12 +22,55 @@ export interface FlowLLMResponse {
 }
 
 /**
+ * Published Power Apps Code Apps corrupt flow responses that contain multibyte
+ * UTF-8 characters (e.g. Chinese) in the SDK/storageproxy decode channel, causing
+ * "JSON Parse error: Unterminated string" (see microsoft/PowerAppsCodeApps#359).
+ *
+ * Mitigation: the flow base64-encodes its payload and prefixes it with `B64:`.
+ * Base64 is pure ASCII, so it survives the channel intact; we decode it here back
+ * to UTF-8. Responses WITHOUT the prefix are returned unchanged (backward compatible).
+ */
+const B64_PREFIX = 'B64:';
+
+/** Telemetry counters for base64 transport health. */
+const b64Stats = { total: 0, b64: 0, raw: 0, decodeFailed: 0 };
+
+/** Read-only snapshot of base64 transport telemetry. */
+export function getB64Stats() { return { ...b64Stats }; }
+
+function decodeFlowPayload(raw: string): string {
+  b64Stats.total += 1;
+  if (!raw.startsWith(B64_PREFIX)) {
+    b64Stats.raw += 1;
+    return raw;
+  }
+  b64Stats.b64 += 1;
+  const b64 = raw.slice(B64_PREFIX.length).trim();
+  try {
+    const binary = atob(b64);
+    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+    return new TextDecoder('utf-8').decode(bytes);
+  } catch (err) {
+    b64Stats.decodeFailed += 1;
+    console.warn('[Power Automate] base64 decode failed, using raw payload:', err);
+    return raw;
+  }
+}
+
+/**
  * Whether the LLM flow is available for use.
  * UI components can use this to show/hide AI features.
+ *
+ * The Power Automate flow is baked into the build via the SDK connector,
+ * so it is available regardless of localStorage state. The only reason to
+ * report unavailable is if the user has explicitly disabled it in settings.
+ * (Treating a missing config as "unavailable" causes a race on first load
+ * where Copilot opens before useInitSettings has written the flag.)
  */
 export function isFlowAvailable(): boolean {
   const config = getLLMConfig();
-  return !!config?.enabled;
+  if (config && config.enabled === false) return false;
+  return true;
 }
 
 /**
@@ -65,6 +108,8 @@ export async function invokeFlowForLLM(
     const responseFormat = request.responseFormat ?? 'text';
     console.log('[Power Automate] Invoking LLM flow, prompt length:', text.length, 'responseFormat:', responseFormat);
 
+    // Cast needed: Flow trigger enum will be updated to include 'dag'|'json-generic';
+    // until then the SDK type is narrower than our internal type.
     const result = await PowerAppsFlow_LLMService.Run({ text, text_1: responseFormat });
     const latencyMs = Date.now() - startTime;
 
@@ -77,25 +122,18 @@ export async function invokeFlowForLLM(
       };
     }
 
-    const rawOutput = result.data?.output ?? '';
-    // Decode B64: prefix — Flow wraps LLM responses in base64 to avoid
-    // OData special character issues in the "Respond to PowerApp" action.
-    const rawContent = rawOutput.startsWith('B64:')
-      ? atob(rawOutput.slice(4))
-      : rawOutput;
+    const rawContent = decodeFlowPayload(result.data?.output ?? '');
     console.log('[Power Automate] Flow response length:', rawContent.length);
-    console.log('[Power Automate] Raw response preview:', rawContent.slice(0, 200));
 
-    // Repair malformed JSON from LLM output (unterminated strings, invalid
-    // escapes, trailing commas, etc.) using the battle-tested jsonrepair lib.
-    // Only run for JSON response formats — plain text responses must NOT be
-    // "repaired" as jsonrepair aggressively converts markdown lists into JSON arrays.
+    // Only repair JSON when a JSON format was explicitly requested.
+    // jsonrepair can mangle plain text responses.
     let content = rawContent;
     if (responseFormat !== 'text') {
       try {
         content = jsonrepair(rawContent);
-      } catch {
-        // jsonrepair throws on completely unparseable input — keep raw content
+        console.log('[Power Automate] jsonrepair applied, before:', rawContent.substring(0, 80), '→ after:', content.substring(0, 80));
+      } catch (repairErr) {
+        console.warn('[Power Automate] jsonrepair failed, using raw:', repairErr);
         content = rawContent;
       }
     }
