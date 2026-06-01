@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { frameToIntent, type TranslatedIntent } from '@/lib/frame-to-intent';
-import type { ShadowResult } from '@/lib/shadow-agent';
+import type { PipelineResult } from '@/lib/shadow-agent';
 
-function makeShadow(plan: ShadowResult['plan'], reasoning = ''): ShadowResult {
+function makeShadow(plan: PipelineResult['plan'], reasoning = ''): PipelineResult {
   // Cast via unknown — frame-to-intent only reads `reasoning` and `confidence`
   // from the frame payload, so a partial mock is sufficient for these tests.
   const frame = {
@@ -10,7 +10,7 @@ function makeShadow(plan: ShadowResult['plan'], reasoning = ''): ShadowResult {
     explicitNames: [],
     reasoning,
     confidence: 80,
-  } as unknown as ShadowResult['frame'];
+  } as unknown as PipelineResult['frame'];
   return {
     frame,
     frameLatencyMs: 0,
@@ -122,7 +122,7 @@ describe('frameToIntent', () => {
   });
 
   it('returns null for an empty DAG', () => {
-    const shadow = makeShadow({ steps: [] } as unknown as ShadowResult['plan']);
+    const shadow = makeShadow({ steps: [] } as unknown as PipelineResult['plan']);
     expect(frameToIntent(shadow)).toBeNull();
   });
 

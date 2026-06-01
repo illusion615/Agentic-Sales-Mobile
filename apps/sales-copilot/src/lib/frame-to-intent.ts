@@ -1,5 +1,5 @@
 /**
- * Translates a Frame + Orchestrator ShadowResult into the legacy IntentResult
+ * Translates a Frame + Orchestrator PipelineResult into the legacy IntentResult
  * shape so the existing executor / matching / resolution machinery can run
  * unchanged.
  *
@@ -17,7 +17,7 @@
  * Returns null when the shadow result has no actionable plan.
  */
 
-import type { ShadowResult } from './shadow-agent';
+import type { PipelineResult } from './shadow-agent';
 import type { DagPlan, SingleIntent } from './dag-schema';
 import { isDagPlan } from './dag-schema';
 import { fallbackUserFacingLabel, type UserFacingLabel, type IntentItem } from './frame-shadow';
@@ -128,10 +128,10 @@ function stepToIntentSlot(
 }
 
 /**
- * Translate a ShadowResult into a legacy IntentResult shape, or null when
+ * Translate a PipelineResult into a legacy IntentResult shape, or null when
  * the shadow plan is empty / non-actionable.
  */
-export function frameToIntent(shadow: ShadowResult): TranslatedIntent | null {
+export function frameToIntent(shadow: PipelineResult): TranslatedIntent | null {
   const plan = shadow.plan;
   if (!plan) return null;
 

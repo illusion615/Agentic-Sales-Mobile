@@ -1,5 +1,5 @@
 /**
- * Shadow Agent Engine (Orchestrator)
+ * Intent Pipeline Orchestrator
  *
  * Architecture:  Frame (intents[])  →  Orchestrator (DAG)  →  Executor
  *
@@ -35,9 +35,11 @@ import {
 } from './dag-schema';
 import { getLocale } from '@/lib/i18n';
 
+import { agentError, type AgentError } from './errors';
+
 // ----------------------------- Types -------------------------------------
 
-export interface ShadowResult {
+export interface PipelineResult {
   frame: FrameResult;
   frameLatencyMs: number;
   skillsCount: number;
@@ -45,32 +47,22 @@ export interface ShadowResult {
   planLatencyMs: number;
   planRaw?: string;
   totalLatencyMs: number;
-  error?: string;
+  error?: AgentError;
 }
 
-export interface ShadowBenchmarkEntry {
+export interface BenchmarkEntry {
   ts: number;
   userMessage: string;
   page?: string;
-  shadow: ShadowResult;
-  legacy?: {
-    functionName: string | null;
-    arguments?: Record<string, unknown>;
-    additionalActions?: unknown[];
-    latencyMs: number;
-  };
-  agreement: {
-    functionMatch: boolean | null;
-    argumentOverlap: number | null;
-  };
+  result: PipelineResult;
 }
 
 // ----------------------------- Ring buffer -------------------------------
 
-const BENCHMARK_KEY = 'copilot-shadow-benchmark';
+const BENCHMARK_KEY = 'copilot-pipeline-benchmark';
 const BENCHMARK_MAX = 50;
 
-export function recordBenchmark(entry: ShadowBenchmarkEntry): void {
+export function recordBenchmark(entry: BenchmarkEntry): void {
   try {
     const list = readBenchmarkLog();
     list.unshift(entry);
@@ -81,11 +73,11 @@ export function recordBenchmark(entry: ShadowBenchmarkEntry): void {
   }
 }
 
-export function readBenchmarkLog(): ShadowBenchmarkEntry[] {
+export function readBenchmarkLog(): BenchmarkEntry[] {
   try {
     const raw = sessionStorage.getItem(BENCHMARK_KEY);
     if (!raw) return [];
-    return JSON.parse(raw) as ShadowBenchmarkEntry[];
+    return JSON.parse(raw) as BenchmarkEntry[];
   } catch {
     return [];
   }
@@ -210,7 +202,7 @@ function buildUserBlock(
 
 // ----------------------------- Pipeline ----------------------------------
 
-export async function runShadowPipeline(ctx: FrameRunContext): Promise<ShadowResult> {
+export async function runIntentPipeline(ctx: FrameRunContext): Promise<PipelineResult> {
   const totalStart = Date.now();
 
   // 1. Frame
@@ -223,7 +215,7 @@ export async function runShadowPipeline(ctx: FrameRunContext): Promise<ShadowRes
       plan: null,
       planLatencyMs: 0,
       totalLatencyMs: Date.now() - totalStart,
-      error: `Frame failed: ${frameOutcome.error ?? 'unknown'}`,
+      error: agentError('llm', 'frame', 'Frame classification failed', frameOutcome.error),
     };
   }
   const frame = frameOutcome.result;
@@ -258,7 +250,7 @@ export async function runShadowPipeline(ctx: FrameRunContext): Promise<ShadowRes
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ],
-    responseFormat: 'json',
+    responseFormat: 'dag',
   });
   let plan = planResp.success && planResp.content
     ? parseOrchestratorOutput(planResp.content, skeleton)
@@ -289,7 +281,7 @@ export async function runShadowPipeline(ctx: FrameRunContext): Promise<ShadowRes
       planLatencyMs,
       planRaw: planResp.content,
       totalLatencyMs: Date.now() - totalStart,
-      error: `Orchestrator LLM failed: ${planResp.error ?? 'empty'}`,
+      error: agentError('llm', 'orchestrator', 'Orchestrator LLM call failed', planResp.error),
     };
   }
 
@@ -301,7 +293,7 @@ export async function runShadowPipeline(ctx: FrameRunContext): Promise<ShadowRes
     planLatencyMs,
     planRaw: planResp.content,
     totalLatencyMs: Date.now() - totalStart,
-    error: plan ? undefined : 'Orchestrator output parse failed',
+    error: plan ? undefined : agentError('parse', 'orchestrator', 'Orchestrator output parse failed'),
   };
 }
 
@@ -311,6 +303,7 @@ function emptyFrame(): FrameResult {
       { salesObject: 'None', cognitiveTask: 'Chat', temporal: 'none', summary: '', relatesTo: [] },
     ],
     explicitNames: [],
+    contextSufficient: false,
     reasoning: 'frame failed',
     confidence: 0,
   };
@@ -336,20 +329,30 @@ function parseOrchestratorOutput(text: string, skeleton: SkeletonStep[]): SubPro
   }
 
   // Patch: if the model dropped seq / outputRef / dependsOn, recover them from skeleton.
+  // Also handle AI Builder schema constraints: dependsOn may be a comma-separated
+  // string instead of an array, and arguments may be a JSON string instead of an object.
   if (
     candidate &&
     typeof candidate === 'object' &&
     Array.isArray((candidate as { steps?: unknown }).steps)
   ) {
-    const steps = (candidate as { steps: Array<Partial<DagStep>> }).steps;
+    const steps = (candidate as { steps: Array<Partial<DagStep> & { dependsOn?: unknown; arguments?: unknown }> }).steps;
     if (steps.length === skeleton.length) {
       for (let i = 0; i < steps.length; i++) {
         const s = steps[i];
         const sk = skeleton[i];
         if (s.seq == null) s.seq = sk.seq;
         if (!s.outputRef) s.outputRef = sk.outputRef;
+        // dependsOn: coerce comma-separated string → array
+        if (typeof s.dependsOn === 'string') {
+          s.dependsOn = (s.dependsOn as string).split(',').map(v => v.trim()).filter(Boolean) as unknown as string[];
+        }
         if (!s.dependsOn && sk.dependsOn) s.dependsOn = sk.dependsOn;
         if (!s.function && sk.suggestedFunction) s.function = sk.suggestedFunction;
+        // arguments: coerce JSON string → object
+        if (typeof s.arguments === 'string') {
+          try { s.arguments = JSON.parse(s.arguments as string); } catch { s.arguments = {}; }
+        }
         if (!s.arguments) s.arguments = {};
       }
     }
@@ -364,42 +367,4 @@ function parseOrchestratorOutput(text: string, skeleton: SkeletonStep[]): SubPro
   return null;
 }
 
-// ----------------------------- Comparison --------------------------------
-
-/**
- * Coarse comparison of shadow plan vs legacy intent. Used by the viewer for
- * KPI dashboards. Not used for production routing.
- */
-export function compareShadowVsLegacy(
-  shadow: ShadowResult,
-  legacyFunction: string | null,
-  legacyArgs?: Record<string, unknown>
-): ShadowBenchmarkEntry['agreement'] {
-  if (!shadow.plan) {
-    return { functionMatch: null, argumentOverlap: null };
-  }
-
-  let shadowFunctions: string[] = [];
-  let firstArgs: Record<string, unknown> = {};
-
-  if (isDagPlan(shadow.plan)) {
-    shadowFunctions = shadow.plan.steps.map((s) => s.function);
-    firstArgs = shadow.plan.steps[0]?.arguments ?? {};
-  } else {
-    shadowFunctions = shadow.plan.function ? [shadow.plan.function] : [];
-    firstArgs = shadow.plan.arguments ?? {};
-  }
-
-  const functionMatch = legacyFunction ? shadowFunctions.includes(legacyFunction) : shadowFunctions.length === 0;
-
-  let argumentOverlap: number | null = null;
-  if (legacyArgs && Object.keys(legacyArgs).length > 0) {
-    const legacyKeys = new Set(Object.keys(legacyArgs));
-    const shadowKeys = new Set(Object.keys(firstArgs));
-    const intersection = [...legacyKeys].filter((k) => shadowKeys.has(k));
-    const union = new Set([...legacyKeys, ...shadowKeys]);
-    argumentOverlap = union.size > 0 ? intersection.length / union.size : 1;
-  }
-
-  return { functionMatch, argumentOverlap };
-}
+// ----------------------------- Exports -----------------------------------

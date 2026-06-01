@@ -15,11 +15,11 @@ import {
   readPipelineLog,
   clearPipelineLog,
   type PipelineLogEntry,
-} from '@/lib/frame';
+} from '@/lib/frame-shadow';
 import {
   readBenchmarkLog,
   type BenchmarkEntry,
-} from '@/lib/orchestrator';
+} from '@/lib/shadow-agent';
 import { isDagPlan } from '@/lib/dag-schema';
 import type { Locale } from '@/lib/i18n';
 

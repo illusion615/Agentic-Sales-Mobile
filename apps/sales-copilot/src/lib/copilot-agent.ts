@@ -30,8 +30,8 @@ import {
   type PendingResolution,
   type ResolutionCandidate,
 } from './agent-utils';
-import { recordShadow, compareFrameVsLegacy } from './frame-shadow';
-import { runShadowPipeline, recordBenchmark, compareShadowVsLegacy, type ShadowResult } from './shadow-agent';
+import { recordPipelineRun } from './frame-shadow';
+import { runIntentPipeline, recordBenchmark, type PipelineResult } from './shadow-agent';
 import { frameToIntent } from './frame-to-intent';
 
 // Greeting pattern for detecting simple greetings that don't need Copilot Studio
@@ -651,16 +651,16 @@ Provide specific, actionable analysis based on the data above. Use concrete dime
   let intent: IntentResult | null = null;
 
   // ===== Frame mode: Frame + Orchestrator drives production =====
-  const shadowCtx = {
+  const pipelineCtx = {
       userMessage,
       pageContext: context.pageContext,
       conversationHistory: history,
       locale: (isZh ? 'zh-Hans' : 'en') as 'zh-Hans' | 'en',
     };
 
-    let shadowResult: ShadowResult;
+    let pipelineResult: PipelineResult;
     try {
-      shadowResult = await runShadowPipeline(shadowCtx);
+      pipelineResult = await runIntentPipeline(pipelineCtx);
     } catch (err) {
       recordCircuitBreakerFailure();
       recordMetrics({ success: false, latencyMs: Date.now() - startTime });
@@ -672,41 +672,37 @@ Provide specific, actionable analysis based on the data above. Use concrete dime
       };
     }
 
-    // Always record the shadow run for the viewer (legacy side empty in frame mode)
+    // Record the pipeline run for the dev viewer
     try {
-      recordShadow({
+      recordPipelineRun({
         ts: Date.now(),
         userMessage,
         page: context.pageContext?.currentPage,
-        frame: { success: !shadowResult.error, result: shadowResult.frame, latencyMs: shadowResult.frameLatencyMs, error: shadowResult.error },
-        legacy: { functionName: null, raw: (shadowResult.planRaw ?? '').slice(0, 8000) },
-        agreement: compareFrameVsLegacy(shadowResult.frame, null, 0),
+        frame: { success: !pipelineResult.error, result: pipelineResult.frame, latencyMs: pipelineResult.frameLatencyMs, error: pipelineResult.error ? String(pipelineResult.error) : undefined },
       });
       recordBenchmark({
         ts: Date.now(),
         userMessage,
         page: context.pageContext?.currentPage,
-        shadow: shadowResult,
-        legacy: { functionName: null, latencyMs: shadowResult.totalLatencyMs },
-        agreement: compareShadowVsLegacy(shadowResult, null, undefined),
+        result: pipelineResult,
       });
     } catch (e) {
       console.warn('[CopilotAgent] frame mode logging failed:', e);
     }
 
-    if (shadowResult.error || !shadowResult.plan) {
+    if (pipelineResult.error || !pipelineResult.plan) {
       recordCircuitBreakerFailure();
       recordMetrics({ success: false, latencyMs: Date.now() - startTime });
       return {
         success: false,
         content: '',
         error: isZh
-          ? `意图识别失败: ${shadowResult.error ?? '未生成执行计划'}。请重试。`
-          : `Intent detection failed: ${shadowResult.error ?? 'no plan produced'}. Please retry.`,
+          ? `意图识别失败: ${pipelineResult.error ?? '未生成执行计划'}。请重试。`
+          : `Intent detection failed: ${pipelineResult.error ?? 'no plan produced'}. Please retry.`,
         latencyMs: Date.now() - startTime,
       };
     } else {
-      const translated = frameToIntent(shadowResult);
+      const translated = frameToIntent(pipelineResult);
       if (!translated) {
         recordCircuitBreakerFailure();
         recordMetrics({ success: false, latencyMs: Date.now() - startTime });
