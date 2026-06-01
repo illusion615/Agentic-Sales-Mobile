@@ -369,7 +369,7 @@ export const availableFunctions: FunctionDefinition[] = [
     displayName: { 'zh-Hans': '生成业务洞察', 'en-US': 'Generate Business Insight' },
     description: 'Analyze business data and generate actionable insight cards.',
     llmBacked: true, responseFormat: 'text',
-    outputSchema: z.array(z.object({ insight: z.string(), rationale: z.string(), type: z.string() })),
+    outputSchema: z.array(z.object({ insight: z.string(), rationale: z.string().default(''), type: z.string().default('general') }).passthrough()),
     promptTemplate: {
       'zh-Hans': '你是一位资深销售分析师。基于以下销售数据生成业务洞察。每个洞察必须包含具体的客户名、商机名和金额。\n返回JSON数组：[{"insight":"...","rationale":"...","type":"..."}]\n只返回JSON数组。',
       'en-US': 'You are a senior sales analyst. Generate business insights from the data below. Each must reference specific names and amounts.\nReturn JSON array: [{"insight":"...","rationale":"...","type":"..."}]\nReturn ONLY the JSON array.',
@@ -392,7 +392,7 @@ export const availableFunctions: FunctionDefinition[] = [
     displayName: { 'zh-Hans': '实体 AI 摘要', 'en-US': 'Summarize Entities' },
     description: 'Generate exactly 4 AI summary cards for a set of entities.',
     llmBacked: true, responseFormat: 'text',
-    outputSchema: z.array(z.object({ title: z.string(), content: z.string() })),
+    outputSchema: z.array(z.object({ title: z.string(), content: z.string().default('') }).passthrough()),
     promptTemplate: {
       'zh-Hans': '你是销售经理的AI助手。基于以下数据，生成恰好4个摘要卡片，JSON数组格式。\n返回格式：[{"title":"标题","content":"内容（2-3句）"}]\n只返回JSON数组。',
       'en-US': 'You are an AI assistant for a sales manager. Generate exactly 4 summary cards as a JSON array.\nReturn: [{"title":"Title","content":"Content (2-3 sentences)"}]\nReturn ONLY the JSON array.',
