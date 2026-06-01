@@ -295,9 +295,33 @@ export default function OpportunityDetailPage() {
 
   if (isLoading) {
     return (
-      <MobileLayout title={locale === 'zh-Hans' ? '加载中...' : 'Loading...'} showBack>
-        <div className="flex items-center justify-center h-64">
-          <div className="text-muted-foreground">{locale === 'zh-Hans' ? '加载中...' : 'Loading...'}</div>
+      <MobileLayout title={locale === 'zh-Hans' ? '商机详情' : 'Opportunity Details'} showBack>
+        <div className="px-4 pb-40 space-y-4 mt-4">
+          {/* Header card skeleton */}
+          <div className="glass-card p-4 animate-pulse" style={{ borderRadius: 20 }}>
+            <div className="flex items-start gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-muted/50" />
+              <div className="flex-1 space-y-2">
+                <div className="h-6 w-3/4 rounded bg-muted/50" />
+                <div className="h-4 w-1/2 rounded bg-muted/40" />
+                <div className="flex gap-2"><div className="h-5 w-16 rounded-full bg-muted/40" /><div className="h-5 w-14 rounded-full bg-muted/40" /></div>
+              </div>
+            </div>
+            <div className="mt-4 pt-4 border-t border-border/50 space-y-2">
+              <div className="flex gap-1">{[0,1,2,3].map(i => <div key={i} className="h-2 flex-1 rounded-full bg-muted/40" />)}</div>
+            </div>
+          </div>
+          {/* Detail rows skeleton */}
+          <div className="glass-card p-4 animate-pulse space-y-3" style={{ borderRadius: 20 }}>
+            {[0,1,2,3].map(i => <div key={i} className="flex justify-between"><div className="h-4 w-24 rounded bg-muted/40" /><div className="h-4 w-32 rounded bg-muted/50" /></div>)}
+          </div>
+          {/* AI Summary skeleton */}
+          <div className="glass-card p-4 animate-pulse space-y-2" style={{ borderRadius: 20 }}>
+            <div className="h-5 w-28 rounded bg-muted/50" />
+            <div className="h-3 w-full rounded bg-muted/40" />
+            <div className="h-3 w-5/6 rounded bg-muted/40" />
+            <div className="h-3 w-2/3 rounded bg-muted/40" />
+          </div>
         </div>
       </MobileLayout>
     );

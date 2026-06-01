@@ -234,9 +234,25 @@ export default function ActivityDetailPage() {
 
   if (isLoading) {
     return (
-      <MobileLayout title="Activity">
-        <div className="flex items-center justify-center h-64">
-          <div className="text-muted-foreground">Loading...</div>
+      <MobileLayout title={locale === 'zh-Hans' ? '活动详情' : 'Activity Details'}>
+        <div className="px-4 pb-40 space-y-4 mt-4">
+          <div className="glass-card p-4 animate-pulse" style={{ borderRadius: 20 }}>
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-muted/50" />
+              <div className="flex-1 space-y-2">
+                <div className="h-5 w-3/4 rounded bg-muted/50" />
+                <div className="h-4 w-1/2 rounded bg-muted/40" />
+                <div className="h-4 w-1/3 rounded bg-muted/40" />
+              </div>
+            </div>
+          </div>
+          <div className="glass-card p-4 animate-pulse space-y-3" style={{ borderRadius: 20 }}>
+            {[0,1,2,3].map(i => <div key={i} className="flex justify-between"><div className="h-4 w-20 rounded bg-muted/40" /><div className="h-4 w-32 rounded bg-muted/50" /></div>)}
+          </div>
+          <div className="glass-card p-4 animate-pulse space-y-2" style={{ borderRadius: 20 }}>
+            <div className="h-5 w-20 rounded bg-muted/50" />
+            <div className="h-16 rounded bg-muted/30" />
+          </div>
         </div>
       </MobileLayout>
     );

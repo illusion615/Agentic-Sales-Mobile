@@ -15,6 +15,7 @@ export function useOpportunityList(options?: IOperationOptions) {
   return useQuery({
     queryKey: ["opportunity-list", options],
     queryFn: () => OpportunityService.getAll(options),
+    staleTime: 60_000,
   });
 }
 

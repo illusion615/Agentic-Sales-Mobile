@@ -223,9 +223,24 @@ export default function ContactDetailPage() {
 
   if (isLoadingContact) {
     return (
-      <MobileLayout title="Contact">
-        <div className="flex items-center justify-center h-64">
-          <div className="text-muted-foreground">Loading...</div>
+      <MobileLayout title={locale === 'zh-Hans' ? '联系人详情' : 'Contact Details'}>
+        <div className="px-4 pb-40 space-y-4 mt-4">
+          <div className="glass-card p-4 animate-pulse" style={{ borderRadius: 20 }}>
+            <div className="flex items-center gap-4">
+              <div className="w-16 h-16 rounded-full bg-muted/50" />
+              <div className="flex-1 space-y-2">
+                <div className="h-6 w-2/3 rounded bg-muted/50" />
+                <div className="h-4 w-1/2 rounded bg-muted/40" />
+              </div>
+            </div>
+          </div>
+          <div className="glass-card p-4 animate-pulse space-y-3" style={{ borderRadius: 20 }}>
+            {[0,1,2,3].map(i => <div key={i} className="flex justify-between"><div className="h-4 w-20 rounded bg-muted/40" /><div className="h-4 w-32 rounded bg-muted/50" /></div>)}
+          </div>
+          <div className="glass-card p-4 animate-pulse space-y-3" style={{ borderRadius: 20 }}>
+            <div className="h-5 w-28 rounded bg-muted/50" />
+            {[0,1].map(i => <div key={i} className="h-12 rounded-lg bg-muted/30" />)}
+          </div>
         </div>
       </MobileLayout>
     );

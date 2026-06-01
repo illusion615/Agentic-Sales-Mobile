@@ -324,9 +324,28 @@ export default function ClientDetailPage() {
 
   if (isLoadingAccount) {
     return (
-      <MobileLayout title="Client">
-        <div className="flex items-center justify-center h-64">
-          <div className="text-muted-foreground">Loading...</div>
+      <MobileLayout title={locale === 'zh-Hans' ? '客户详情' : 'Account Details'}>
+        <div className="px-4 pb-40 space-y-4 mt-4">
+          {/* Header card skeleton */}
+          <div className="glass-card p-4 animate-pulse" style={{ borderRadius: 20 }}>
+            <div className="flex items-start gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-muted/50" />
+              <div className="flex-1 space-y-2">
+                <div className="h-6 w-3/4 rounded bg-muted/50" />
+                <div className="h-4 w-1/2 rounded bg-muted/40" />
+                <div className="flex gap-2"><div className="h-5 w-20 rounded-full bg-muted/40" /><div className="h-5 w-16 rounded-full bg-muted/40" /></div>
+              </div>
+            </div>
+          </div>
+          {/* Info rows skeleton */}
+          <div className="glass-card p-4 animate-pulse space-y-3" style={{ borderRadius: 20 }}>
+            {[0,1,2,3].map(i => <div key={i} className="flex justify-between"><div className="h-4 w-20 rounded bg-muted/40" /><div className="h-4 w-36 rounded bg-muted/50" /></div>)}
+          </div>
+          {/* List skeleton */}
+          <div className="glass-card p-4 animate-pulse space-y-3" style={{ borderRadius: 20 }}>
+            <div className="h-5 w-24 rounded bg-muted/50" />
+            {[0,1,2].map(i => <div key={i} className="h-12 rounded-lg bg-muted/30" />)}
+          </div>
         </div>
       </MobileLayout>
     );

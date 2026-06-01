@@ -15,6 +15,7 @@ export function useActivityList(options?: IOperationOptions) {
   return useQuery({
     queryKey: ["activity-list", options],
     queryFn: () => ActivityService.getAll(options),
+    staleTime: 60_000,
   });
 }
 

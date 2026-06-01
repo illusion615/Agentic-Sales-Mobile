@@ -15,6 +15,7 @@ export function useAccountList(options?: IOperationOptions) {
   return useQuery({
     queryKey: ["account-list", options],
     queryFn: () => AccountService.getAll(options),
+    staleTime: 60_000,
   });
 }
 

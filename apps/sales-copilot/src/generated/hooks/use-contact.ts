@@ -15,6 +15,7 @@ export function useContactList(options?: IOperationOptions) {
   return useQuery({
     queryKey: ["contact-list", options],
     queryFn: () => ContactService.getAll(options),
+    staleTime: 60_000,
   });
 }
 

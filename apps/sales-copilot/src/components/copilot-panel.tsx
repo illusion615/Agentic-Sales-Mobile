@@ -1329,7 +1329,7 @@ export function CopilotPanel() {
             // Side-docked mode: inline flex child, not fixed/absolute.
             // flex-1 makes it share space 1:1 with the content area.
             // pt-14: push content below the fixed page header that spans full width.
-            isSideDocked && 'h-full flex-1 border-border/50 pt-14',
+            isSideDocked && 'h-full flex-1 min-w-0 max-w-[50%] border-border/50 pt-14',
             isSideDocked && effectiveLayout === 'right' && 'border-l',
             isSideDocked && effectiveLayout === 'left' && 'border-r',
           )}
