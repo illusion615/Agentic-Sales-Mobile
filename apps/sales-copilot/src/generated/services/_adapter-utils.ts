@@ -89,7 +89,11 @@ export async function createWithReadback<TDv, TApp>(
     if (typeof pk === 'string' && pk) return mapFn(result.data);
   }
   console.warn(`[${entity}] createRecordAsync returned no data body — reading back via getAll`);
-  const readback = await getAllFn({ filter: readbackFilter, orderBy: ['createdon desc'], top: 1 });
+  const { withRetry } = await import('@/lib/retry');
+  const readback = await withRetry(
+    () => getAllFn({ filter: readbackFilter, orderBy: ['createdon desc'], top: 1 }),
+    { attempts: 3, backoffMs: 300, jitterMs: 200 },
+  );
   if (readback.success && readback.data && readback.data.length > 0) {
     return mapFn(readback.data[0]);
   }

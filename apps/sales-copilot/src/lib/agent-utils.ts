@@ -301,6 +301,8 @@ export function parseAndValidateIntent(text: string): ValidatedIntentResult | nu
 
 // ========== Circuit Breaker Pattern ==========
 
+export type CircuitBreakerChannel = 'llm' | 'dataverse';
+
 export interface CircuitBreakerState {
   failures: number;
   lastFailure: number;
@@ -308,76 +310,45 @@ export interface CircuitBreakerState {
   openedAt: number;
 }
 
-const CIRCUIT_BREAKER_KEY = 'copilot-circuit-breaker';
+const CB_PREFIX = 'copilot-circuit-breaker';
 const MAX_FAILURES = 3;
-const RECOVERY_TIME_MS = 30000; // 30 seconds
+const RECOVERY_TIME_MS = 30000;
 
-/**
- * Get current circuit breaker state
- */
-export function getCircuitBreakerState(): CircuitBreakerState {
+function cbKey(ch: CircuitBreakerChannel = 'llm'): string { return `${CB_PREFIX}-${ch}`; }
+
+export function getCircuitBreakerState(channel: CircuitBreakerChannel = 'llm'): CircuitBreakerState {
   try {
-    const stored = sessionStorage.getItem(CIRCUIT_BREAKER_KEY);
+    const stored = sessionStorage.getItem(cbKey(channel));
     if (stored) {
       const state = JSON.parse(stored) as CircuitBreakerState;
-      
-      // Check if recovery time has passed
       if (state.isOpen && Date.now() - state.openedAt > RECOVERY_TIME_MS) {
-        // Half-open: allow one attempt
         return { ...state, isOpen: false };
       }
       return state;
     }
-  } catch {
-    // Ignore parse errors
-  }
+  } catch { /* ignore */ }
   return { failures: 0, lastFailure: 0, isOpen: false, openedAt: 0 };
 }
 
-/**
- * Record a failure in the circuit breaker
- */
-export function recordCircuitBreakerFailure(): void {
-  const state = getCircuitBreakerState();
+export function recordCircuitBreakerFailure(channel: CircuitBreakerChannel = 'llm'): void {
+  const state = getCircuitBreakerState(channel);
   const now = Date.now();
-  
-  // Reset failures if last failure was more than 60 seconds ago
   const failures = now - state.lastFailure > 60000 ? 1 : state.failures + 1;
-  
   const newState: CircuitBreakerState = {
-    failures,
-    lastFailure: now,
+    failures, lastFailure: now,
     isOpen: failures >= MAX_FAILURES,
     openedAt: failures >= MAX_FAILURES ? now : state.openedAt,
   };
-  
-  try {
-    sessionStorage.setItem(CIRCUIT_BREAKER_KEY, JSON.stringify(newState));
-  } catch {
-    // Ignore storage errors
-  }
-  
-  if (newState.isOpen) {
-    console.warn('[CircuitBreaker] OPEN - LLM calls disabled for', RECOVERY_TIME_MS / 1000, 'seconds');
-  }
+  try { sessionStorage.setItem(cbKey(channel), JSON.stringify(newState)); } catch { /* ignore */ }
+  if (newState.isOpen) console.warn(`[CircuitBreaker:${channel}] OPEN for`, RECOVERY_TIME_MS / 1000, 's');
 }
 
-/**
- * Record a success in the circuit breaker (reset state)
- */
-export function recordCircuitBreakerSuccess(): void {
-  try {
-    sessionStorage.removeItem(CIRCUIT_BREAKER_KEY);
-  } catch {
-    // Ignore storage errors
-  }
+export function recordCircuitBreakerSuccess(channel: CircuitBreakerChannel = 'llm'): void {
+  try { sessionStorage.removeItem(cbKey(channel)); } catch { /* ignore */ }
 }
 
-/**
- * Check if circuit breaker is open (blocking calls)
- */
-export function isCircuitBreakerOpen(): boolean {
-  return getCircuitBreakerState().isOpen;
+export function isCircuitBreakerOpen(channel: CircuitBreakerChannel = 'llm'): boolean {
+  return getCircuitBreakerState(channel).isOpen;
 }
 
 // ========== Levenshtein Distance for Fuzzy Matching ==========
