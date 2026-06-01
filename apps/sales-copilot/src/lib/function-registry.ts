@@ -3,6 +3,8 @@
  * Defines available functions that the LLM can invoke
  */
 
+import { z, type ZodTypeAny } from 'zod';
+
 export interface FunctionParameter {
   type: string;
   description: string;
@@ -18,6 +20,10 @@ export interface FunctionDefinition {
     properties: Record<string, FunctionParameter>;
     required?: string[];
   };
+  llmBacked?: boolean;
+  promptTemplate?: { 'zh-Hans': string; 'en-US': string };
+  responseFormat?: 'json' | 'text' | 'dag' | 'json-generic';
+  outputSchema?: ZodTypeAny;
 }
 
 /**
@@ -355,6 +361,88 @@ export const availableFunctions: FunctionDefinition[] = [
       },
       required: [],
     },
+  },
+
+  // ===== LLM-backed AI Skills =====
+  {
+    name: 'generateInsight',
+    displayName: { 'zh-Hans': '生成业务洞察', 'en-US': 'Generate Business Insight' },
+    description: 'Analyze business data and generate actionable insight cards.',
+    llmBacked: true, responseFormat: 'text',
+    outputSchema: z.array(z.object({ insight: z.string(), rationale: z.string(), type: z.string() })),
+    promptTemplate: {
+      'zh-Hans': '你是一位资深销售分析师。基于以下销售数据生成业务洞察。每个洞察必须包含具体的客户名、商机名和金额。\n返回JSON数组：[{"insight":"...","rationale":"...","type":"..."}]\n只返回JSON数组。',
+      'en-US': 'You are a senior sales analyst. Generate business insights from the data below. Each must reference specific names and amounts.\nReturn JSON array: [{"insight":"...","rationale":"...","type":"..."}]\nReturn ONLY the JSON array.',
+    },
+    parameters: { type: 'object', properties: { data: { type: 'string', description: 'Business data to analyze' } }, required: ['data'] },
+  },
+  {
+    name: 'generateBriefTranscript',
+    displayName: { 'zh-Hans': '生成播报稿', 'en-US': 'Generate Brief Transcript' },
+    description: 'Convert insight bullet points into a natural TTS voice briefing script.',
+    llmBacked: true, responseFormat: 'text', outputSchema: z.string().min(1),
+    promptTemplate: {
+      'zh-Hans': '你是一个专业的销售助理，正在为销售人员播报今日的业务简报。请基于以下业务洞察内容，生成一段完整、流畅、自然的语音播报稿。要求：友好专业的语气、提到具体客户/商机/金额、每个段落间空行、不用 markdown、控制在 1-2 分钟朗读时间。',
+      'en-US': 'You are a professional sales assistant delivering today\'s business briefing. Generate a complete, fluent, natural voice briefing script. Requirements: friendly professional tone, mention specific clients/opportunities/amounts, blank lines between paragraphs, no markdown, keep to 1-2 minutes.',
+    },
+    parameters: { type: 'object', properties: { data: { type: 'string', description: 'Insight list text' } }, required: ['data'] },
+  },
+  {
+    name: 'summarizeEntities',
+    displayName: { 'zh-Hans': '实体 AI 摘要', 'en-US': 'Summarize Entities' },
+    description: 'Generate exactly 4 AI summary cards for a set of entities.',
+    llmBacked: true, responseFormat: 'text',
+    outputSchema: z.array(z.object({ title: z.string(), content: z.string() })),
+    promptTemplate: {
+      'zh-Hans': '你是销售经理的AI助手。基于以下数据，生成恰好4个摘要卡片，JSON数组格式。\n返回格式：[{"title":"标题","content":"内容（2-3句）"}]\n只返回JSON数组。',
+      'en-US': 'You are an AI assistant for a sales manager. Generate exactly 4 summary cards as a JSON array.\nReturn: [{"title":"Title","content":"Content (2-3 sentences)"}]\nReturn ONLY the JSON array.',
+    },
+    parameters: { type: 'object', properties: { data: { type: 'string', description: 'Entity data' }, entityType: { type: 'string', description: 'Entity type', enum: ['account', 'opportunity', 'activity', 'contact'] } }, required: ['data'] },
+  },
+  {
+    name: 'generateEntitySummary',
+    displayName: { 'zh-Hans': '实体行动摘要', 'en-US': 'Generate Entity Summary' },
+    description: 'Generate a concise markdown summary with actionable next steps.',
+    llmBacked: true, responseFormat: 'text', outputSchema: z.string().min(1),
+    promptTemplate: {
+      'zh-Hans': '你是销售助手。严格遵循用户消息中的结构与要求输出。必须返回纯 Markdown 文本。',
+      'en-US': 'You are a sales assistant. Follow the user\'s requested structure exactly. Return plain Markdown text only.',
+    },
+    parameters: { type: 'object', properties: { data: { type: 'string', description: 'Prompt content' }, entityType: { type: 'string', description: 'Entity type', enum: ['account', 'opportunity', 'activity', 'contact'] } }, required: ['data'] },
+  },
+  {
+    name: 'analyzeOpportunity',
+    displayName: { 'zh-Hans': '商机分析', 'en-US': 'Analyze Opportunity' },
+    description: 'Analyze visit data to determine if there is a sales opportunity.',
+    llmBacked: true, responseFormat: 'text',
+    outputSchema: z.object({ hasOpportunity: z.boolean(), opportunityName: z.string().optional(), estimatedAmount: z.number().optional(), confidence: z.number().optional(), stage: z.string().optional(), matchingOpportunityId: z.string().optional() }).passthrough(),
+    promptTemplate: {
+      'zh-Hans': '你是一位销售AI助手。分析以下拜访记录，判断是否包含销售商机。\n返回JSON：{"hasOpportunity":bool,"opportunityName":"","estimatedAmount":0,"confidence":0-100,"stage":"prospecting|qualification","matchingOpportunityId":""}',
+      'en-US': 'You are a sales AI assistant. Analyze the visit record to determine if it contains a sales opportunity.\nReturn JSON: {"hasOpportunity":bool,"opportunityName":"","estimatedAmount":0,"confidence":0-100,"stage":"prospecting|qualification","matchingOpportunityId":""}',
+    },
+    parameters: { type: 'object', properties: { visitData: { type: 'string', description: 'Visit record data' }, existingOpportunities: { type: 'string', description: 'Existing opportunities for dedup' } }, required: ['visitData'] },
+  },
+  {
+    name: 'narrateTask',
+    displayName: { 'zh-Hans': '任务播报', 'en-US': 'Narrate Task' },
+    description: 'Generate a context-aware one-sentence announcement for a multi-step task.',
+    llmBacked: true, responseFormat: 'text', outputSchema: z.string().min(1).max(120),
+    promptTemplate: {
+      'zh-Hans': '你是销售助手的对话叙述者。用一句自然的话宣告即将开始的任务，带上关键实体名称。用中文回复，不超过40字。',
+      'en-US': 'You are the narrator for a sales assistant. Announce the next task in one natural sentence. Max 20 words.',
+    },
+    parameters: { type: 'object', properties: { data: { type: 'string', description: 'Task context' } }, required: ['data'] },
+  },
+  {
+    name: 'summarizeDAGResults',
+    displayName: { 'zh-Hans': 'DAG 汇总报告', 'en-US': 'Summarize DAG Results' },
+    description: 'Aggregate results from a completed multi-step query DAG into a markdown report.',
+    llmBacked: true, responseFormat: 'text', outputSchema: z.string().min(1),
+    promptTemplate: {
+      'zh-Hans': '你是一个销售助手。用户请求了一个多步分析任务。请基于所有数据生成一份完整报告。使用 markdown 格式。',
+      'en-US': 'You are a sales assistant. The user requested a multi-step analysis. Generate a complete report from all data. Use markdown.',
+    },
+    parameters: { type: 'object', properties: { data: { type: 'string', description: 'Step summaries' } }, required: ['data'] },
   },
 ];
 

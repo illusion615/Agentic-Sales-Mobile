@@ -12,7 +12,7 @@ import { MatchSelectionCard, buildMatchReasonText } from '@/components/match-sel
 import { MarkdownContent } from '@/components/markdown-content';
 import { RecordListCard } from '@/components/record-list-card';
 import { AdditionalIntentsCard } from '@/components/additional-intents-card';
-import { FrameShadowViewer } from '@/components/frame-shadow-viewer';
+import { PipelineViewer } from '@/components/frame-viewer';
 import { TaskAnnounceBubble } from '@/components/task-announce-bubble';
 import { toast } from 'sonner';
 import { useActionDock } from '@/contexts/action-dock-context';
@@ -1123,7 +1123,7 @@ export function CopilotPanel() {
         </motion.div>
 
 
-        <FrameShadowViewer open={frameViewerOpen} onClose={() => setFrameViewerOpen(false)} locale={locale} />
+        <PipelineViewer open={frameViewerOpen} onClose={() => setFrameViewerOpen(false)} locale={locale} />
       </>
     );
 }

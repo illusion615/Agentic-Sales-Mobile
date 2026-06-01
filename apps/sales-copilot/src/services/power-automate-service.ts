@@ -42,7 +42,7 @@ export function isFlowAvailable(): boolean {
 export async function invokeFlowForLLM(
   request: {
     messages: Array<{ role: string; content: string }>;
-    responseFormat?: 'text' | 'json';
+    responseFormat?: 'text' | 'json' | 'dag' | 'json-generic';
   },
 ): Promise<FlowLLMResponse> {
   const startTime = Date.now();
@@ -77,18 +77,27 @@ export async function invokeFlowForLLM(
       };
     }
 
-    const rawContent = result.data?.output ?? '';
+    const rawOutput = result.data?.output ?? '';
+    // Decode B64: prefix — Flow wraps LLM responses in base64 to avoid
+    // OData special character issues in the "Respond to PowerApp" action.
+    const rawContent = rawOutput.startsWith('B64:')
+      ? atob(rawOutput.slice(4))
+      : rawOutput;
     console.log('[Power Automate] Flow response length:', rawContent.length);
+    console.log('[Power Automate] Raw response preview:', rawContent.slice(0, 200));
 
     // Repair malformed JSON from LLM output (unterminated strings, invalid
     // escapes, trailing commas, etc.) using the battle-tested jsonrepair lib.
-    // For plain text responses this is a no-op (non-JSON passes through unchanged).
+    // Only run for JSON response formats — plain text responses must NOT be
+    // "repaired" as jsonrepair aggressively converts markdown lists into JSON arrays.
     let content = rawContent;
-    try {
-      content = jsonrepair(rawContent);
-    } catch {
-      // jsonrepair throws on completely unparseable input — keep raw content
-      content = rawContent;
+    if (responseFormat !== 'text') {
+      try {
+        content = jsonrepair(rawContent);
+      } catch {
+        // jsonrepair throws on completely unparseable input — keep raw content
+        content = rawContent;
+      }
     }
 
     return { success: true, content, latencyMs };

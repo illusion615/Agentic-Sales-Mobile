@@ -37,7 +37,7 @@ describe('skills-selector', () => {
 
     expect(names).toContain('draftActivity');
     expect(names).toContain('updateActivity');
-    expect(names).toContain('batchDraft');
+    expect(names).toContain('fuzzyMatchActivity');
     expect(names).not.toContain('draftAccount');
     expect(names).not.toContain('draftOpportunity');
   });
@@ -46,8 +46,8 @@ describe('skills-selector', () => {
     const skills = selectSkillsForIntents([makeIntent('Account', 'Find')]);
     const names = skills.map((s) => s.name);
 
-    expect(names).toContain('searchAccounts');
-    expect(names).toContain('getAccountDetails');
+    expect(names).toContain('queryAccounts');
+    expect(names).toContain('updateAccount');
     expect(names).not.toContain('draftActivity');
   });
 
@@ -61,7 +61,7 @@ describe('skills-selector', () => {
 
     expect(names).toContain('draftOpportunity');
     expect(names).toContain('draftActivity');
-    expect(names).toContain('batchDraft');
+    expect(names).toContain('fuzzyMatchActivity');
   });
 
   it('includes Product skills for a Product Knowledge intent', () => {

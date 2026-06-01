@@ -427,12 +427,14 @@ export function levenshteinSimilarity(a: string, b: string): number {
 // ========== Match Configuration ==========
 
 export interface MatchThresholds {
+  autoSelect: number; // Score >= this → auto-inject without user confirmation
   high: number;    // Score >= this is high confidence
   medium: number;  // Score >= this is medium confidence
   low: number;     // Score >= this is low confidence (below is none)
 }
 
 const DEFAULT_THRESHOLDS: MatchThresholds = {
+  autoSelect: 90,
   high: 70,
   medium: 50,
   low: 25,

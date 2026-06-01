@@ -12,13 +12,18 @@ import { buildQueueFromIntent, findIntentByMessageId, type IntentQueue } from '@
 import type * as QR from '@/lib/intent-queue-runtime';
 
 // Lazy-load the queue runtime — it pulls in function-executor.ts which is heavy.
-// Cached after first import so subsequent calls are instant.
 const loadQR = () => import('@/lib/intent-queue-runtime');
 import { narrateTask, type PriorTaskOutcome } from '@/lib/task-narrator';
 import type { AwaitingClarification, ResolutionItem } from '@/lib/agent-utils';
 import { extractVisitDataFromText, type ExtractedVisitData } from '@/lib/visit-extraction';
+import {
+  pickLabel, buildOverviewMessage, buildAnnounceMessage,
+  hasMessageAfterLastUser, collapseEarlierTasks, extractPriorOutcomes,
+  PERSIST_KEY, PERSIST_SCHEMA_VERSION, PERSIST_TTL_MS, type PersistEnvelope,
+} from './copilot-helpers';
 
-// Re-export ExtractedVisitData for consumers that import from context
+type IntentsOverview = NonNullable<AgentResponse['intentsOverview']>;
+
 export type { ExtractedVisitData } from '@/lib/visit-extraction';
 
 export interface ThinkingStep {
@@ -328,147 +333,6 @@ export interface PageContext {
 }
 
 const CopilotContext = createContext<CopilotContextValue | null>(null);
-
-// ===== Conversation persistence =====
-// localStorage so messages survive Power Apps player restarts (sessionStorage
-// dies with the host tab). Bump the schema version when ChatMessage's shape
-// changes incompatibly; on mismatch we discard and start fresh instead of
-// rendering broken cards.
-const PERSIST_KEY = 'copilot-messages';
-const PERSIST_SCHEMA_VERSION = 3;
-const PERSIST_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-interface PersistEnvelope {
-  v: number;
-  savedAt: number;
-  messages: ChatMessage[];
-}
-
-// ===== Phase B: task narration helpers =====
-type IntentsOverview = NonNullable<AgentResponse['intentsOverview']>;
-
-function pickLabel(label: { zh: string; en: string }, isZh: boolean): string {
-  return isZh ? label.zh : label.en;
-}
-
-const ZH_ORDINALS = ['第一', '第二', '第三', '第四', '第五', '第六', '第七', '第八', '第九'];
-function ordinalZh(n: number): string {
-  return ZH_ORDINALS[n - 1] ?? `第${n}`;
-}
-
-function buildOverviewMessage(overview: IntentsOverview, isZh: boolean): ChatMessage {
-  const labels = overview.map((o) => pickLabel(o.userFacingLabel, isZh));
-  const joined = isZh ? labels.join('、') : labels.join(', ');
-  const text = isZh
-    ? `识别到 ${overview.length} 个意图：${joined}`
-    : `Identified ${overview.length} intents: ${joined}`;
-  return {
-    id: `msg-${Date.now()}-overview`,
-    role: 'assistant',
-    type: 'agent',
-    content: text,
-    timestamp: new Date().toISOString(),
-    taskRole: 'overview',
-    taskOverview: { intents: overview.map((o) => ({ index: o.intentIndex, label: pickLabel(o.userFacingLabel, isZh) })) },
-  };
-}
-
-function buildAnnounceMessage(
-  intentIndex: number,
-  overview: IntentsOverview,
-  isZh: boolean,
-): ChatMessage | null {
-  const entry = overview.find((o) => o.intentIndex === intentIndex);
-  if (!entry) return null;
-  const label = pickLabel(entry.userFacingLabel, isZh);
-  const position = overview.findIndex((o) => o.intentIndex === intentIndex) + 1;
-  const total = overview.length;
-  const text = total > 1
-    ? (isZh
-        ? `现在开始${ordinalZh(position)}个任务：${label}`
-        : `Starting task ${position} of ${total}: ${label}`)
-    : (isZh ? `开始：${label}` : `Starting: ${label}`);
-  const taskGroupId = `task-${intentIndex}`;
-  return {
-    id: `msg-${Date.now()}-announce-${intentIndex}`,
-    role: 'assistant',
-    type: 'agent',
-    content: text,
-    timestamp: new Date().toISOString(),
-    taskGroupId,
-    taskRole: 'announce',
-    taskAnnounce: { index: position, total, label },
-  };
-}
-
-/**
- * Returns true if a message with the given predicate exists after the latest
- * user message in `prev`. Used to deduplicate overview / announce emissions
- * across multi-call cascades within the same turn.
- */
-function hasMessageAfterLastUser(prev: ChatMessage[], predicate: (m: ChatMessage) => boolean): boolean {
-  let lastUserIdx = -1;
-  for (let i = prev.length - 1; i >= 0; i--) {
-    if (prev[i].role === 'user') { lastUserIdx = i; break; }
-  }
-  for (let i = lastUserIdx + 1; i < prev.length; i++) {
-    if (predicate(prev[i])) return true;
-  }
-  return false;
-}
-
-/**
- * Phase D: when a new task announce is added, fold every prior task's
- * substep messages so the chat stays tidy. The previous announce bubble
- * remains visible (with its chevron now pointing right to hint at expand);
- * its sub-rows are hidden behind `collapsed=true`.
- */
-function collapseEarlierTasks(prev: ChatMessage[], newIntentIndex: number): ChatMessage[] {
-  let mutated = false;
-  const next = prev.map((m) => {
-    if (!m.taskGroupId) return m;
-    const match = /^task-(\d+)$/.exec(m.taskGroupId);
-    if (!match) return m;
-    const idx = Number.parseInt(match[1], 10);
-    if (!Number.isFinite(idx) || idx >= newIntentIndex) return m;
-    if (m.collapsed) return m;
-    mutated = true;
-    return { ...m, collapsed: true };
-  });
-  return mutated ? next : prev;
-}
-
-/**
- * Phase C: walk the current message list and produce one outcome line per
- * already-completed task group, ordered by intentIndex. The narrator feeds
- * these to the LLM so it can carry resolved entities into the next sentence.
- */
-function extractPriorOutcomes(messages: ChatMessage[], upToIntentIndex: number): PriorTaskOutcome[] {
-  const byGroup = new Map<string, { intentIdx: number; label: string; outcomeParts: string[] }>();
-  for (const m of messages) {
-    if (!m.taskGroupId) continue;
-    const match = /^task-(\d+)$/.exec(m.taskGroupId);
-    if (!match) continue;
-    const intentIdx = Number.parseInt(match[1], 10);
-    if (!Number.isFinite(intentIdx) || intentIdx >= upToIntentIndex) continue;
-    let bucket = byGroup.get(m.taskGroupId);
-    if (!bucket) {
-      bucket = { intentIdx, label: '', outcomeParts: [] };
-      byGroup.set(m.taskGroupId, bucket);
-    }
-    if (m.taskRole === 'announce' && m.taskAnnounce?.label) {
-      bucket.label = m.taskAnnounce.label;
-    } else if (m.taskRole === 'substep' && typeof m.content === 'string' && m.content.trim()) {
-      bucket.outcomeParts.push(m.content.trim());
-    }
-  }
-  return [...byGroup.values()]
-    .sort((a, b) => a.intentIdx - b.intentIdx)
-    .map((b) => ({
-      taskGroupId: `task-${b.intentIdx}`,
-      label: b.label || `task-${b.intentIdx}`,
-      outcome: b.outcomeParts.length ? b.outcomeParts[b.outcomeParts.length - 1] : '(completed)',
-    }));
-}
 
 export function CopilotProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
