@@ -17,7 +17,6 @@
  */
 
 import { executeFunction } from './function-executor';
-import { invokeFlowForLLM } from '@/services/power-automate-service';
 import {
   advanceCursor,
   buildEffectiveArgs,
@@ -32,7 +31,7 @@ import {
   type IntentQueue,
   type QueueIntent,
 } from './intent-queue';
-import type { ResolutionItem } from './agent-utils';
+import { type ResolutionItem, getMatchThresholds } from './agent-utils';
 
 // ---------- card-message shapes (shared with copilot-context) ----------
 // Kept loose (Record<string, unknown>) here to avoid an import cycle; the
@@ -189,18 +188,15 @@ async function emitSummary(queue: IntentQueue, deps: RuntimeDeps): Promise<Inten
       : `You are a sales assistant. The user requested a multi-step analysis. Below are the query results from each step. Generate a complete, insightful report based on all the data to answer the user's original request. Use markdown format with clear sections.`;
 
     try {
-      const llmResp = await invokeFlowForLLM({
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Original request: ${userMsg}\n\n${stepSummaries}` },
-        ],
-      });
+      const dagResult = await executeFunction('summarizeDAGResults', {
+        data: `Original request: ${userMsg}\n\n${stepSummaries}`,
+      }, { locale: deps.locale });
 
-      if (llmResp.success && llmResp.content) {
+      if (dagResult.success && dagResult.data) {
         deps.pushMessage({
           id: `narrate-${queue.id}-summary-${Date.now()}`,
           type: 'agent',
-          content: llmResp.content,
+          content: dagResult.data as string,
           timestamp: Date.now(),
           queueId: queue.id,
           queueIntentId: 'summary',
@@ -389,7 +385,7 @@ async function runOneResolution(
       exactMatch?: { id: string; name: string; score: number; accountId?: string; accountName?: string };
     };
 
-    const highConf = data.matches.filter((m) => m.score >= 70);
+    const highConf = data.matches.filter((m) => m.score >= getMatchThresholds().high);
     const singleAuto = highConf.length === 1 && highConf[0].score > 90;
 
     if (singleAuto) {
@@ -463,7 +459,7 @@ async function implicitNameResolution(
       );
       if (!res.success || !res.data) continue;
       const md = res.data as { matches?: Array<{ id: string; name: string; score: number; accountId?: string; accountName?: string }> };
-      const top = (md.matches ?? []).find((m) => m.score >= 90);
+      const top = (md.matches ?? []).find((m) => m.score >= getMatchThresholds().autoSelect);
       if (!top) continue;
       const patch: Record<string, string> = { [lk.idField]: top.id, [lk.name]: top.name };
       // Propagate parent entity context from the match result so downstream
@@ -524,8 +520,8 @@ function renderMatchSelectionCard(
   deps: RuntimeDeps,
 ): IntentQueue {
   const isZh = deps.locale === 'zh-Hans';
-  const highConf = data.matches.filter((m) => m.score >= 70);
-  const lowConf = data.matches.filter((m) => m.score < 70 && m.score >= 20);
+  const highConf = data.matches.filter((m) => m.score >= getMatchThresholds().high);
+  const lowConf = data.matches.filter((m) => m.score < getMatchThresholds().high && m.score >= 20);
   const messageId = `card-${queue.id}-${intent.id}-match-${Date.now()}`;
   const entityZh = resolution.entityType === 'account' ? '客户'
     : resolution.entityType === 'contact' ? '联系人'

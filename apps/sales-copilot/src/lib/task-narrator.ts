@@ -86,7 +86,8 @@ export function narrateTaskSync(input: TaskNarrationInput): TaskNarration {
 //   need deeper hooks into the cascade orchestrator; ship narration only.
 // ---------------------------------------------------------------------------
 
-import { invokeFlowForLLM, isFlowAvailable } from '@/services/power-automate-service';
+import { isFlowAvailable } from '@/services/power-automate-service';
+import { executeFunction } from '@/lib/function-executor';
 
 const NARRATE_TIMEOUT_MS = 6000;
 
@@ -129,15 +130,14 @@ export async function narrateTask(input: TaskNarrationInput): Promise<TaskNarrat
 
   try {
     const prompt = buildPrompt(input);
-    const llmPromise = invokeFlowForLLM({
-      messages: [{ role: 'user', content: prompt }],
-      responseFormat: 'text',
-    });
+    const llmPromise = executeFunction('narrateTask', {
+      data: prompt,
+    }, { locale: input.locale });
     const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), NARRATE_TIMEOUT_MS));
     const result = await Promise.race([llmPromise, timeout]);
-    if (!result || !result.success || !result.content) return sync;
+    if (!result || !result.success || !result.data) return sync;
 
-    const cleaned = result.content
+    const cleaned = (result.data as string)
       .trim()
       .replace(/^["'「『]+|["'」』]+$/g, '')
       .replace(/^\d+[\.、)\s]+/, '')

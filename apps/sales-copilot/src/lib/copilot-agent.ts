@@ -23,6 +23,7 @@ import {
   recordCircuitBreakerFailure, 
   recordCircuitBreakerSuccess,
   recordMetrics,
+  getMatchThresholds,
   type ValidatedIntentResult,
   type SingleIntent,
   type AwaitingClarification,
@@ -366,7 +367,7 @@ async function processAdditionalIntents(
             );
             if (matchRes.success && matchRes.data) {
               const md = matchRes.data as { matches?: Array<{ id: string; name: string; score: number; accountId?: string; accountName?: string }> };
-              const top = (md.matches ?? []).find((m) => m.score >= 90);
+              const top = (md.matches ?? []).find((m) => m.score >= getMatchThresholds().autoSelect);
               if (top) {
                 stepArgs[lookup.idField] = top.id;
                 stepArgs[lookup.name] = top.name;
@@ -856,7 +857,7 @@ Provide specific, actionable analysis based on the data above. Use concrete dime
         
         // Notify progress: matching completed
         if (onProgress) {
-          const highConfMatches = matchData.matches.filter((m: { score: number }) => m.score >= 70);
+          const highConfMatches = matchData.matches.filter((m: { score: number }) => m.score >= getMatchThresholds().high);
           onProgress({ 
             stage: 'matching', 
             status: 'completed', 
@@ -867,12 +868,12 @@ Provide specific, actionable analysis based on the data above. Use concrete dime
         }
         
         // If high confidence exact match found (score >= 70), handle based on entity type
-        if (matchData.confidence === 'high' && matchData.exactMatch && matchData.exactMatch.score >= 70) {
+        if (matchData.confidence === 'high' && matchData.exactMatch && matchData.exactMatch.score >= getMatchThresholds().high) {
           console.log('[CopilotAgent] High confidence match found:', matchData.exactMatch.name, 'score:', matchData.exactMatch.score);
           
           // For draftAccount, show match selection card since user might be trying to create a duplicate
           if (intent.function === 'draftAccount') {
-            const highConfAccountMatches = matchData.matches.filter((m: { score: number }) => m.score >= 70);
+            const highConfAccountMatches = matchData.matches.filter((m: { score: number }) => m.score >= getMatchThresholds().high);
             // Only show selection if there are actual high-confidence matches to display
             if (highConfAccountMatches.length > 0) {
               blockingResponse = {
@@ -902,7 +903,7 @@ Provide specific, actionable analysis based on the data above. Use concrete dime
           
           // For draftActivity with activity matching - if found exact match with high score, show duplicate warning
           if (intent.function === 'draftActivity' && entityType === 'activity') {
-            const highConfActivityMatches = matchData.matches.filter((m: { score: number }) => m.score >= 70);
+            const highConfActivityMatches = matchData.matches.filter((m: { score: number }) => m.score >= getMatchThresholds().high);
             // Only show selection if there are actual high-confidence matches to display
             if (highConfActivityMatches.length > 0) {
               // Show selection card for potential duplicate activity
@@ -968,12 +969,12 @@ Provide specific, actionable analysis based on the data above. Use concrete dime
         
         // If medium/low confidence or multiple matches, show selection card
         // Filter to only show high-confidence matches (score >= 70)
-        const highConfidenceMatches = matchData.matches.filter((m: { score: number }) => m.score >= 70);
+        const highConfidenceMatches = matchData.matches.filter((m: { score: number }) => m.score >= getMatchThresholds().high);
         
         // If there are high-confidence matches and needs confirmation, show selection
         if (highConfidenceMatches.length > 0) {
           // For single high-confidence match (>90%), auto-select for account/contact/opportunity
-          if (highConfidenceMatches.length === 1 && highConfidenceMatches[0].score > 90) {
+          if (highConfidenceMatches.length === 1 && highConfidenceMatches[0].score >= getMatchThresholds().autoSelect) {
             const autoMatch = highConfidenceMatches[0];
             console.log(`[CopilotAgent] Auto-selecting single high-confidence ${entityType} match:`, autoMatch.name, 'score:', autoMatch.score);
             
