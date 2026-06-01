@@ -132,8 +132,8 @@ function StageProgress({ stage, confidence }: { stage: string; confidence?: numb
       </div>
       <div className="flex justify-between text-[10px] text-muted-foreground">
         {displayStages.map((stage: string) => (
-          <span key={stage} className="capitalize">
-            {stage.slice(0, 4)}
+          <span key={stage} className="capitalize truncate">
+            {stage}
           </span>
         ))}
       </div>

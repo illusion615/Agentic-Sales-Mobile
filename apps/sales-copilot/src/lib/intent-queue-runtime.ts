@@ -130,8 +130,9 @@ function emitAnnounce(queue: IntentQueue, intent: QueueIntent, deps: RuntimeDeps
   const content = isZh
     ? `正在处理第 ${idx} / ${total} 步：${label}${desc ? ` — ${desc}` : ''}`
     : `Step ${idx} of ${total}: ${label}${desc ? ' — ' + desc : ''}`;
+  const announceId = `announce-${queue.id}-${intent.id}`;
   deps.pushMessage({
-    id: `narrate-${queue.id}-${intent.id}-announce-${Date.now()}`,
+    id: announceId,
     type: 'agent',
     content,
     timestamp: Date.now(),
@@ -166,11 +167,10 @@ async function emitSummary(queue: IntentQueue, deps: RuntimeDeps): Promise<Inten
   if (top.length <= 1) return { ...queue, summaryEmitted: true };
   const isZh = deps.locale === 'zh-Hans';
 
-  // ---- Check if all steps are query/analysis functions → aggregate with LLM ----
-  const queryFns = ['queryActivities', 'queryOpportunities', 'queryAccounts', 'queryContacts', 'suggestPlan', 'analyzePipeline'];
-  const allQueries = top.every((i) => queryFns.includes(i.function));
+  // ---- Check if all steps are non-draft functions → aggregate with LLM ----
+  const allNonDraft = top.every((i) => !i.function.startsWith('draft'));
   
-  if (allQueries && top.some((i) => i.status === 'confirmed')) {
+  if (allNonDraft && top.some((i) => i.status === 'confirmed')) {
     // Collect all query results for LLM aggregation
     const stepSummaries = top.map((intent, idx) => {
       const label = intent.userFacingLabel || intent.function;
@@ -183,27 +183,49 @@ async function emitSummary(queue: IntentQueue, deps: RuntimeDeps): Promise<Inten
     // Get the original user message from the queue
     const userMsg = queue.userMessage || '';
 
+    // Show a thinking indicator while the LLM generates the summary
+    const summaryMsgId = `narrate-${queue.id}-summary-${Date.now()}`;
+    deps.pushMessage({
+      id: summaryMsgId,
+      type: 'agent',
+      content: '',
+      timestamp: Date.now(),
+      queueId: queue.id,
+      queueIntentId: 'summary',
+      taskRole: 'summary',
+      isThinking: true,
+      thinkingSteps: [{
+        stage: 'generating',
+        status: 'active',
+        label: isZh ? '正在生成综合分析...' : 'Generating summary...',
+      }],
+    });
+
     try {
       const dagResult = await executeFunction('summarizeDAGResults', {
         data: `Original request: ${userMsg}\n\n${stepSummaries}`,
       }, { locale: deps.locale });
 
       if (dagResult.success && dagResult.data) {
-        deps.pushMessage({
-          id: `narrate-${queue.id}-summary-${Date.now()}`,
-          type: 'agent',
+        deps.patchMessage(summaryMsgId, {
           content: dagResult.data as string,
-          timestamp: Date.now(),
-          queueId: queue.id,
-          queueIntentId: 'summary',
-          taskRole: 'summary',
+          isThinking: false,
+          thinkingSteps: [{
+            stage: 'generating',
+            status: 'completed',
+            label: isZh ? '已完成' : 'Done',
+          }],
         });
         return { ...queue, summaryEmitted: true };
       }
     } catch (e) {
       console.error('[QueueRuntime] Aggregation LLM failed:', e);
     }
-    // Fall through to default summary if LLM fails
+    // LLM failed — replace thinking with fallback summary
+    deps.patchMessage(summaryMsgId, {
+      isThinking: false,
+      thinkingSteps: undefined,
+    });
   }
 
   // ---- Default summary for draft/create workflows ----
@@ -634,13 +656,11 @@ async function executeIntent(
 
     if (!res.success) {
       const err = res.error || 'execution failed';
-      deps.pushMessage({
-        id: `msg-${queue.id}-${intent.id}-err-${Date.now()}`,
-        type: 'agent',
-        content: isZh ? `执行 ${intent.function} 时出错: ${err}` : `Error executing ${intent.function}: ${err}`,
-        timestamp: Date.now(),
-        queueId: queue.id,
-        queueIntentId: intent.id,
+      // Patch the announce message with error detail instead of pushing a separate message
+      const announceId = `announce-${queue.id}-${intent.id}`;
+      deps.patchMessage(announceId, {
+        announceDetail: isZh ? `失败: ${err}` : `Failed: ${err}`,
+        announceStatus: 'failed',
       });
       emitResult(queue, intent, 'failed', undefined, deps);
       let q = patchIntent(queue, intent.id, { status: 'failed', result: { error: err } });
@@ -650,19 +670,21 @@ async function executeIntent(
 
     if (res.invalidateQueries) deps.invalidate(res.invalidateQueries);
 
-    // For update*: just acknowledge briefly.
+    // For update*: patch announce with result.
     if (intent.function.startsWith('update')) {
+      const updateAnnounceId = `announce-${queue.id}-${intent.id}`;
+      deps.patchMessage(updateAnnounceId, {
+        announceDetail: isZh ? '已更新' : 'Updated',
+        announceStatus: 'completed',
+      });
       emitResult(queue, intent, 'updated', undefined, deps);
     } else {
-      // query* — show short summary; store data for potential aggregation
+      // query* / other — merge result into announce detail
       const count = Array.isArray(res.data) ? res.data.length : 1;
-      deps.pushMessage({
-        id: `msg-${queue.id}-${intent.id}-res-${Date.now()}`,
-        type: 'agent',
-        content: isZh ? `已执行 ${displayName(intent.function, isZh)}，找到 ${count} 条记录。` : `Executed ${displayName(intent.function, isZh)}, found ${count} record(s).`,
-        timestamp: Date.now(),
-        queueId: queue.id,
-        queueIntentId: intent.id,
+      const announceId = `announce-${queue.id}-${intent.id}`;
+      deps.patchMessage(announceId, {
+        announceDetail: isZh ? `${count} 条记录` : `${count} record${count === 1 ? '' : 's'}`,
+        announceStatus: 'completed',
       });
       emitResult(queue, intent, 'completed', undefined, deps);
     }
@@ -672,6 +694,11 @@ async function executeIntent(
     return await runQueue(q, deps);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    const catchAnnounceId = `announce-${queue.id}-${intent.id}`;
+    deps.patchMessage(catchAnnounceId, {
+      announceDetail: isZh ? `失败` : `Failed`,
+      announceStatus: 'failed',
+    });
     emitResult(queue, intent, 'failed', undefined, deps);
     let q = patchIntent(queue, intent.id, { status: 'failed', result: { error: msg } });
     q = advanceCursor(q);
@@ -694,13 +721,10 @@ async function renderFormCard(
     );
     if (!res.success || !res.data) {
       const err = res.error || 'draft failed';
-      deps.pushMessage({
-        id: `msg-${queue.id}-${intent.id}-err-${Date.now()}`,
-        type: 'agent',
-        content: isZh ? `准备草稿失败: ${err}` : `Draft failed: ${err}`,
-        timestamp: Date.now(),
-        queueId: queue.id,
-        queueIntentId: intent.id,
+      const draftAnnounceId = `announce-${queue.id}-${intent.id}`;
+      deps.patchMessage(draftAnnounceId, {
+        announceDetail: isZh ? `失败: ${err}` : `Failed: ${err}`,
+        announceStatus: 'failed',
       });
       let q = patchIntent(queue, intent.id, { status: 'failed', result: { error: err } });
       q = advanceCursor(q);

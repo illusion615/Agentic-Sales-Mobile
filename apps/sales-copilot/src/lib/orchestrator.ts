@@ -195,7 +195,7 @@ function buildUserBlock(
   }
   const tail = (conversationHistory ?? []).slice(-2);
   if (tail.length) {
-    lines.push(`[Recent dialogue]\n${tail.map((m) => `${m.role}: ${m.content.slice(0, 120)}`).join('\n')}`);
+    lines.push(`[Recent dialogue]\n${tail.map((m) => `${m.role}: ${m.content}`).join('\n')}`);
   }
   return lines.join('\n\n');
 }

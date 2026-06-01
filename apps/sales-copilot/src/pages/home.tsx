@@ -1107,7 +1107,7 @@ export default function HomeDashboard() {
       
       const segment = segments[currentSegment];
       setBriefMeCurrentSegmentIndex(currentSegment);
-      setBriefMeCurrentSegmentLabel(segment.length > 72 ? `${segment.slice(0, 72)}...` : segment);
+      setBriefMeCurrentSegmentLabel(segment);
       const utterance = new SpeechSynthesisUtterance(segment);
       utterance.lang = locale === 'zh-Hans' ? 'zh-CN' : 'en-US';
       utterance.rate = briefMeSpeed;
@@ -1605,7 +1605,7 @@ ${agentResponse}`;
           
           return createBusinessInsight.mutateAsync({
             title: categoryInfo.title,
-            summary: item.insight.length > 80 ? item.insight.substring(0, 80) + '...' : item.insight,
+            summary: item.insight,
             detailsjson: JSON.stringify([item.insight]),
             rationale: item.rationale, // Full rationale (Dataverse field increased to support longer text)
             displayorder: idx,

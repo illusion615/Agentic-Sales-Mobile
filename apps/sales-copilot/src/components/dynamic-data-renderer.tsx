@@ -602,7 +602,7 @@ function formatCellValue(key: string, value: unknown, locale: Locale): string {
     const obj = value as Record<string, unknown>;
     if ('name1' in obj) return String(obj.name1);
     if ('title' in obj) return String(obj.title);
-    if ('id' in obj) return String(obj.id).slice(0, 8) + '...';
+    if ('id' in obj) return String(obj.id);
     return JSON.stringify(value);
   }
   

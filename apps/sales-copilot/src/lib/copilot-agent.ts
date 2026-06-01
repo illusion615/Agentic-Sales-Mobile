@@ -1323,7 +1323,7 @@ Important rules:
 调用了函数: ${intent.function}
 记录数量: ${Array.isArray(functionResult.data) ? functionResult.data.length : 1}
 执行结果摘要:
-${JSON.stringify(functionResult.data, null, 2).slice(0, 1500)}
+${JSON.stringify(functionResult.data, null, 2).slice(0, 4000)}
 
 请提供简短的摘要和分析，不要列出具体记录。`
     : `User question: ${userMessage}
@@ -1331,7 +1331,7 @@ ${JSON.stringify(functionResult.data, null, 2).slice(0, 1500)}
 Called function: ${intent.function}
 Record count: ${Array.isArray(functionResult.data) ? functionResult.data.length : 1}
 Execution result summary:
-${JSON.stringify(functionResult.data, null, 2).slice(0, 1500)}
+${JSON.stringify(functionResult.data, null, 2).slice(0, 4000)}
 
 Please provide a brief summary and analysis, do not list individual records.`;
 

@@ -32,6 +32,7 @@ export function CopilotPanel() {
     messages,
     isSending,
     sendMessage,
+    cancelSend,
     inputValue,
     setInputValue,
 
@@ -442,7 +443,8 @@ export function CopilotPanel() {
     if (messages.length === 0) {
       return [
         { text: locale === 'zh-Hans' ? '今日待办' : "Today's tasks", query: locale === 'zh-Hans' ? '今天有哪些待办事项？' : 'What are my tasks for today?' },
-        { text: locale === 'zh-Hans' ? '商机状态' : 'Pipeline status', query: locale === 'zh-Hans' ? '我的商机状态如何？' : 'What is my pipeline status?' },
+        { text: locale === 'zh-Hans' ? '商机状态' : 'Pipeline status', query: locale === 'zh-Hans' ? '我的商机总览' : 'Show my pipeline overview' },
+        { text: locale === 'zh-Hans' ? '新建拜访' : 'New visit', query: locale === 'zh-Hans' ? '帮我新建一条拜访记录' : 'Create a new visit record for me' },
         { text: locale === 'zh-Hans' ? '客户跟进' : 'Follow-ups', query: locale === 'zh-Hans' ? '哪些客户需要跟进？' : 'Which customers need follow-up?' },
       ];
     }
@@ -474,7 +476,7 @@ export function CopilotPanel() {
                 <span className="text-xs text-primary font-medium">1</span>
               </span>
               <span className="text-sm text-muted-foreground">
-                {locale === 'zh-Hans' ? '查询客户信息和商机状态' : 'Query customer info and opportunity status'}
+                {locale === 'zh-Hans' ? '查询和管理客户、商机、联系人、拜访' : 'Query & manage accounts, opportunities, contacts, activities'}
               </span>
             </li>
             <li className="flex items-center gap-3">
@@ -482,7 +484,7 @@ export function CopilotPanel() {
                 <span className="text-xs text-primary font-medium">2</span>
               </span>
               <span className="text-sm text-muted-foreground">
-                {locale === 'zh-Hans' ? '获取今日日程和待办事项' : 'Get today\'s schedule and to-do items'}
+                {locale === 'zh-Hans' ? '一句话新建拜访、商机、客户（支持多意图）' : 'Create visits, opportunities & accounts from one sentence'}
               </span>
             </li>
             <li className="flex items-center gap-3">
@@ -490,7 +492,15 @@ export function CopilotPanel() {
                 <span className="text-xs text-primary font-medium">3</span>
               </span>
               <span className="text-sm text-muted-foreground">
-                {locale === 'zh-Hans' ? '分析销售趋势和业绩数据' : 'Analyze sales trends and performance data'}
+                {locale === 'zh-Hans' ? '分析商机、生成洞察、语音播报简报' : 'Analyze pipeline, generate insights & voice briefings'}
+              </span>
+            </li>
+            <li className="flex items-center gap-3">
+              <span className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
+                <span className="text-xs text-primary font-medium">4</span>
+              </span>
+              <span className="text-sm text-muted-foreground">
+                {locale === 'zh-Hans' ? '产品知识问答（连接企业知识库）' : 'Product knowledge Q&A (connected to enterprise KB)'}
               </span>
             </li>
           </ul>
@@ -501,12 +511,25 @@ export function CopilotPanel() {
       ) : (
         <>
 
-          {messages.map((message: ChatMessage) => {
+          {messages.map((message: ChatMessage, msgIndex: number) => {
             // Phase D: hide substep messages when their owning task group is collapsed.
             if (message.taskRole === 'substep' && message.collapsed) return null;
+
+            // Determine if a queue step announce is completed: check the
+            // announceStatus field patched by the runtime after execution.
+            const announceStatus = message.announceStatus;
+            const announceDetail = message.announceDetail;
+            const isAnnounceCompleted = message.taskRole === 'announce' && (
+              announceStatus === 'completed' || announceStatus === 'failed'
+              || (message.queueIntentId && messages.slice(msgIndex + 1).some((m) => m.queueIntentId === message.queueIntentId && m.taskRole !== 'announce'))
+            );
+            const isAnnounceFailed = announceStatus === 'failed';
+
+            // Messages inside a queue step (not announce/summary/overview) are "substeps".
+            const isQueueSubstep = !!message.queueId && message.taskRole !== 'announce' && message.taskRole !== 'summary' && message.taskRole !== 'overview';
             return (
             <div key={message.id} id={`message-${message.id}`} className={cn(
-              'mb-3',
+              message.taskRole === 'announce' ? 'mb-1' : 'mb-3',
               message.type === 'user' ? 'flex justify-end' : '',
               // Indent sub-content under a task header for visual hierarchy.
               message.queueId && message.taskRole !== 'announce' && message.taskRole !== 'summary' && 'pl-3 border-l-2 border-primary/10',
@@ -518,16 +541,33 @@ export function CopilotPanel() {
                 </div>
               )}
 
-              {/* Phase B: Per-task announce bubble (Phase D: now toggleable) */}
+              {/* Phase B: Per-task announce — uses thinking-step style */}
               {message.taskRole === 'announce' && message.taskAnnounce && (
-                <TaskAnnounceBubble
-                  index={message.taskAnnounce.index}
-                  total={message.taskAnnounce.total}
-                  label={message.taskAnnounce.label}
-                  locale={locale === 'zh-Hans' ? 'zh-Hans' : 'en'}
-                  collapsed={message.collapsed}
-                  onToggle={message.taskGroupId ? () => toggleTaskGroupCollapsed(message.taskGroupId!) : undefined}
-                />
+                <div className="flex items-center gap-2 text-xs py-1">
+                  {isAnnounceFailed ? (
+                    <span className="text-destructive">✗</span>
+                  ) : isAnnounceCompleted || message.collapsed ? (
+                    <span className="text-primary">✓</span>
+                  ) : (
+                    <span className="w-3 h-3 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+                  )}
+                  <span className={cn(
+                    isAnnounceFailed ? 'text-destructive' :
+                    isAnnounceCompleted || message.collapsed ? 'text-muted-foreground' : 'text-foreground font-medium'
+                  )}>
+                    {locale === 'zh-Hans'
+                      ? `第 ${message.taskAnnounce.index}/${message.taskAnnounce.total} 步 · ${message.taskAnnounce.label}`
+                      : `Step ${message.taskAnnounce.index}/${message.taskAnnounce.total} · ${message.taskAnnounce.label}`}
+                  </span>
+                  {announceDetail && (
+                    <span className={cn(
+                      'text-[10px]',
+                      isAnnounceFailed ? 'text-destructive/70' : 'text-muted-foreground/70'
+                    )}>
+                      — {announceDetail}
+                    </span>
+                  )}
+                </div>
               )}
 
               {/* User Message */}
@@ -803,8 +843,8 @@ export function CopilotPanel() {
                         additionalIntents={message.additionalIntents}
                       />
                     )}
-                    {/* Action bar: timestamp + copy + play — right-aligned */}
-                    {message.content && !isJson && !message.isThinking && !message.isStreaming && (
+                    {/* Action bar: timestamp + copy + play — hidden for queue substeps */}
+                    {message.content && !isJson && !message.isThinking && !message.isStreaming && !isQueueSubstep && (
                       <div className="flex items-center justify-between mt-0.5">
                         <p className="text-[9px] text-muted-foreground">
                           {new Date(message.timestamp).toLocaleTimeString(locale === 'zh-Hans' ? 'zh-CN' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
@@ -956,7 +996,7 @@ export function CopilotPanel() {
                   <div className="w-16 h-16 rounded-lg border border-border/50 bg-muted/50 flex flex-col items-center justify-center">
                     <Paperclip className="w-5 h-5 text-muted-foreground" />
                     <span className="text-[8px] text-muted-foreground mt-1 px-1 truncate max-w-full">
-                      {attachment.file.name.length > 8 ? attachment.file.name.slice(0, 8) + '...' : attachment.file.name}
+                      {attachment.file.name}
                     </span>
                   </div>
                 )}
@@ -1069,7 +1109,7 @@ export function CopilotPanel() {
         {/* Right action — mutually exclusive: Stop / Send / Mic */}
         {isSending ? (
           <button
-            onClick={() => {}}
+            onClick={cancelSend}
             className="w-10 h-10 rounded-full flex items-center justify-center text-red-500 hover:bg-muted/50 transition-colors shrink-0"
             aria-label={locale === 'zh-Hans' ? '停止' : 'Stop'}
             title={locale === 'zh-Hans' ? '停止' : 'Stop'}

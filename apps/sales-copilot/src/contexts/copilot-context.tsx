@@ -182,6 +182,10 @@ export interface ChatMessage {
   collapsed?: boolean;
   /** One-line summary shown when this task group is collapsed. */
   collapsedSummary?: string;
+  /** Result detail merged into announce (e.g. "5 records", "Updated", "Failed: ..."). Set by runtime. */
+  announceDetail?: string;
+  /** Execution status for announce messages: 'completed' | 'failed'. Set by runtime. */
+  announceStatus?: 'completed' | 'failed';
 }
 
 // Form fill callback type
@@ -207,6 +211,7 @@ interface CopilotContextValue {
   isSending: boolean;
   setIsSending: (value: boolean) => void;
   sendMessage: (text: string) => void;
+  cancelSend: () => void;
   inputValue: string;
   setInputValue: (value: string) => void;
   
@@ -968,6 +973,39 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const streamingRafRef = useRef<number | null>(null);
+  const sendAbortRef = useRef<AbortController | null>(null);
+
+  // Cancel the current send — aborts pending LLM calls, stops streaming, resets UI.
+  const cancelSend = useCallback(() => {
+    // 1. Signal abort to any in-flight async work
+    if (sendAbortRef.current) {
+      sendAbortRef.current.abort();
+      sendAbortRef.current = null;
+    }
+    // 2. Stop streaming animation
+    if (streamingRafRef.current) {
+      cancelAnimationFrame(streamingRafRef.current);
+      streamingRafRef.current = null;
+    }
+    if (streamingIntervalRef.current) {
+      clearInterval(streamingIntervalRef.current);
+      streamingIntervalRef.current = null;
+    }
+    // 3. Finalise any thinking message → show what we have so far
+    setMessages((prev) => prev.map((msg) => {
+      if (msg.isThinking || msg.isStreaming) {
+        return {
+          ...msg,
+          isThinking: false,
+          isStreaming: false,
+          content: msg.content || (locale === 'zh-Hans' ? '已取消' : 'Cancelled'),
+        };
+      }
+      return msg;
+    }));
+    // 4. Reset sending state
+    setIsSending(false);
+  }, [locale]);
 
   // Helper function to simulate streaming text effect — reveals character-by-character
   // using requestAnimationFrame for buttery-smooth animation.
@@ -1293,6 +1331,11 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     setInputValue('');
     clearClarificationSuggestions(); // Clear any pending clarification suggestions
     setIsSending(true);
+
+    // Set up abort controller so cancelSend can signal this pipeline to stop
+    const abortController = new AbortController();
+    sendAbortRef.current = abortController;
+    const signal = abortController.signal;
     
     // Proceed directly — invokeFlowForLLM has its own availability guard
     {
@@ -1416,6 +1459,9 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
               summary: pageContextRef.current.summary,
             } : undefined,
           }, handleProgress);
+
+          // Bail out if the user cancelled while we were waiting for the LLM
+          if (signal.aborted) return;
           
           // ===== IntentQueue intercept =====
           // When the parsed intent triggers queue mode (draft / batch / matching / additionalActions),
@@ -2942,6 +2988,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     isSending,
     setIsSending,
     sendMessage,
+    cancelSend,
     inputValue,
     setInputValue,
     isRecording,
@@ -2983,6 +3030,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     messages,
     isSending,
     sendMessage,
+    cancelSend,
     inputValue,
     isRecording,
 

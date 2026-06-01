@@ -322,7 +322,7 @@ export async function runFrame(ctx: FrameRunContext): Promise<FrameRunOutcome> {
     if (summary) pageBlock += `\n[Summary] ${summary}`;
     if (pageData) {
       try {
-        pageBlock += `\n[PageData] ${JSON.stringify(pageData).slice(0, 1500)}`;
+        pageBlock += `\n[PageData] ${JSON.stringify(pageData).slice(0, 4000)}`;
       } catch {
         /* ignore */
       }
@@ -337,7 +337,7 @@ export async function runFrame(ctx: FrameRunContext): Promise<FrameRunOutcome> {
   const tail = (ctx.conversationHistory ?? []).slice(-4);
   let contextBlock = '';
   if (tail.length > 0) {
-    const turns = tail.map((m) => `${m.role}: ${m.content.slice(0, 300)}`).join('\n');
+    const turns = tail.map((m) => `${m.role}: ${m.content}`).join('\n');
     contextBlock = `\n\n# Conversation context\n${turns}\n\nThe user's next message follows. If it contains pronouns (them/it/those/these/this) or short commands (list/show/details/more), resolve the referent from the conversation above — the salesObject MUST match what was discussed, not a default.`;
   }
 

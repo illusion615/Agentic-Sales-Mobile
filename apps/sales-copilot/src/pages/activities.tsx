@@ -235,7 +235,7 @@ export default function ActivitiesPage() {
           outcome: a.outcome || undefined, scheduledAt: a.scheduleddate,
           accountName: a.account?.name1, contactName: a.contact?.fullname,
           opportunityName: a.opportunity?.name1,
-          notes: a.notes ? String(a.notes).slice(0, 200) : undefined,
+          notes: a.notes ? String(a.notes) : undefined,
         }))
       : undefined;
 
