@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronDown, ChevronUp, Building2, Target, Calendar, ArrowRight, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getLocale } from '@/lib/i18n';
 import { useCopilot } from '@/contexts/copilot-context';
 import { useCopilotSideDocked } from '@/components/global-copilot';
+import { prefetchForEntityType } from '@/lib/prefetch';
 
 export type RecordType = 'account' | 'opportunity' | 'activity' | 'contact';
 
@@ -56,6 +57,9 @@ export function RecordListCard({ type, records, title }: RecordListCardProps) {
   const isZh = locale === 'zh-Hans';
   const { closePanel, setPageContext } = useCopilot();
   const { docked } = useCopilotSideDocked();
+
+  // Prefetch the detail page chunk when this record list renders
+  useEffect(() => { prefetchForEntityType(type); }, [type]);
   
   const config = typeConfig[type];
   const Icon = config.icon;

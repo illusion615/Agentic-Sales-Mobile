@@ -156,6 +156,11 @@ export default function OpportunityDetailPage() {
   const { data: opportunity, isLoading, error } = useOpportunity(id || '');
   const { data: account } = useAccount(opportunity?.account?.id || '');
   const { data: allActivities = [] } = useActivityList();
+
+  // Prefetch related entity detail chunks (account, activity)
+  useEffect(() => {
+    import('@/lib/prefetch').then(({ prefetchRelated }) => prefetchRelated('opportunity'));
+  }, []);
   const deleteOpportunity = useDeleteOpportunity();
   const queryClient = useQueryClient();
 

@@ -104,6 +104,11 @@ export default function ContactDetailPage() {
   const { data: accounts = [] } = useAccountList();
   const { data: allOpportunities = [] } = useOpportunityList();
   const { data: allActivities = [] } = useActivityList();
+
+  // Prefetch related entity detail chunks (account, opportunity, activity)
+  useEffect(() => {
+    import('@/lib/prefetch').then(({ prefetchRelated }) => prefetchRelated('contact'));
+  }, []);
   const updateContact = useUpdateContact();
   const deleteContact = useDeleteContact();
   const queryClient = useQueryClient();

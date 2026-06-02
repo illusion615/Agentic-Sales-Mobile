@@ -129,6 +129,11 @@ export default function ClientDetailPage() {
   // Fetch data from Dataverse
   const { data: account, isLoading: isLoadingAccount, error } = useAccount(id || '');
 
+  // Prefetch related entity detail chunks (opportunity, activity, contact)
+  useEffect(() => {
+    import('@/lib/prefetch').then(({ prefetchRelated }) => prefetchRelated('account'));
+  }, []);
+
   // Debug logging for account fetch issues
   useEffect(() => {
     if (id) {

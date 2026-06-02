@@ -769,6 +769,38 @@ export function KPICards({
       </div>
 
       {/* Today's Agenda - Full Width Row */}
+      {isLoading ? (
+        <div className="glass-card p-4 animate-pulse" style={{ borderRadius: 20 }}>
+          {/* Calendar skeleton */}
+          <div className="mb-4">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-8 h-8 rounded-full bg-muted/50" />
+              <div className="space-y-1">
+                <div className="h-3 w-20 rounded bg-muted/40" />
+                <div className="h-4 w-28 rounded bg-muted/50" />
+              </div>
+            </div>
+            {/* Calendar grid skeleton */}
+            <div className="grid grid-cols-7 gap-1">
+              {[...Array(7)].map((_, i) => <div key={`h${i}`} className="h-4 rounded bg-muted/30" />)}
+              {[...Array(35)].map((_, i) => <div key={i} className="h-8 rounded bg-muted/20" />)}
+            </div>
+          </div>
+          {/* Agenda skeleton */}
+          <div className="rounded-lg border border-muted/30 p-3 space-y-2">
+            <div className="h-4 w-24 rounded bg-muted/50" />
+            {[0, 1, 2].map(i => (
+              <div key={i} className="flex items-center gap-3">
+                <div className="w-1 h-8 rounded bg-muted/40" />
+                <div className="flex-1 space-y-1">
+                  <div className="h-3 w-3/4 rounded bg-muted/40" />
+                  <div className="h-2.5 w-1/2 rounded bg-muted/30" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
       <motion.div
         variants={itemVariants}
         className="glass-card p-4 cursor-pointer hover:bg-muted/50 transition-colors"
@@ -1021,6 +1053,7 @@ export function KPICards({
 
 
       </motion.div>
+      )}
       
       {/* Overdue Tasks Sheet with Swipe */}
       <Sheet open={overdueSheetOpen} onOpenChange={setOverdueSheetOpen}>

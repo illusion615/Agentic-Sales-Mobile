@@ -415,6 +415,16 @@ export default function HomeDashboard() {
   const { data: accounts = [], refetch: refetchAccounts, isLoading: isLoadingAccounts } = useAccountList();
   const isDataLoading = isLoadingActivities || isLoadingOpportunities || isLoadingAccounts;
 
+  // Prefetch all detail page chunks once home data starts loading — the user
+  // will likely navigate to one of these from the agenda or copilot results.
+  useEffect(() => {
+    if (!isDataLoading) {
+      import('@/lib/prefetch').then(({ prefetchForEntityTypes }) =>
+        prefetchForEntityTypes(['activity', 'account', 'opportunity', 'contact'])
+      );
+    }
+  }, [isDataLoading]);
+
   const updateConversation = useUpdateCopilotConversation();
   const createConversation = useCreateCopilotConversation();
   const { data: businessInsights = [], refetch: refetchBusinessInsights, isLoading: isLoadingBusinessInsights } = useBusinessInsightList({ filter: 'isactive eq true', orderBy: ['displayorder asc'] });
