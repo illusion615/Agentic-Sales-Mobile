@@ -196,7 +196,7 @@ export default function DataImportPage() {
             account: { id: realAccountId, name1: data.name },
             opportunity: realOppId ? { id: realOppId, name1: data.opportunity.name } : undefined,
             scheduleddate: data.nextActivityDate,
-            draftStatus: 'confirmed',
+            status: 'open',
             notes: `${data.department} | ${data.productLine}`,
             ownerid: ownerId,
           });

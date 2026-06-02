@@ -586,15 +586,15 @@ export default function ContactDetailPage() {
                         <h4 className="text-sm font-medium text-foreground truncate">
                           {activity.title}
                         </h4>
-                        {activity.draftStatus && (
+                        {activity.status && (
                           <Badge
                             variant="outline"
                             className={cn(
                               'text-[10px]',
-                              activity.draftStatus === 'completed' && 'text-emerald-600 border-emerald-200'
+                              activity.status === 'completed' && 'text-emerald-600 border-emerald-200'
                             )}
                           >
-                            {activity.draftStatus}
+                            {activity.status}
                           </Badge>
                         )}
                       </div>

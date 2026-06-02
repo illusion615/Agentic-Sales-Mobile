@@ -6,7 +6,7 @@ import { MobileLayout } from '@/components/mobile-layout';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { useProductList, useAccountList, useOpportunityList, useActivityList } from '@/generated/hooks';
-import type { Product } from '@/generated/models/product-model';import type { Account } from '@/generated/models/account-model';import type { Opportunity, OpportunityStageKeyToLabel } from '@/generated/models/opportunity-model';import type { Activity, ActivityTypeKeyToLabel } from '@/generated/models/activity-model';import { imageFallbackByCategory, type ImageFallbackCategory } from '@/lib/product-images';
+import type { Product } from '@/generated/models/product-model';import type { Account } from '@/generated/models/account-model';import type { Opportunity } from '@/generated/models/opportunity-model';import type { Activity } from '@/generated/models/activity-model';import { imageFallbackByCategory, type ImageFallbackCategory } from '@/lib/product-images';
 import { useCopilot } from '@/contexts/copilot-context';
 import { getLocale } from '@/lib/i18n';
 import { useFirstMount } from '@/hooks/use-first-mount';
@@ -256,10 +256,10 @@ export default function ProductDetailPage() {
                         <div>
                           <h4 className="text-sm font-medium text-foreground">{account.name1}</h4>
                           <p className="text-xs text-muted-foreground mt-0.5">
-                            {account.industry || 'No industry'} • {account.region || 'No region'}
+                            {account.industry || 'No industry'}
                           </p>
                         </div>
-                        <span className="text-xs text-muted-foreground">{account.tier}</span>
+                        <span className="text-xs text-muted-foreground">{account.industry}</span>
                       </div>
                     </button>
                   ))
@@ -313,7 +313,7 @@ export default function ProductDetailPage() {
                             {getActivityTypeLabel(activity.type)} • {new Date(activity.scheduleddate).toLocaleDateString()}
                           </p>
                         </div>
-                        <span className="text-xs text-muted-foreground">{getDraftStatusLabel(activity.draftStatus)}</span>
+                        <span className="text-xs text-muted-foreground">{getDraftStatusLabel(activity.status)}</span>
                       </div>
                     </button>
                   ))

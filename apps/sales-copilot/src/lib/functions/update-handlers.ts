@@ -28,8 +28,6 @@ const updateAccount: FunctionHandler = async (args) => {
   const accountChanges: Partial<Account> = {};
   if (args.name) accountChanges.name1 = args.name as string;
   if (args.industry) accountChanges.industry = args.industry as string;
-  if (args.region) accountChanges.region = args.region as string;
-  if (args.tier) accountChanges.tier = args.tier as string;
   if (args.phone) accountChanges.phone = args.phone as string;
   if (args.email) accountChanges.email = args.email as string;
   if (args.address) accountChanges.address = args.address as string;
@@ -92,20 +90,20 @@ const updateActivity: FunctionHandler = async (args) => {
 
   const actChanges: Partial<Activity> = {};
   if (args.title) actChanges.title = args.title as string;
-  if (args.type) actChanges.type = args.type as string;
+  if (args.type) actChanges.type = args.type as Activity['type'];
   if (args.status) {
     const statusStr = (args.status as string).toLowerCase();
-    const statusMap: Record<string, string> = {
-      'draft': 'draft', 'confirmed': 'confirmed', 'completed': 'completed', 'cancelled': 'cancelled', 'canceled': 'cancelled',
-      'done': 'completed', 'complete': 'completed', 'finished': 'completed', 'cancel': 'cancelled', 'confirm': 'confirmed',
-      '草稿': 'draft', '已确认': 'confirmed', '确认': 'confirmed',
-      '已完成': 'completed', '完成': 'completed', '已取消': 'cancelled', '取消': 'cancelled',
+    const statusMap: Record<string, Activity['status']> = {
+      'draft': 'open', 'confirmed': 'open', 'open': 'open',
+      'completed': 'completed', 'done': 'completed', 'complete': 'completed', 'finished': 'completed',
+      'cancelled': 'canceled', 'canceled': 'canceled', 'cancel': 'canceled',
+      '草稿': 'open', '已确认': 'open', '确认': 'open',
+      '已完成': 'completed', '完成': 'completed', '已取消': 'canceled', '取消': 'canceled',
     };
-    if (statusMap[statusStr]) actChanges.draftStatus = statusMap[statusStr];
+    if (statusMap[statusStr]) actChanges.status = statusMap[statusStr];
   }
   if (args.scheduledDate) actChanges.scheduleddate = args.scheduledDate as string;
   if (args.notes) actChanges.notes = args.notes as string;
-  if (args.result) actChanges.outcome = args.result as string;
 
   if (args.opportunityId || args.opportunityName) {
     const opportunities = await OpportunityService.getAll();

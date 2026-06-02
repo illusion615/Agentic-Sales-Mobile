@@ -5,17 +5,31 @@
  */
 
 export const dataSourcesInfo = {
-  "crf5c_account1s": {
+  "accounts": {
     "tableId": "",
     "version": "",
-    "primaryKey": "crf5c_account1id",
+    "primaryKey": "accountid",
     "dataSourceType": "Dataverse",
     "apis": {}
   },
-  "crf5c_activity1s": {
+  "appointments": {
     "tableId": "",
     "version": "",
-    "primaryKey": "crf5c_activity1id",
+    "primaryKey": "activityid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
+  "phonecalls": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "activityid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
+  "emails": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "activityid",
     "dataSourceType": "Dataverse",
     "apis": {}
   },
@@ -47,10 +61,10 @@ export const dataSourcesInfo = {
     "dataSourceType": "Dataverse",
     "apis": {}
   },
-  "crf5c_contacts": {
+  "contacts": {
     "tableId": "",
     "version": "",
-    "primaryKey": "crf5c_contactid",
+    "primaryKey": "contactid",
     "dataSourceType": "Dataverse",
     "apis": {}
   },

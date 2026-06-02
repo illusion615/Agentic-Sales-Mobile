@@ -521,9 +521,7 @@ export default function HomeDashboard() {
     }
     const effectiveLastContact = (a: Account): Date | null => {
       const fromActivity = a.id ? lastActivityByAccount.get(a.id) : undefined;
-      const fromField = a.lastcontactedon ? new Date(a.lastcontactedon) : null;
-      if (fromActivity && fromField) return fromActivity > fromField ? fromActivity : fromField;
-      return fromActivity || fromField || null;
+      return fromActivity || null;
     };
 
     const clientsTouchedThisWeek = accounts.filter((a: Account) => {
@@ -593,7 +591,7 @@ export default function HomeDashboard() {
       // Any activity scheduled before today (not including today)
       const isBeforeToday = scheduled < todayStart;
       // NOT completed
-      const isNotCompleted = a.draftStatus !== 'completed';
+      const isNotCompleted = a.status !== 'completed';
       return isBeforeToday && isNotCompleted;
     });
     
@@ -618,7 +616,7 @@ export default function HomeDashboard() {
     // No fallback placeholder data - show real data only
 
     const agendaCompleted = todayActivities.filter(
-      (a: Activity) => a.draftStatus === 'completed'
+      (a: Activity) => a.status === 'completed'
     ).length;
 
     // Quarterly Performance calculation
@@ -964,7 +962,7 @@ export default function HomeDashboard() {
     try {
       await updateActivity.mutateAsync({
         id: activityId,
-        changedFields: { draftStatus: 'completed' as const } // 'completed'
+        changedFields: { status: 'completed' as const }
       });
       toast.success(locale === 'zh-Hans' ? '已标记完成' : 'Marked as done');
       refetchActivities();

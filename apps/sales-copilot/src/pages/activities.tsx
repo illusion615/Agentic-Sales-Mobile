@@ -61,7 +61,7 @@ function formatTime(dateStr: string): string {
 }
 
 function isOverdue(activity: DataverseActivity): boolean {
-  if (activity.draftStatus === 'completed') return false;
+  if (activity.status === 'completed') return false;
   const scheduled = new Date(activity.scheduleddate);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -83,7 +83,7 @@ function ActivityItem({ activity, showOverdue = false }: { activity: DataverseAc
   const typeLabel = activity.type;
   const Icon = activityIcons[typeLabel] || CheckSquare;
   const color = activityColors[typeLabel] || 'bg-muted';
-  const isCompleted = activity.draftStatus === 'completed';
+  const isCompleted = activity.status === 'completed';
   const overdue = showOverdue && isOverdue(activity);
   const daysOver = overdue ? getDaysOverdue(activity) : 0;
 
@@ -136,7 +136,7 @@ function ActivityItem({ activity, showOverdue = false }: { activity: DataverseAc
               'px-1.5 py-0 rounded text-[9px] font-medium',
               isCompleted ? 'bg-green-500/15 text-green-600' : 'bg-muted text-muted-foreground'
             )}>
-              {activity.draftStatus}
+              {activity.status}
             </span>
             {overdue && (
               <span className="flex items-center gap-0.5 text-[9px] font-medium text-red-500">
@@ -197,7 +197,7 @@ export default function ActivitiesPage() {
   }, [activities, viewMode, currentDate]);
 
   // ─── Stats ───
-  const completedCount = filteredActivities.filter((a: DataverseActivity) => a.draftStatus === 'completed').length;
+  const completedCount = filteredActivities.filter((a: DataverseActivity) => a.status === 'completed').length;
   const totalCount = filteredActivities.length;
   const pendingCount = totalCount - completedCount;
   const completionRate = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
@@ -223,16 +223,16 @@ export default function ActivitiesPage() {
   // Selected day activities split into groups
   const selectedDateKey = format(currentDate, 'yyyy-MM-dd');
   const selectedDayActivities = activitiesByDate[selectedDateKey] || [];
-  const selectedDayPending = selectedDayActivities.filter((a) => a.draftStatus !== 'completed');
-  const selectedDayCompleted = selectedDayActivities.filter((a) => a.draftStatus === 'completed');
+  const selectedDayPending = selectedDayActivities.filter((a) => a.status !== 'completed');
+  const selectedDayCompleted = selectedDayActivities.filter((a) => a.status === 'completed');
   const [showCompleted, setShowCompleted] = useState(false);
 
   // Copilot page context
   useEffect(() => {
     const dayActivitiesPayload = viewMode === 'week'
       ? filteredActivities.map((a: DataverseActivity) => ({
-          id: a.id, title: a.title, type: a.type, status: a.draftStatus,
-          outcome: a.outcome || undefined, scheduledAt: a.scheduleddate,
+          id: a.id, title: a.title, type: a.type, status: a.status,
+          scheduledAt: a.scheduleddate,
           accountName: a.account?.name1, contactName: a.contact?.fullname,
           opportunityName: a.opportunity?.name1,
           notes: a.notes ? String(a.notes) : undefined,

@@ -156,8 +156,7 @@ export default function ActivityDetailPage() {
     if (!activity) return;
     
     const typeLabel = activity.type;
-    const statusLabel = activity.draftStatus;
-    const outcomeLabel = activity.outcome ? activity.outcome : undefined;
+    const statusLabel = activity.status;
     
     copilot.setPageContext({
       currentPage: locale === 'zh-Hans' ? '活动详情' : 'Activity Detail',
@@ -169,7 +168,6 @@ export default function ActivityDetailPage() {
         activityTitle: activity.title,
         type: typeLabel,
         status: statusLabel,
-        outcome: outcomeLabel,
         scheduledDate: activity.scheduleddate,
         notes: activity.notes,
         accountId: activity.account?.id,
@@ -207,14 +205,14 @@ export default function ActivityDetailPage() {
       await updateActivity.mutateAsync({
         id: activity.id,
         changedFields: {
-          draftStatus: 'completed',
+          status: 'completed',
         },
       });
       
       // Trigger AI summary generation after completing
       triggerForEntity('activity', activity.id, {
         ...activity,
-        draftStatus: 'completed',
+        status: 'completed',
       } as Record<string, unknown>, {
         account: activity.account ? { id: activity.account.id, name: activity.account.name1 } : undefined,
         opportunity: activity.opportunity ? { id: activity.opportunity.id, name: activity.opportunity.name1 } : undefined,
@@ -283,9 +281,8 @@ export default function ActivityDetailPage() {
   const typeLabel = activity.type;
   const Icon = activityIcons[typeLabel] || CheckSquare;
   const color = activityColors[typeLabel] || 'bg-muted';
-  const statusLabel = activity.draftStatus;
+  const statusLabel = activity.status;
   const isCompleted = statusLabel === 'completed';
-  const outcomeLabel = activity.outcome ? activity.outcome : undefined;
 
   const deleteButton = (
     <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
@@ -511,25 +508,12 @@ export default function ActivityDetailPage() {
           </GlassCard>
         )}
 
-        {/* Details Card - Outcome and Notes */}
-        {(outcomeLabel || activity.notes) && (
+        {/* Details Card - Notes */}
+        {activity.notes && (
           <GlassCard className="space-y-4">
             <h2 className="text-sm font-semibold text-foreground uppercase tracking-wide">
               {locale === 'zh-Hans' ? '详情' : 'Details'}
             </h2>
-
-            {/* Outcome */}
-            {outcomeLabel && (
-              <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/30">
-                <CheckCircle className="w-5 h-5 text-muted-foreground" />
-                <div className="flex-1">
-                  <p className="text-xs text-muted-foreground">{locale === 'zh-Hans' ? '结果' : 'Outcome'}</p>
-                  <p className="text-sm font-medium text-foreground">
-                    {outcomeLabel}
-                  </p>
-                </div>
-              </div>
-            )}
 
             {/* Notes */}
             {activity.notes && (

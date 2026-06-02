@@ -340,7 +340,7 @@ export default function ActivityCapturePage() {
         await createActivity.mutateAsync({
           title,
           type: 'visit', // visit
-          draftStatus: 'confirmed', // confirmed
+          status: 'open',
           ownerid: user?.objectId || '',
           scheduleddate: new Date(formData.visitDate).toISOString(),
           notes,

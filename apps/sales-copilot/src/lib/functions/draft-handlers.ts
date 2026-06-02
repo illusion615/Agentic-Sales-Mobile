@@ -56,8 +56,6 @@ const draftAccount: FunctionHandler = async (args) => ({
     data: {
       name: args.name as string || '',
       industry: args.industry as string || '',
-      region: args.region as string || '',
-      tier: args.tier as string || '',
       phone: args.phone as string || '',
       email: args.email as string || '',
       address: args.address as string || '',

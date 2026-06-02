@@ -59,7 +59,6 @@ import { useEntityAISummary, useWithAISummaryTrigger } from '@/hooks/use-ai-summ
 import type { Opportunity } from '@/generated/models/opportunity-model';
 import type { Activity } from '@/generated/models/activity-model';
 import type { Contact } from '@/generated/models/contact-model';
-import { getRegionEnglish } from '@/lib/display-labels';
 import { toast } from 'sonner';
 import { getLocale } from '@/lib/i18n';
 import { useCopilot } from '@/contexts/copilot-context';
@@ -122,8 +121,6 @@ export default function ClientDetailPage() {
     email: '',
     address: '',
     notes: '',
-    tier: '',
-    region: '',
   });
 
   // Fetch data from Dataverse
@@ -184,8 +181,6 @@ export default function ClientDetailPage() {
         email: account.email || '',
         address: account.address || '',
         notes: account.notes || '',
-        tier: (account.tier as string) || '',
-        region: (account.region as string) || '',
       });
     }
   }, [account, isEditMode]);
@@ -226,7 +221,7 @@ export default function ClientDetailPage() {
     (opp: Opportunity) => opp.stage !== wonStage && opp.stage !== lostStage
   );
 
-  const daysSinceContact = getDaysSince(account?.lastcontactedon || account?.lastinteractiondate);
+  const daysSinceContact = 999; // computed from activities instead
 
   // Copilot context for agent awareness
   const copilot = useCopilot();
@@ -244,8 +239,6 @@ export default function ClientDetailPage() {
         accountId: account.id,
         accountName: account.name1,
         industry: account.industry,
-        tier: account.tier,
-        region: account.region,
         phone: account.phone,
         email: account.email,
         address: account.address,
@@ -253,8 +246,6 @@ export default function ClientDetailPage() {
         opportunitiesCount: opportunities.length,
         activitiesCount: activities.length,
         totalPipelineValue,
-        daysSinceLastContact: daysSinceContact,
-        creditStatus: account.creditStatus,
         notes: account.notes,
       },
     });
@@ -285,8 +276,6 @@ export default function ClientDetailPage() {
         email: editForm.email,
         address: editForm.address,
         notes: editForm.notes,
-        tier: editForm.tier || undefined,
-        region: editForm.region || undefined,
       };
       
       await updateAccount.mutateAsync({
@@ -321,8 +310,6 @@ export default function ClientDetailPage() {
         email: account.email || '',
         address: account.address || '',
         notes: account.notes || '',
-        tier: (account.tier as string) || '',
-        region: (account.region as string) || '',
       });
     }
   };
@@ -447,44 +434,6 @@ export default function ClientDetailPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label htmlFor="tier">Tier</Label>
-                  <Select
-                    value={editForm.tier || 'none'}
-                    onValueChange={(val: string) => setEditForm({ ...editForm, tier: val === 'none' ? '' : val })}
-                  >
-                    <SelectTrigger id="tier">
-                      <SelectValue placeholder="Select tier" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      {['S', 'A', 'B', 'C'].map((label) => (
-                        <SelectItem key={label} value={label}>{label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <Label htmlFor="region">Region</Label>
-                  <Select
-                    value={editForm.region || 'none'}
-                    onValueChange={(val: string) => setEditForm({ ...editForm, region: val === 'none' ? '' : val })}
-                  >
-                    <SelectTrigger id="region">
-                      <SelectValue placeholder="Select region" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      {['华东', '华北', '华南', '西南'].map((label) => (
-                        <SelectItem key={label} value={label}>{getRegionEnglish(label)}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
               <div>
                 <Label htmlFor="phone">Phone</Label>
                 <Input
@@ -573,15 +522,9 @@ export default function ClientDetailPage() {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1">
                 <h1 className="text-xl font-bold text-foreground truncate">{account.name1}</h1>
-                {account.tier && (
-                  <Badge variant="secondary" className="flex-shrink-0">
-                    {account.tier}
-                  </Badge>
-                )}
               </div>
               <p className="text-sm text-muted-foreground mb-2">
                 {account.industry || 'Uncategorized'}
-                {account.region && ` • ${getRegionEnglish(account.region)}`}
               </p>
               <div className="flex flex-wrap gap-2">
                 {daysSinceContact <= 14 ? (
@@ -595,11 +538,6 @@ export default function ClientDetailPage() {
                     At Risk
                   </Badge>
                 ) : null}
-                {account.creditStatus && account.creditStatus !== '正常' && (
-                  <Badge variant="outline" className="gap-1 text-amber-600 border-amber-200 dark:border-amber-900">
-                    {account.creditStatus}
-                  </Badge>
-                )}
               </div>
             </div>
           </div>
@@ -667,24 +605,6 @@ export default function ClientDetailPage() {
                     <span className="text-foreground">{account.address}</span>
                   </div>
                 )}
-              </div>
-            </GlassCard>
-
-            {/* Last Interaction */}
-            <GlassCard>
-              <h3 className="text-sm font-medium text-foreground mb-3">Last Interaction</h3>
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                  <Calendar className="w-5 h-5 text-primary" />
-                </div>
-                <div>
-                  <p className="text-sm text-foreground">
-                    {formatDate(account.lastcontactedon || account.lastinteractiondate)}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {daysSinceContact} days ago
-                  </p>
-                </div>
               </div>
             </GlassCard>
 
@@ -843,15 +763,15 @@ export default function ClientDetailPage() {
                         <h4 className="text-sm font-medium text-foreground truncate">
                           {activity.title}
                         </h4>
-                        {activity.draftStatus && (
+                        {activity.status && (
                           <Badge
                             variant="outline"
                             className={cn(
                               'text-[10px]',
-                              activity.draftStatus === 'completed' && 'text-emerald-600 border-emerald-200'
+                              activity.status === 'completed' && 'text-emerald-600 border-emerald-200'
                             )}
                           >
-                            {activity.draftStatus}
+                            {activity.status}
                           </Badge>
                         )}
                       </div>

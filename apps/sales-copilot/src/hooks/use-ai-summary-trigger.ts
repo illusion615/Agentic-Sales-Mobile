@@ -64,17 +64,10 @@ function buildAIPrompt(
       const activities = relatedData?.activities as Array<Record<string, unknown>> | undefined;
       const contacts = relatedData?.contacts as Array<Record<string, unknown>> | undefined;
       
-      const tierLabel = (entityData.tier as string) || 'Not specified';
-      const regionLabel = (entityData.region as string) || 'Not specified';
-      const creditStatusLabel = (entityData.creditStatus as string) || 'Not specified';
-      
       return `Analyze this sales account and provide actionable insights.
 
 ACCOUNT: ${entityName}
 - Industry: ${entityData.industry || 'Not specified'}
-- Tier: ${tierLabel}
-- Region: ${regionLabel}
-- Credit Status: ${creditStatusLabel}
 - Revenue: ${entityData.annualrevenue ? `$${Number(entityData.annualrevenue).toLocaleString()}` : 'Not specified'}
 
 RELATED DATA
@@ -244,10 +237,9 @@ function generatePlaceholderSummary(
   switch (entityType) {
     case 'account': {
       const name = entityData.name1 || entityData.name || 'This account';
-      const tierLabel = (entityData.tier as string) || '';
       const industry = entityData.industry || '';
       return {
-        summary: `### Account Overview\n\n${name} is ${industry ? `in the **${industry}** industry` : 'an account'}. ${tierLabel ? `Tier: **${tierLabel}**` : ''}\n\nReview recent activities and opportunities to identify growth potential and address any outstanding issues.`,
+        summary: `### Account Overview\n\n${name} is ${industry ? `in the **${industry}** industry` : 'an account'}.\n\nReview recent activities and opportunities to identify growth potential and address any outstanding issues.`,
         actionItems: '### Recommended Actions\n\n- Review recent interaction history\n- Check open opportunities status\n- Verify contact information is current\n- Schedule follow-up if needed',
       };
     }

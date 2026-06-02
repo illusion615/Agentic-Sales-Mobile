@@ -113,7 +113,7 @@ export function ClientProfileSheet({ accountId, open, onOpenChange }: ClientProf
       )
       .slice(0, 5)
       .forEach((activity: Activity) => {
-        const statusLabel = activity.draftStatus;
+        const statusLabel = activity.status;
         const isCompleted = statusLabel === 'completed';
         
         // Extract action items from notes or use title
@@ -308,7 +308,7 @@ export function ClientProfileSheet({ accountId, open, onOpenChange }: ClientProf
                   ) : (
                     recentVisits.map((activity: Activity, index: number) => {
                       const typeLabel = activity.type;
-                      const statusLabel = activity.draftStatus;
+                      const statusLabel = activity.status;
                       const isCompleted = statusLabel === 'completed';
                       
                       return (

@@ -595,23 +595,6 @@ function AccountFormCard({ data, formData, setFormData, onConfirm, onCancel, isC
   isConfirming: boolean;
   locale: Locale;
 }) {
-  const regionOptions = [
-    { value: '华东', label: locale === 'zh-Hans' ? '华东' : 'East China' },
-    { value: '华北', label: locale === 'zh-Hans' ? '华北' : 'North China' },
-    { value: '华南', label: locale === 'zh-Hans' ? '华南' : 'South China' },
-    { value: '西南', label: locale === 'zh-Hans' ? '西南' : 'Southwest China' },
-  ];
-
-  const tierOptions = [
-    { value: 'S', label: locale === 'zh-Hans' ? 'S级' : 'S-Tier' },
-    { value: 'A', label: locale === 'zh-Hans' ? 'A级' : 'A-Tier' },
-    { value: 'B', label: locale === 'zh-Hans' ? 'B级' : 'B-Tier' },
-    { value: 'C', label: locale === 'zh-Hans' ? 'C级' : 'C-Tier' },
-  ];
-
-  const tier = formData.tier as string || '';
-  const tierLabel = tierOptions.find((t: { value: string; label: string }) => t.value === tier)?.label || tier;
-
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 mb-3">
@@ -622,7 +605,6 @@ function AccountFormCard({ data, formData, setFormData, onConfirm, onCancel, isC
           <h4 className="font-medium text-sm text-foreground">
             {locale === 'zh-Hans' ? '新建客户' : 'New Account'}
           </h4>
-          {tier && <span className="text-xs text-muted-foreground">{tierLabel}</span>}
         </div>
       </div>
 
@@ -640,22 +622,6 @@ function AccountFormCard({ data, formData, setFormData, onConfirm, onCancel, isC
           value={formData.industry as string}
           onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, industry: v }))}
           placeholder={locale === 'zh-Hans' ? '输入行业' : 'Enter industry'}
-        />
-        <EditableField 
-          icon={MapPin} 
-          label={locale === 'zh-Hans' ? '区域' : 'Region'} 
-          value={formData.region as string}
-          onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, region: v }))}
-          type="select"
-          options={regionOptions}
-        />
-        <EditableField 
-          icon={Tag} 
-          label={locale === 'zh-Hans' ? '等级' : 'Tier'} 
-          value={formData.tier as string}
-          onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, tier: v }))}
-          type="select"
-          options={tierOptions}
         />
         <EditableField 
           icon={Phone} 
@@ -947,25 +913,19 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
           }
         }
         
-        // I-8 Slice A: map temporalMode -> draftStatus label
+        // Map temporalMode -> status
         const temporalMode = formData.temporalMode as 'planned' | 'completed' | 'unspecified' | undefined;
-        const draftStatus: string =
+        const status: Activity['status'] =
           temporalMode === 'completed' ? 'completed'
-          : temporalMode === 'planned' ? 'confirmed'
-          : 'draft';
-
-        // Result maps to the Activity.outcome column; only persist when the field is visible
-        // (hidden for planned activities since the event hasn't happened yet).
-        const outcomeValue = temporalMode !== 'planned' ? (formData.result as string || '') : '';
+          : 'open';
 
         const createInput: Omit<Activity, 'id'> = {
           title: formData.title as string || '',
-          type: activityType,
-          draftStatus,
+          type: activityType as Activity['type'],
+          status,
           ownerid: user?.objectId || 'unknown',
           scheduleddate: formData.scheduledDate as string || new Date().toISOString(),
           notes: (formData.notes as string) || '',
-          ...(outcomeValue && { outcome: outcomeValue }),
           ...(targetAccount && { account: { id: targetAccount.id, name1: targetAccount.name1 } }),
           ...(targetOpportunity && { opportunity: { id: targetOpportunity.id, name1: targetOpportunity.name1 } }),
           ...(targetContact && { contact: { id: targetContact.id, fullname: targetContact.fullname } }),
@@ -1050,14 +1010,9 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
           accountName: targetAccount.name1 || '',
         });
       } else if (type === 'account') {
-        const region = (formData.region as string) || '华东';
-        const tier = (formData.tier as string) || 'C';
-
         const createdAccount = await createAccount.mutateAsync({
           name1: formData.name as string || '',
           industry: formData.industry as string || '',
-          region,
-          tier,
           phone: formData.phone as string || '',
           email: formData.email as string || '',
           address: formData.address as string || '',

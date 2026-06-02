@@ -426,7 +426,7 @@ export default function VisitLogPage() {
       await createActivity.mutateAsync({
         title: `${t('title', locale)} - ${selectedAccount?.name1 || formData.contactName || 'Visit'}`,
         type: 'visit', // visit type
-        draftStatus: 'confirmed', // confirmed
+        status: 'open',
         ownerid: user?.objectId || '',
         scheduleddate: formData.visitDate.toISOString(),
         notes: [

@@ -187,7 +187,7 @@ export default function OpportunityDetailPage() {
     if (!opportunity) return;
     setIsRefreshingAI(true);
     triggerForEntity('opportunity', opportunity.id, JSON.parse(JSON.stringify(opportunity)), {
-      account: account ? { id: account.id, name: account.name1, tier: account.tier } : undefined,
+      account: account ? { id: account.id, name: account.name1 } : undefined,
       activities: activities.map((a: Activity) => ({ id: a.id, title: a.title, type: a.type, date: a.scheduleddate })),
     });
     setTimeout(() => {
@@ -594,15 +594,15 @@ export default function OpportunityDetailPage() {
                             <h4 className="text-sm font-medium text-foreground truncate">
                               {activity.title}
                             </h4>
-                            {activity.draftStatus && (
+                            {activity.status && (
                               <Badge
                                 variant="outline"
                                 className={cn(
                                   'text-[10px]',
-                                  activity.draftStatus === 'completed' && 'text-emerald-600 border-emerald-200'
+                                  activity.status === 'completed' && 'text-emerald-600 border-emerald-200'
                                 )}
                               >
-                                {activity.draftStatus}
+                                {activity.status}
                               </Badge>
                             )}
                           </div>

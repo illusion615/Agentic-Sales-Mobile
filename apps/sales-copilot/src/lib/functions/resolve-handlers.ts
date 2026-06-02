@@ -23,7 +23,7 @@ const fuzzyMatchAccount: FunctionHandler = async (args) => {
       const name = a.name1 || '';
       const enhancedScore = calculateEnhancedMatchScore(query, name, contextStr || a.industry);
       return {
-        id: a.id, name: a.name1 || '', industry: a.industry, region: a.region,
+        id: a.id, name: a.name1 || '', industry: a.industry,
         score: enhancedScore.score, matchType: enhancedScore.matchType,
         scoreBreakdown: enhancedScore.breakdown,
       };

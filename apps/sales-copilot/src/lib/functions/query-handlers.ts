@@ -19,9 +19,6 @@ const queryAccounts: FunctionHandler = async (args, ctx) => {
   let filtered = [...accounts];
   const accountId = args.accountId as string | undefined;
   const nameQuery = (args.name as string || args.query as string || '').toLowerCase();
-  const region = args.region as string | undefined;
-  const tier = args.tier as string | undefined;
-  const daysSinceLastContact = args.daysSinceLastContact as number | undefined;
   const sortBy = args.sortBy as string | undefined;
   const limit = (args.limit as number) || 20;
 
@@ -32,34 +29,14 @@ const queryAccounts: FunctionHandler = async (args, ctx) => {
   }
 
   if (nameQuery) filtered = filtered.filter((a: Account) => a.name1?.toLowerCase().includes(nameQuery));
-  if (region) filtered = filtered.filter((a: Account) => a.region === region);
-  if (tier) filtered = filtered.filter((a: Account) => a.tier === tier);
-  if (daysSinceLastContact) {
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - daysSinceLastContact);
-    filtered = filtered.filter((a: Account) => {
-      if (!a.lastcontactedon) return true;
-      return new Date(a.lastcontactedon) < cutoff;
-    });
-  }
 
-  if (sortBy === 'lastContacted') {
-    filtered.sort((a, b) => {
-      const da = a.lastcontactedon ? new Date(a.lastcontactedon).getTime() : 0;
-      const db = b.lastcontactedon ? new Date(b.lastcontactedon).getTime() : 0;
-      return da - db;
-    });
-  } else if (sortBy === 'tier') {
-    const tierOrder: Record<string, number> = { S: 0, A: 1, B: 2, C: 3 };
-    filtered.sort((a, b) => (tierOrder[a.tier || 'C'] ?? 9) - (tierOrder[b.tier || 'C'] ?? 9));
-  }
+
 
   return {
     success: true,
     data: filtered.slice(0, limit).map((a: Account) => ({
       id: a.id, name: a.name1, industry: a.industry,
-      region: a.region, tier: a.tier, phone: a.phone,
-      email: a.email, lastContactedOn: a.lastcontactedon,
+      phone: a.phone, email: a.email,
     })),
   };
 };
@@ -137,7 +114,7 @@ const queryActivities: FunctionHandler = async (args, ctx) => {
 
   if (actAccountId) filteredAct = filteredAct.filter((a: Activity) => a.account?.id === actAccountId);
   if (actType) filteredAct = filteredAct.filter((a: Activity) => a.type === actType);
-  if (actStatus) filteredAct = filteredAct.filter((a: Activity) => a.draftStatus === actStatus);
+  if (actStatus) filteredAct = filteredAct.filter((a: Activity) => a.status === actStatus);
 
   if (scheduledDate) {
     filteredAct = filteredAct.filter((a: Activity) => a.scheduleddate?.startsWith(scheduledDate));
@@ -176,7 +153,7 @@ const queryActivities: FunctionHandler = async (args, ctx) => {
     data: filteredAct.slice(0, actLimit).map((a: Activity) => ({
       id: a.id, title: a.title, type: a.type,
       account: a.account?.name1, scheduledDate: a.scheduleddate,
-      status: a.draftStatus, notes: a.notes,
+      status: a.status, notes: a.notes,
     })),
   };
 };

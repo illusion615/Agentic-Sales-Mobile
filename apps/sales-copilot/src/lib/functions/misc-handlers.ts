@@ -84,10 +84,7 @@ const suggestPlan: FunctionHandler = async (args, ctx) => {
   });
 
   const allAccounts = await AccountService.getAll();
-  const accountsNeedingContact = allAccounts
-    .filter((a) => a.lastcontactedon)
-    .sort((a, b) => new Date(a.lastcontactedon!).getTime() - new Date(b.lastcontactedon!).getTime())
-    .slice(0, 10);
+  const accountsNeedingContact = allAccounts.slice(0, 10);
 
   const recentHistory = (ctx.conversationHistory || []).slice(-4)
     .map((m) => `${m.role}: ${m.content.slice(0, 300)}`).join('\n');
@@ -104,7 +101,7 @@ const suggestPlan: FunctionHandler = async (args, ctx) => {
   })), null, 0).slice(0, 2000)}\n\nExisting activities for ${targetDate}${period === 'week' ? ' week' : ''}:\n${JSON.stringify(existingActivities.map((a) => ({
     title: a.title, type: a.type, account: a.account?.name1, date: a.scheduleddate,
   })), null, 0).slice(0, 1000)}\n\nAccounts needing contact:\n${JSON.stringify(accountsNeedingContact.map((a) => ({
-    name: a.name1, lastContacted: a.lastcontactedon, tier: a.tier,
+    name: a.name1, industry: a.industry,
   })), null, 0).slice(0, 800)}\n\nRecent conversation:\n${recentHistory.slice(0, 500)}`;
 
   const { invokeFlowForLLM } = await import('@/services/power-automate-service');

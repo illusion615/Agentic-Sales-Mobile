@@ -522,7 +522,7 @@ export default function OpportunityDraftReviewPage() {
     if (finalActivityId) {
       await updateActivity.mutateAsync({
         id: finalActivityId,
-        changedFields: { draftStatus: 'draft' }, // back to draft
+        changedFields: { status: 'open' },
       });
     }
     toast.info(t('abandonedDraft', locale));
@@ -541,7 +541,7 @@ export default function OpportunityDraftReviewPage() {
       if (finalActivityId) {
         await updateActivity.mutateAsync({
           id: finalActivityId,
-          changedFields: { draftStatus: 'confirmed' }, // confirmed
+          changedFields: { status: 'open' },
         });
       }
 
@@ -598,7 +598,7 @@ export default function OpportunityDraftReviewPage() {
     if (finalActivityId) {
       await updateActivity.mutateAsync({
         id: finalActivityId,
-        changedFields: { draftStatus: 'cancelled' }, // cancelled
+        changedFields: { status: 'canceled' },
       });
     }
     toast.info(t('abandonedDraft', locale));

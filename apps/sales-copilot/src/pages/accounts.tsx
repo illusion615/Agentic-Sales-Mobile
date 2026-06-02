@@ -7,7 +7,8 @@ import { cn } from '@/lib/utils';
 import { useAccountList } from '@/generated/hooks/use-account';
 import { useContactList } from '@/generated/hooks/use-contact';
 import { useQueryClient } from '@tanstack/react-query';
-import type { Account } from '@/generated/models/account-model';import type { Contact } from '@/generated/models/contact-model';import { getRegionEnglish } from '@/lib/display-labels';
+import type { Account } from '@/generated/models/account-model';
+import type { Contact } from '@/generated/models/contact-model';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -95,7 +96,7 @@ export default function ClientsPage() {
   // Enrich accounts with contact status
   const enrichedAccounts = useMemo(() => {
     return accounts.map((account: Account) => {
-      const daysSince = getDaysSinceContact(account.lastcontactedon || account.lastinteractiondate);
+      const daysSince = getDaysSinceContact(undefined);
       const contactStatus = getContactStatus(daysSince);
       const accountContacts = getContactsByAccountId(account.id);
       return { ...account, daysSince, contactStatus, contactCount: accountContacts.length };
@@ -112,8 +113,7 @@ export default function ClientsPage() {
         const matchesIndustry = account.industry?.toLowerCase().includes(query);
         if (!matchesName && !matchesIndustry) return false;
       }
-      // Tier filter
-      if (tierFilter !== 'all' && String(account.tier) !== tierFilter) return false;
+      // Tier filter removed — tier field no longer exists
       // At risk filter
       if (showAtRiskOnly && !account.contactStatus.isAtRisk) return false;
       return true;
@@ -139,10 +139,9 @@ export default function ClientsPage() {
     setAiLoading(true);
     try {
       const clientData = enrichedAccounts.map((a) => ({
-        name: a.name1, tier: a.tier, industry: a.industry,
+        name: a.name1, industry: a.industry,
         daysSinceContact: a.daysSince, status: a.contactStatus.label,
-        contactCount: a.contactCount, region: a.region,
-        creditStatus: a.creditStatus, paymentStatus: a.paymentStatus,
+        contactCount: a.contactCount,
       }));
 
       const { executeFunction } = await import('@/lib/function-executor');
@@ -369,15 +368,9 @@ export default function ClientsPage() {
                         <h3 className="text-sm font-medium text-foreground truncate flex-1">
                           {account.name1}
                         </h3>
-                        {account.tier && (
-                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">
-                            {account.tier}
-                          </Badge>
-                        )}
                       </div>
                       <p className="text-xs text-muted-foreground mb-1.5">
                         {account.industry || 'Uncategorized'}
-                        {account.region && ` • ${getRegionEnglish(account.region)}`}
                       </p>
                       <div className="flex items-center gap-3 text-xs">
                         <span className={cn('px-1.5 py-0.5 rounded-md text-[10px] font-medium', account.contactStatus.color)}>

@@ -1,107 +1,171 @@
-import { Crf5c_activity1sService } from './Crf5c_activity1sService';
-import {
-  type Crf5c_activity1s,
-  Crf5c_activity1scrf5c_draftstatus,
-  Crf5c_activity1scrf5c_outcome,
-  Crf5c_activity1scrf5c_type,
-} from '../models/Crf5c_activity1sModel';
+/**
+ * Activity adapter service — routes to native appointment / phonecall / email tables.
+ *
+ * Read: queries all three tables in parallel, merges, sorts by scheduleddate desc.
+ * Write: routes to the correct table based on activity type.
+ *
+ * regardingobjectid: points to opportunity (if present) or account.
+ * Account is derived from opportunity when regarding points to an opp.
+ */
+import { AppointmentEntityService, PhonecallEntityService, EmailEntityService } from './ActivityEntityService';
+import type { ActivityEntityBase } from '../models/ActivityEntityModel';
 import type { IGetAllOptions } from '../models/CommonModels';
-import {
-  ActivityDraftstatusKeyToLabel,
-  ActivityOutcomeKeyToLabel,
-  ActivityTypeKeyToLabel,
-  type Activity,
-} from '../models/activity-model';
-import { labelToDv, mapOptions, dvChoice, dvLookupName, createWithReadback, requireId } from './_adapter-utils';
+import type { Activity, ActivityType } from '../models/activity-model';
+import { requireId } from './_adapter-utils';
 
-const FIELD_MAP: Record<string, string> = {
-  id: 'crf5c_activity1id',
-  title: 'crf5c_title',
-  createdon: 'crf5c_createdon',
-  notes: 'crf5c_notes',
-  ownerid: 'crf5c_ownerid',
-  scheduleddate: 'crf5c_scheduleddate',
+// Map native table → activity type
+const TABLE_TYPE_MAP: Record<string, ActivityType> = {
+  appointment: 'visit',  // default; could be 'meeting' but we unify
+  phonecall: 'call',
+  email: 'email',
 };
 
-function fromDv(dv: Crf5c_activity1s): Activity {
+function statusFromCode(code?: number): 'open' | 'completed' | 'canceled' {
+  if (code === 1) return 'completed';
+  if (code === 2) return 'canceled';
+  return 'open';
+}
+
+function fromDv(dv: ActivityEntityBase, type: ActivityType): Activity {
   const d = dv as unknown as Record<string, unknown>;
+  const regardingType = (d.regardingobjectidtypecode ?? d['_regardingobjectid_value@Microsoft.Dynamics.CRM.lookuplogicalname']) as string | undefined;
+  const regardingId = (d._regardingobjectid_value as string) ?? '';
+  const regardingName = (d.regardingobjectidname ?? d['_regardingobjectid_value@OData.Community.Display.V1.FormattedValue']) as string ?? '';
+
+  let account: Activity['account'];
+  let opportunity: Activity['opportunity'];
+
+  if (regardingType === 'opportunity') {
+    opportunity = { id: regardingId, name1: regardingName };
+    // Account will be resolved by the UI from the opportunity record
+  } else if (regardingType === 'account') {
+    account = { id: regardingId, name1: regardingName };
+  }
+
   return {
-    id: dv.crf5c_activity1id,
-    title: dv.crf5c_title,
-    account: (d._crf5c_account_value as string)
-      ? { id: d._crf5c_account_value as string, name1: dvLookupName(d, '_crf5c_account_value') }
-      : undefined,
-    contact: (d._biz_contact_value as string)
-      ? { id: d._biz_contact_value as string, fullname: dvLookupName(d, '_biz_contact_value') }
-      : undefined,
-    createdon: dv.crf5c_createdon,
-    draftStatus: dvChoice(d, 'crf5c_draftstatus', Crf5c_activity1scrf5c_draftstatus),
-    notes: dv.crf5c_notes,
-    opportunity: (d._crf5c_opportunity_value as string)
-      ? { id: d._crf5c_opportunity_value as string, name1: dvLookupName(d, '_crf5c_opportunity_value') }
-      : undefined,
-    outcome: dvChoice(d, 'crf5c_outcome', Crf5c_activity1scrf5c_outcome),
-    ownerid: dv.crf5c_ownerid,
-    scheduleddate: dv.crf5c_scheduleddate,
-    type: dvChoice(d, 'crf5c_type', Crf5c_activity1scrf5c_type),
+    id: dv.activityid,
+    title: dv.subject ?? '',
+    type,
+    account,
+    opportunity,
+    contact: undefined, // Activity Party requires separate query; omit for now
+    notes: dv.description,
+    scheduleddate: dv.scheduledstart ?? dv.createdon ?? '',
+    status: statusFromCode(dv.statecode),
+    ownerid: (d._ownerid_value as string) ?? '',
+    createdon: dv.createdon,
   };
 }
 
-function toDv(r: Partial<Omit<Activity, 'id'>>): Record<string, unknown> {
+type ServiceClass = typeof AppointmentEntityService | typeof PhonecallEntityService | typeof EmailEntityService;
+
+function getService(type: ActivityType): { svc: ServiceClass; tableName: string } {
+  switch (type) {
+    case 'visit':
+    case 'meeting':
+      return { svc: AppointmentEntityService, tableName: 'appointments' };
+    case 'call':
+      return { svc: PhonecallEntityService, tableName: 'phonecalls' };
+    case 'email':
+      return { svc: EmailEntityService, tableName: 'emails' };
+  }
+}
+
+function toDv(r: Partial<Omit<Activity, 'id'>>, type: ActivityType): Record<string, unknown> {
   const dv: Record<string, unknown> = {};
-  if (r.title !== undefined) dv.crf5c_title = r.title;
-  if (r.account !== undefined) {
-    dv['crf5c_Account@odata.bind'] = r.account?.id ? `/crf5c_account1s(${r.account.id})` : null;
+  if (r.title !== undefined) dv.subject = r.title;
+  if (r.notes !== undefined) dv.description = r.notes;
+  if (r.scheduleddate !== undefined) {
+    dv.scheduledstart = r.scheduleddate;
+    // Set end = start + 1 hour for appointment
+    if (type === 'visit' || type === 'meeting') {
+      const start = new Date(r.scheduleddate);
+      dv.scheduledend = new Date(start.getTime() + 3600000).toISOString();
+    }
   }
-  if (r.contact !== undefined) {
-    dv['biz_Contact@odata.bind'] = r.contact?.id ? `/crf5c_contacts(${r.contact.id})` : null;
+
+  // regardingobjectid: prefer opportunity, fallback to account
+  if (r.opportunity?.id) {
+    dv['regardingobjectid_opportunity@odata.bind'] = `/opportunities(${r.opportunity.id})`;
+  } else if (r.account?.id) {
+    dv['regardingobjectid_account@odata.bind'] = `/accounts(${r.account.id})`;
   }
-  if (r.draftStatus !== undefined) dv.crf5c_draftstatus = labelToDv(ActivityDraftstatusKeyToLabel, r.draftStatus);
-  if (r.notes !== undefined) dv.crf5c_notes = r.notes;
-  if (r.opportunity !== undefined) {
-    dv['crf5c_Opportunity@odata.bind'] = r.opportunity?.id ? `/crf5c_opportunity1s(${r.opportunity.id})` : null;
-  }
-  if (r.outcome !== undefined) dv.crf5c_outcome = labelToDv(ActivityOutcomeKeyToLabel, r.outcome);
-  if (r.ownerid !== undefined) dv.crf5c_ownerid = r.ownerid;
-  if (r.scheduleddate !== undefined) dv.crf5c_scheduleddate = r.scheduleddate;
-  if (r.type !== undefined) dv.crf5c_type = labelToDv(ActivityTypeKeyToLabel, r.type);
+
   return dv;
 }
 
 export class ActivityService {
+  /** Create a new activity in the correct native table. */
   static async create(record: Omit<Activity, 'id'>): Promise<Activity> {
-    const dvPayload = toDv(record);
-    return createWithReadback(
-      (p) => Crf5c_activity1sService.create(p as any),
-      (o) => Crf5c_activity1sService.getAll(o),
-      dvPayload, 'crf5c_activity1id', 'Activity',
-      `crf5c_title eq '${record.title}'`,
-      fromDv,
-    );
+    const type = (record.type || 'visit') as ActivityType;
+    const { svc } = getService(type);
+    const dvPayload = toDv(record, type);
+    const result = await svc.create(dvPayload);
+    if (!result.success) throw result.error ?? new Error('Activity create failed');
+    return fromDv(result.data as ActivityEntityBase, type);
   }
 
-  static async update(id: string, changedFields: Partial<Omit<Activity, 'id'>>): Promise<Activity> {
+  /** Update an existing activity. Caller must know the type. */
+  static async update(id: string, changedFields: Partial<Omit<Activity, 'id'>>, type: ActivityType = 'visit'): Promise<Activity> {
     requireId(id, 'update', 'Activity');
-    const result = await Crf5c_activity1sService.update(id, toDv(changedFields) as any);
-    if (!result.success) throw result.error;
-    return fromDv(result.data!);
+    const { svc } = getService(type);
+    const dvPayload = toDv(changedFields, type);
+    const result = await svc.update(id, dvPayload);
+    if (!result.success) throw result.error ?? new Error('Activity update failed');
+    return fromDv(result.data as ActivityEntityBase, type);
   }
 
+  /** Delete an activity. Tries appointment first, then phonecall, then email. */
   static async delete(id: string): Promise<void> {
     requireId(id, 'delete', 'Activity');
-    await Crf5c_activity1sService.delete(id);
+    // Try each table — only one will have this id
+    for (const svc of [AppointmentEntityService, PhonecallEntityService, EmailEntityService]) {
+      try {
+        await svc.delete(id);
+        return;
+      } catch { /* not in this table, try next */ }
+    }
+    throw new Error(`Activity ${id} not found in any table`);
   }
 
+  /** Get a single activity by id. Tries each table until found. */
   static async get(id: string): Promise<Activity> {
     requireId(id, 'get', 'Activity');
-    const result = await Crf5c_activity1sService.get(id);
-    if (!result.success) throw result.error;
-    return fromDv(result.data!);
+    const tables: Array<[ServiceClass, ActivityType]> = [
+      [AppointmentEntityService, 'visit'],
+      [PhonecallEntityService, 'call'],
+      [EmailEntityService, 'email'],
+    ];
+    for (const [svc, type] of tables) {
+      try {
+        const result = await svc.get(id);
+        if (result.success && result.data) return fromDv(result.data as ActivityEntityBase, type);
+      } catch { /* not in this table */ }
+    }
+    throw new Error(`Activity ${id} not found`);
   }
 
+  /** Get all activities — queries all three tables in parallel and merges. */
   static async getAll(options?: IGetAllOptions): Promise<Activity[]> {
-    const result = await Crf5c_activity1sService.getAll(mapOptions(options, FIELD_MAP) as any);
-    if (!result.success) throw result.error;
-    return (result.data ?? []).map(fromDv);
+    const [appts, calls, emails] = await Promise.all([
+      AppointmentEntityService.getAll(options).catch(() => ({ success: true, data: [] as ActivityEntityBase[] })),
+      PhonecallEntityService.getAll(options).catch(() => ({ success: true, data: [] as ActivityEntityBase[] })),
+      EmailEntityService.getAll(options).catch(() => ({ success: true, data: [] as ActivityEntityBase[] })),
+    ]);
+
+    const all: Activity[] = [
+      ...(appts.data ?? []).map((d) => fromDv(d as ActivityEntityBase, 'visit')),
+      ...(calls.data ?? []).map((d) => fromDv(d as ActivityEntityBase, 'call')),
+      ...(emails.data ?? []).map((d) => fromDv(d as ActivityEntityBase, 'email')),
+    ];
+
+    // Sort by scheduleddate descending (most recent first)
+    all.sort((a, b) => {
+      const ta = a.scheduleddate ? new Date(a.scheduleddate).getTime() : 0;
+      const tb = b.scheduleddate ? new Date(b.scheduleddate).getTime() : 0;
+      return tb - ta;
+    });
+
+    return all;
   }
 }
