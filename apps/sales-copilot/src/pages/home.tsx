@@ -1821,7 +1821,7 @@ ${agentResponse}`;
         className={cn(
           'flex-1 pt-safe px-4 overflow-y-auto scrollbar-hide transition-all duration-300',
           'pb-44',
-          isSideDocked && 'pt-14'
+          isSideDocked && 'pt-16'
         )}
         onTouchStart={(e: React.TouchEvent) => {
           if (mainContentRef.current && mainContentRef.current.scrollTop <= 0) {

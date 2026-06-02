@@ -221,7 +221,9 @@ export function KPICards({
   const [overdueProcessing, setOverdueProcessing] = useState<string | null>(null); // tracks which action is in-flight
   const [showCelebration, setShowCelebration] = useState(false);
   const [prevOverdueCount, setPrevOverdueCount] = useState<number | null>(null);
-  const [agendaExpanded, setAgendaExpanded] = useState(false);
+  const [agendaExpanded, setAgendaExpanded] = useState(() => {
+    try { return localStorage.getItem('agendaDefaultExpanded') !== 'false'; } catch { return true; }
+  });
   const [insightsSheetOpenInternal, setInsightsSheetOpenInternal] = useState(false);
   const insightsSheetOpen = insightsSheetOpenProp ?? insightsSheetOpenInternal;
   const setInsightsSheetOpen = (open: boolean) => {

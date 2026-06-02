@@ -3,11 +3,12 @@ import { motion } from 'motion/react';
 import { ArrowLeft, Moon, Sun, Globe, HelpCircle, LogOut, Volume2, Play, Type, Palette, CircleDot, LayoutGrid, Speech, X, Zap, MessageSquare, Gauge, LayoutDashboard, Database, Bug, FileCode, ChevronRight, Monitor, Calendar, Maximize } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
+import { ThinkingIndicator } from '@/components/thinking-indicator';
 import { Button } from '@/components/ui/button';
 
 import { useUser } from '@/hooks/use-user';
 import { useAppSettings } from '@/hooks/use-app-settings';
-import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, setSelectedVoice, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getOrganizeInStructureCard, setOrganizeInStructureCard, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, getCopilotDockLayout, setCopilotDockLayout, copilotDockLayoutLabels, getWeekStartDay, setWeekStartDay, getCopilotFullscreenDefault, setCopilotFullscreenDefault, getAdminMode, setAdminMode, type Locale, type VoiceOption, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget, type CopilotDockLayout, type WeekStartDay } from '@/lib/i18n';
+import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, setSelectedVoice, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getOrganizeInStructureCard, setOrganizeInStructureCard, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, getCopilotDockLayout, setCopilotDockLayout, copilotDockLayoutLabels, getWeekStartDay, setWeekStartDay, getCopilotFullscreenDefault, setCopilotFullscreenDefault, getAdminMode, setAdminMode, getAgendaDefaultExpanded, setAgendaDefaultExpanded, type Locale, type VoiceOption, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget, type CopilotDockLayout, type WeekStartDay } from '@/lib/i18n';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
@@ -90,6 +91,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const [simulateStreaming, setSimulateStreamingState] = useState(() => getSimulateStreaming());
   const [copilotFullscreenDefault, setCopilotFullscreenDefaultState] = useState(() => getCopilotFullscreenDefault());
   const [adminMode, setAdminModeState] = useState(() => getAdminMode());
+  const [agendaDefaultExpanded, setAgendaDefaultExpandedState] = useState(() => getAgendaDefaultExpanded());
   const [homeHeaderWidget, setHomeHeaderWidgetState] = useState<HomeHeaderWidget>(() => getHomeHeaderWidget());
   const [weekStartDay, setWeekStartDayState] = useState<WeekStartDay>(() => getWeekStartDay());
 
@@ -218,6 +220,11 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const handleCopilotFullscreenDefaultChange = (enabled: boolean) => {
     setCopilotFullscreenDefaultState(enabled);
     setCopilotFullscreenDefault(enabled);
+  };
+
+  const handleAgendaDefaultExpandedChange = (enabled: boolean) => {
+    setAgendaDefaultExpandedState(enabled);
+    setAgendaDefaultExpanded(enabled);
   };
 
   const handleAdminModeChange = (enabled: boolean) => {
@@ -549,13 +556,20 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                     <SelectContent>
                       {(Object.keys(thinkingDotStyleLabels) as ThinkingDotStyle[]).map((style: ThinkingDotStyle) => (
                         <SelectItem key={style} value={style}>
-                          {locale === 'zh-Hans' ? thinkingDotStyleLabels[style].zh : thinkingDotStyleLabels[style].en}
+                          <span className="flex items-center gap-2">
+                            <ThinkingIndicator style={style} />
+                            <span>{locale === 'zh-Hans' ? thinkingDotStyleLabels[style].zh : thinkingDotStyleLabels[style].en}</span>
+                          </span>
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 }
               />
+              <div className="flex items-center gap-2 pl-8 mt-1">
+                <span className="text-xs text-muted-foreground">{locale === 'zh-Hans' ? '预览：' : 'Preview:'}</span>
+                <ThinkingIndicator />
+              </div>
             </div>
           </motion.div>
 
@@ -646,6 +660,25 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                   {locale === 'zh-Hans'
                     ? '启用后，点击对话框将以全屏模式展开 Copilot（仅移动端）'
                     : 'When enabled, tapping the input opens Copilot in fullscreen mode (mobile only)'}
+                </p>
+              </div>
+
+              {/* Agenda default expanded toggle */}
+              <div className="pt-3 border-t border-border/30">
+                <SettingsItem
+                  icon={Calendar}
+                  label={locale === 'zh-Hans' ? '默认展开今日待办' : "Expand Today's Agenda by Default"}
+                  rightElement={
+                    <Switch
+                      checked={agendaDefaultExpanded}
+                      onCheckedChange={handleAgendaDefaultExpandedChange}
+                    />
+                  }
+                />
+                <p className="text-xs text-muted-foreground mt-1 pl-8">
+                  {locale === 'zh-Hans'
+                    ? '启用后，首页日历卡片中的今日待办列表默认展开'
+                    : "When enabled, the Today's Agenda list in the home calendar card is expanded by default"}
                 </p>
               </div>
 

@@ -5,6 +5,7 @@ import { Sparkles, ArrowUp, SquarePen, X, ChevronDown, Copy, Volume2, VolumeX, L
 import { cn } from '@/lib/utils';
 import { useCopilot, type ChatMessage } from '@/contexts/copilot-context';
 import { getLocale, getChatFontClass, getSelectedVoice, findMatchingSystemVoice, getLLMConfig, getVoiceSummaryEnabled, getCopilotDockLayout, getCopilotFullscreenDefault, type CopilotDockLayout, type Locale } from '@/lib/i18n';
+import { ThinkingIndicator } from '@/components/thinking-indicator';
 import { DynamicDataRenderer, tryParseJson } from '@/components/dynamic-data-renderer';
 import { FormCard } from '@/components/form-card';
 import { BatchFormCard } from '@/components/batch-form-card';
@@ -549,7 +550,7 @@ export function CopilotPanel() {
                   ) : isAnnounceCompleted || message.collapsed ? (
                     <span className="text-primary">✓</span>
                   ) : (
-                    <span className="w-3 h-3 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+                    <ThinkingIndicator />
                   )}
                   <span className={cn(
                     isAnnounceFailed ? 'text-destructive' :
@@ -761,7 +762,7 @@ export function CopilotPanel() {
                             {step.status === 'completed' ? (
                               <span className="text-primary">✓</span>
                             ) : step.status === 'active' ? (
-                              <span className="w-3 h-3 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+                              <ThinkingIndicator />
                             ) : null}
                             <span className={cn(
                               step.status === 'completed' && 'text-muted-foreground',

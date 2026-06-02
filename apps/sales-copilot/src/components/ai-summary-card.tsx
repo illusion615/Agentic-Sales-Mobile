@@ -67,7 +67,7 @@ export function AISummaryCard({
             <Loader2 className="w-5 h-5 text-primary animate-spin" />
           </div>
           <div className="flex-1">
-            <h3 className="text-sm font-medium text-foreground flex items-center gap-2">
+            <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-primary" />
               {locale === 'zh-Hans' ? 'AI 正在分析...' : 'AI Analyzing...'}
             </h3>
@@ -89,7 +89,7 @@ export function AISummaryCard({
             <Sparkles className="w-5 h-5 text-muted-foreground" />
           </div>
           <div className="flex-1">
-            <h3 className="text-sm font-medium text-foreground">
+            <h3 className="text-base font-semibold text-foreground">
               {locale === 'zh-Hans' ? 'AI 洞察' : 'AI Insights'}
             </h3>
             <p className="text-xs text-muted-foreground mt-1">
@@ -115,7 +115,7 @@ export function AISummaryCard({
             <AlertCircle className="w-5 h-5 text-destructive" />
           </div>
           <div className="flex-1">
-            <h3 className="text-sm font-medium text-foreground flex items-center gap-2">
+            <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
               {locale === 'zh-Hans' ? 'AI 分析失败' : 'AI Analysis Failed'}
             </h3>
             <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
@@ -153,7 +153,7 @@ export function AISummaryCard({
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <h3 className="text-sm font-medium text-foreground">
+            <h3 className="text-base font-semibold text-foreground">
               {locale === 'zh-Hans' ? 'AI 洞察' : 'AI Insights'}
             </h3>
             {isExpired && (

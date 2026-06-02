@@ -379,7 +379,7 @@ export default function ActivityDetailPage() {
         />
 
         {/* Unified Related Context Card - Account, Contact, Opportunity */}
-        {(activity.account || activity.opportunity || relatedContacts.length > 0) && (
+        {(activity.account || activity.contact || activity.opportunity) && (
           <GlassCard className="space-y-3">
             <h2 className="text-sm font-semibold text-foreground uppercase tracking-wide">
               {locale === 'zh-Hans' ? '关联上下文' : 'Related Context'}
@@ -425,55 +425,35 @@ export default function ActivityDetailPage() {
               )}
 
               {/* Divider */}
-              {activity.account && (relatedContacts.length > 0 || activity.opportunity) && (
+              {activity.account && (activity.contact || activity.opportunity) && (
                 <div className="border-t border-border/50 my-3" />
               )}
 
-              {/* Contacts Row */}
-              {relatedContacts.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                    {locale === 'zh-Hans' ? '联系人' : 'Contacts'} ({relatedContacts.length})
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {relatedContacts.slice(0, 3).map((contact: Contact) => (
-                      <div
-                        key={contact.id}
-                        className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-accent/10 border border-accent/20"
-                      >
-                        <div className="w-6 h-6 rounded-full bg-accent/20 flex items-center justify-center">
-                          <User className="w-3.5 h-3.5 text-accent-foreground" />
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-xs font-medium text-foreground truncate max-w-[100px]">
-                            {contact.fullname}
-                          </p>
-                          {contact.title && (
-                            <p className="text-[10px] text-muted-foreground truncate max-w-[100px]">{contact.title}</p>
-                          )}
-                        </div>
-                        {contact.phone && (
-                          <a
-                            href={`tel:${contact.phone}`}
-                            className="p-1 rounded-full hover:bg-primary/10 transition-colors"
-                            onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                          >
-                            <Phone className="w-3 h-3 text-primary" />
-                          </a>
-                        )}
-                      </div>
-                    ))}
-                    {relatedContacts.length > 3 && (
-                      <div className="flex items-center px-3 py-1.5 rounded-full bg-muted/50 text-xs text-muted-foreground">
-                        +{relatedContacts.length - 3} {locale === 'zh-Hans' ? '更多' : 'more'}
-                      </div>
-                    )}
+              {/* Contact Section — the activity's direct contact */}
+              {activity.contact && (
+                <div
+                  className="flex items-start gap-3 cursor-pointer hover:bg-muted/30 -m-2 p-2 rounded-lg transition-colors"
+                  onClick={() => navigate(`/contacts/${activity.contact?.id}`)}
+                >
+                  <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center flex-shrink-0">
+                    <User className="w-5 h-5 text-accent-foreground" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold text-foreground truncate">
+                        {activity.contact.fullname}
+                      </p>
+                      <ArrowRight className="w-3.5 h-3.5 text-accent-foreground flex-shrink-0" />
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {locale === 'zh-Hans' ? '联系人' : 'Contact'}
+                    </p>
                   </div>
                 </div>
               )}
 
               {/* Divider */}
-              {relatedContacts.length > 0 && activity.opportunity && (
+              {activity.contact && activity.opportunity && (
                 <div className="border-t border-border/50 my-3" />
               )}
 

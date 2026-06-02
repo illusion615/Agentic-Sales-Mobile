@@ -280,7 +280,7 @@ export default function ClientsPage() {
                       className="glass-card p-3.5 snap-center shrink-0"
                       style={{ width: 'calc(100vw - 48px)', maxWidth: '400px', borderRadius: 16 }}
                     >
-                      <p className="text-[11px] font-semibold text-primary mb-1">{slide.title}</p>
+                      <p className="text-sm font-semibold text-primary mb-1">{slide.title}</p>
                       <p className="text-[11px] text-foreground leading-relaxed">{slide.content}</p>
                     </div>
                   ))}

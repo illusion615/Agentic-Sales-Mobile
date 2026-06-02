@@ -476,7 +476,7 @@ export function InsightCarousel({
           </div>
           <div className="flex-1 min-w-0">
             {/* Category Title */}
-            <h4 className={cn('text-sm font-semibold', typeTextColors[card.type])}>{card.title}</h4>
+            <h4 className={cn('text-base font-semibold', typeTextColors[card.type])}>{card.title}</h4>
             {/* Summary — full text, CSS line-clamp limits visible lines */}
             <p className="text-sm text-foreground mt-0.5 leading-relaxed line-clamp-2">{card.summary}</p>
           </div>

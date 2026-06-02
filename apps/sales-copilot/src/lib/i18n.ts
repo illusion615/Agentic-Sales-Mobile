@@ -1222,6 +1222,15 @@ export function setCopilotFullscreenDefault(enabled: boolean): void {
   localStorage.setItem('copilotFullscreenDefault', String(enabled));
 }
 
+// Agenda default expanded on home page
+export function getAgendaDefaultExpanded(): boolean {
+  return localStorage.getItem('agendaDefaultExpanded') !== 'false'; // default true
+}
+
+export function setAgendaDefaultExpanded(enabled: boolean): void {
+  localStorage.setItem('agendaDefaultExpanded', String(enabled));
+}
+
 // Simulate streaming response setting
 export function getSimulateStreaming(): boolean {
   return localStorage.getItem('simulateStreaming') !== 'false'; // default true
