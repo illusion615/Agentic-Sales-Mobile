@@ -31,8 +31,8 @@ function fromDv(dv: Crf5c_opportunity1s): Opportunity {
     id: dv.crf5c_opportunity1id,
     name1: dv.crf5c_name,
     account: {
-      id: (d._crf5c_account_value as string) ?? '',
-      name1: dvLookupName(d, '_crf5c_account_value'),
+      id: (d._biz_account_value as string) ?? '',
+      name1: dvLookupName(d, '_biz_account_value'),
     },
     blocker: dv.crf5c_blocker,
     closedon: dv.crf5c_closedon,
@@ -50,7 +50,7 @@ function fromDv(dv: Crf5c_opportunity1s): Opportunity {
 function toDv(r: Partial<Omit<Opportunity, 'id'>>): Record<string, unknown> {
   const dv: Record<string, unknown> = {};
   if (r.name1 !== undefined) dv.crf5c_name = r.name1;
-  if (r.account?.id) dv['crf5c_Account@odata.bind'] = `/crf5c_account1s(${r.account.id})`;
+  if (r.account?.id) dv['biz_Account@odata.bind'] = `/accounts(${r.account.id})`;
   if (r.blocker !== undefined) dv.crf5c_blocker = r.blocker;
   if (r.closedon !== undefined) dv.crf5c_closedon = r.closedon;
   if (r.confidence !== undefined) dv.crf5c_confidence = numToDv(r.confidence);
