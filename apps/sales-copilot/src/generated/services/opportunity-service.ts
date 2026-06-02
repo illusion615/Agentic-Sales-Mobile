@@ -41,7 +41,7 @@ function fromDv(dv: Crf5c_opportunity1s): Opportunity {
     createdon: dv.crf5c_createdon,
     expectedclosedate: dv.crf5c_expectedclosedate,
     lastaction: dv.crf5c_lastaction,
-    ownerid: dv.crf5c_ownerid,
+    ownerid: (d._ownerid_value as string) ?? '',
     stage: dvChoice(d, 'crf5c_stage', Crf5c_opportunity1scrf5c_stage),
     totalamount: dvNum(dv.crf5c_totalamount) ?? 0,
   };
@@ -57,7 +57,6 @@ function toDv(r: Partial<Omit<Opportunity, 'id'>>): Record<string, unknown> {
   if (r.confidenceTrend !== undefined) dv.crf5c_confidencetrend = labelToDv(OpportunityConfidencetrendKeyToLabel, r.confidenceTrend);
   if (r.expectedclosedate !== undefined) dv.crf5c_expectedclosedate = r.expectedclosedate;
   if (r.lastaction !== undefined) dv.crf5c_lastaction = r.lastaction;
-  if (r.ownerid !== undefined) dv.crf5c_ownerid = r.ownerid;
   if (r.stage !== undefined) dv.crf5c_stage = labelToDv(OpportunityStageKeyToLabel, r.stage);
   if (r.totalamount !== undefined) dv.crf5c_totalamount = numToDv(r.totalamount);
   return dv;

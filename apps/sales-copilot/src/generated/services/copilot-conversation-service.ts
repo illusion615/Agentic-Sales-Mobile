@@ -7,7 +7,7 @@ import { createWithReadback, requireId } from './_adapter-utils';
 function fromDv(dv: Crf5c_copilotconversations): CopilotConversation {
   return {
     id: dv.crf5c_copilotconversationid,
-    ownerid: dv.crf5c_ownerid,
+    ownerid: (dv as unknown as Record<string, unknown>)._ownerid_value as string ?? '',
     lastactiveon: dv.crf5c_lastactiveon,
     messagesjson: dv.crf5c_messagesjson,
     startedon: dv.crf5c_startedon,

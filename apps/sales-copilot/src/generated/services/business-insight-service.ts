@@ -19,7 +19,7 @@ const FIELD_MAP: Record<string, string> = {
   displayorder: 'crf5c_displayorder',
   generatedon: 'crf5c_generatedon',
   isactive: 'crf5c_isactive',
-  ownerid: 'crf5c_ownerid',
+  ownerid: '_ownerid_value',
   rationale: 'crf5c_rationale',
   referenceidsjson: 'crf5c_referenceidsjson',
   summary: 'crf5c_summary',
@@ -35,7 +35,7 @@ function fromDv(dv: Crf5c_businessinsights): BusinessInsight {
     displayorder: dvNum(dv.crf5c_displayorder) ?? 0,
     generatedon: dv.crf5c_generatedon,
     isactive: Boolean(dv.crf5c_isactive),
-    ownerid: dv.crf5c_ownerid,
+    ownerid: (dv as unknown as Record<string, unknown>)._ownerid_value as string ?? '',
     rationale: dv.crf5c_rationale,
     referenceidsjson: dv.crf5c_referenceidsjson,
     referenceType: dvChoice(d, 'crf5c_referencetype', Crf5c_businessinsightscrf5c_referencetype),
@@ -52,7 +52,6 @@ function toDv(r: Partial<Omit<BusinessInsight, 'id'>>): Record<string, unknown> 
   if (r.displayorder !== undefined) dv.crf5c_displayorder = numToDv(r.displayorder);
   if (r.generatedon !== undefined) dv.crf5c_generatedon = r.generatedon;
   if (r.isactive !== undefined) dv.crf5c_isactive = r.isactive;
-  if (r.ownerid !== undefined) dv.crf5c_ownerid = r.ownerid;
   if (r.rationale !== undefined) dv.crf5c_rationale = r.rationale;
   if (r.referenceidsjson !== undefined) dv.crf5c_referenceidsjson = r.referenceidsjson;
   if (r.referenceType !== undefined) dv.crf5c_referencetype = labelToDv(BusinessInsightReferencetypeKeyToLabel, r.referenceType);

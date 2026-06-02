@@ -7,7 +7,7 @@ import { dvNum, numToDv, createWithReadback, requireId } from './_adapter-utils'
 function fromDv(dv: Crf5c_briefings): Briefing {
   return {
     id: dv.crf5c_briefingid,
-    ownerid: dv.crf5c_ownerid,
+    ownerid: (dv as unknown as Record<string, unknown>)._ownerid_value as string ?? '',
     audiourl: dv.crf5c_audiourl,
     generatedon: dv.crf5c_generatedon,
     lastposition: dvNum(dv.crf5c_lastposition),
@@ -17,7 +17,6 @@ function fromDv(dv: Crf5c_briefings): Briefing {
 
 function toDv(r: Partial<Omit<Briefing, 'id'>>): Record<string, unknown> {
   const dv: Record<string, unknown> = {};
-  if (r.ownerid !== undefined) dv.crf5c_ownerid = r.ownerid;
   if (r.audiourl !== undefined) dv.crf5c_audiourl = r.audiourl;
   if (r.generatedon !== undefined) dv.crf5c_generatedon = r.generatedon;
   if (r.lastposition !== undefined) dv.crf5c_lastposition = numToDv(r.lastposition);
