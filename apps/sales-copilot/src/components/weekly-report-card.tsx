@@ -5,36 +5,25 @@ import { cn } from '@/lib/utils';
 import { GlassCard } from './glass-card';
 import { MarkdownContent } from './markdown-content';
 import { getLocale } from '@/lib/i18n';
+import {
+  type WeeklyReportActivity,
+  weeklyReportCacheKey,
+  readWeeklyReport,
+  weekRangeLabel,
+  generateWeeklyReportMarkdown,
+} from '@/lib/weekly-report';
+
+export type { WeeklyReportActivity } from '@/lib/weekly-report';
 
 /**
  * Weekly report shown inside the Activities week view (D16).
  *
  * The report is generated on demand from the displayed week's activities and
  * persisted per-week in localStorage, so switching weeks instantly shows that
- * week's stored report (or an empty "generate" state if none exists yet). It is
- * intentionally NOT routed through the Copilot conversation.
- *
- * Cache contract: key `weekly-report:v1:<weekStart yyyy-MM-dd>` →
- * `{ ts, markdown, activityCount }`. No TTL — reports persist until the user
- * regenerates them.
+ * week's stored report (or an empty "generate" state if none exists yet). The
+ * generation + caching logic lives in `lib/weekly-report.ts` so the Copilot
+ * chat short-circuit (D9) shares the exact same store.
  */
-const CACHE_PREFIX = 'weekly-report:v1:';
-
-export interface WeeklyReportActivity {
-  title: string;
-  type: string;
-  status: string;
-  scheduledAt: string;
-  accountName?: string;
-  opportunityName?: string;
-  notes?: string;
-}
-
-interface CachedReport {
-  ts: number;
-  markdown: string;
-  activityCount: number;
-}
 
 interface WeeklyReportCardProps {
   /** Start of the displayed week (used as the cache key). */
@@ -46,83 +35,6 @@ interface WeeklyReportCardProps {
   completedCount: number;
   totalCount: number;
   className?: string;
-}
-
-function cacheKey(weekStart: Date): string {
-  const y = weekStart.getFullYear();
-  const m = String(weekStart.getMonth() + 1).padStart(2, '0');
-  const d = String(weekStart.getDate()).padStart(2, '0');
-  return `${CACHE_PREFIX}${y}-${m}-${d}`;
-}
-
-function readCache(weekStart: Date): CachedReport | null {
-  try {
-    const raw = localStorage.getItem(cacheKey(weekStart));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as CachedReport;
-    if (parsed && typeof parsed.markdown === 'string' && parsed.markdown.length > 0) return parsed;
-  } catch {
-    /* ignore malformed cache */
-  }
-  return null;
-}
-
-function rangeLabel(weekStart: Date, weekEnd: Date, locale: string): string {
-  const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
-  const loc = locale === 'zh-Hans' ? 'zh-CN' : 'en-US';
-  return `${weekStart.toLocaleDateString(loc, opts)} – ${weekEnd.toLocaleDateString(loc, opts)}`;
-}
-
-function buildPrompt(
-  weekStart: Date,
-  weekEnd: Date,
-  activities: WeeklyReportActivity[],
-  completedCount: number,
-  totalCount: number,
-  locale: string,
-): string {
-  const lines = activities.map((a) => {
-    const when = new Date(a.scheduledAt).toLocaleDateString(locale === 'zh-Hans' ? 'zh-CN' : 'en-US', {
-      weekday: 'short', month: 'short', day: 'numeric',
-    });
-    const parts = [
-      `- [${a.status}] ${a.type} · ${a.title} (${when})`,
-      a.accountName ? `account: ${a.accountName}` : '',
-      a.opportunityName ? `opportunity: ${a.opportunityName}` : '',
-      a.notes ? `notes: ${a.notes}` : '',
-    ].filter(Boolean);
-    return parts.join(' · ');
-  }).join('\n');
-
-  const range = rangeLabel(weekStart, weekEnd, locale);
-
-  if (locale === 'zh-Hans') {
-    return `根据下面这一周（${range}）的活动列表，生成一份简洁的销售周报。共 ${totalCount} 个活动，已完成 ${completedCount} 个。
-
-活动列表：
-${lines || '（本周暂无活动）'}
-
-请用纯 Markdown 输出，包含以下小节（用 ### 标题）：
-### 本周概况
-### 关键成果
-### 未完成与逾期
-### 下周建议
-
-要求：提到具体客户/商机名称；条目用无序列表；不要输出 JSON 或代码块；语气专业简洁。`;
-  }
-
-  return `Using the activity list for this week (${range}), write a concise sales weekly report. ${totalCount} activities total, ${completedCount} completed.
-
-Activities:
-${lines || '(no activities this week)'}
-
-Respond in plain Markdown with these sections (use ### headings):
-### Overview
-### Key Wins
-### Pending & Overdue
-### Next Week
-
-Requirements: reference specific account/opportunity names; use bulleted lists; no JSON or code fences; professional and concise.`;
 }
 
 export function WeeklyReportCard({
@@ -145,9 +57,9 @@ export function WeeklyReportCard({
   inputsRef.current = { weekStart, weekEnd, activities, completedCount, totalCount, locale };
 
   // Load the cached report whenever the displayed week changes.
-  const weekKey = cacheKey(weekStart);
+  const weekKey = weeklyReportCacheKey(weekStart);
   useEffect(() => {
-    const cached = readCache(weekStart);
+    const cached = readWeeklyReport(weekStart);
     setMarkdown(cached?.markdown ?? '');
     setGeneratedAt(cached?.ts ?? null);
     setIsExpanded(true);
@@ -159,27 +71,14 @@ export function WeeklyReportCard({
     const { weekStart: ws, weekEnd: we, activities: acts, completedCount: cc, totalCount: tc, locale: loc } = inputsRef.current;
     setIsGenerating(true);
     try {
-      const prompt = buildPrompt(ws, we, acts, cc, tc, loc);
-      const { executeFunction } = await import('@/lib/function-executor');
-      const result = await executeFunction('generateEntitySummary', {
-        data: prompt,
-        entityType: 'activity',
-      }, { locale: loc });
-
-      if (result.success && typeof result.data === 'string' && result.data.trim().length > 0) {
-        const md = result.data.trim();
-        const ts = Date.now();
+      const md = await generateWeeklyReportMarkdown({
+        weekStart: ws, weekEnd: we, activities: acts,
+        completedCount: cc, totalCount: tc, locale: loc,
+      });
+      if (md) {
         setMarkdown(md);
-        setGeneratedAt(ts);
+        setGeneratedAt(Date.now());
         setIsExpanded(true);
-        try {
-          const payload: CachedReport = { ts, markdown: md, activityCount: acts.length };
-          localStorage.setItem(cacheKey(ws), JSON.stringify(payload));
-        } catch {
-          /* storage full / unavailable — keep in-memory result */
-        }
-      } else {
-        console.error('[WeeklyReport] generation failed:', result.error);
       }
     } catch (e) {
       console.error('[WeeklyReport] generation error:', e);
@@ -214,7 +113,7 @@ export function WeeklyReportCard({
                   {locale === 'zh-Hans' ? '生成于 ' : 'Generated '}{formatTs(generatedAt)}
                 </>
               ) : (
-                rangeLabel(weekStart, weekEnd, locale)
+                weekRangeLabel(weekStart, weekEnd, locale)
               )}
             </p>
           </div>

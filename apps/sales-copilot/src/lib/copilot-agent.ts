@@ -34,6 +34,13 @@ import { frameToIntent } from './frame-to-intent';
 import { agentError, toUserMessage, toDevLog, type AgentError } from './errors';
 import { fallbackToCopilotStudio } from './copilot-studio-fallback';
 import {
+  WEEKLY_REPORT_PATTERN,
+  resolveReportWeekFromMessage,
+  generateWeeklyReportMarkdown,
+  weekRangeLabel,
+  type WeeklyReportActivity,
+} from './weekly-report';
+import {
   type ThinkingProgress,
   type AgentResponse,
   type IntentResult,
@@ -161,6 +168,61 @@ async function processMessageInner(
       pageContextStr = `\n\nCurrent page: ${currentPage}`;
       if (summary) pageContextStr += `\nPage summary: ${summary}`;
       if (pageData) pageContextStr += `\nPage data: ${JSON.stringify(pageData, null, 2).slice(0, 4000)}`;
+    }
+  }
+
+  // ===== Weekly-report fast-path (D9) =====
+  // When the user asks in chat for a weekly report, generate it through the
+  // SAME shared pipeline the Activities week-view card uses (D16) and render the
+  // markdown in the conversation. The result is cached under the week's key, so
+  // the Activities card shows the identical report for that week.
+  // NOTE: this must run BEFORE the daily-report routing — DAILY_REPORT_PATTERN's
+  // `生成…报` alternative also matches "生成周报".
+  if (WEEKLY_REPORT_PATTERN.test(userMessage)) {
+    console.log('[CopilotAgent] Weekly-report request detected — generating via shared weekly-report lib');
+    if (onProgress) onProgress({ stage: 'intent', status: 'active' });
+    try {
+      const { weekStart, weekEnd } = resolveReportWeekFromMessage(userMessage);
+      const { ActivityService } = await import('@/generated/services/activity-service');
+      const all = await ActivityService.getAll();
+      const inWeek = all.filter((a) => {
+        if (!a.scheduleddate) return false;
+        const d = new Date(a.scheduleddate);
+        return !Number.isNaN(d.getTime()) && d >= weekStart && d <= weekEnd;
+      });
+      const payload: WeeklyReportActivity[] = inWeek.map((a) => ({
+        title: a.title,
+        type: a.type,
+        status: a.status,
+        scheduledAt: a.scheduleddate,
+        accountName: a.account?.name1,
+        opportunityName: a.opportunity?.name1,
+        notes: a.notes ? String(a.notes) : undefined,
+      }));
+      const completed = inWeek.filter((a) => a.status === 'completed').length;
+      const md = await generateWeeklyReportMarkdown({
+        weekStart,
+        weekEnd,
+        activities: payload,
+        completedCount: completed,
+        totalCount: inWeek.length,
+        locale: isZh ? 'zh-Hans' : 'en',
+      });
+      if (md) {
+        const range = weekRangeLabel(weekStart, weekEnd, isZh ? 'zh-Hans' : 'en');
+        const header = isZh ? `**📋 周报 · ${range}**\n\n` : `**📋 Weekly Report · ${range}**\n\n`;
+        return {
+          success: true,
+          content: header + md,
+          latencyMs: Date.now() - startTime,
+          thinkingSteps: [
+            { stage: 'intent' as const, status: 'completed' as const, label: isZh ? '意图识别：生成周报' : 'Intent: Weekly report' },
+          ],
+        };
+      }
+      console.warn('[CopilotAgent] Weekly-report generation returned empty — falling through to normal pipeline');
+    } catch (e) {
+      console.error('[CopilotAgent] Weekly-report generation failed, falling through:', e);
     }
   }
 
