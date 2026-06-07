@@ -57,6 +57,35 @@ const queryCopilotStudio: FunctionHandler = async (args, ctx) => {
   }
 };
 
+/**
+ * Resolve how many days the planning window spans, from a loose `period` value.
+ * Accepts: "day"/"today"/"单日" → 1; "week"/"本周"/"this week" → 7;
+ * "month"/"本月" → 30; a date-range string "YYYY-MM-DD to YYYY-MM-DD" → inclusive
+ * day count; or a bare number of days. Defaults to a 7-day week (a plan should
+ * span more than one day). Capped at 31 to keep the prompt bounded. (Defect D8)
+ */
+function resolveWindowDays(period: string): number {
+  const p = (period || '').toLowerCase().trim();
+  if (/^(day|today|tomorrow|单日|今天|明天)$/.test(p)) return 1;
+  if (/(month|本月|这个月|当月)/.test(p)) return 30;
+  if (/(week|本周|这周|这个星期|一周)/.test(p)) return 7;
+  // Date-range "YYYY-MM-DD ... YYYY-MM-DD" (to / – / ~ / 至).
+  const dates = p.match(/\d{4}-\d{2}-\d{2}/g);
+  if (dates && dates.length >= 2) {
+    const a = new Date(dates[0] + 'T00:00:00');
+    const b = new Date(dates[1] + 'T00:00:00');
+    const days = Math.round((b.getTime() - a.getTime()) / 86400000) + 1; // inclusive
+    if (days >= 1) return Math.min(days, 31);
+  }
+  // Bare number of days ("3", "5 days", "7天").
+  const num = p.match(/(\d+)\s*(day|days|天)?/);
+  if (num) {
+    const n = parseInt(num[1], 10);
+    if (n >= 1) return Math.min(n, 31);
+  }
+  return 7; // default: a week
+}
+
 const suggestPlan: FunctionHandler = async (args, ctx) => {
   // Default the planning window to start TOMORROW (not today) — a plan of
   // today-only tasks is not a plan. Users can still reschedule per-card.
@@ -80,7 +109,12 @@ const suggestPlan: FunctionHandler = async (args, ctx) => {
 
   const allActivities = await ActivityService.getAll();
   const targetStart = new Date(targetDate + 'T00:00:00');
-  const windowDays = period === 'week' ? 7 : 1;
+  // Resolve the planning window length (Defect D8). The Orchestrator no longer
+  // always passes the literal "week"/"day" — it often sends a date-range string
+  // like "2026-06-07 to 2026-06-13" or a localized phrase. The old check
+  // `period === 'week' ? 7 : 1` collapsed every non-"week" value to a SINGLE day,
+  // so the plan produced only one activity. Parse robustly and default to a week.
+  const windowDays = resolveWindowDays(period);
   const targetEnd = new Date(targetStart.getTime() + windowDays * 24 * 60 * 60 * 1000);
   const existingActivities = allActivities.filter((a) => {
     const d = new Date(a.scheduleddate);

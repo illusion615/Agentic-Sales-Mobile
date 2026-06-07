@@ -377,7 +377,7 @@ export const availableFunctions: FunctionDefinition[] = [
       type: 'object',
       properties: {
         targetDate: { type: 'string', description: '目标日期 YYYY-MM-DD，默认明天 / Target date, defaults to tomorrow' },
-        period: { type: 'string', description: '规划区间', enum: ['day', 'week'], },
+        period: { type: 'string', description: '规划区间：单日填 "day"，整周填 "week"（默认）。"plan my week"/"安排下周" → "week"；"plan tomorrow"/"明天" → "day"。Planning window: "day" or "week" (default "week").', enum: ['day', 'week'], },
         focus: { type: 'string', description: '可选的重点方向，如 close deals / client visits / follow-ups' },
         maxTasks: { type: 'number', description: '建议任务数量上限，默认5 / Max suggestions, default 5' },
       },
