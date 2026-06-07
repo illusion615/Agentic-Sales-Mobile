@@ -75,123 +75,6 @@ function parseJsonResponse(text: string): IntentResult | null {
 }
 
 /**
- * Fallback to Copilot Studio when intent recognition fails
- * Calls the existing queryCopilotStudio function executor
- */
-async function processAdditionalIntents(
-  intents: SingleIntent[],
-  context: { userId?: string; userEmail?: string },
-  isZh: boolean,
-  labels?: Array<{ zh: string; en: string } | undefined>
-): Promise<Array<{
-  type: 'activity' | 'opportunity' | 'account' | 'contact';
-  isNew: boolean;
-  data: Record<string, unknown>;
-  reason: string;
-  batchIndex: number;
-  userFacingLabel?: { zh: string; en: string };
-  intentIndex?: number;
-}>> {
-  const results: Array<{
-    type: 'activity' | 'opportunity' | 'account' | 'contact';
-    isNew: boolean;
-    data: Record<string, unknown>;
-    reason: string;
-    batchIndex: number;
-    userFacingLabel?: { zh: string; en: string };
-    intentIndex?: number;
-  }> = [];
-  
-  for (let i = 0; i < intents.length; i++) {
-    const intent = intents[i];
-    
-    // Only process draft functions for additional intents
-    const draftFunctions = ['draftActivity', 'draftOpportunity', 'draftAccount', 'draftContact'];
-    if (!draftFunctions.includes(intent.function)) {
-      console.log('[CopilotAgent] Skipping non-draft additional intent:', intent.function);
-      continue;
-    }
-    
-    // Per-step fuzzyMatch: when a name field is set but its id is missing, try to resolve
-    // it now (best-effort, top-1 high-confidence only). For 'draftAccount' / 'draftOpportunity'
-    // / 'draftContact' the name field IS the new entity's name, not a query — so we only
-    // fuzzy-match the *referenced* names (e.g. accountName on draftOpportunity, contactName
-    // on draftActivity). For draftAccount the only name field is the account itself, so skip.
-    const stepArgs: Record<string, unknown> = { ...(intent.arguments || {}) };
-    if (intent.function !== 'draftAccount') {
-      const lookups: Array<{ name: keyof typeof stepArgs; idField: string; entityType: 'account' | 'contact' | 'opportunity' }> = [
-        { name: 'accountName', idField: 'accountId', entityType: 'account' },
-      ];
-      // contactName / opportunityName only make sense as references on draftActivity
-      // (and in some draftOpportunity flows for parent contact, but that's out of scope).
-      if (intent.function === 'draftActivity') {
-        lookups.push({ name: 'contactName', idField: 'contactId', entityType: 'contact' });
-        lookups.push({ name: 'opportunityName', idField: 'opportunityId', entityType: 'opportunity' });
-      }
-      for (const lookup of lookups) {
-        const nameVal = stepArgs[lookup.name];
-        const idVal = stepArgs[lookup.idField];
-        if (typeof nameVal === 'string' && nameVal.trim() && (typeof idVal !== 'string' || !idVal)) {
-          try {
-            const matchRes = await executeFunction(
-              'fuzzyMatch',
-              { entityType: lookup.entityType, query: nameVal.trim() },
-              context
-            );
-            if (matchRes.success && matchRes.data) {
-              const md = matchRes.data as FuzzyMatchData;
-              const top = (md.matches ?? []).find((m) => m.score >= getMatchThresholds().autoSelect);
-              if (top) {
-                stepArgs[lookup.idField] = top.id;
-                stepArgs[lookup.name] = top.name;
-                if (lookup.entityType === 'contact' && top.accountId && !stepArgs.accountId) {
-                  stepArgs.accountId = top.accountId;
-                  if (top.accountName) stepArgs.accountName = top.accountName;
-                }
-                console.log('[CopilotAgent] additional-intent auto-resolved', lookup.entityType, top.name);
-              }
-            }
-          } catch (e) {
-            console.warn('[CopilotAgent] additional-intent fuzzyMatch failed:', lookup.entityType, e);
-          }
-        }
-      }
-    }
-
-    try {
-      const result = await executeFunction(
-        intent.function,
-        stepArgs,
-        context
-      );
-      
-      if (result.success && result.data) {
-        const data = result.data as { type?: string; data?: Record<string, unknown> };
-        const itemType = data.type || (
-          intent.function === 'draftActivity' ? 'activity' :
-          intent.function === 'draftOpportunity' ? 'opportunity' :
-          intent.function === 'draftAccount' ? 'account' : 'contact'
-        );
-        
-        results.push({
-          type: itemType as 'activity' | 'opportunity' | 'account' | 'contact',
-          isNew: true,
-          data: data.data || data as Record<string, unknown>,
-          reason: intent.reason || (isZh ? '从对话中推断' : 'Inferred from conversation'),
-          batchIndex: i,
-          ...(labels?.[i] ? { userFacingLabel: labels[i] } : {}),
-          intentIndex: i + 1,
-        });
-      }
-    } catch (error) {
-      console.warn('[CopilotAgent] Failed to process additional intent:', intent.function, error);
-    }
-  }
-  
-  return results;
-}
-
-/**
  * Process a user message through the Copilot agent
  * Two-pass approach:
  * 1. Intent detection + function call generation
@@ -563,6 +446,11 @@ async function processMessageInner(
   }
 
   // ===== Smart Matching: Pre-check for entity matching before draft functions =====
+  // DEAD CODE (single-executor refactor): the `willUseQueue` guard above returns
+  // early whenever `requiresMatching` is true or `resolutions.length > 0`, so the
+  // condition below can never be satisfied. All entity matching now happens in the
+  // IntentQueue runtime. This block is inert and slated for physical removal; it is
+  // kept temporarily only to keep the diff small. Do NOT add new logic here.
   // I-3 Slice 2: serial resolution chain. Walks `resolutions[]` (or the legacy single
   // `matchTarget` wrapped into a one-element array). Each iteration may:
   //   - auto-inject a resolved ID into intent.arguments (silent) and continue,
@@ -1103,67 +991,11 @@ Please respond to the user in a friendly manner based on the error. Important ru
     };
   }
 
-  // ===== MULTI-INTENT PROCESSING =====
-  // Check for additional intents regardless of primary function type
-  // This enables multi-intent extraction for ALL operations (update, draft, query, etc.)
-  
-  // Get additional intents from LLM's additionalActions
-  const additionalActions = intent.additionalActions || [];
-  const hasAdditionalIntents = additionalActions.length > 0;
-  const isMultiIntent = hasAdditionalIntents && intent.multiIntentAnalysis?.hasMultipleIntents;
-  
-  // Process additional intents if detected
-  let additionalIntentsResult: AgentResponse['additionalIntents'] | undefined;
-  
-  if (isMultiIntent && additionalActions.length > 0) {
-    console.log('[CopilotAgent] Multi-intent detected with', additionalActions.length, 'additional actions');
-    console.log('[CopilotAgent] Summary:', intent.multiIntentAnalysis?.summary);
-    
-    // Get account / contact / opportunity context resolved during the primary intent
-    // so it can be injected into additional intents that reference the same entities by name.
-    const matchedAccountId = intent.arguments?.accountId as string | undefined;
-    const matchedAccountName = intent.arguments?.accountName as string | undefined;
-    const matchedContactId = intent.arguments?.contactId as string | undefined;
-    const matchedContactName = intent.arguments?.contactName as string | undefined;
-    const matchedOpportunityId = intent.arguments?.opportunityId as string | undefined;
-    const matchedOpportunityName = intent.arguments?.opportunityName as string | undefined;
-    
-    // Process additional intents asynchronously
-    const additionalItems = await processAdditionalIntents(
-      additionalActions.map((action, index) => ({
-        id: `additional_${index + 1}`,
-        function: action.function,
-        arguments: {
-          ...action.arguments,
-          // Inject primary-resolved context if not already present on the step
-          ...(matchedAccountId && !action.arguments.accountId ? { accountId: matchedAccountId } : {}),
-          ...(matchedAccountName && !action.arguments.accountName ? { accountName: matchedAccountName } : {}),
-          ...(matchedContactId && !action.arguments.contactId ? { contactId: matchedContactId } : {}),
-          ...(matchedContactName && !action.arguments.contactName ? { contactName: matchedContactName } : {}),
-          ...(matchedOpportunityId && !action.arguments.opportunityId ? { opportunityId: matchedOpportunityId } : {}),
-          ...(matchedOpportunityName && !action.arguments.opportunityName ? { opportunityName: matchedOpportunityName } : {}),
-        },
-        confidence: 0.75,
-        type: 'inferred' as const,
-        priority: 10 + index,
-        missingFields: [] as string[],
-        source: 'inferred' as const,
-        reason: action.reason || (isZh ? '从对话中推断' : 'Inferred from conversation'),
-      })),
-      { userId: context.userId, userEmail: context.userEmail },
-      isZh,
-      additionalActions.map((a) => a.userFacingLabel)
-    );
-    
-    if (additionalItems.length > 0) {
-      additionalIntentsResult = {
-        message: isZh 
-          ? `我还从您的描述中发现了 ${additionalItems.length} 个可能需要记录的内容：`
-          : `I also found ${additionalItems.length} item(s) you might want to record:`,
-        items: additionalItems,
-      };
-    }
-  }
+  // ===== MULTI-INTENT PROCESSING (removed — single-executor refactor) =====
+  // Multi-intent / additionalActions are now handled entirely by the IntentQueue
+  // (copilot-context.tsx). When an intent carries additionalActions the
+  // `willUseQueue` guard above returns early, so this agent path only ever runs
+  // for single, non-queue intents.
 
   // ===== Check for suggestPlan - returns batch form cards =====
   if (intent.function === 'suggestPlan') {
@@ -1247,117 +1079,11 @@ Please respond to the user in a friendly manner based on the error. Important ru
     };
   }
 
-  // ===== Check for draft functions - return directly without Pass 2 =====
-  const draftFunctions = ['draftActivity', 'draftOpportunity', 'draftAccount', 'draftContact'];
-  if (draftFunctions.includes(intent.function)) {
-    console.log('[CopilotAgent] Draft function detected, returning form card data directly');
-    
-    // If we have additional intents, include them in the response
-    if (additionalIntentsResult) {
-      const primaryData = functionResult.data as { type?: string; data?: Record<string, unknown> };
-      const primaryType = primaryData.type || (intent.function === 'draftActivity' ? 'activity' : 
-                         intent.function === 'draftOpportunity' ? 'opportunity' : 
-                         intent.function === 'draftAccount' ? 'account' : 'contact');
-      
-      // Build batch items including primary intent
-      const allItems = [
-        {
-          type: primaryType as 'activity' | 'opportunity' | 'account' | 'contact',
-          isNew: true,
-          data: primaryData.data || primaryData as Record<string, unknown>,
-          batchIndex: 0,
-          reason: isZh ? '主要意图' : 'Primary intent',
-          ...(intent.userFacingLabel ? { userFacingLabel: intent.userFacingLabel } : {}),
-          intentIndex: 0,
-        },
-        ...additionalIntentsResult.items,
-      ];
-      
-      // Notify progress: completed
-      if (onProgress) {
-        onProgress({ stage: 'generating', status: 'completed' });
-      }
-      
-      return {
-        success: true,
-        content: isZh 
-          ? `检测到 ${allItems.length} 个意图，请确认以下信息：\n${intent.multiIntentAnalysis?.summary || ''}`
-          : `Detected ${allItems.length} intents, please confirm the following:\n${intent.multiIntentAnalysis?.summary || ''}`,
-        functionCalled: 'multiIntent',
-        functionDisplayName: isZh ? '多意图智能提取' : 'Multi-Intent Extraction',
-        functionResult: {
-          items: allItems,
-          totalCount: allItems.length,
-          multiIntentSummary: intent.multiIntentAnalysis?.summary,
-        },
-        latencyMs: Date.now() - startTime,
-        thinkingSteps: [
-          { stage: 'intent', status: 'completed', label: isZh ? `多意图识别：发现 ${allItems.length} 个意图` : `Multi-Intent: ${allItems.length} intents detected` },
-          { stage: 'executing', status: 'completed', label: isZh ? `已准备 ${allItems.length} 个表单` : `Prepared ${allItems.length} forms` },
-        ],
-        intentAnalysis: {
-          totalIntents: allItems.length,
-          summary: intent.multiIntentAnalysis?.summary || '',
-        },
-        intentsOverview: buildIntentsOverview(intent),
-      };
-    }
-    
-    // Single intent - return as before
-    // Notify progress: completed
-    if (onProgress) {
-      onProgress({ stage: 'generating', status: 'completed' });
-    }
-    
-    return {
-      success: true,
-      content: isZh ? '请确认以下信息' : 'Please confirm the following information',
-      functionCalled: intent.function,
-      functionDisplayName: fnDisplayName,
-      functionResult: functionResult.data,
-      latencyMs: Date.now() - startTime,
-      thinkingSteps: [
-        ...(hasMultipleIntents ? [] : [{ stage: 'intent' as const, status: 'completed' as const, label: isZh ? `意图识别：${intentLabel}` : `Intent: ${intentLabel}` }]),
-        { stage: 'executing', status: 'completed', label: isZh ? `${fnDisplayName}：已准备表单` : `${fnDisplayName}: Form ready` },
-      ],
-    };
-  }
-
-  // ===== For UPDATE operations with additional intents =====
-  // Execute the update, then show additional intents as forms
-  if (additionalIntentsResult && additionalIntentsResult.items.length > 0) {
-    // Notify progress: completed
-    if (onProgress) {
-      onProgress({ stage: 'generating', status: 'completed' });
-    }
-    
-    // Build a success message for the primary action
-    const primarySuccessMsg = isZh
-      ? `${fnDisplayName} 已完成。`
-      : `${fnDisplayName} completed.`;
-    
-    return {
-      success: true,
-      content: `${primarySuccessMsg}\n\n${additionalIntentsResult.message}`,
-      functionCalled: intent.function,
-      functionDisplayName: fnDisplayName,
-      functionResult: functionResult.data,
-      invalidateQueries: functionResult.invalidateQueries,
-      latencyMs: Date.now() - startTime,
-      thinkingSteps: [
-        { stage: 'intent', status: 'completed', label: isZh ? `多意图识别：发现 ${additionalIntentsResult.items.length + 1} 个意图` : `Multi-Intent: ${additionalIntentsResult.items.length + 1} intents detected` },
-        { stage: 'executing', status: 'completed', label: isZh ? `${fnDisplayName}：执行成功` : `${fnDisplayName}: Success` },
-        { stage: 'generating', status: 'completed', label: isZh ? `发现 ${additionalIntentsResult.items.length} 个额外意图` : `Found ${additionalIntentsResult.items.length} additional intent(s)` },
-      ],
-      // Include additional intents for UI to display as batch forms
-      additionalIntents: additionalIntentsResult,
-      intentAnalysis: {
-        totalIntents: additionalIntentsResult.items.length + 1,
-        summary: intent.multiIntentAnalysis?.summary || '',
-      },
-      intentsOverview: buildIntentsOverview(intent),
-    };
-  }
+  // ===== Draft functions & multi-intent batch forms (removed) =====
+  // draft* functions and any intent carrying additionalActions are now handled
+  // exclusively by the IntentQueue (the `willUseQueue` guard returns early).
+  // The former draft-form and "update + additional intents" branches here were
+  // unreachable and have been deleted as part of the single-executor refactor.
 
   // ===== Knowledge-query short-circuit (boss directive 2026-05-17) =====
   // For Copilot Studio knowledge queries the function result already IS a
