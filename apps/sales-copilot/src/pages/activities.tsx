@@ -11,7 +11,6 @@ import {
   MapPin,
   Plus,
   ChevronLeft,
-  Sparkles,
   AlertTriangle,
   CheckCircle2,
   TrendingUp,
@@ -19,6 +18,7 @@ import {
 import { MobileLayout } from '@/components/mobile-layout';
 import { FloatingQuickActions } from '@/components/floating-quick-actions';
 import { GlassCard } from '@/components/glass-card';
+import { WeeklyReportCard, type WeeklyReportActivity } from '@/components/weekly-report-card';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { ACTIVITY_TYPE_COLORS } from '@/lib/activity-colors';
@@ -297,14 +297,22 @@ export default function ActivitiesPage() {
     return eachDayOfInterval({ start: ws, end: addDays(ws, 6) });
   };
 
-  const handleGenerateDailyReport = () => {
-    const dateLabel = format(currentDate, 'yyyy-MM-dd');
-    const prompt = locale === 'zh-Hans'
-      ? `生成 ${dateLabel} 的工作日报：根据当前页面上的任务列表，输出：1）今日完成情况；2）关键成果；3）未完成任务与原因；4）明日建议。`
-      : `Generate a daily report for ${dateLabel}: use the task list on this page and produce: 1) completion summary; 2) key wins; 3) pending tasks; 4) tomorrow's plan.`;
-    copilot.openPanel(true);
-    copilot.sendMessage(prompt);
-  };
+  // Week bounds + payload for the persisted weekly report (D16).
+  const weekReport = useMemo(() => {
+    const wso = getWeekStartDay() === 'monday' ? 1 : 0;
+    const ws = startOfWeek(currentDate, { weekStartsOn: wso as 0 | 1 });
+    const we = endOfWeek(currentDate, { weekStartsOn: wso as 0 | 1 });
+    const acts: WeeklyReportActivity[] = filteredActivities.map((a: DataverseActivity) => ({
+      title: a.title,
+      type: a.type,
+      status: a.status,
+      scheduledAt: a.scheduleddate,
+      accountName: a.account?.name1,
+      opportunityName: a.opportunity?.name1,
+      notes: a.notes ? String(a.notes) : undefined,
+    }));
+    return { weekStart: ws, weekEnd: we, activities: acts };
+  }, [currentDate, filteredActivities]);
 
   if (isLoading) {
     return (
@@ -365,16 +373,6 @@ export default function ActivitiesPage() {
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                {viewMode === 'week' && (
-                  <button
-                    type="button"
-                    onClick={handleGenerateDailyReport}
-                    aria-label="AI Report"
-                    className="h-8 w-8 rounded-full bg-primary/10 text-primary hover:bg-primary/20 transition-colors flex items-center justify-center"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                  </button>
-                )}
                 <div className="relative w-11 h-11">
                   <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
                     <circle cx="18" cy="18" r="15.5" fill="none" stroke="currentColor" strokeWidth="3" className="text-muted/30" />
@@ -417,6 +415,15 @@ export default function ActivitiesPage() {
                   const weekDays = getWeekDays();
                   return (
                     <div className="space-y-3">
+                      {/* Persisted weekly report (D16) — lives in the week view,
+                          not the Copilot chat; cached per week. */}
+                      <WeeklyReportCard
+                        weekStart={weekReport.weekStart}
+                        weekEnd={weekReport.weekEnd}
+                        activities={weekReport.activities}
+                        completedCount={completedCount}
+                        totalCount={totalCount}
+                      />
                       {/* Day selector with type dots */}
                       <div className="grid grid-cols-7 gap-1">
                         {weekDays.map((day: Date) => {
