@@ -73,7 +73,7 @@ function formatDate(dateStr?: string): string {
 
 function getActivityTypeIcon(type: string | null | undefined): React.ComponentType<{ className?: string }> {
   switch (type) {
-    case 'visit': return MapPin; // visit
+    case 'visit': return Calendar; // visit
     case 'call': return Phone; // call
     case 'meeting': return Calendar; // meeting
     case 'email': return Mail; // email
@@ -185,7 +185,7 @@ export default function ContactDetailPage() {
     if (!contact) return;
     try {
       await deleteContact.mutateAsync(contact.id);
-      toast.success('Contact deleted');
+      // Returning to the list (item now gone) is the feedback; no toast.
       navigate('/contacts');
     } catch (err: unknown) {
       toast.error('Failed to delete contact');
@@ -206,7 +206,7 @@ export default function ContactDetailPage() {
           account: selectedAccount ? { id: selectedAccount.id, name1: selectedAccount.name1 } : contact.account,
         },
       });
-      toast.success('Contact updated');
+      // Exiting edit mode reveals the updated fields inline; no toast.
       setIsEditMode(false);
     } catch (err: unknown) {
       toast.error('Failed to update contact');

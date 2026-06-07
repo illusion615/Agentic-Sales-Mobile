@@ -24,8 +24,19 @@ export interface Activity {
   type: ActivityType;
   /** Related account (from regardingobjectid or via opportunity) */
   account?: Pick<Account, 'id' | 'name1'>;
-  /** Related contact (from Activity Party) */
+  /** Primary related contact (first attendee). Derived from `contacts[0]` for backward compat. */
   contact?: Pick<Contact, 'id' | 'fullname'>;
+  /**
+   * All participants (from Activity Party). For visit/meeting these are the
+   * attendees; each carries the email alias used and participation role.
+   * Lazily populated — list queries may omit this; detail/edit paths fill it.
+   */
+  contacts?: Array<{
+    id: string;
+    fullname: string;
+    email?: string;
+    role?: 'required' | 'optional' | 'organizer' | 'customer';
+  }>;
   /** Related opportunity (from regardingobjectid) */
   opportunity?: Pick<Opportunity, 'id' | 'name1'>;
   /** Notes / description */

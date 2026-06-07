@@ -10,18 +10,6 @@
     "projectId": "e3bc3760-89b8-4f31-87a6-6fbf8e983eff"
   },
   "connectionReferences": {
-    "89863882-49cb-4301-94d6-70f0c9e148bd": {
-      "id": "/providers/Microsoft.PowerApps/apis/shared_logicflows",
-      "displayName": "Logic flows",
-      "dataSources": [
-        "powerappsflow_llm"
-      ],
-      "workflowDetails": {
-        "workflowEntityId": "0c518b89-fe53-f111-a825-7ced8d3c7b0f",
-        "workflowDisplayName": "Power Apps Flow - LLM",
-        "workflowName": "c9412c8b-3ed4-4fa0-92a8-ea98ff6cca75"
-      }
-    },
     "db0d28da-2c3b-4cb4-b7d1-bfa6e32e41cf": {
       "id": "/providers/Microsoft.PowerApps/apis/shared_microsoftcopilotstudio",
       "displayName": "Microsoft Copilot Studio",
@@ -101,6 +89,31 @@
         "agentlogs": {
           "entitySetName": "crf5c_agentlogs",
           "logicalName": "crf5c_agentlog",
+          "isHidden": false
+        },
+        "users": {
+          "entitySetName": "systemusers",
+          "logicalName": "systemuser",
+          "isHidden": false
+        },
+        "environment_39a902ba": {
+          "entitySetName": "Environment",
+          "logicalName": "environment_39a902ba",
+          "isHidden": false
+        },
+        "notes": {
+          "entitySetName": "annotations",
+          "logicalName": "annotation",
+          "isHidden": false
+        },
+        "attachments": {
+          "entitySetName": "activitymimeattachments",
+          "logicalName": "activitymimeattachment",
+          "isHidden": false
+        },
+        "activityparties": {
+          "entitySetName": "activityparties",
+          "logicalName": "activityparty",
           "isHidden": false
         }
       },

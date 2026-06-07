@@ -1,0 +1,51 @@
+{
+  "name": "msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7",
+  "title": "msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7",
+  "type": "Microsoft.PowerApps/dataverseOperation",
+  "properties": {
+    "displayName": "msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7",
+    "swagger": {
+      "swagger": "2.0",
+      "info": {
+        "title": "msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7",
+        "version": "1.0"
+      },
+      "basePath": "/api/data/v9.2",
+      "paths": {
+        "/msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7": {
+          "post": {
+            "operationId": "msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7",
+            "parameters": [
+              {
+                "name": "Special_20character",
+                "in": "body",
+                "required": true,
+                "type": "string",
+                "x-ms-dataverse-type": "StringType",
+                "x-ms-csdl-type": "Edm.String"
+              },
+              {
+                "name": "Text",
+                "in": "body",
+                "required": true,
+                "type": "string",
+                "x-ms-dataverse-type": "StringType",
+                "x-ms-csdl-type": "Edm.String"
+              }
+            ],
+            "responses": {
+              "200": {
+                "description": "Success",
+                "schema": {
+                  "type": "object",
+                  "x-ms-dataverse-type": "LookupType",
+                  "x-ms-csdl-type": "mscrm.msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7Response"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

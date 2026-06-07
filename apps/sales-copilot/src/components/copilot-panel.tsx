@@ -1,7 +1,7 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence, useDragControls, type PanInfo } from 'motion/react';
-import { Sparkles, ArrowUp, SquarePen, X, ChevronDown, Copy, Volume2, VolumeX, Loader2, Square, Play, Pause, Paperclip, RotateCcw, Mic, Plus, Camera } from 'lucide-react';
+import { Sparkles, ArrowUp, SquarePen, X, ChevronDown, Copy, Volume2, VolumeX, Loader2, Square, Play, Pause, Paperclip, RotateCcw, Mic, Plus, Camera, ScrollText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useCopilot, type ChatMessage } from '@/contexts/copilot-context';
 import { getLocale, getChatFontClass, getSelectedVoice, findMatchingSystemVoice, getLLMConfig, getVoiceSummaryEnabled, getCopilotDockLayout, getCopilotFullscreenDefault, type CopilotDockLayout, type Locale } from '@/lib/i18n';
@@ -15,9 +15,11 @@ import { RecordListCard } from '@/components/record-list-card';
 import { AdditionalIntentsCard } from '@/components/additional-intents-card';
 import { PipelineViewer } from '@/components/frame-viewer';
 import { TaskAnnounceBubble } from '@/components/task-announce-bubble';
+import { MessageAttachments } from '@/components/message-attachments';
 import { toast } from 'sonner';
 import { useActionDock } from '@/contexts/action-dock-context';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { newAttachmentId, type CopilotAttachment } from '@/lib/attachments';
 
 
 
@@ -89,6 +91,12 @@ export function CopilotPanel() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+
+  // Smart auto-scroll: only scroll to bottom after the user sends a message
+  // or while a streaming response is arriving. Preserve scroll position when
+  // the user navigates away (clicks a record card) and comes back.
+  const shouldAutoScrollRef = useRef(true);
+  const prevMessagesLenRef = useRef(0);
   
   // TTS per-message playback
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
@@ -168,23 +176,15 @@ export function CopilotPanel() {
     if (!files || files.length === 0) return;
 
     Array.from(files).forEach((file: File) => {
-      if (file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          setAttachments((prev) => [...prev, {
-            file,
-            preview: event.target?.result as string,
-            type: 'image' as const
-          }]);
-        };
-        reader.readAsDataURL(file);
-      } else {
+      const reader = new FileReader();
+      reader.onload = (event) => {
         setAttachments((prev) => [...prev, {
           file,
-          preview: '',
-          type: 'file' as const
+          preview: event.target?.result as string,
+          type: file.type.startsWith('image/') ? 'image' as const : 'file' as const,
         }]);
-      }
+      };
+      reader.readAsDataURL(file);
     });
 
     if (fileInputRef.current) {
@@ -196,6 +196,21 @@ export function CopilotPanel() {
   const handleRemoveAttachment = useCallback((index: number) => {
     setAttachments((prev) => prev.filter((_, i) => i !== index));
   }, []);
+
+  // Send the current input together with any composer attachments, then clear both.
+  const handleSend = useCallback((text: string) => {
+    if (!text.trim()) return;
+    const atts: CopilotAttachment[] = attachments.map((a) => ({
+      id: newAttachmentId(),
+      name: a.file.name,
+      mimeType: a.file.type || 'application/octet-stream',
+      dataUrl: a.preview,
+      type: a.type,
+    }));
+    shouldAutoScrollRef.current = true;
+    sendMessage(text, atts.length ? atts : undefined);
+    setAttachments([]);
+  }, [attachments, sendMessage]);
   
   // Check if context should be shown
   const shouldShowContext = pageContext && 
@@ -203,23 +218,62 @@ export function CopilotPanel() {
     !dismissedContexts.has(pageContext.currentPage) &&
     pageContext.currentPage !== 'Home';
 
-  // Scroll to bottom when messages change.
-  // Use requestAnimationFrame to ensure the DOM has updated before scrolling,
-  // preventing overshoot when the queue pushes messages rapidly.
+  // Scroll to bottom when messages change — but only when auto-scroll is active.
+  // Auto-scroll is enabled when the user sends a message or a quick-action, and
+  // disabled when the user manually scrolls up away from the bottom.
   useEffect(() => {
+    // A new user message just appeared → re-enable auto-scroll
+    if (messages.length > prevMessagesLenRef.current) {
+      const latest = messages[messages.length - 1];
+      if (latest?.role === 'user') {
+        shouldAutoScrollRef.current = true;
+      }
+    }
+    prevMessagesLenRef.current = messages.length;
+
+    if (!shouldAutoScrollRef.current) return;
     requestAnimationFrame(() => {
       const container = messagesContainerRef.current;
       if (container) container.scrollTop = container.scrollHeight;
     });
-  }, [messages.length]);
+  }, [messages.length, messages]);
+
+  // While the assistant is streaming, keep scrolling to bottom (if auto-scroll is on).
+  useEffect(() => {
+    if (!isSending || !shouldAutoScrollRef.current) return;
+    requestAnimationFrame(() => {
+      const container = messagesContainerRef.current;
+      if (container) container.scrollTop = container.scrollHeight;
+    });
+  });
+
+  // Detect manual scroll: if user scrolls up away from the bottom, pause auto-scroll.
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    const handleScroll = () => {
+      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+      // If user scrolled more than 80px from bottom, they're browsing history
+      if (distanceFromBottom > 80) {
+        shouldAutoScrollRef.current = false;
+      } else {
+        shouldAutoScrollRef.current = true;
+      }
+    };
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, []);
 
   // Focus input and scroll to bottom when panel opens
   useEffect(() => {
     if (isOpen) {
       setTimeout(() => {
         inputRef.current?.focus();
-        const container = messagesContainerRef.current;
-        if (container) container.scrollTop = container.scrollHeight;
+        // Only auto-scroll to bottom on open if we're not preserving position
+        if (shouldAutoScrollRef.current) {
+          const container = messagesContainerRef.current;
+          if (container) container.scrollTop = container.scrollHeight;
+        }
       }, 300);
     }
   }, [isOpen]);
@@ -253,7 +307,7 @@ export function CopilotPanel() {
     if (isComposingRef.current) return;
     if (e.key === 'Enter' && !e.shiftKey && inputValue.trim()) {
       e.preventDefault();
-      sendMessage(inputValue);
+      handleSend(inputValue);
     }
   };
 
@@ -583,6 +637,9 @@ export function CopilotPanel() {
                   >
                     {message.content}
                   </div>
+                  {message.attachments && message.attachments.length > 0 && (
+                    <MessageAttachments attachments={message.attachments} />
+                  )}
                   <div className="flex items-center justify-end gap-1.5 mt-1">
                     <button
                       onClick={() => {
@@ -593,7 +650,7 @@ export function CopilotPanel() {
                         // Focus input
                         inputRef.current?.focus();
                       }}
-                      className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-primary/10 hover:text-primary transition-all"
+                      className="p-1 rounded hover:bg-primary/10 hover:text-primary transition-all"
                       aria-label={locale === 'zh-Hans' ? '重试' : 'Retry'}
                     >
                       <RotateCcw className="w-3 h-3 text-muted-foreground hover:text-primary" />
@@ -960,6 +1017,7 @@ export function CopilotPanel() {
                   );
                 } else {
                   // Regular query - send as message
+                  shouldAutoScrollRef.current = true;
                   sendMessage(action.query);
                 }
               }}
@@ -1055,10 +1113,25 @@ export function CopilotPanel() {
             <>
               {/* Click-away overlay */}
               <div
-                className="fixed inset-0 z-40"
+                className="fixed inset-0 z-[70]"
                 onClick={() => setShowAttachMenu(false)}
               />
-              <div className="absolute bottom-full left-0 mb-2 z-50 min-w-[160px] glass-card rounded-xl p-1.5 shadow-lg">
+              <div
+                className="fixed z-[80] min-w-[160px] rounded-xl p-1.5 shadow-lg border border-border bg-popover"
+                style={{
+                  bottom: (() => {
+                    const btn = document.querySelector('[data-attach-trigger]');
+                    if (!btn) return 56;
+                    const rect = btn.getBoundingClientRect();
+                    return window.innerHeight - rect.top + 8;
+                  })(),
+                  left: (() => {
+                    const btn = document.querySelector('[data-attach-trigger]');
+                    if (!btn) return 16;
+                    return btn.getBoundingClientRect().left;
+                  })(),
+                }}
+              >
                 <button
                   type="button"
                   onClick={() => { setShowAttachMenu(false); cameraInputRef.current?.click(); }}
@@ -1080,6 +1153,7 @@ export function CopilotPanel() {
           )}
           <button
             type="button"
+            data-attach-trigger
             onClick={() => setShowAttachMenu((v) => !v)}
             className={cn(
               'w-10 h-10 flex items-center justify-center rounded-full transition-colors',
@@ -1119,7 +1193,7 @@ export function CopilotPanel() {
           </button>
         ) : !isListening && inputValue.trim() ? (
           <button
-            onClick={() => inputValue.trim() && sendMessage(inputValue)}
+            onClick={() => { if (inputValue.trim()) { handleSend(inputValue); } }}
             className="w-10 h-10 flex items-center justify-center transition-all text-primary hover:brightness-125 shrink-0"
             aria-label={locale === 'zh-Hans' ? '发送' : 'Send'}
             title={locale === 'zh-Hans' ? '发送' : 'Send'}
@@ -1187,9 +1261,25 @@ export function CopilotPanel() {
           'flex items-center justify-between px-4 py-2 border-b border-border/30',
           isFullScreen && 'safe-area-top pt-3'
         )}>
-          {/* Collapse button — hidden in side-docked mode (always open) */}
+          {/* Collapse button — hidden in side-docked mode (always open).
+              In side-docked mode the title moves into this left slot since
+              there's no collapse button to balance the layout. */}
           {isSideDocked ? (
-            <div className="w-8" />
+            <div className="flex items-center gap-2">
+              {isFullScreen && <Sparkles className="w-5 h-5 text-primary" />}
+              <span className="text-sm font-medium text-foreground">Sales Copilot</span>
+              {isConnected && <span className="w-2 h-2 bg-green-500 rounded-full" />}
+              {isConnecting && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
+              <button
+                type="button"
+                onClick={() => setFrameViewerOpen(true)}
+                className="ml-1 w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                title={locale === 'zh-Hans' ? 'Frame 影子模式 · 销售专家思考记录' : 'Frame shadow mode · sales-coach reasoning log'}
+                aria-label="Frame shadow log"
+              >
+                <ScrollText className="w-3.5 h-3.5" />
+              </button>
+            </div>
           ) : (
           <button
             onClick={isFullScreen ? () => openPanel(false) : handleClose}
@@ -1203,24 +1293,26 @@ export function CopilotPanel() {
             <ChevronDown className="w-4 h-4 text-foreground" />
           </button>
           )}
+          {/* Centered title — only in non-docked (float/mobile) layout. */}
+          {!isSideDocked && (
           <div className="flex items-center gap-2">
-            {isFullScreen && <Sparkles className="w-5 h-5 text-primary" />}
             <span className="text-sm font-medium text-foreground">Sales Copilot</span>
             {isConnected && <span className="w-2 h-2 bg-green-500 rounded-full" />}
             {isConnecting && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
             <button
               type="button"
               onClick={() => setFrameViewerOpen(true)}
-              className="ml-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold text-orange-700 bg-orange-100 hover:bg-orange-200 transition-colors"
+              className="ml-1 w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
               title={locale === 'zh-Hans' ? 'Frame 影子模式 · 销售专家思考记录' : 'Frame shadow mode · sales-coach reasoning log'}
               aria-label="Frame shadow log"
             >
-              F
+              <ScrollText className="w-3.5 h-3.5" />
             </button>
           </div>
+          )}
           <div className="flex items-center gap-1">
             <button
-              onClick={() => startNewConversation()}
+              onClick={() => { shouldAutoScrollRef.current = true; startNewConversation(); }}
               className="w-8 h-8 flex items-center justify-center rounded-lg transition-all hover:brightness-125 active:brightness-75"
               aria-label={locale === 'zh-Hans' ? '新会话' : 'New session'}
             >

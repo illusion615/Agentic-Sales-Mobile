@@ -16,6 +16,8 @@ const loadQR = () => import('@/lib/intent-queue-runtime');
 import { narrateTask, type PriorTaskOutcome } from '@/lib/task-narrator';
 import type { AwaitingClarification, ResolutionItem } from '@/lib/agent-utils';
 import { extractVisitDataFromText, type ExtractedVisitData } from '@/lib/visit-extraction';
+import { putAttachments, toAttachmentMeta, type CopilotAttachment, type AttachmentMeta } from '@/lib/attachments';
+import { assignAttachmentsToIntent } from '@/lib/attachment-assign';
 import {
   pickLabel, buildOverviewMessage, buildAnnounceMessage,
   hasMessageAfterLastUser, collapseEarlierTasks, extractPriorOutcomes,
@@ -23,6 +25,120 @@ import {
 } from './copilot-helpers';
 
 type IntentsOverview = NonNullable<AgentResponse['intentsOverview']>;
+
+/**
+ * Invalidate React Query caches after a write, covering BOTH the list key the
+ * handler reports AND the matching single-record family the open detail page
+ * subscribes to.
+ *
+ * Handlers return list keys like `account-list`; a detail page uses
+ * `['account', id]`. Invalidating only the list leaves the page the user is
+ * looking at stale. For every `<entity>-list` we also invalidate `<entity>`
+ * (prefix match → refreshes every open `[entity, id]` query). Bare keys are
+ * invalidated as-is and also get their `-list` sibling refreshed.
+ */
+function invalidateRelatedQueries(
+  queryClient: ReturnType<typeof useQueryClient>,
+  keys: string[],
+): void {
+  const seen = new Set<string>();
+  const invalidateExact = (k: string) => {
+    if (seen.has(k)) return;
+    seen.add(k);
+    queryClient.invalidateQueries({ queryKey: [k] });
+  };
+  for (const key of keys) {
+    invalidateExact(key);
+    if (key.endsWith('-list')) {
+      // e.g. 'activity-list' → also refresh every ['activity', id] detail query.
+      invalidateExact(key.slice(0, -'-list'.length));
+    } else {
+      // e.g. 'activity' → also refresh the ['activity-list'] collection.
+      invalidateExact(`${key}-list`);
+    }
+  }
+}
+
+/**
+ * Build a business-meaningful acknowledgement for a single queued intent.
+ *
+ * Replaces the old generic "Preparing..." with a sentence that states WHAT the
+ * agent is about to do and WHICH record/values are involved, plus the action
+ * the user is expected to take next (review & confirm the card below).
+ * Derived purely from the parsed intent (function + arguments + label).
+ */
+function buildQueueAck(intent: IntentResult, locale: Locale): string {
+  const isZh = locale === 'zh-Hans';
+  const a = intent.arguments ?? {};
+  const title = (a.title ?? a.name ?? a.fullName ?? '') as string;
+  const account = (a.accountName ?? '') as string;
+  const contact = (a.contactName ?? '') as string;
+  const dateRaw = (a.scheduledDate ?? a.expectedCloseDate ?? '') as string;
+  const dateStr = dateRaw
+    ? new Date(dateRaw).toLocaleDateString(isZh ? 'zh-CN' : 'en-US', { month: 'short', day: 'numeric' })
+    : '';
+  const q = (s: string) => (isZh ? `「${s}」` : `"${s}"`);
+  const reviewZh = '，请在下方卡片中核对，确认后我再为你保存。';
+  const reviewEn = ' — review the card below; I’ll save it once you confirm.';
+
+  switch (intent.function) {
+    case 'draftActivity': {
+      const who = contact ? (isZh ? `与${contact}` : ` with ${contact}`) : '';
+      const when = dateStr ? (isZh ? `${dateStr} ` : `${dateStr} `) : '';
+      const what = title ? q(title) : account ? (isZh ? `对${account}的活动` : `an activity for ${account}`) : (isZh ? '一项活动' : 'an activity');
+      return isZh
+        ? `我将为你起草${when}${who}的活动${what}${reviewZh}`
+        : `I'll draft ${when}${what}${who}${reviewEn}`;
+    }
+    case 'draftOpportunity':
+      return isZh
+        ? `我将为你起草商机${title ? q(title) : ''}${account ? `（${account}）` : ''}${reviewZh}`
+        : `I'll draft opportunity ${title ? q(title) : ''}${account ? ` (${account})` : ''}${reviewEn}`;
+    case 'draftContact':
+      return isZh
+        ? `我将为你起草联系人${title ? q(title) : ''}${account ? `（${account}）` : ''}${reviewZh}`
+        : `I'll draft contact ${title ? q(title) : ''}${account ? ` (${account})` : ''}${reviewEn}`;
+    case 'draftAccount':
+      return isZh
+        ? `我将为你起草客户${title ? q(title) : ''}${reviewZh}`
+        : `I'll draft account ${title ? q(title) : ''}${reviewEn}`;
+    case 'updateActivity':
+    case 'updateOpportunity':
+    case 'updateContact':
+    case 'updateAccount': {
+      // Update functions execute directly in the queue (executeIntent's
+      // non-draft branch) — there is NO confirmation card. Do NOT promise one;
+      // describe the action as already happening so the message matches reality.
+      const target = title || contact || account;
+      return isZh
+        ? `好的，正在更新${target ? q(target) : '该记录'}…`
+        : `Got it — updating ${target ? q(target) : 'the record'}…`;
+    }
+    default:
+      // Fall back to the agent's own label if present, else a still-useful generic.
+      if (intent.userFacingLabel) return isZh ? intent.userFacingLabel.zh : intent.userFacingLabel.en;
+      return isZh ? '我将根据你的请求准备操作，请在下方确认。' : "I'll prepare this based on your request — confirm below.";
+  }
+}
+
+/** Build an acknowledgement summarising a multi-step plan before the cards render. */
+function buildMultiStepAck(intent: IntentResult, stepCount: number, locale: Locale): string {
+  const isZh = locale === 'zh-Hans';
+  const labels: string[] = [];
+  if (intent.userFacingLabel) labels.push(isZh ? intent.userFacingLabel.zh : intent.userFacingLabel.en);
+  for (const act of intent.additionalActions ?? []) {
+    if (act.userFacingLabel) labels.push(isZh ? act.userFacingLabel.zh : act.userFacingLabel.en);
+  }
+  if (labels.length > 0) {
+    const list = labels.join(isZh ? '、' : ', ');
+    return isZh
+      ? `已识别 ${stepCount} 项任务：${list}。请依次在下方卡片中确认。`
+      : `Detected ${stepCount} tasks: ${list}. Confirm each in the cards below.`;
+  }
+  return isZh
+    ? `已识别 ${stepCount} 项任务，请依次在下方卡片中确认。`
+    : `Detected ${stepCount} tasks — confirm each in the cards below.`;
+}
 
 export type { ExtractedVisitData } from '@/lib/visit-extraction';
 export type { ThinkingStep } from '@/lib/copilot-agent';
@@ -38,6 +154,8 @@ export interface ChatMessage {
   queueIntentId?: string;
   audioUrl?: string;
   audioDuration?: number;
+  /** Files the user attached in the composer (lightweight meta; blobs live in the attachment store). */
+  attachments?: AttachmentMeta[];
   agentName?: string;
   functionCalled?: string;
   functionDisplayName?: string;
@@ -65,6 +183,8 @@ export interface ChatMessage {
     data: Record<string, unknown>;
     status?: 'pending' | 'confirmed' | 'modified' | 'cancelled';
     createdRecordId?: string;
+    /** Attachment ids (resolved from the attachment store) to upload as Notes after create. */
+    attachmentIds?: string[];
   };
   // Batch form cards for multiple drafts
   batchFormCards?: {
@@ -210,7 +330,7 @@ interface CopilotContextValue {
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
   isSending: boolean;
   setIsSending: (value: boolean) => void;
-  sendMessage: (text: string) => void;
+  sendMessage: (text: string, attachments?: CopilotAttachment[]) => void;
   cancelSend: () => void;
   inputValue: string;
   setInputValue: (value: string) => void;
@@ -414,7 +534,9 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     },
     invalidate: (keys) => {
       if (!keys || keys.length === 0) return;
-      keys.forEach((k) => queryClientRef.current.invalidateQueries({ queryKey: [k] }));
+      // Refresh both the list and the single-record family so the page the
+      // user is on (e.g. an activity detail) updates in place — not just lists.
+      invalidateRelatedQueries(queryClientRef.current, keys);
     },
     toast: (kind, msg) => {
       if (kind === 'success') toast.success(msg);
@@ -1101,8 +1223,14 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     setIsFullScreen((prev) => !prev);
   }, []);
 
-  const sendMessage = useCallback(async (text: string) => {
+  const sendMessage = useCallback(async (text: string, attachments?: CopilotAttachment[]) => {
     if (!text.trim()) return;
+
+    // Register composer attachment blobs in the session store and project to
+    // lightweight meta carried on the user message + (later) the activity intent.
+    const turnAttachments = attachments ?? [];
+    if (turnAttachments.length) putAttachments(turnAttachments);
+    const turnAttachmentMeta: AttachmentMeta[] = turnAttachments.map(toAttachmentMeta);
 
     // ===== I-2 Stage 1: Awaiting-clarification gate =====
     // If the last assistant message is blocked on user clarification, intercept this reply
@@ -1326,6 +1454,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       role: 'user',
       content: text.trim(),
       timestamp: new Date().toISOString(),
+      ...(turnAttachmentMeta.length ? { attachments: turnAttachmentMeta } : {}),
     };
     setMessages((prev) => [...prev, userMessage]);
     setInputValue('');
@@ -1471,10 +1600,11 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             setIsSending(false);
             setMessages((prev) => prev.map((msg) => {
               if (msg.id !== thinkingMsgId) return msg;
-              const stepCount = 1 + (response.rawIntent?.additionalActions?.length ?? 0);
+              const ri = response.rawIntent!;
+              const stepCount = 1 + (ri.additionalActions?.length ?? 0);
               const ackContent = stepCount > 1
-                ? (locale === 'zh-Hans' ? `已识别 ${stepCount} 步任务，依次处理...` : `Detected ${stepCount} steps. Processing in order...`)
-                : (locale === 'zh-Hans' ? '正在准备...' : 'Preparing...');
+                ? buildMultiStepAck(ri, stepCount, locale)
+                : buildQueueAck(ri, locale);
               return {
                 ...msg,
                 type: 'agent' as const,
@@ -1482,13 +1612,41 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                 functionCalled: response.functionCalled,
                 functionDisplayName: response.functionDisplayName,
                 isThinking: false,
-                // Drop pre-resolved thinkingSteps (e.g. "Found N high-confidence matches").
-                // In queue mode the same info already appears inside the cards we render,
-                // so showing it again above the ack is redundant noise.
-                thinkingSteps: undefined,
+                // Keep the agent's reasoning steps (intent classification, drafting, etc.)
+                // so the user sees meaningful progress above the queued cards, matching
+                // the non-queue paths. Previously these were dropped, leaving a bare
+                // "Preparing..." with no context.
+                thinkingSteps: response.thinkingSteps?.map((s) => ({
+                  stage: s.stage,
+                  status: 'completed' as const,
+                  label: s.label,
+                  detail: s.detail,
+                })),
               };
             }));
+            // Assign composer attachments to the activity draft(s) in this turn
+            // (single → all; multiple → LLM mapping). Stamps __attachmentIds onto
+            // each activity intent's arguments, which the queue carries to the form-card.
+            if (turnAttachmentMeta.length) {
+              await assignAttachmentsToIntent(response.rawIntent, turnAttachmentMeta, userMessage.content, locale);
+            }
             const newQueue = buildQueueFromIntent(response.rawIntent);
+            // Seed page-bound entities (account / contact / opportunity) into the
+            // queue's resolvedContext so every step auto-links to what the user is
+            // viewing — e.g. on an Opportunity Detail page, a drafted activity links
+            // to that opportunity. Primary-resolved values (already seeded by
+            // buildQueueFromIntent) win; buildEffectiveArgs only fills missing keys.
+            if (pageContextRef.current?.pageData) {
+              const pd = pageContextRef.current.pageData as Record<string, unknown>;
+              const pageSeed: Record<string, string> = {};
+              for (const key of ['accountId', 'accountName', 'contactId', 'contactName', 'opportunityId', 'opportunityName'] as const) {
+                const val = pd[key];
+                if (typeof val === 'string' && val.trim() && !newQueue.resolvedContext[key]) {
+                  pageSeed[key] = val;
+                }
+              }
+              newQueue.resolvedContext = { ...pageSeed, ...newQueue.resolvedContext };
+            }
             newQueue.userMessage = userMessage.content;
             await runAndStoreQueue(newQueue);
             return;
@@ -1831,11 +1989,13 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             }
           }
           
-          // Invalidate React Query cache if the operation modified data
+          // Invalidate React Query cache if the operation modified data.
+          // Handlers report list keys (e.g. 'activity-list'), but the page the
+          // user is currently on usually subscribes to a SINGLE-record key
+          // (e.g. ['activity', id]). Invalidate BOTH so the open detail page
+          // refreshes in place, not just the list behind it.
           if (response.invalidateQueries && response.invalidateQueries.length > 0) {
-            response.invalidateQueries.forEach((queryKey: string) => {
-              queryClient.invalidateQueries({ queryKey: [queryKey] });
-            });
+            invalidateRelatedQueries(queryClient, response.invalidateQueries);
           }
           
           // Log function call for debugging
@@ -2993,7 +3153,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     setInputValue,
     isRecording,
     setIsRecording,
-    pageContext: pageContextRef.current,
+    pageContext: pageContextState,
     setPageContext,
     inputPlaceholder,
     setInputPlaceholder,
@@ -3033,7 +3193,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     cancelSend,
     inputValue,
     isRecording,
-
+    pageContextState,
     setPageContext,
     inputPlaceholder,
     setInputPlaceholder,

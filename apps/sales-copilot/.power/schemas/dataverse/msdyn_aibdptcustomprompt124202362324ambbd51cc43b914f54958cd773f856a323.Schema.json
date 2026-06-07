@@ -1,0 +1,43 @@
+{
+  "name": "msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323",
+  "title": "msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323",
+  "type": "Microsoft.PowerApps/dataverseOperation",
+  "properties": {
+    "displayName": "msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323",
+    "swagger": {
+      "swagger": "2.0",
+      "info": {
+        "title": "msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323",
+        "version": "1.0"
+      },
+      "basePath": "/api/data/v9.2",
+      "paths": {
+        "/msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323": {
+          "post": {
+            "operationId": "msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323",
+            "parameters": [
+              {
+                "name": "Text",
+                "in": "body",
+                "required": true,
+                "type": "string",
+                "x-ms-dataverse-type": "StringType",
+                "x-ms-csdl-type": "Edm.String"
+              }
+            ],
+            "responses": {
+              "200": {
+                "description": "Success",
+                "schema": {
+                  "type": "object",
+                  "x-ms-dataverse-type": "LookupType",
+                  "x-ms-csdl-type": "mscrm.msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323Response"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

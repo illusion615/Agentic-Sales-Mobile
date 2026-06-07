@@ -10,7 +10,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, RefreshCcw, Trash2, Activity as ActivityIcon } from 'lucide-react';
+import { X, RefreshCcw, Trash2, Activity as ActivityIcon, Copy, Check } from 'lucide-react';
 import {
   readPipelineLog,
   clearPipelineLog,
@@ -225,10 +225,51 @@ function EntryRow({ entry, benchmark, locale }: { entry: PipelineLogEntry; bench
           ) : (
             <Chip danger>—</Chip>
           )}
+          {/* Degradation visibility: surface any LLM retry that fired this turn. */}
+          {benchmark?.result.frameRetried && (
+            <Chip danger>⟳ Frame retry</Chip>
+          )}
+          {benchmark?.result.planRetried && (
+            <Chip danger>⟳ Plan retry</Chip>
+          )}
         </div>
       </button>
       {expanded && (
         <div className="border-t border-stone-100 bg-stone-50/60 px-3 py-2 text-xs">
+          {/* Degradation detail: explain why a retry fired, so it's traceable. */}
+          {(benchmark?.result.frameRetried || benchmark?.result.planRetried) && (
+            <div className="mb-2 rounded border border-rose-200 bg-rose-50 px-2 py-1.5 text-[11px] text-rose-700">
+              <div className="font-medium">{locale === 'zh-Hans' ? '⚠️ 本轮触发了重试（降级）' : '⚠️ Retry fired this turn (degradation)'}</div>
+              {benchmark?.result.frameRetried && (
+                <div>Frame: {benchmark.result.frameRetryReason ?? 'first attempt malformed'}</div>
+              )}
+              {benchmark?.result.planRetried && (
+                <div>Orchestrator: {benchmark.result.planRetryReason ?? 'first attempt malformed'}</div>
+              )}
+            </div>
+          )}
+          {/* Copy the exact prompts sent to the LLM, for offline testing. */}
+          {(benchmark?.result.framePrompt || benchmark?.result.planPrompt) && (
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <span className="text-[10px] uppercase tracking-wide text-stone-400">
+                {locale === 'zh-Hans' ? '复制 Prompt' : 'Copy Prompt'}
+              </span>
+              {benchmark?.result.framePrompt && (
+                <CopyPromptButton
+                  label={locale === 'zh-Hans' ? 'Frame' : 'Frame'}
+                  text={benchmark.result.framePrompt}
+                  locale={locale}
+                />
+              )}
+              {benchmark?.result.planPrompt && (
+                <CopyPromptButton
+                  label={locale === 'zh-Hans' ? 'Orchestrator' : 'Orchestrator'}
+                  text={benchmark.result.planPrompt}
+                  locale={locale}
+                />
+              )}
+            </div>
+          )}
           {ok && f ? (
             <>
               <div className="mb-1 text-stone-500">
@@ -254,9 +295,9 @@ function EntryRow({ entry, benchmark, locale }: { entry: PipelineLogEntry; bench
               <div className="mb-2 italic text-stone-700">{f.reasoning}</div>
               {f.explicitNames && f.explicitNames.length > 0 && (
                 <div className="mb-2">
-                  <span className="text-stone-500">{locale === 'zh-Hans' ? '点名实体：' : 'Explicit entities:'}</span>
+                  <span className="text-stone-600 font-medium">{locale === 'zh-Hans' ? '点名实体：' : 'Explicit entities:'}</span>
                   {f.explicitNames.map((n, i) => (
-                    <span key={i} className="ml-1 rounded bg-stone-200 px-1.5 py-0.5">
+                    <span key={i} className="ml-1 rounded bg-stone-700 px-1.5 py-0.5 text-stone-50">
                       {n.kind}:{n.text}
                     </span>
                   ))}
@@ -290,7 +331,7 @@ function EntryRow({ entry, benchmark, locale }: { entry: PipelineLogEntry; bench
               {benchmark.result.planRaw && (
                 <details>
                   <summary className="cursor-pointer text-stone-500">{locale === 'zh-Hans' ? 'Orchestrator raw' : 'Orchestrator raw'}</summary>
-                  <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-indigo-900/90 p-2 text-[10px] text-indigo-100">
+                  <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words rounded bg-indigo-900/90 p-2 text-[10px] text-indigo-100">
                     {benchmark.result.planRaw}
                   </pre>
                 </details>
@@ -300,6 +341,43 @@ function EntryRow({ entry, benchmark, locale }: { entry: PipelineLogEntry; bench
         </div>
       )}
     </li>
+  );
+}
+
+function CopyPromptButton({ label, text, locale }: { label: string; text: string; locale: Locale }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Clipboard API may be blocked in the embedded iframe — fall back to a temp textarea.
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); } catch { /* ignore */ }
+      document.body.removeChild(ta);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors ${
+        copied
+          ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+          : 'border-stone-300 bg-white text-stone-700 hover:bg-stone-100'
+      }`}
+      title={`${locale === 'zh-Hans' ? '复制' : 'Copy'} ${label} prompt (${text.length})`}
+    >
+      {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+      {copied ? (locale === 'zh-Hans' ? '已复制' : 'Copied') : label}
+    </button>
   );
 }
 

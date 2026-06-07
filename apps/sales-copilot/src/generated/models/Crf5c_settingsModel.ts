@@ -19,14 +19,14 @@ export interface Crf5c_settingsBase {
   crf5c_settingkey: string;
   crf5c_settingvalue: string;
   crf5c_updatedon?: string;
-  importsequencenumber?: string;
+  importsequencenumber?: number;
   overriddencreatedon?: string;
   ownerid: string;
   owneridtype: string;
   statecode: Crf5c_settingsstatecode;
   statuscode?: Crf5c_settingsstatuscode;
-  timezoneruleversionnumber?: string;
-  utcconversiontimezonecode?: string;
+  timezoneruleversionnumber?: number;
+  utcconversiontimezonecode?: number;
 }
 
 export interface Crf5c_settings extends Crf5c_settingsBase {
@@ -45,7 +45,7 @@ export interface Crf5c_settings extends Crf5c_settingsBase {
   owningbusinessunitname: string;
   statecodename?: string;
   statuscodename?: string;
-  versionnumber?: string;
+  versionnumber?: number;
   createdby?: object;
   _createdby_value?: string;
   createdonbehalfby?: object;

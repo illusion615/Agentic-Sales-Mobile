@@ -49,7 +49,7 @@ import { useCopilot } from '@/contexts/copilot-context';
 import { PullToRefresh } from '@/components/pull-to-refresh';
 
 const activityIcons: Record<string, typeof Phone> = {
-  visit: MapPin,
+  visit: Calendar,
   call: Phone,
   meeting: Calendar,
   email: Mail,
@@ -103,6 +103,18 @@ export default function ActivityDetailPage() {
   const { data: contacts = [] } = useContactList();
   const { data: accounts = [] } = useAccountList();
   const { data: allOpportunities = [] } = useOpportunityList();
+
+  // Saved file attachments (Dataverse Notes) bound to this activity.
+  const [savedAttachments, setSavedAttachments] = useState<import('@/lib/attachments').SavedAttachment[]>([]);
+  const [lightboxAttachment, setLightboxAttachment] = useState<string | null>(null);
+  useEffect(() => {
+    if (!id) { setSavedAttachments([]); return; }
+    let cancelled = false;
+    import('@/lib/attachments').then(({ fetchActivityAttachments }) =>
+      fetchActivityAttachments(id).then((atts) => { if (!cancelled) setSavedAttachments(atts); })
+    );
+    return () => { cancelled = true; };
+  }, [id]);
 
   // Prefetch related entity detail chunks (account, opportunity, contact)
   useEffect(() => {
@@ -217,8 +229,7 @@ export default function ActivityDetailPage() {
         account: activity.account ? { id: activity.account.id, name: activity.account.name1 } : undefined,
         opportunity: activity.opportunity ? { id: activity.opportunity.id, name: activity.opportunity.name1 } : undefined,
       } as Record<string, unknown>);
-      
-      toast.success('Activity marked as completed');
+      // Status badge updates inline via query invalidation; no toast.
     } catch (error: unknown) {
       toast.error('Failed to update activity');
     }
@@ -228,7 +239,7 @@ export default function ActivityDetailPage() {
     if (!activity) return;
     try {
       await deleteActivity.mutateAsync(activity.id);
-      toast.success('Activity deleted');
+      // Returning to the list (item now gone) is the feedback; no toast.
       navigate('/activities');
     } catch (error: unknown) {
       toast.error('Failed to delete activity');
@@ -422,12 +433,40 @@ export default function ActivityDetailPage() {
               )}
 
               {/* Divider */}
-              {activity.account && (activity.contact || activity.opportunity) && (
+              {activity.account && (activity.contact || (activity.contacts && activity.contacts.length > 0) || activity.opportunity) && (
                 <div className="border-t border-border/50 my-3" />
               )}
 
-              {/* Contact Section — the activity's direct contact */}
-              {activity.contact && (
+              {/* Attendees Section — multiple participants (visit/meeting) */}
+              {activity.contacts && activity.contacts.length > 0 ? (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    {locale === 'zh-Hans' ? `参会人 (${activity.contacts.length})` : `Attendees (${activity.contacts.length})`}
+                  </p>
+                  {activity.contacts.map((att) => (
+                    <div
+                      key={att.id}
+                      className="flex items-start gap-3 cursor-pointer hover:bg-muted/30 -m-2 p-2 rounded-lg transition-colors"
+                      onClick={() => navigate(`/contacts/${att.id}`)}
+                    >
+                      <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center flex-shrink-0">
+                        <User className="w-5 h-5 text-accent-foreground" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-semibold text-foreground truncate">
+                            {att.fullname}
+                          </p>
+                          <ArrowRight className="w-3.5 h-3.5 text-accent-foreground flex-shrink-0" />
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {att.email || (locale === 'zh-Hans' ? '联系人' : 'Contact')}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : activity.contact && (
                 <div
                   className="flex items-start gap-3 cursor-pointer hover:bg-muted/30 -m-2 p-2 rounded-lg transition-colors"
                   onClick={() => navigate(`/contacts/${activity.contact?.id}`)}
@@ -450,7 +489,7 @@ export default function ActivityDetailPage() {
               )}
 
               {/* Divider */}
-              {activity.contact && activity.opportunity && (
+              {(activity.contact || (activity.contacts && activity.contacts.length > 0)) && activity.opportunity && (
                 <div className="border-t border-border/50 my-3" />
               )}
 
@@ -522,11 +561,67 @@ export default function ActivityDetailPage() {
                   <FileText className="w-4 h-4 text-muted-foreground" />
                   <p className="text-xs text-muted-foreground">{locale === 'zh-Hans' ? '备注' : 'Notes'}</p>
                 </div>
-                <p className="text-sm text-foreground leading-relaxed pl-6">
-                  {activity.notes}
-                </p>
+                {/<html[\s>]/i.test(activity.notes) ? (
+                  <iframe
+                    srcDoc={activity.notes}
+                    sandbox="allow-same-origin"
+                    scrolling="no"
+                    className="w-full border-0 pl-6"
+                    style={{ minHeight: 120, overflow: 'hidden' }}
+                    onLoad={(e) => {
+                      const iframe = e.target as HTMLIFrameElement;
+                      try {
+                        const h = iframe.contentDocument?.documentElement?.scrollHeight;
+                        if (h) iframe.style.height = `${h}px`;
+                      } catch { /* cross-origin fallback */ }
+                    }}
+                  />
+                ) : (
+                  <p className="text-sm text-foreground leading-relaxed pl-6">
+                    {activity.notes}
+                  </p>
+                )}
               </div>
             )}
+          </GlassCard>
+        )}
+
+        {/* Attachments Card - saved file Notes bound to this activity */}
+        {savedAttachments.length > 0 && (
+          <GlassCard className="space-y-3">
+            <h2 className="text-sm font-semibold text-foreground uppercase tracking-wide">
+              {locale === 'zh-Hans' ? `附件 (${savedAttachments.length})` : `Attachments (${savedAttachments.length})`}
+            </h2>
+            <div className="flex gap-2 flex-wrap">
+              {savedAttachments.map((att) => (
+                <button
+                  key={att.id}
+                  type="button"
+                  onClick={() => {
+                    if (att.type === 'image') {
+                      setLightboxAttachment(att.dataUrl);
+                    } else {
+                      const w = window.open();
+                      if (w) w.document.write(`<iframe src="${att.dataUrl}" style="border:0;width:100vw;height:100vh"></iframe>`);
+                    }
+                  }}
+                  className="relative w-20 h-20 rounded-lg overflow-hidden border border-border/50 bg-muted/40 focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  title={att.name}
+                  aria-label={att.name}
+                >
+                  {att.type === 'image' ? (
+                    <img src={att.dataUrl} alt={att.name} className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center px-1">
+                      <FileText className="w-5 h-5 text-muted-foreground" />
+                      <span className="text-[8px] text-muted-foreground mt-1 truncate max-w-full">
+                        {att.name.length > 10 ? att.name.slice(0, 10) + '…' : att.name}
+                      </span>
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
           </GlassCard>
         )}
 
@@ -564,6 +659,23 @@ export default function ActivityDetailPage() {
           },
         ]}
       />
+
+      {/* Attachment lightbox */}
+      {lightboxAttachment && (
+        <div
+          className="fixed inset-0 z-[200] bg-black/85 flex items-center justify-center p-4"
+          onClick={() => setLightboxAttachment(null)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <img
+            src={lightboxAttachment}
+            alt=""
+            className="max-w-full max-h-full object-contain rounded-lg"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </MobileLayout>
   );
 }

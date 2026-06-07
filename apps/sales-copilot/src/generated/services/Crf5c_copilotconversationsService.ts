@@ -27,7 +27,7 @@ export class Crf5c_copilotconversationsService {
   public static async update(id: string, changedFields: Partial<Omit<Crf5c_copilotconversationsBase, 'crf5c_copilotconversationid'>>): Promise<IOperationResult<Crf5c_copilotconversations>> {
     const result = await Crf5c_copilotconversationsService.client.updateRecordAsync<Partial<Omit<Crf5c_copilotconversationsBase, 'crf5c_copilotconversationid'>>, Crf5c_copilotconversations>(
       Crf5c_copilotconversationsService.dataSourceName,
-      id.toString(),
+      id,
       changedFields
     );
     return result;
@@ -36,13 +36,13 @@ export class Crf5c_copilotconversationsService {
   public static async delete(id: string): Promise<void> {
     await Crf5c_copilotconversationsService.client.deleteRecordAsync(
       Crf5c_copilotconversationsService.dataSourceName,
-      id.toString());
+      id);
   }
 
   public static async get(id: string, options?: IGetOptions): Promise<IOperationResult<Crf5c_copilotconversations>> {
     const result = await Crf5c_copilotconversationsService.client.retrieveRecordAsync<Crf5c_copilotconversations>(
       Crf5c_copilotconversationsService.dataSourceName,
-      id.toString(),
+      id,
       options
     );
     return result;

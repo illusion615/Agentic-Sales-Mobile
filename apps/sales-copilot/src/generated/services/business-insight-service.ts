@@ -32,7 +32,7 @@ function fromDv(dv: Crf5c_businessinsights): BusinessInsight {
     id: dv.crf5c_businessinsightid,
     title: dv.crf5c_title,
     detailsjson: dv.crf5c_detailsjson,
-    displayorder: dvNum(dv.crf5c_displayorder) ?? 0,
+    displayorder: dv.crf5c_displayorder ?? 0,
     generatedon: dv.crf5c_generatedon,
     isactive: Boolean(dv.crf5c_isactive),
     ownerid: (dv as unknown as Record<string, unknown>)._ownerid_value as string ?? '',

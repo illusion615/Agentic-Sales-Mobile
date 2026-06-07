@@ -79,7 +79,7 @@ export default function BriefMePage() {
   
   // Get today's briefing
   const briefing = useMemo(() => {
-    const userId = user?.objectId;
+    const userId = user?.objectId?.toLowerCase();
     const isAdmin = getAdminMode();
     if (!isAdmin && !userId) return undefined;
     

@@ -876,7 +876,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
           </div>
 
           <motion.p variants={itemVariants} className="text-center text-helper text-muted-foreground pt-4">
-            Sales Copilot Mobile v1.0.0
+            Sales Copilot Mobile · build {__BUILD_TIMESTAMP__}
           </motion.p>
         </motion.div>
       </main>

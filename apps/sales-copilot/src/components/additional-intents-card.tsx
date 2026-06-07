@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Lightbulb, ChevronRight, Check, X, MapPin, Phone, Calendar, Mail, CheckSquare, Building2, Users, TrendingUp } from 'lucide-react';
+import { Lightbulb, ChevronRight, Check, X, MapPin, Phone, Calendar, Mail, CheckSquare, Building2, Users, TrendingUp, CalendarClock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { getLocale, type Locale } from '@/lib/i18n';
@@ -9,7 +9,6 @@ import { useCreateActivity } from '@/generated/hooks/use-activity';
 import { useCreateOpportunity } from '@/generated/hooks/use-opportunity';
 import { useCreateAccount } from '@/generated/hooks/use-account';
 import { useCreateContact } from '@/generated/hooks/use-contact';
-import { toast } from 'sonner';
 
 export interface AdditionalIntentForm {
   type: 'activity' | 'opportunity' | 'account' | 'contact';
@@ -29,7 +28,7 @@ interface AdditionalIntentsCardProps {
 }
 
 const ActivityTypeIcons: Record<string, React.ComponentType<{ className?: string }>> = {
-  visit: MapPin,
+  visit: Calendar,
   call: Phone,
   meeting: Calendar,
   email: Mail,
@@ -70,6 +69,26 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
     return {};
   });
   const [isSubmitting, setIsSubmitting] = useState<number | null>(null);
+  // Per-card scheduled-date override (ISO yyyy-mm-dd) and which card's scheduler is open.
+  const [dateOverrides, setDateOverrides] = useState<Record<number, string>>({});
+  const [scheduleOpen, setScheduleOpen] = useState<number | null>(null);
+
+  // Resolve the effective scheduled date for a card: user override → form data.
+  const effectiveDate = (form: AdditionalIntentForm, index: number): string | undefined => {
+    return dateOverrides[index] ?? (form.data.scheduledDate as string | undefined);
+  };
+
+  const toISODate = (d: Date): string => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const setCardDate = (index: number, iso: string) => {
+    setDateOverrides((prev) => ({ ...prev, [index]: iso }));
+    setScheduleOpen(null);
+  };
 
   // Persist status changes
   const updateStatus = (index: number, status: 'confirmed' | 'skipped') => {
@@ -82,28 +101,30 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
   
   const handleConfirm = async (form: AdditionalIntentForm, index: number) => {
     setIsSubmitting(index);
-    
+
+    // Apply the user's scheduled-date choice (if any) before creating.
+    const chosenDate = dateOverrides[index];
+    const formData = chosenDate ? { ...form.data, scheduledDate: chosenDate } : form.data;
+
     try {
       // Execute the appropriate create mutation based on type
       switch (form.type) {
         case 'activity':
-          await createActivityMutation.mutateAsync(form.data as Parameters<typeof createActivityMutation.mutateAsync>[0]);
+          await createActivityMutation.mutateAsync(formData as Parameters<typeof createActivityMutation.mutateAsync>[0]);
           break;
         case 'opportunity':
-          await createOpportunityMutation.mutateAsync(form.data as Parameters<typeof createOpportunityMutation.mutateAsync>[0]);
+          await createOpportunityMutation.mutateAsync(formData as Parameters<typeof createOpportunityMutation.mutateAsync>[0]);
           break;
         case 'account':
-          await createAccountMutation.mutateAsync(form.data as Parameters<typeof createAccountMutation.mutateAsync>[0]);
+          await createAccountMutation.mutateAsync(formData as Parameters<typeof createAccountMutation.mutateAsync>[0]);
           break;
         case 'contact':
-          await createContactMutation.mutateAsync(form.data as Parameters<typeof createContactMutation.mutateAsync>[0]);
+          await createContactMutation.mutateAsync(formData as Parameters<typeof createContactMutation.mutateAsync>[0]);
           break;
       }
       
       updateStatus(index, 'confirmed');
-      toast.success(locale === 'zh-Hans' 
-        ? `${EntityTypeLabels[form.type].zh}已创建` 
-        : `${EntityTypeLabels[form.type].en} created`);
+      // Inline status update reflects the save in-conversation; no toast.
     } catch (error: unknown) {
       // Toast is shown by the global MutationCache.onError handler.
       console.error('Failed to create entity from additional intent:', error);
@@ -138,7 +159,7 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
     }
   };
   
-  const getFormSubtitle = (form: AdditionalIntentForm): string | null => {
+  const getFormSubtitle = (form: AdditionalIntentForm, index: number): string | null => {
     const data = form.data;
     switch (form.type) {
       case 'activity': {
@@ -148,7 +169,7 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
           : actType === 'meeting' ? (locale === 'zh-Hans' ? '会议' : 'Meeting')
           : actType === 'email' ? (locale === 'zh-Hans' ? '邮件' : 'Email')
           : (locale === 'zh-Hans' ? '其他' : 'Other');
-        const scheduledDate = data.scheduledDate as string;
+        const scheduledDate = effectiveDate(form, index);
         if (scheduledDate) {
           return `${typeLabel} · ${new Date(scheduledDate).toLocaleDateString(locale === 'zh-Hans' ? 'zh-CN' : 'en-US')}`;
         }
@@ -200,7 +221,7 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
             const status = formStatuses[idx];
             const Icon = form.type === 'activity' ? getActivityIcon(form.data) : EntityTypeIcons[form.type];
             const title = getFormTitle(form);
-            const subtitle = getFormSubtitle(form);
+            const subtitle = getFormSubtitle(form, idx);
             const isLoading = isSubmitting === idx;
             
             return (
@@ -282,33 +303,96 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
                   
                 {/* Actions - below card content, full width */}
                 {!status && (
-                  <div className="flex items-center gap-2 mt-2.5 pt-2 border-t border-border/30">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleSkip(idx)}
-                      disabled={isLoading}
-                      className="flex-1 h-8 text-muted-foreground"
-                    >
-                      <X className="w-3.5 h-3.5 mr-1" />
-                      {locale === 'zh-Hans' ? '跳过' : 'Skip'}
-                    </Button>
-                    <Button
-                      size="sm"
-                      onClick={() => handleConfirm(form, idx)}
-                      disabled={isLoading}
-                      className="flex-1 h-8"
-                    >
-                      {isLoading ? (
-                        <span className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
-                      ) : (
-                        <>
-                          <Check className="w-3.5 h-3.5 mr-1" />
-                          {locale === 'zh-Hans' ? '确认创建' : 'Confirm'}
-                        </>
-                      )}
-                    </Button>
-                  </div>
+                  <>
+                    {/* Schedule picker (activity only) — lets the user pick a real day
+                        instead of accepting the suggested "today". */}
+                    {form.type === 'activity' && (
+                      <div className="mt-2.5 pt-2 border-t border-border/30">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setScheduleOpen(scheduleOpen === idx ? null : idx)}
+                          disabled={isLoading}
+                          className="h-8 w-full justify-start text-xs text-muted-foreground hover:text-foreground"
+                        >
+                          <CalendarClock className="w-3.5 h-3.5 mr-1.5" />
+                          {locale === 'zh-Hans' ? '安排时间' : 'Schedule'}
+                          <span className="ml-auto text-foreground">
+                            {effectiveDate(form, idx)
+                              ? new Date(effectiveDate(form, idx) as string).toLocaleDateString(locale === 'zh-Hans' ? 'zh-CN' : 'en-US')
+                              : ''}
+                          </span>
+                        </Button>
+                        {scheduleOpen === idx && (
+                          <div className="flex flex-wrap gap-1.5 mt-2">
+                            {[
+                              { key: 'today', label: locale === 'zh-Hans' ? '今天' : 'Today', offset: 0 },
+                              { key: 'tomorrow', label: locale === 'zh-Hans' ? '明天' : 'Tomorrow', offset: 1 },
+                              { key: 'dayafter', label: locale === 'zh-Hans' ? '后天' : 'Day after', offset: 2 },
+                            ].map((opt) => {
+                              const d = new Date();
+                              d.setDate(d.getDate() + opt.offset);
+                              const iso = toISODate(d);
+                              const active = effectiveDate(form, idx) === iso;
+                              return (
+                                <button
+                                  key={opt.key}
+                                  type="button"
+                                  onClick={() => setCardDate(idx, iso)}
+                                  className={cn(
+                                    'px-2.5 py-1 rounded-full text-xs border transition-colors',
+                                    active
+                                      ? 'bg-primary text-primary-foreground border-primary'
+                                      : 'bg-card text-muted-foreground border-border hover:border-primary/50'
+                                  )}
+                                >
+                                  {opt.label}
+                                </button>
+                              );
+                            })}
+                            <label className="px-2.5 py-1 rounded-full text-xs border border-border bg-card text-muted-foreground hover:border-primary/50 cursor-pointer inline-flex items-center">
+                              {locale === 'zh-Hans' ? '自定义' : 'Custom'}
+                              <input
+                                type="date"
+                                className="sr-only"
+                                onChange={(e) => { if (e.target.value) setCardDate(idx, e.target.value); }}
+                              />
+                            </label>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <div className={cn(
+                      'flex items-center gap-2 mt-2.5',
+                      form.type !== 'activity' && 'pt-2 border-t border-border/30'
+                    )}>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleSkip(idx)}
+                        disabled={isLoading}
+                        className="flex-1 h-8 text-muted-foreground"
+                      >
+                        <X className="w-3.5 h-3.5 mr-1" />
+                        {locale === 'zh-Hans' ? '跳过' : 'Skip'}
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={() => handleConfirm(form, idx)}
+                        disabled={isLoading}
+                        className="flex-1 h-8"
+                      >
+                        {isLoading ? (
+                          <span className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          <>
+                            <Check className="w-3.5 h-3.5 mr-1" />
+                            {locale === 'zh-Hans' ? '确认创建' : 'Confirm'}
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </>
                 )}
               </motion.div>
             );

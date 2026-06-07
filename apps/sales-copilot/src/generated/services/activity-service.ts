@@ -12,6 +12,12 @@ import type { ActivityEntityBase } from '../models/ActivityEntityModel';
 import type { IGetAllOptions } from '../models/CommonModels';
 import type { Activity, ActivityType } from '../models/activity-model';
 import { requireId } from './_adapter-utils';
+import { fetchActivityParticipants } from '@/lib/activity-party';
+
+/** Participation only applies to appointment-backed activities. */
+function supportsParticipants(type: ActivityType): boolean {
+  return type === 'visit' || type === 'meeting';
+}
 
 // Map native table → activity type
 const TABLE_TYPE_MAP: Record<string, ActivityType> = {
@@ -75,6 +81,10 @@ function toDv(r: Partial<Omit<Activity, 'id'>>, type: ActivityType): Record<stri
   const dv: Record<string, unknown> = {};
   if (r.title !== undefined) dv.subject = r.title;
   if (r.notes !== undefined) dv.description = r.notes;
+  if (r.status !== undefined) {
+    // Native activity statecode: 0=open, 1=completed, 2=canceled.
+    dv.statecode = r.status === 'completed' ? 1 : r.status === 'canceled' ? 2 : 0;
+  }
   if (r.scheduleddate !== undefined) {
     dv.scheduledstart = r.scheduleddate;
     // Set end = start + 1 hour for appointment
@@ -82,6 +92,18 @@ function toDv(r: Partial<Omit<Activity, 'id'>>, type: ActivityType): Record<stri
       const start = new Date(r.scheduleddate);
       dv.scheduledend = new Date(start.getTime() + 3600000).toISOString();
     }
+  }
+
+  // Attendees: ActivityParty rows CANNOT be created directly (restricted table).
+  // They must be deep-inserted via the appointment's party collection nav property.
+  // participationtypemask: 5=Required, 6=Optional, 7=Organizer.
+  if ((type === 'visit' || type === 'meeting') && r.contacts && r.contacts.length > 0) {
+    const maskFor = (role?: string): number =>
+      role === 'optional' ? 6 : role === 'organizer' ? 7 : 5;
+    dv.appointment_activity_parties = r.contacts.map((c) => ({
+      'partyid_contact@odata.bind': `/contacts(${c.id})`,
+      participationtypemask: maskFor(c.role),
+    }));
   }
 
   // regardingobjectid: prefer opportunity, fallback to account
@@ -102,17 +124,57 @@ export class ActivityService {
     const dvPayload = toDv(record, type);
     const result = await svc.create(dvPayload);
     if (!result.success) throw result.error ?? new Error('Activity create failed');
-    return fromDv(result.data as ActivityEntityBase, type);
+    const created = fromDv(result.data as ActivityEntityBase, type);
+    // Attendees were deep-inserted via the appointment payload (appointment_activity_parties).
+    if (supportsParticipants(type) && record.contacts && record.contacts.length > 0) {
+      created.contacts = record.contacts;
+    }
+    return created;
   }
 
-  /** Update an existing activity. Caller must know the type. */
-  static async update(id: string, changedFields: Partial<Omit<Activity, 'id'>>, type: ActivityType = 'visit'): Promise<Activity> {
+  /**
+   * Update an existing activity.
+   *
+   * If type is omitted, try appointment/phonecall/email in order so callers
+   * like useUpdateActivity (which only has id + changedFields) still work.
+   */
+  static async update(id: string, changedFields: Partial<Omit<Activity, 'id'>>, type?: ActivityType): Promise<Activity> {
     requireId(id, 'update', 'Activity');
-    const { svc } = getService(type);
-    const dvPayload = toDv(changedFields, type);
-    const result = await svc.update(id, dvPayload);
-    if (!result.success) throw result.error ?? new Error('Activity update failed');
-    return fromDv(result.data as ActivityEntityBase, type);
+
+    const tryOne = async (svc: ServiceClass, t: ActivityType): Promise<Activity | null> => {
+      try {
+        const dvPayload = toDv(changedFields, t);
+        const result = await svc.update(id, dvPayload);
+        if (!result.success || !result.data) return null;
+        return fromDv(result.data as ActivityEntityBase, t);
+      } catch {
+        return null;
+      }
+    };
+
+    if (type) {
+      const { svc } = getService(type);
+      const updated = await tryOne(svc, type);
+      if (updated) {
+        if (changedFields.contacts) updated.contacts = changedFields.contacts;
+        return updated;
+      }
+      throw new Error('Activity update failed');
+    }
+
+    const candidates: Array<[ServiceClass, ActivityType]> = [
+      [AppointmentEntityService, 'visit'],
+      [PhonecallEntityService, 'call'],
+      [EmailEntityService, 'email'],
+    ];
+    for (const [svc, t] of candidates) {
+      const updated = await tryOne(svc, t);
+      if (updated) {
+        if (changedFields.contacts) updated.contacts = changedFields.contacts;
+        return updated;
+      }
+    }
+    throw new Error('Activity update failed');
   }
 
   /** Delete an activity. Tries appointment first, then phonecall, then email. */
@@ -139,7 +201,18 @@ export class ActivityService {
     for (const [svc, type] of tables) {
       try {
         const result = await svc.get(id);
-        if (result.success && result.data) return fromDv(result.data as ActivityEntityBase, type);
+        if (result.success && result.data) {
+          const activity = fromDv(result.data as ActivityEntityBase, type);
+          // Populate attendees for appointment-backed activities.
+          if (supportsParticipants(type)) {
+            const parties = await fetchActivityParticipants(id);
+            if (parties.length > 0) {
+              activity.contacts = parties.map((p) => ({ id: p.id, fullname: p.name, email: p.email, role: p.role }));
+              // Appointment participants are attendees only — do NOT also set single contact.
+            }
+          }
+          return activity;
+        }
       } catch { /* not in this table */ }
     }
     throw new Error(`Activity ${id} not found`);

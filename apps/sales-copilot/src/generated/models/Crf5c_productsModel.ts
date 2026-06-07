@@ -20,17 +20,17 @@ export interface Crf5c_productsBase {
   crf5c_productid: string;
   crf5c_productname: string;
   crf5c_producturl: string;
-  crf5c_sortorder: string;
+  crf5c_sortorder: number;
   crf5c_specification: string;
   crf5c_summary: string;
-  importsequencenumber?: string;
+  importsequencenumber?: number;
   overriddencreatedon?: string;
   ownerid: string;
   owneridtype: string;
   statecode: Crf5c_productsstatecode;
   statuscode?: Crf5c_productsstatuscode;
-  timezoneruleversionnumber?: string;
-  utcconversiontimezonecode?: string;
+  timezoneruleversionnumber?: number;
+  utcconversiontimezonecode?: number;
 }
 
 export interface Crf5c_products extends Crf5c_productsBase {
@@ -49,7 +49,7 @@ export interface Crf5c_products extends Crf5c_productsBase {
   owningbusinessunitname: string;
   statecodename?: string;
   statuscodename?: string;
-  versionnumber?: string;
+  versionnumber?: number;
   createdby?: object;
   _createdby_value?: string;
   createdonbehalfby?: object;

@@ -92,7 +92,7 @@ function getTrendIcon(trendKey?: string) {
 
 function getActivityTypeIcon(type: string | null | undefined): React.ComponentType<{ className?: string }> {
   switch (type) {
-    case 'visit': return MapPin; // visit
+    case 'visit': return Calendar; // visit
     case 'call': return Phone; // call
     case 'meeting': return Calendar; // meeting
     case 'email': return Mail; // email
@@ -209,7 +209,7 @@ export default function OpportunityDetailPage() {
     setIsDeleting(true);
     try {
       await deleteOpportunity.mutateAsync(id);
-      toast.success(locale === 'zh-Hans' ? '商机已删除' : 'Opportunity deleted');
+      // Returning to the list (item now gone) is the feedback; no toast.
       navigate('/opportunities');
     } catch (error: unknown) {
       // Toast is shown by the global MutationCache.onError handler.

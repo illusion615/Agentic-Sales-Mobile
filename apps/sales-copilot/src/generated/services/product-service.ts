@@ -24,7 +24,7 @@ function fromDv(dv: Crf5c_products): Product {
     featureHighlight: dv.crf5c_featurehighlight,
     imageURL: dv.crf5c_imageurl,
     productURL: dv.crf5c_producturl,
-    sortOrder: dvNum(dv.crf5c_sortorder) ?? 0,
+    sortOrder: dv.crf5c_sortorder ?? 0,
     specification: dv.crf5c_specification,
     summary: dv.crf5c_summary,
   };

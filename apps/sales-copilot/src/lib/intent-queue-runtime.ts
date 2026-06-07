@@ -32,6 +32,7 @@ import {
   type QueueIntent,
 } from './intent-queue';
 import { type ResolutionItem, getMatchThresholds } from './agent-utils';
+import { ATTACHMENT_IDS_KEY } from './attachment-assign';
 
 // ---------- card-message shapes (shared with copilot-context) ----------
 // Kept loose (Record<string, unknown>) here to avoid an import cycle; the
@@ -732,6 +733,7 @@ async function renderFormCard(
     }
     const draftData = res.data as { type: 'activity' | 'opportunity' | 'account' | 'contact'; isNew?: boolean; data: Record<string, unknown> };
     const messageId = `card-${queue.id}-${intent.id}-form-${Date.now()}`;
+    const attachmentIds = effectiveArgs[ATTACHMENT_IDS_KEY] as string[] | undefined;
     deps.pushMessage({
       id: messageId,
       type: 'form-card',
@@ -744,6 +746,7 @@ async function renderFormCard(
         isNew: draftData.isNew ?? true,
         data: draftData.data,
         status: 'pending',
+        ...(attachmentIds?.length ? { attachmentIds } : {}),
       },
     });
     return patchIntent(queue, intent.id, { status: 'executing', messageId });

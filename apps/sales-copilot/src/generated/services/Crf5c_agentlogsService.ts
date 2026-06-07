@@ -27,7 +27,7 @@ export class Crf5c_agentlogsService {
   public static async update(id: string, changedFields: Partial<Omit<Crf5c_agentlogsBase, 'crf5c_agentlogid'>>): Promise<IOperationResult<Crf5c_agentlogs>> {
     const result = await Crf5c_agentlogsService.client.updateRecordAsync<Partial<Omit<Crf5c_agentlogsBase, 'crf5c_agentlogid'>>, Crf5c_agentlogs>(
       Crf5c_agentlogsService.dataSourceName,
-      id.toString(),
+      id,
       changedFields
     );
     return result;
@@ -36,13 +36,13 @@ export class Crf5c_agentlogsService {
   public static async delete(id: string): Promise<void> {
     await Crf5c_agentlogsService.client.deleteRecordAsync(
       Crf5c_agentlogsService.dataSourceName,
-      id.toString());
+      id);
   }
 
   public static async get(id: string, options?: IGetOptions): Promise<IOperationResult<Crf5c_agentlogs>> {
     const result = await Crf5c_agentlogsService.client.retrieveRecordAsync<Crf5c_agentlogs>(
       Crf5c_agentlogsService.dataSourceName,
-      id.toString(),
+      id,
       options
     );
     return result;

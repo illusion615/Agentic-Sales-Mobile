@@ -27,7 +27,7 @@ export class Crf5c_settingsService {
   public static async update(id: string, changedFields: Partial<Omit<Crf5c_settingsBase, 'crf5c_settingid'>>): Promise<IOperationResult<Crf5c_settings>> {
     const result = await Crf5c_settingsService.client.updateRecordAsync<Partial<Omit<Crf5c_settingsBase, 'crf5c_settingid'>>, Crf5c_settings>(
       Crf5c_settingsService.dataSourceName,
-      id.toString(),
+      id,
       changedFields
     );
     return result;
@@ -36,13 +36,13 @@ export class Crf5c_settingsService {
   public static async delete(id: string): Promise<void> {
     await Crf5c_settingsService.client.deleteRecordAsync(
       Crf5c_settingsService.dataSourceName,
-      id.toString());
+      id);
   }
 
   public static async get(id: string, options?: IGetOptions): Promise<IOperationResult<Crf5c_settings>> {
     const result = await Crf5c_settingsService.client.retrieveRecordAsync<Crf5c_settings>(
       Crf5c_settingsService.dataSourceName,
-      id.toString(),
+      id,
       options
     );
     return result;

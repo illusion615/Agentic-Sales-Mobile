@@ -36,14 +36,14 @@ export interface Crf5c_aisummariesBase {
   crf5c_generatedon?: string;
   crf5c_status: Crf5c_aisummariescrf5c_status;
   crf5c_summary: string;
-  importsequencenumber?: string;
+  importsequencenumber?: number;
   overriddencreatedon?: string;
   ownerid: string;
   owneridtype: string;
   statecode: Crf5c_aisummariesstatecode;
   statuscode?: Crf5c_aisummariesstatuscode;
-  timezoneruleversionnumber?: string;
-  utcconversiontimezonecode?: string;
+  timezoneruleversionnumber?: number;
+  utcconversiontimezonecode?: number;
 }
 
 export interface Crf5c_aisummaries extends Crf5c_aisummariesBase {
@@ -64,7 +64,7 @@ export interface Crf5c_aisummaries extends Crf5c_aisummariesBase {
   owningbusinessunitname: string;
   statecodename?: string;
   statuscodename?: string;
-  versionnumber?: string;
+  versionnumber?: number;
   createdby?: object;
   _createdby_value?: string;
   createdonbehalfby?: object;

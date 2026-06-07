@@ -85,7 +85,7 @@ function DateTimeClock({ locale }: { locale: Locale }) {
 
   return (
     <div>
-      <p className="text-sm text-muted-foreground leading-none">{formatDate(currentTime)}</p>
+      <p className="text-xs text-muted-foreground leading-none">{formatDate(currentTime)}</p>
       <p className="text-2xl font-bold text-foreground leading-tight mt-0.5 tabular-nums">{formatTime(currentTime)}</p>
     </div>
   );
@@ -163,7 +163,7 @@ function HomeHeaderWidgetDisplay({
     case 'date-time':
       return (
         <div>
-          <p className="text-sm text-muted-foreground leading-none">{formatDate(currentTime)}</p>
+          <p className="text-xs text-muted-foreground leading-none">{formatDate(currentTime)}</p>
           <p className="text-2xl font-bold text-foreground leading-tight mt-0.5 tabular-nums">{formatTime(currentTime)}</p>
         </div>
       );
@@ -435,7 +435,7 @@ export default function HomeDashboard() {
   // Activity-related filtering removed: the unified Insights sheet now shows
   // all business insights regardless of reference type.
 
-  const userId = user?.objectId;
+  const userId = user?.objectId?.toLowerCase();
   const isAdmin = getAdminMode();
 
   // Get source data for drawer
@@ -964,7 +964,7 @@ export default function HomeDashboard() {
         id: activityId,
         changedFields: { status: 'completed' as const }
       });
-      toast.success(locale === 'zh-Hans' ? '已标记完成' : 'Marked as done');
+      // The item leaves the overdue list on refetch; no toast.
       refetchActivities();
     } catch (error) {
       // Toast is shown by the global MutationCache.onError handler.
@@ -978,7 +978,7 @@ export default function HomeDashboard() {
         id: activityId,
         changedFields: { scheduleddate: newDate.toISOString() }
       });
-      toast.success(locale === 'zh-Hans' ? '已重新安排' : 'Rescheduled');
+      // The item moves out of the overdue list on refetch; no toast.
       refetchActivities();
     } catch (error) {
       // Toast is shown by the global MutationCache.onError handler.

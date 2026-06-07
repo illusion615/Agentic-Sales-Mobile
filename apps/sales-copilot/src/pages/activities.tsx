@@ -29,10 +29,24 @@ import { useCopilot } from '@/contexts/copilot-context';
 import { getLocale } from '@/lib/i18n';
 import { getWeekStartDay } from '@/lib/i18n';
 import { PullToRefresh } from '@/components/pull-to-refresh';
-import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addDays, addWeeks, addMonths, subDays, subWeeks, subMonths, isSameDay, isSameMonth, eachDayOfInterval, getDay } from 'date-fns';
+import { format } from 'date-fns/format';
+import { startOfWeek } from 'date-fns/startOfWeek';
+import { endOfWeek } from 'date-fns/endOfWeek';
+import { startOfMonth } from 'date-fns/startOfMonth';
+import { endOfMonth } from 'date-fns/endOfMonth';
+import { addDays } from 'date-fns/addDays';
+import { addWeeks } from 'date-fns/addWeeks';
+import { addMonths } from 'date-fns/addMonths';
+import { subDays } from 'date-fns/subDays';
+import { subWeeks } from 'date-fns/subWeeks';
+import { subMonths } from 'date-fns/subMonths';
+import { isSameDay } from 'date-fns/isSameDay';
+import { isSameMonth } from 'date-fns/isSameMonth';
+import { eachDayOfInterval } from 'date-fns/eachDayOfInterval';
+import { getDay } from 'date-fns/getDay';
 
 const activityIcons: Record<string, typeof Phone> = {
-  visit: MapPin,
+  visit: Calendar,
   call: Phone,
   meeting: Calendar,
   email: Mail,
@@ -171,9 +185,7 @@ export default function ActivitiesPage() {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const queryClient = useQueryClient();
-  const { data: activities = [], isLoading } = useActivityList({
-    orderBy: ['scheduleddate desc'],
-  });
+  const { data: activities = [], isLoading } = useActivityList();
 
   const handleRefresh = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: ['activity-list'] });
@@ -393,7 +405,7 @@ export default function ActivitiesPage() {
           {/* Swipeable Calendar */}
           <div
             ref={containerRef}
-            className="touch-pan-x select-none"
+            className="touch-pan-y select-none"
             onPointerDown={handleDragStart}
             onPointerUp={handleDragEnd}
           >

@@ -10,7 +10,7 @@ function fromDv(dv: Crf5c_briefings): Briefing {
     ownerid: (dv as unknown as Record<string, unknown>)._ownerid_value as string ?? '',
     audiourl: dv.crf5c_audiourl,
     generatedon: dv.crf5c_generatedon,
-    lastposition: dvNum(dv.crf5c_lastposition),
+    lastposition: dv.crf5c_lastposition,
     payloadjson: dv.crf5c_payloadjson,
   };
 }

@@ -22,14 +22,14 @@ export interface Crf5c_agentlogsBase {
   crf5c_sessionid?: string;
   crf5c_sourcedescription?: string;
   crf5c_timestamp: string;
-  importsequencenumber?: string;
+  importsequencenumber?: number;
   overriddencreatedon?: string;
   ownerid: string;
   owneridtype: string;
   statecode: Crf5c_agentlogsstatecode;
   statuscode?: Crf5c_agentlogsstatuscode;
-  timezoneruleversionnumber?: string;
-  utcconversiontimezonecode?: string;
+  timezoneruleversionnumber?: number;
+  utcconversiontimezonecode?: number;
 }
 
 export interface Crf5c_agentlogs extends Crf5c_agentlogsBase {
@@ -48,7 +48,7 @@ export interface Crf5c_agentlogs extends Crf5c_agentlogsBase {
   owningbusinessunitname: string;
   statecodename?: string;
   statuscodename?: string;
-  versionnumber?: string;
+  versionnumber?: number;
   createdby?: object;
   _createdby_value?: string;
   createdonbehalfby?: object;

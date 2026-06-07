@@ -13,6 +13,7 @@ import type { Contact } from '@/generated/models/contact-model';
 import { touchAccountLastContacted } from '../account-touch';
 import { registerHandlers, type FunctionHandler } from './handler-registry';
 import { sanitizeForOData, diagRetrieve } from './_shared';
+import { fetchActivityParticipants } from '../activity-party';
 
 const updateAccount: FunctionHandler = async (args) => {
   const accountId = args.accountId as string;
@@ -62,6 +63,18 @@ const updateOpportunity: FunctionHandler = async (args) => {
   if (args.confidence !== undefined) oppChanges.confidence = args.confidence as number;
   if (args.expectedCloseDate) oppChanges.expectedclosedate = args.expectedCloseDate as string;
   if (args.lastAction) oppChanges.lastaction = args.lastAction as string;
+  // Re-parent the opportunity to a different account ("change the opportunity's
+  // account to X"). The service toDv() maps account.id → biz_Account@odata.bind.
+  if (args.accountId || args.accountName) {
+    const accounts = await AccountService.getAll();
+    let targetAccount: Account | undefined;
+    if (args.accountId) targetAccount = accounts.find((a: Account) => a.id === args.accountId);
+    else if (args.accountName) {
+      const n = (args.accountName as string).toLowerCase();
+      targetAccount = accounts.find((a: Account) => a.name1?.toLowerCase().includes(n));
+    }
+    if (targetAccount) oppChanges.account = { id: targetAccount.id, name1: targetAccount.name1 };
+  }
   if (oppChanges.stage === 'won' || oppChanges.stage === 'lost') {
     oppChanges.closedon = (args.closedon as string) || new Date().toISOString();
   }
@@ -127,6 +140,62 @@ const updateActivity: FunctionHandler = async (args) => {
     if (targetAccount) actChanges.account = { id: targetAccount.id, name1: targetAccount.name1 };
   }
 
+  // ===== Attendee changes (meeting/visit participants) =====
+  const addNames = (args.addAttendeeNames as string[] | undefined) ?? [];
+  // Also treat a bare contactName as an attendee to add (LLM may use it for "add X").
+  if (args.contactName && typeof args.contactName === 'string') addNames.push(args.contactName as string);
+  const removeNames = (args.removeAttendeeNames as string[] | undefined) ?? [];
+
+  if (addNames.length > 0 || removeNames.length > 0) {
+    const allContacts = await ContactService.getAll();
+    const matchName = (name: string): Contact | undefined => {
+      const n = name.toLowerCase().trim();
+      return allContacts.find((c: Contact) => c.fullname?.toLowerCase() === n)
+        ?? allContacts.find((c: Contact) => {
+          const f = (c.fullname || '').toLowerCase();
+          return f.length > 0 && (f.includes(n) || n.includes(f));
+        });
+    };
+
+    // Start from the activity's current attendees so PATCH (replace-set) keeps them.
+    const current = await fetchActivityParticipants(targetId);
+    const byId = new Map<string, { id: string; fullname: string; role?: 'required' | 'optional' | 'organizer' }>(
+      current.map((p) => [p.id, { id: p.id, fullname: p.name, role: p.role as 'required' | 'optional' | 'organizer' }]),
+    );
+
+    const notFound: string[] = [];
+    for (const name of addNames) {
+      const c = matchName(name);
+      if (c) byId.set(c.id, { id: c.id, fullname: c.fullname || name, role: 'required' });
+      else notFound.push(name);
+    }
+    for (const name of removeNames) {
+      const c = matchName(name);
+      if (c) byId.delete(c.id);
+    }
+
+    // A named attendee doesn't exist yet → offer to create them (draft card),
+    // carrying the meeting's account so the new contact is linked correctly.
+    if (notFound.length > 0) {
+      return {
+        success: true,
+        data: {
+          type: 'contact' as const,
+          isNew: true,
+          _fallbackDraft: true,
+          data: {
+            fullName: notFound[0],
+            title: (args.contactTitle as string) || '',
+            accountId: actChanges.account?.id || (args.accountId as string) || '',
+            accountName: actChanges.account?.name1 || (args.accountName as string) || '',
+          },
+        },
+      };
+    }
+
+    actChanges.contacts = Array.from(byId.values());
+  }
+
   if (Object.keys(actChanges).length === 0) return { success: false, error: '没有提供要更新的字段 / No fields to update' };
 
   await ActivityService.update(targetId, sanitizeForOData(actChanges));
@@ -152,7 +221,29 @@ const updateContact: FunctionHandler = async (args) => {
     const match = contacts.find((c: Contact) => c.fullname?.toLowerCase().includes(contactName.toLowerCase()));
     if (match) targetId = match.id;
   }
-  if (!targetId) return { success: false, error: '缺少 contactId 或无法找到匹配的联系人 / Missing contactId or cannot find matching contact' };
+  if (!targetId) {
+    // Contact not found. If the user named someone, offer to CREATE them
+    // (return a draft-contact card) instead of dead-ending with an error.
+    if (contactName) {
+      return {
+        success: true,
+        data: {
+          type: 'contact' as const,
+          isNew: true,
+          _fallbackDraft: true,
+          data: {
+            fullName: contactName,
+            title: (args.title as string) || '',
+            phone: (args.phone as string) || '',
+            email: (args.email as string) || '',
+            accountId: (args.accountId as string) || '',
+            accountName: (args.accountName as string) || '',
+          },
+        },
+      };
+    }
+    return { success: false, error: '缺少 contactId 或无法找到匹配的联系人 / Missing contactId or cannot find matching contact' };
+  }
 
   const contactChanges: Partial<Contact> = {};
   if (args.fullName) contactChanges.fullname = args.fullName as string;

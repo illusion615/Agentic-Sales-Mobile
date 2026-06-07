@@ -48,6 +48,18 @@ export interface PipelineResult {
   planRaw?: string;
   totalLatencyMs: number;
   error?: AgentError;
+  /** Exact prompt text sent to the Frame LLM call (for dev inspection/copy). */
+  framePrompt?: string;
+  /** Exact prompt text sent to the Orchestrator LLM call (for dev inspection/copy). */
+  planPrompt?: string;
+  /** True if the Frame stage had to retry its LLM call (first attempt malformed). */
+  frameRetried?: boolean;
+  /** Reason the Frame stage retried, surfaced in the inspector. */
+  frameRetryReason?: string;
+  /** True if the Orchestrator stage had to retry its LLM call (first attempt malformed). */
+  planRetried?: boolean;
+  /** Reason the Orchestrator stage retried. */
+  planRetryReason?: string;
 }
 
 export interface BenchmarkEntry {
@@ -135,7 +147,19 @@ function buildOrchestratorPrompt(
     return `  - seq=${s.seq}, outputRef="${s.outputRef}"${deps}, salesObject=${intent.salesObject}, cognitiveTask=${intent.cognitiveTask}, temporal=${intent.temporal}, summary=${JSON.stringify(intent.summary)}${fn}`;
   }).join('\n');
 
+  // Anchor all relative-date reasoning to the real current date. Without this
+  // the LLM has no idea what "today" is and fabricates dates (often years off).
+  const now = new Date();
+  const todayIso = now.toISOString().split('T')[0];
+  const weekday = now.toLocaleDateString('en-US', { weekday: 'long' });
+
   return `${heading}
+
+# Current date
+Today is ${todayIso} (${weekday}). ALWAYS resolve relative dates against this:
+"today"=${todayIso}; "yesterday"=the day before; "tomorrow"=the day after;
+"this/next week" relative to ${todayIso}. NEVER invent a year — every date you
+output must be in the same year as today unless the user explicitly says otherwise.
 
 # Skeleton (must be preserved one-to-one)
 ${skeletonLines}
@@ -151,8 +175,9 @@ ${describeBoundEntities(frame)}
 - "arguments" must obey the parameter schema of the chosen skill.
 - For queryCopilotStudio / externalKnowledgeQuery: "query" is REQUIRED — use the intent summary as the query text.
 - For Activity steps: temporal=past → temporalMode="completed"; temporal=future → temporalMode="planned".
+- For draftActivity/updateActivity: when the user mentions a date or relative day ("today", "yesterday", "next Tuesday", "明天"), set scheduledDate to the resolved YYYY-MM-DD using the Current date above. For a past activity with no explicit date ("visited the customer", "called them"), default scheduledDate to today (${todayIso}). Omit scheduledDate only when truly unknown.
 - For draftActivity: "type" is REQUIRED. Infer from context: 拜访/visit/went to/现场 → "visit", 电话/call/phoned/rang → "call", 会议/meeting/met with/讨论会 → "meeting", 邮件/email/sent mail → "email", otherwise → "other".
-- For queryActivities: always set date filters. "today" → dateRange="today" OR scheduledDate=YYYY-MM-DD. "this week" → dateRange="7days" OR dateFrom/dateTo. "completed today" → dateRange="today" + status="completed". "pending" → status="draft" or "confirmed".
+- For queryActivities: always set date filters. "today" → dateRange="today" OR scheduledDate=${todayIso}. "this week" → dateRange="7days" OR dateFrom/dateTo. "completed today" → dateRange="today" + status="completed". "pending" → status="draft" or "confirmed".
 - For queryOpportunities: "active/pipeline" → stage != won/lost. "at risk" → minConfidence=0 maxConfidence=49.
 
 # Page context data reuse
@@ -186,11 +211,25 @@ function buildUserBlock(
       const dataKeys = Object.keys(pd);
       const dataSummary = dataKeys.map((k) => {
         const v = pd[k];
+        // Skip null/undefined — never emit a placeholder string the LLM might
+        // copy verbatim into an argument (this caused accountName="[object]"
+        // when the page's account was unresolved/undefined).
+        if (v == null) return null;
         if (Array.isArray(v)) return `${k}: ${v.length} records`;
-        if (typeof v === 'number' || typeof v === 'string') return `${k}: ${v}`;
-        return `${k}: [object]`;
-      }).join(', ');
-      lines.push(`[Page data available] ${dataSummary}`);
+        if (typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean') return `${k}: ${v}`;
+        if (typeof v === 'object') {
+          // Surface a couple of identifying fields instead of a literal placeholder.
+          const o = v as Record<string, unknown>;
+          const name = o.name ?? o.name1 ?? o.fullName;
+          const id = o.id ?? o.Id;
+          if (name != null || id != null) {
+            return `${k}: ${name ?? ''}${id != null ? ` (id=${id})` : ''}`.trim();
+          }
+          return null;
+        }
+        return null;
+      }).filter(Boolean).join(', ');
+      if (dataSummary) lines.push(`[Page data available] ${dataSummary}`);
     }
   }
   const tail = (conversationHistory ?? []).slice(-2);
@@ -215,11 +254,17 @@ export async function runIntentPipeline(ctx: FrameRunContext): Promise<PipelineR
       plan: null,
       planLatencyMs: 0,
       totalLatencyMs: Date.now() - totalStart,
+      framePrompt: frameOutcome.prompt,
+      frameRetried: frameOutcome.retried,
+      frameRetryReason: frameOutcome.retryReason,
       error: agentError('llm', 'frame', 'Frame classification failed', frameOutcome.error),
     };
   }
   const frame = frameOutcome.result;
   const frameLatencyMs = frameOutcome.latencyMs;
+  const framePrompt = frameOutcome.prompt;
+  const frameRetried = frameOutcome.retried;
+  const frameRetryReason = frameOutcome.retryReason;
 
   // 2. Build skeleton + select skills
   const skeleton = buildSkeleton(frame.intents);
@@ -237,27 +282,49 @@ export async function runIntentPipeline(ctx: FrameRunContext): Promise<PipelineR
       plan: { function: null as unknown as string, arguments: {} },
       planLatencyMs: 0,
       totalLatencyMs: Date.now() - totalStart,
+      framePrompt,
+      frameRetried,
+      frameRetryReason,
     };
   }
 
   // 3. Orchestrator (LLM call for argument filling — all intents, single or multi)
   const systemPrompt = buildOrchestratorPrompt(frame, skeleton, skillsText, locale);
   const userPrompt = buildUserBlock(ctx.userMessage, frame, ctx.pageContext, ctx.conversationHistory);
+  // Exact text invokeFlowForLLM serialises and sends — captured for copy in the
+  // Frame Inspector so the Orchestrator prompt can be tested offline.
+  const planPrompt = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userPrompt },
+  ].map((m) => `${m.role}: ${m.content}`).join('\n');
 
   const planStart = Date.now();
+  // Call in 'text' mode (free-form) and let parseOrchestratorOutput extract the
+  // { steps: [...] } object. We do NOT use AI Builder "JSON output" mode: its
+  // example-based structured output only supports flat shapes and cannot
+  // express our nested DAG schema, so enabling it locked the model onto AI
+  // Builder's default sample schema and caused 100% parse failures + retries.
   let planResp = await invokeFlowForLLM({
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ],
-    responseFormat: 'dag',
+    responseFormat: 'text',
   });
   let plan = planResp.success && planResp.content
     ? parseOrchestratorOutput(planResp.content, skeleton)
     : null;
-  // Retry once in text mode on flow parse-JSON failure or client parse failure.
+  // Defensive non-deterministic retry only — should almost never fire.
+  let planRetried = false;
+  let planRetryReason: string | undefined;
   if (!plan) {
     const firstError = planResp.error;
+    // Observability: a plan retry is a degradation — surface it, never silent.
+    planRetried = true;
+    planRetryReason = planResp.success
+      ? 'parse/validation failed on first attempt'
+      : `LLM call failed on first attempt: ${firstError ?? 'unknown'}`;
+    console.warn(`[Orchestrator] retry fired — ${planRetryReason}`);
     planResp = await invokeFlowForLLM({
       messages: [
         { role: 'system', content: systemPrompt },
@@ -269,6 +336,11 @@ export async function runIntentPipeline(ctx: FrameRunContext): Promise<PipelineR
       plan = parseOrchestratorOutput(planResp.content, skeleton);
     }
     if (!planResp.success && !planResp.error && firstError) planResp.error = firstError;
+    if (plan) {
+      console.warn('[Orchestrator] retry SUCCEEDED — second attempt parsed cleanly');
+    } else {
+      console.error('[Orchestrator] retry FAILED — both attempts unparseable');
+    }
   }
   const planLatencyMs = Date.now() - planStart;
 
@@ -281,6 +353,12 @@ export async function runIntentPipeline(ctx: FrameRunContext): Promise<PipelineR
       planLatencyMs,
       planRaw: planResp.content,
       totalLatencyMs: Date.now() - totalStart,
+      framePrompt,
+      planPrompt,
+      frameRetried,
+      frameRetryReason,
+      planRetried,
+      planRetryReason,
       error: agentError('llm', 'orchestrator', 'Orchestrator LLM call failed', planResp.error),
     };
   }
@@ -293,6 +371,12 @@ export async function runIntentPipeline(ctx: FrameRunContext): Promise<PipelineR
     planLatencyMs,
     planRaw: planResp.content,
     totalLatencyMs: Date.now() - totalStart,
+    framePrompt,
+    planPrompt,
+    frameRetried,
+    frameRetryReason,
+    planRetried,
+    planRetryReason,
     error: plan ? undefined : agentError('parse', 'orchestrator', 'Orchestrator output parse failed'),
   };
 }
@@ -338,22 +422,28 @@ function parseOrchestratorOutput(text: string, skeleton: SkeletonStep[]): SubPro
   ) {
     const steps = (candidate as { steps: Array<Partial<DagStep> & { dependsOn?: unknown; arguments?: unknown }> }).steps;
     if (steps.length === skeleton.length) {
+      const patched: string[] = [];
       for (let i = 0; i < steps.length; i++) {
         const s = steps[i];
         const sk = skeleton[i];
-        if (s.seq == null) s.seq = sk.seq;
-        if (!s.outputRef) s.outputRef = sk.outputRef;
+        if (s.seq == null) { s.seq = sk.seq; patched.push(`step${i}.seq`); }
+        if (!s.outputRef) { s.outputRef = sk.outputRef; patched.push(`step${i}.outputRef`); }
         // dependsOn: coerce comma-separated string → array
         if (typeof s.dependsOn === 'string') {
           s.dependsOn = (s.dependsOn as string).split(',').map(v => v.trim()).filter(Boolean) as unknown as string[];
         }
         if (!s.dependsOn && sk.dependsOn) s.dependsOn = sk.dependsOn;
-        if (!s.function && sk.suggestedFunction) s.function = sk.suggestedFunction;
+        if (!s.function && sk.suggestedFunction) { s.function = sk.suggestedFunction; patched.push(`step${i}.function`); }
         // arguments: coerce JSON string → object
         if (typeof s.arguments === 'string') {
-          try { s.arguments = JSON.parse(s.arguments as string); } catch { s.arguments = {}; }
+          try { s.arguments = JSON.parse(s.arguments as string); } catch { s.arguments = {}; patched.push(`step${i}.arguments(unparseable→{})`); }
         }
         if (!s.arguments) s.arguments = {};
+      }
+      // Observability: if we had to repair the model's output, say so — a
+      // recovered-but-incomplete plan should never look like a clean one.
+      if (patched.length) {
+        console.warn('[Orchestrator] output had missing/invalid fields, patched from skeleton:', patched.join(', '));
       }
     }
   }

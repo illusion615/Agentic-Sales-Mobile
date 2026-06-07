@@ -1142,6 +1142,37 @@ Please respond to the user in a friendly manner based on the error. Important ru
     }
   }
 
+  // ===== Update fell back to a draft (entity not found → offer to create) =====
+  // e.g. updateContact for a person who doesn't exist yet → show a create card
+  // instead of a dead-end error.
+  if (
+    functionResult.success &&
+    functionResult.data &&
+    typeof functionResult.data === 'object' &&
+    (functionResult.data as Record<string, unknown>)._fallbackDraft
+  ) {
+    const draftData = functionResult.data as { type: string; isNew: boolean; data: Record<string, unknown> };
+    const draftFnName =
+      draftData.type === 'contact' ? 'draftContact'
+      : draftData.type === 'account' ? 'draftAccount'
+      : draftData.type === 'opportunity' ? 'draftOpportunity'
+      : 'draftActivity';
+    const draftDisplayName = getDisplayName(draftFnName, isZh ? 'zh-Hans' : 'en-US');
+    if (onProgress) onProgress({ stage: 'generating', status: 'completed' });
+    return {
+      success: true,
+      content: isZh ? '没有找到该记录，请确认是否创建：' : 'No matching record found — confirm to create:',
+      functionCalled: draftFnName,
+      functionDisplayName: draftDisplayName,
+      functionResult: { type: draftData.type, isNew: true, data: draftData.data },
+      latencyMs: Date.now() - startTime,
+      thinkingSteps: [
+        { stage: 'intent', status: 'completed', label: isZh ? `意图识别：${fnDisplayName}` : `Intent: ${fnDisplayName}` },
+        { stage: 'executing', status: 'completed', label: isZh ? '未找到记录，转为新建' : 'Not found — switching to create' },
+      ],
+    };
+  }
+
   // ===== Check for draft functions - return directly without Pass 2 =====
   const draftFunctions = ['draftActivity', 'draftOpportunity', 'draftAccount', 'draftContact'];
   if (draftFunctions.includes(intent.function)) {

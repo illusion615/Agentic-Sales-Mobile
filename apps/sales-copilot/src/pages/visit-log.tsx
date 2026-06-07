@@ -18,10 +18,11 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { format } from 'date-fns';
+import { format } from 'date-fns/format';
 import { cn } from '@/lib/utils';
 import { useUser } from '@/hooks/use-user';
 import { useAccountList } from '@/generated/hooks/use-account';
+import type { Account } from '@/generated/models/account-model';
 import { useCreateActivity } from '@/generated/hooks/use-activity';
 import { isCopilotStudioAvailable } from '@/services/copilot-service';
 import { getLocale, getLLMConfig, type Locale } from '@/lib/i18n';
@@ -584,7 +585,7 @@ export default function VisitLogPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">{t('selectAccount', locale)}</SelectItem>
-                    {accounts.filter((a) => a.id).map((account) => (
+                    {accounts.filter((a: Account) => a.id).map((account: Account) => (
                       <SelectItem key={account.id} value={account.id}>
                         {account.name1}
                       </SelectItem>
@@ -737,7 +738,7 @@ export default function VisitLogPage() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">{t('selectAccount', locale)}</SelectItem>
-                        {accounts.filter((a) => a.id).map((account) => (
+                        {accounts.filter((a: Account) => a.id).map((account: Account) => (
                           <SelectItem key={account.id} value={account.id}>
                             {account.name1}
                           </SelectItem>

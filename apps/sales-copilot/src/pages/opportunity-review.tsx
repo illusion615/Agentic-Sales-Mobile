@@ -91,7 +91,7 @@ export default function OpportunityReviewPage() {
   const { data: opportunities = [] } = useOpportunityList();
   const { data: user } = useUser();
 
-  const userId = user?.objectId;
+  const userId = user?.objectId?.toLowerCase();
   const isAdmin = getAdminMode();
 
   const activeOpps = useMemo(() =>
@@ -258,7 +258,7 @@ export default function OpportunityReviewPage() {
           )}
           {daysUntil !== null && (
             <span className={cn(
-              'flex items-center gap-1 text-helper ml-auto',
+              'flex items-center gap-1 text-[11px] ml-auto',
               daysUntil < 0 ? 'text-red-500 font-medium' : daysUntil <= 7 ? 'text-amber-500' : 'text-muted-foreground'
             )}>
               <Clock className="w-3 h-3" />

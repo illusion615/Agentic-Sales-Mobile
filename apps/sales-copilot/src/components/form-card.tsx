@@ -7,7 +7,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { Check, X, Calendar, User, Building2, Phone, Mail, MapPin, DollarSign, TrendingUp, FileText, Tag, ChevronRight, ChevronDown, Target, Sparkles } from 'lucide-react';
+import { Check, X, Calendar, User, Users, Building2, Phone, Mail, MapPin, DollarSign, TrendingUp, FileText, Tag, ChevronRight, ChevronDown, Target, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -18,8 +18,7 @@ import { cn } from '@/lib/utils';
 import { getLocale, type Locale } from '@/lib/i18n';
 import { formatCurrencyCompact } from '@/lib/format-currency';
 import { useCopilot } from '@/contexts/copilot-context';
-import { toast } from 'sonner';
-import { format } from 'date-fns';
+import { format } from 'date-fns/format';
 
 // Hooks for creating records (use mutations for cache invalidation)
 import { useCreateActivity } from '@/generated/hooks/use-activity';
@@ -34,6 +33,7 @@ import type { Account } from '@/generated/models/account-model';
 import { useUser } from '@/hooks/use-user';
 import { useCreateContact } from '@/generated/hooks/use-contact';
 import type { Contact } from '@/generated/models/contact-model';
+import { getAttachments, dropAttachments, uploadAttachmentsToActivity } from '@/lib/attachments';
 
 export interface FormCardData {
   type: 'activity' | 'opportunity' | 'account' | 'contact';
@@ -42,6 +42,8 @@ export interface FormCardData {
   data: Record<string, unknown>;
   status?: 'pending' | 'confirmed' | 'modified' | 'cancelled';
   createdRecordId?: string;
+  /** Attachment ids (resolved from the attachment store) to upload as Notes after create. */
+  attachmentIds?: string[];
 }
 
 interface FormCardProps {
@@ -284,6 +286,112 @@ function ContactSelector({
   );
 }
 
+// Multi-attendee selector for meetings / visits.
+// Stores attendees in formData.attendees as Array<{ id, fullname }>.
+function MultiContactSelector({
+  attendees,
+  onChange,
+  accountId,
+  suggestedNames,
+  locale,
+}: {
+  attendees: Array<{ id: string; fullname: string }>;
+  onChange: (next: Array<{ id: string; fullname: string }>) => void;
+  accountId?: string;
+  suggestedNames?: string[];
+  locale: Locale;
+}) {
+  const { data: contacts = [] } = useContactList();
+  const filteredContacts = accountId
+    ? contacts.filter((c: Contact) => c.account?.id === accountId)
+    : contacts;
+  const selectedIds = new Set(attendees.map((a) => a.id));
+  const available = filteredContacts.filter((c: Contact) => !selectedIds.has(c.id));
+
+  // Auto-prefill attendees from LLM-recognized names (once contacts have loaded).
+  const prefilledRef = useRef(false);
+  useEffect(() => {
+    if (prefilledRef.current) return;
+    if (attendees.length > 0) { prefilledRef.current = true; return; }
+    const names = (suggestedNames || []).map((n) => n.trim()).filter(Boolean);
+    if (names.length === 0 || contacts.length === 0) return;
+
+    const pool = accountId ? contacts.filter((c: Contact) => c.account?.id === accountId) : contacts;
+    const matched: Array<{ id: string; fullname: string }> = [];
+    const seen = new Set<string>();
+    for (const name of names) {
+      const lower = name.toLowerCase();
+      const hit =
+        pool.find((c: Contact) => (c.fullname || '').toLowerCase() === lower) ||
+        pool.find((c: Contact) => {
+          const f = (c.fullname || '').toLowerCase();
+          return f.includes(lower) || lower.includes(f);
+        });
+      if (hit && !seen.has(hit.id)) {
+        seen.add(hit.id);
+        matched.push({ id: hit.id, fullname: hit.fullname || name });
+      }
+    }
+    if (matched.length > 0) {
+      prefilledRef.current = true;
+      onChange(matched);
+    }
+  }, [contacts, suggestedNames, accountId, attendees.length, onChange]);
+
+  return (
+    <div className="flex items-start gap-2 py-1">
+      <Users className="w-4 h-4 text-muted-foreground mt-2 flex-shrink-0" />
+      <div className="flex-1 min-w-0">
+        <span className="text-xs text-muted-foreground">
+          {locale === 'zh-Hans' ? '参会人' : 'Attendees'}
+        </span>
+        {attendees.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mt-1 mb-1">
+            {attendees.map((a) => (
+              <span
+                key={a.id}
+                className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary text-xs px-2 py-0.5"
+              >
+                {a.fullname}
+                <button
+                  type="button"
+                  onClick={() => onChange(attendees.filter((x) => x.id !== a.id))}
+                  className="hover:text-destructive"
+                  aria-label={locale === 'zh-Hans' ? '移除' : 'Remove'}
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <Select
+          value="add"
+          onValueChange={(val: string) => {
+            if (val === 'add') return;
+            const contact = filteredContacts.find((c: Contact) => c.id === val);
+            if (contact) onChange([...attendees, { id: contact.id, fullname: contact.fullname || '' }]);
+          }}
+        >
+          <SelectTrigger className="h-8 text-sm mt-0.5 w-full min-w-0">
+            <SelectValue placeholder={locale === 'zh-Hans' ? '添加参会人' : 'Add attendee'} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="add">
+              {locale === 'zh-Hans' ? '添加参会人…' : 'Add attendee…'}
+            </SelectItem>
+            {available.map((contact: Contact) => (
+              <SelectItem key={contact.id} value={contact.id}>
+                {contact.fullname}{contact.title ? ` (${contact.title})` : ''}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  );
+}
+
 // Activity Form Card
 function ActivityFormCard({ data, formData, setFormData, onConfirm, onCancel, isConfirming, locale }: {
   data: Record<string, unknown>;
@@ -354,12 +462,27 @@ function ActivityFormCard({ data, formData, setFormData, onConfirm, onCancel, is
           accountId={formData.accountId as string}
           locale={locale}
         />
-        <ContactSelector
-          value={formData.contactId as string}
-          onChange={(id: string, name: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, contactId: id, contactName: name }))}
-          accountId={formData.accountId as string}
-          locale={locale}
-        />
+        {/* Native appointment (visit/meeting) participants are attendees — multi-select.
+            Native phonecall/email/other use a single contact (From/To semantics). */}
+        {(activityType === 'visit' || activityType === 'meeting') ? (
+          <MultiContactSelector
+            attendees={(formData.attendees as Array<{ id: string; fullname: string }>) || []}
+            onChange={(next) => setFormData((prev: Record<string, unknown>) => ({ ...prev, attendees: next }))}
+            accountId={formData.accountId as string}
+            suggestedNames={[
+              ...((formData.contactNames as string[]) || []),
+              ...(formData.contactName ? [formData.contactName as string] : []),
+            ]}
+            locale={locale}
+          />
+        ) : (
+          <ContactSelector
+            value={formData.contactId as string}
+            onChange={(id: string, name: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, contactId: id, contactName: name }))}
+            accountId={formData.accountId as string}
+            locale={locale}
+          />
+        )}
         {/* I-8 Slice A: hide outcome when activity is planned (event hasn't happened). NextStep is handled
             via multi-intent — concrete follow-ups become their own draftActivity rather than free text. */}
         {formData.temporalMode !== 'planned' && (
@@ -796,6 +919,7 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
   const { data: user } = useUser();
   const [isConfirming, setIsConfirming] = useState(false);
   const [status, setStatus] = useState<'pending' | 'confirmed' | 'modified' | 'cancelled'>(formCard.status || 'pending');
+  const [validationError, setValidationError] = useState<string | null>(null);
   const [createdRecordId, setCreatedRecordId] = useState<string | null>(formCard.createdRecordId || null);
   // Use ref to keep the latest createdRecordId available immediately (for async operations)
   const createdRecordIdRef = useRef<string | null>(formCard.createdRecordId || null);
@@ -851,6 +975,7 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
   // Handle confirmation - create the record
   const handleConfirm = async () => {
     setIsConfirming(true);
+    setValidationError(null);
     try {
       const { type } = formCard;
 
@@ -928,8 +1053,17 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
           notes: (formData.notes as string) || '',
           ...(targetAccount && { account: { id: targetAccount.id, name1: targetAccount.name1 } }),
           ...(targetOpportunity && { opportunity: { id: targetOpportunity.id, name1: targetOpportunity.name1 } }),
-          ...(targetContact && { contact: { id: targetContact.id, fullname: targetContact.fullname } }),
         };
+        // Native appointment (visit/meeting) participants are attendees only.
+        // Native phonecall/email use a single contact (From/To). Avoid storing both.
+        const attendees = (formData.attendees as Array<{ id: string; fullname: string }>) || [];
+        if (activityType === 'visit' || activityType === 'meeting') {
+          if (attendees.length > 0) {
+            createInput.contacts = attendees.map((a) => ({ id: a.id, fullname: a.fullname, role: 'required' as const }));
+          }
+        } else if (targetContact) {
+          createInput.contact = { id: targetContact.id, fullname: targetContact.fullname };
+        }
         const createdActivity = await createActivity.mutateAsync(createInput);
         // Bump account's last-contacted timestamp so dashboards stay accurate.
         if (targetAccount?.id) {
@@ -937,9 +1071,21 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
         }
         setCreatedRecordId(createdActivity.id);
         createdRecordIdRef.current = createdActivity.id;
+        // Upload composer attachments as Notes (annotation) bound to this activity.
+        if (formCard.attachmentIds?.length) {
+          const atts = getAttachments(formCard.attachmentIds);
+          if (atts.length) {
+            await uploadAttachmentsToActivity(
+              createdActivity.id,
+              createInput.type,
+              atts,
+            );
+            dropAttachments(formCard.attachmentIds);
+            // Attachment outcome is reflected inline on the confirmed card; no toast.
+          }
+        }
         // Pass the created record ID to persist it in session storage
         copilot.updateFormCardStatus(messageId, 'confirmed', undefined, createdActivity.id);
-        toast.success(locale === 'zh-Hans' ? '活动已创建' : 'Activity created');
         copilot.formCardSaved({
           messageId,
           type: 'activity',
@@ -973,7 +1119,7 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
         }
         
         if (!targetAccount) {
-          toast.error(locale === 'zh-Hans' ? '未找到关联客户，请先创建客户' : 'Account not found, please create account first');
+          setValidationError(locale === 'zh-Hans' ? '未找到关联客户，请先创建客户' : 'Account not found, please create account first');
           setIsConfirming(false);
           return;
         }
@@ -981,7 +1127,7 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
         // Validate required fields before saving
         const oppName = (formData.name as string || '').trim();
         if (!oppName) {
-          toast.error(locale === 'zh-Hans' ? '商机名称为必填项' : 'Opportunity name is required');
+          setValidationError(locale === 'zh-Hans' ? '商机名称为必填项' : 'Opportunity name is required');
           setIsConfirming(false);
           return;
         }
@@ -999,7 +1145,6 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
         setCreatedRecordId(createdOpp.id);
         createdRecordIdRef.current = createdOpp.id;
         copilot.updateFormCardStatus(messageId, 'confirmed', undefined, createdOpp.id);
-        toast.success(locale === 'zh-Hans' ? '商机已创建' : 'Opportunity created');
         // Unified queue / legacy resume.
         copilot.formCardSaved({
           messageId,
@@ -1022,7 +1167,6 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
         setCreatedRecordId(createdAccount.id);
         createdRecordIdRef.current = createdAccount.id;
         copilot.updateFormCardStatus(messageId, 'confirmed', undefined, createdAccount.id);
-        toast.success(locale === 'zh-Hans' ? '客户已创建' : 'Account created');
         // Unified queue / legacy resume.
         copilot.formCardSaved({
           messageId,
@@ -1051,7 +1195,7 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
         }
         
         if (!targetAccount) {
-          toast.error(locale === 'zh-Hans' ? '未找到关联客户，请先创建客户' : 'Account not found, please create account first');
+          setValidationError(locale === 'zh-Hans' ? '未找到关联客户，请先创建客户' : 'Account not found, please create account first');
           setIsConfirming(false);
           return;
         }
@@ -1066,7 +1210,6 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
         setCreatedRecordId(createdContact.id);
         createdRecordIdRef.current = createdContact.id;
         copilot.updateFormCardStatus(messageId, 'confirmed', undefined, createdContact.id);
-        toast.success(locale === 'zh-Hans' ? '联系人已创建' : 'Contact created');
 
         // Unified queue / legacy resume.
         copilot.formCardSaved({
@@ -1175,10 +1318,10 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            {formCard.type === 'activity' && <Calendar className="w-4 h-4 text-primary" />}
-            {formCard.type === 'contact' && <User className="w-4 h-4 text-purple-600" />}
-            {formCard.type === 'opportunity' && <TrendingUp className="w-4 h-4 text-green-600" />}
-            {formCard.type === 'account' && <Building2 className="w-4 h-4 text-blue-600" />}
+            {formCard.type === 'activity' && <Calendar className="w-5 h-5 text-primary" />}
+            {formCard.type === 'contact' && <User className="w-5 h-5 text-purple-600" />}
+            {formCard.type === 'opportunity' && <TrendingUp className="w-5 h-5 text-green-600" />}
+            {formCard.type === 'account' && <Building2 className="w-5 h-5 text-blue-600" />}
             <span className="text-sm font-medium text-foreground">
               {formData.title as string || formData.name as string || formData.fullName as string || ''}
             </span>
@@ -1200,6 +1343,29 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
       transition={{ duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] as const }}
       className="glass-card p-4 rounded-xl"
     >
+      {formCard.type === 'activity' && formCard.attachmentIds && formCard.attachmentIds.length > 0 && (
+        <div className="mb-3">
+          <div className="text-helper text-muted-foreground mb-1.5">
+            {locale === 'zh-Hans' ? `附件 (${formCard.attachmentIds.length})` : `Attachments (${formCard.attachmentIds.length})`}
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            {getAttachments(formCard.attachmentIds).map((att) => (
+              att.type === 'image' ? (
+                <div key={att.id} className="w-14 h-14 rounded-lg overflow-hidden border border-border/50">
+                  <img src={att.dataUrl} alt={att.name} className="w-full h-full object-cover" />
+                </div>
+              ) : (
+                <div key={att.id} className="w-14 h-14 rounded-lg border border-border/50 bg-muted/50 flex flex-col items-center justify-center px-1">
+                  <FileText className="w-4 h-4 text-muted-foreground" />
+                  <span className="text-[7px] text-muted-foreground mt-0.5 truncate max-w-full">
+                    {att.name.length > 8 ? att.name.slice(0, 8) + '…' : att.name}
+                  </span>
+                </div>
+              )
+            ))}
+          </div>
+        </div>
+      )}
       {formCard.type === 'activity' && (
         <ActivityFormCard
           data={formCard.data}
@@ -1243,6 +1409,12 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
           isConfirming={isConfirming}
           locale={locale}
         />
+      )}
+      {validationError && (
+        <div className="mt-2 flex items-start gap-1.5 text-xs text-destructive">
+          <X className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+          <span>{validationError}</span>
+        </div>
       )}
     </motion.div>
   );

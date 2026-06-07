@@ -17,6 +17,7 @@ const draftActivity: FunctionHandler = async (args) => ({
       accountName: args.accountName as string || '',
       contactId: args.contactId as string || '',
       contactName: args.contactName as string || '',
+      contactNames: (args.contactNames as string[]) || [],
       contactTitle: args.contactTitle as string || '',
       scheduledDate: args.scheduledDate as string || new Date().toISOString().split('T')[0],
       result: args.result as string || '',

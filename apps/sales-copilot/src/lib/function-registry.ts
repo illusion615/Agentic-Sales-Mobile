@@ -8,6 +8,8 @@ export interface FunctionParameter {
   type: string;
   description: string;
   enum?: string[];
+  /** For type: 'array' — describes the element type. */
+  items?: { type: string };
 }
 
 /**
@@ -151,7 +153,7 @@ export const availableFunctions: FunctionDefinition[] = [
         accountName: { type: 'string', description: 'Filter by account name (fuzzy matched) / 按客户名称筛选（模糊匹配）' },
         type: { type: 'string', description: 'Filter by activity type / 按类型筛选', enum: ['visit', 'call', 'meeting', 'email', 'other'] },
         dateRange: { type: 'string', description: 'Date range: "today", "7days", "30days", "all" / 日期范围', enum: ['today', '7days', '30days', 'all'] },
-        scheduledDate: { type: 'string', description: 'Exact date YYYY-MM-DD (e.g. "2026-05-28" for today) / 精确日期' },
+        scheduledDate: { type: 'string', description: 'Exact date in YYYY-MM-DD format / 精确日期（YYYY-MM-DD 格式）' },
         dateFrom: { type: 'string', description: 'Start date YYYY-MM-DD for range queries / 范围起始日期' },
         dateTo: { type: 'string', description: 'End date YYYY-MM-DD for range queries / 范围结束日期' },
         status: { type: 'string', description: 'Filter by status / 按状态筛选', enum: ['draft', 'confirmed', 'completed', 'cancelled'] },
@@ -192,7 +194,8 @@ export const availableFunctions: FunctionDefinition[] = [
         type: { type: 'string', description: '活动类型', enum: ['visit', 'call', 'meeting', 'email', 'other'] },
         accountId: { type: 'string', description: '客户ID（如果已知）/ Account ID (if known)' },
         accountName: { type: 'string', description: '客户/公司名称' },
-        contactName: { type: 'string', description: '联系人姓名' },
+        contactName: { type: 'string', description: '联系人姓名（单个；对于会议/拜访的多个参会人请用 contactNames）/ Contact name (single; for multiple meeting/visit attendees use contactNames)' },
+        contactNames: { type: 'array', items: { type: 'string' }, description: '会议/拜访的多个参会人姓名列表。当用户提到和多人开会/拜访时，把每个人的姓名都放进来。例如"和张经理、李医生开会" -> ["张经理","李医生"]。Multiple attendee names for a meeting/visit.' },
         contactTitle: { type: 'string', description: '联系人职位/科室 / Contact job title or department' },
         scheduledDate: { type: 'string', description: '日期，ISO格式 YYYY-MM-DD' },
         result: { type: 'string', description: '结果/讨论要点' },
@@ -302,7 +305,7 @@ export const availableFunctions: FunctionDefinition[] = [
   {
     name: 'updateActivity',
     displayName: { 'zh-Hans': '更新活动', 'en-US': 'Update Activity' },
-    description: '更新现有活动记录。当用户说"更新活动"、"修改这个活动"、"把活动日期改成XX"时调用。Update existing activity record.',
+    description: '更新现有活动记录：修改日期/标题/备注/状态，以及**添加或移除会议/拜访的与会人**。当用户说"更新活动"、"把活动日期改成XX"、"把张三加到这个会议"、"add Robert to this meeting"、"把李四从会议中移除"时调用。Update an existing activity — including adding/removing meeting attendees.',
     parameters: {
       type: 'object',
       properties: {
@@ -313,6 +316,8 @@ export const availableFunctions: FunctionDefinition[] = [
         scheduledDate: { type: 'string', description: '新的日期 YYYY-MM-DD / New scheduled date' },
         result: { type: 'string', description: '新的结果 / New result' },
         notes: { type: 'string', description: '新的备注 / New notes' },
+        addAttendeeNames: { type: 'array', items: { type: 'string' }, description: '要添加到会议/拜访的与会人姓名列表。当用户说"把张三加到这个会议"、"add Robert to this meeting"时填入。Names of contacts to ADD as attendees of a meeting/visit.' },
+        removeAttendeeNames: { type: 'array', items: { type: 'string' }, description: '要从会议/拜访中移除的与会人姓名列表。当用户说"把李四从会议中去掉"、"remove John from the meeting"时填入。Names of contacts to REMOVE from a meeting/visit.' },
       },
       required: [],
     },

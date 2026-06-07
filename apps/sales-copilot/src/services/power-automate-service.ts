@@ -1,18 +1,23 @@
 /**
- * Power Automate Flow Service
- * Invokes the "Power Apps Flow - LLM" via SDK connector (shared_logicflows).
+ * AI Builder Direct Service
+ * Invokes AI Builder custom prompts directly via Dataverse Custom API,
+ * bypassing Power Automate Flow entirely.
  *
- * Flow contract:
- *   Input:  { text: string, text_1: 'text' | 'json' }
- *   Output: { output?: string }
+ * This eliminates:
+ * - shared_logicflows connectionReference (which causes launch 500)
+ * - Flow run quota consumption
+ * - UTF-8 multibyte corruption (microsoft/PowerAppsCodeApps#359)
+ * - ~1-3s Flow middleware latency
  *
- * ALL LLM availability checks are centralised here.
- * Callers should NOT check getLLMConfig / endpoint / enabled themselves.
+ * Uses generated service classes from `power-apps add-dataverse-api`.
  */
 
-import { PowerAppsFlow_LLMService } from '@/generated/services/PowerAppsFlow_LLMService';
 import { getLLMConfig } from '@/lib/i18n';
 import { jsonrepair } from 'jsonrepair';
+import { Msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75cService as TextPromptService } from '@/generated/services/Msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75cService';
+import { Msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323Service as JsonPromptService } from '@/generated/services/Msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323Service';
+import { Msdyn_aibdptcustomprompt228202435537pmbd0d86826d054e2ba9efc694a371f6fbService as DagPromptService } from '@/generated/services/Msdyn_aibdptcustomprompt228202435537pmbd0d86826d054e2ba9efc694a371f6fbService';
+import { Msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7Service as JsonGenericPromptService } from '@/generated/services/Msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7Service';
 
 export interface FlowLLMResponse {
   success: boolean;
@@ -21,23 +26,17 @@ export interface FlowLLMResponse {
   latencyMs?: number;
 }
 
-/**
- * Published Power Apps Code Apps corrupt flow responses that contain multibyte
- * UTF-8 characters (e.g. Chinese) in the SDK/storageproxy decode channel, causing
- * "JSON Parse error: Unterminated string" (see microsoft/PowerAppsCodeApps#359).
- *
- * Mitigation: the flow base64-encodes its payload and prefixes it with `B64:`.
- * Base64 is pure ASCII, so it survives the channel intact; we decode it here back
- * to UTF-8. Responses WITHOUT the prefix are returned unchanged (backward compatible).
- */
-const B64_PREFIX = 'B64:';
+type ResponseFormat = 'text' | 'json' | 'dag' | 'json-generic';
 
-/** Telemetry counters for base64 transport health. */
+/** Telemetry counters */
 const b64Stats = { total: 0, b64: 0, raw: 0, decodeFailed: 0 };
-
-/** Read-only snapshot of base64 transport telemetry. */
 export function getB64Stats() { return { ...b64Stats }; }
 
+/**
+ * Decode flow payload — kept for backward compatibility.
+ * Direct AI Builder calls return plain UTF-8, so B64 prefix is unlikely.
+ */
+const B64_PREFIX = 'B64:';
 function decodeFlowPayload(raw: string): string {
   b64Stats.total += 1;
   if (!raw.startsWith(B64_PREFIX)) {
@@ -52,20 +51,13 @@ function decodeFlowPayload(raw: string): string {
     return new TextDecoder('utf-8').decode(bytes);
   } catch (err) {
     b64Stats.decodeFailed += 1;
-    console.warn('[Power Automate] base64 decode failed, using raw payload:', err);
+    console.warn('[AI Tool] base64 decode failed, using raw:', err);
     return raw;
   }
 }
 
 /**
- * Whether the LLM flow is available for use.
- * UI components can use this to show/hide AI features.
- *
- * The Power Automate flow is baked into the build via the SDK connector,
- * so it is available regardless of localStorage state. The only reason to
- * report unavailable is if the user has explicitly disabled it in settings.
- * (Treating a missing config as "unavailable" causes a race on first load
- * where Copilot opens before useInitSettings has written the flag.)
+ * Whether the LLM is available for use.
  */
 export function isFlowAvailable(): boolean {
   const config = getLLMConfig();
@@ -74,13 +66,7 @@ export function isFlowAvailable(): boolean {
 }
 
 /**
- * Invoke the LLM flow via Power Platform connector.
- *
- * Callers pass a `messages` array (OpenAI chat format). This function
- * serialises them into a single `text` string for the flow's Prompt input.
- *
-/**
- * Contains its own availability guard — callers do NOT need to pre-check config.
+ * Invoke AI Builder custom prompt directly via Dataverse Custom API.
  */
 export async function invokeFlowForLLM(
   request: {
@@ -90,7 +76,6 @@ export async function invokeFlowForLLM(
 ): Promise<FlowLLMResponse> {
   const startTime = Date.now();
 
-  // Centralised availability check — no caller needs to duplicate this
   if (!isFlowAvailable()) {
     return {
       success: false,
@@ -100,40 +85,73 @@ export async function invokeFlowForLLM(
   }
 
   try {
-    // Serialise messages → single prompt string
     const text = request.messages
       .map((m) => `${m.role}: ${m.content}`)
       .join('\n');
 
-    const responseFormat = request.responseFormat ?? 'text';
-    console.log('[Power Automate] Invoking LLM flow, prompt length:', text.length, 'responseFormat:', responseFormat);
+    const responseFormat: ResponseFormat = request.responseFormat ?? 'text';
 
-    // Cast needed: Flow trigger enum will be updated to include 'dag'|'json-generic';
-    // until then the SDK type is narrower than our internal type.
-    const result = await PowerAppsFlow_LLMService.Run({ text, text_1: responseFormat });
+    console.log('[AI Tool] Invoking prompt via generated service, format:', responseFormat, 'prompt length:', text.length);
+
+    // Call via generated Dataverse operation services (from `power-apps add-dataverse-api`)
+    let result: { success: boolean; data?: Record<string, unknown> | null; error?: { message?: string } };
+    switch (responseFormat) {
+      case 'json':
+        result = await JsonPromptService.msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323(text);
+        break;
+      case 'dag':
+        result = await DagPromptService.msdyn_aibdptcustomprompt228202435537pmbd0d86826d054e2ba9efc694a371f6fb(text);
+        break;
+      case 'json-generic':
+        result = await JsonGenericPromptService.msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7('', text);
+        break;
+      default: // 'text'
+        result = await TextPromptService.msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75c(text);
+        break;
+    }
+
     const latencyMs = Date.now() - startTime;
 
     if (!result.success) {
-      console.error('[Power Automate] Flow SDK error:', result.error);
+      console.error('[AI Tool] Custom API error:', JSON.stringify(result.error, null, 2));
+      console.error('[AI Tool] Full result:', JSON.stringify(result, null, 2));
       return {
         success: false,
-        error: result.error?.message ?? 'Flow invocation failed',
+        error: result.error?.message ?? 'AI Builder predict failed',
         latencyMs,
       };
     }
 
-    const rawContent = decodeFlowPayload(result.data?.output ?? '');
-    console.log('[Power Automate] Flow response length:', rawContent.length);
+    // Extract prediction output text
+    const data = result.data as Record<string, unknown>;
+    let rawContent = '';
 
-    // Only repair JSON when a JSON format was explicitly requested.
-    // jsonrepair can mangle plain text responses.
+    // Response shape: { ResponsePayload: "{ predictionOutput: { text: '...' } }" }
+    const payload = data?.ResponsePayload ?? data?.responsev2 ?? data;
+    if (typeof payload === 'string') {
+      try {
+        const parsed = JSON.parse(payload);
+        rawContent = parsed?.predictionOutput?.text ?? parsed?.text ?? payload;
+      } catch {
+        rawContent = payload;
+      }
+    } else if (typeof payload === 'object' && payload !== null) {
+      const p = payload as Record<string, unknown>;
+      rawContent = (p.predictionOutput as Record<string, string>)?.text
+        ?? (p as Record<string, string>).text
+        ?? JSON.stringify(payload);
+    }
+
+    // Decode in case of B64 prefix (backward compat)
+    rawContent = decodeFlowPayload(rawContent);
+    console.log('[AI Tool] Response length:', rawContent.length);
+
+    // JSON repair for structured formats
     let content = rawContent;
     if (responseFormat !== 'text') {
       try {
         content = jsonrepair(rawContent);
-        console.log('[Power Automate] jsonrepair applied, before:', rawContent.substring(0, 80), '→ after:', content.substring(0, 80));
-      } catch (repairErr) {
-        console.warn('[Power Automate] jsonrepair failed, using raw:', repairErr);
+      } catch {
         content = rawContent;
       }
     }
@@ -141,10 +159,10 @@ export async function invokeFlowForLLM(
     return { success: true, content, latencyMs };
   } catch (error: unknown) {
     const latencyMs = Date.now() - startTime;
-    console.error('[Power Automate] Error:', error);
+    console.error('[AI Tool] Error:', error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error invoking flow',
+      error: error instanceof Error ? error.message : 'Unknown error invoking AI Builder',
       latencyMs,
     };
   }

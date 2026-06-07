@@ -119,7 +119,7 @@ const activityTypeColors: Record<string, { bg: string; text: string; dot: string
 
 // Icons for each activity type - matching activities.tsx exactly
 const typeIcons: Record<string, React.ComponentType<{ className?: string }>> = {
-  'visit': MapPin,
+  'visit': Calendar,
   'call': Phone,
   'meeting': Calendar,
   'email': Mail,
@@ -773,19 +773,31 @@ export function KPICards({
       {/* Today's Agenda - Full Width Row */}
       {isLoading ? (
         <div className="glass-card p-4 animate-pulse" style={{ borderRadius: 20 }}>
-          {/* Calendar skeleton */}
+          {/* Calendar skeleton — matches real calendar layout */}
           <div className="mb-4">
+            {/* Header: icon + month name */}
             <div className="flex items-center gap-2 mb-3">
               <div className="w-8 h-8 rounded-full bg-muted/50" />
               <div className="space-y-1">
-                <div className="h-3 w-20 rounded bg-muted/40" />
-                <div className="h-4 w-28 rounded bg-muted/50" />
+                <div className="h-3 w-24 rounded bg-muted/40" />
+                <div className="h-4 w-20 rounded bg-muted/50" />
               </div>
             </div>
-            {/* Calendar grid skeleton */}
-            <div className="grid grid-cols-7 gap-1">
-              {[...Array(7)].map((_, i) => <div key={`h${i}`} className="h-4 rounded bg-muted/30" />)}
-              {[...Array(35)].map((_, i) => <div key={i} className="h-8 rounded bg-muted/20" />)}
+            {/* Weekday headers + 6 rows of 7 days (matches real h-8 cells) */}
+            <div className="grid grid-cols-7 gap-0.5 mb-1">
+              {[...Array(7)].map((_, i) => <div key={`wh${i}`} className="h-4 flex items-center justify-center"><div className="w-3 h-2.5 rounded bg-muted/30" /></div>)}
+            </div>
+            <div className="grid grid-cols-7 gap-0.5">
+              {[...Array(42)].map((_, i) => <div key={i} className="h-8 rounded bg-muted/20" />)}
+            </div>
+            {/* Legend row */}
+            <div className="flex gap-3 mt-2 pt-2 border-t border-border/30">
+              {[16, 12, 14, 12].map((w, i) => (
+                <div key={i} className="flex items-center gap-1">
+                  <div className="w-2 h-2 rounded-full bg-muted/30" />
+                  <div className={`h-2.5 rounded bg-muted/30`} style={{ width: w * 4 }} />
+                </div>
+              ))}
             </div>
           </div>
           {/* Agenda skeleton */}

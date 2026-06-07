@@ -347,6 +347,12 @@ export interface FrameRunOutcome {
   latencyMs: number;
   error?: string;
   raw?: string;
+  /** Exact prompt text sent to the LLM (serialised messages), for dev inspection/copy. */
+  prompt?: string;
+  /** True if the first LLM attempt failed to parse and a retry was fired. Surfaced so degradations are never silent. */
+  retried?: boolean;
+  /** Why the first attempt failed (parse/validation vs llm error), for the inspector. */
+  retryReason?: string;
 }
 
 export async function runFrame(ctx: FrameRunContext): Promise<FrameRunOutcome> {
@@ -386,33 +392,58 @@ export async function runFrame(ctx: FrameRunContext): Promise<FrameRunOutcome> {
     { role: 'user', content: ctx.userMessage },
   ];
 
-  // First attempt: strict JSON mode. On any failure, retry once in text mode
-  // — the flow's server-side Parse-JSON action sometimes throws
-  // "Retrieve operation failure: JSON Parse error: Unterminated string"
-  // when the model's JSON output is truncated. Text mode bypasses that
-  // parser and lets our tolerant client parser handle the response.
+  // Exact text invokeFlowForLLM serialises and sends to the AI Builder prompt —
+  // captured so the Frame Inspector can copy it for offline prompt testing.
+  const serializedPrompt = messages.map((m) => `${m.role}: ${m.content}`).join('\n');
+
+  // We call the LLM in 'text' mode (free-form) and let tryParseFrame extract
+  // the { intents: [...] } object from the response.
+  //
+  // We deliberately do NOT use AI Builder "JSON output" mode here: its
+  // structured output is example-based and only supports flat shapes
+  // (e.g. {categories:[{category}]}). It cannot express our nested Frame
+  // schema (intents[].{salesObject, cognitiveTask, userFacingLabel:{zh,en},
+  // relatesTo[]}). Enabling JSON mode locked the model onto AI Builder's
+  // default sample schema and produced 100% parse failures + retries.
+  // Free-form text + client-side Zod validation is the reliable path.
+  //
+  // The second text call below is a defensive non-deterministic retry for the
+  // rare case the first response is malformed; it should almost never fire.
   let resp = await invokeFlowForLLM({
     messages,
-    responseFormat: 'json',
+    responseFormat: 'text',
   });
   let parsed = resp.success && resp.content ? tryParseFrame(resp.content) : null;
+  let retried = false;
+  let retryReason: string | undefined;
   if (!parsed) {
     const firstError = resp.error;
+    // Observability: a retry is a degradation — never let it pass silently.
+    retried = true;
+    retryReason = resp.success
+      ? 'parse/validation failed on first attempt'
+      : `LLM call failed on first attempt: ${firstError ?? 'unknown'}`;
+    console.warn(`[Frame] retry fired — ${retryReason}`);
     resp = await invokeFlowForLLM({
       messages,
       responseFormat: 'text',
     });
     if (resp.success && resp.content) parsed = tryParseFrame(resp.content);
     if (!resp.success && !resp.error && firstError) resp.error = firstError;
+    if (parsed) {
+      console.warn('[Frame] retry SUCCEEDED — second attempt parsed cleanly (first attempt was malformed)');
+    } else {
+      console.error('[Frame] retry FAILED — both attempts unparseable');
+    }
   }
 
   const latencyMs = Date.now() - startedAt;
 
   if (!resp.success || !resp.content) {
-    return { success: false, error: resp.error ?? 'empty response', latencyMs, raw: resp.content };
+    return { success: false, error: resp.error ?? 'empty response', latencyMs, raw: resp.content, prompt: serializedPrompt, retried, retryReason };
   }
   if (!parsed) {
-    return { success: false, error: 'parse/validation failed', latencyMs, raw: resp.content };
+    return { success: false, error: 'parse/validation failed', latencyMs, raw: resp.content, prompt: serializedPrompt, retried, retryReason };
   }
 
   // Inject host-provided boundEntities (LLM should not invent them).
@@ -428,7 +459,7 @@ export async function runFrame(ctx: FrameRunContext): Promise<FrameRunOutcome> {
     }
   }
 
-  return { success: true, result: parsed, latencyMs, raw: resp.content };
+  return { success: true, result: parsed, latencyMs, raw: resp.content, prompt: serializedPrompt, retried, retryReason };
 }
 
 /** Deterministic fallback labels when the LLM omits userFacingLabel. */

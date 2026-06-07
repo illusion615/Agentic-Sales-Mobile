@@ -6,6 +6,9 @@ import path from 'node:path';
 
 // https://vite.dev/config/
 export default defineConfig({
+  define: {
+    __BUILD_TIMESTAMP__: JSON.stringify(new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)),
+  },
   plugins: [
     react(),
     tailwindcss(),

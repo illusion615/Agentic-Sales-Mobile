@@ -21,6 +21,10 @@ if (savedTheme === 'dark') {
 // Initialize color theme
 initColorTheme();
 
+// Build fingerprint — changes on every build
+const BUILD_ID = __BUILD_TIMESTAMP__;
+console.log(`%c[SalesCopilot] build ${BUILD_ID}`, 'color:#6366f1;font-weight:bold');
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />

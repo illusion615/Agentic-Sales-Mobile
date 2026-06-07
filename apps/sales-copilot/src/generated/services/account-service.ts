@@ -44,6 +44,13 @@ function toDv(r: Partial<Omit<Account, 'id'>>): Record<string, unknown> {
   if (r.phone !== undefined) dv.telephone1 = r.phone;
   if (r.latitude !== undefined) dv.address1_latitude = r.latitude;
   if (r.longitude !== undefined) dv.address1_longitude = r.longitude;
+  // industrycode is an integer option set; fromDv exposes it as the numeric code
+  // stringified. Write it back only when the value is a valid numeric code —
+  // free-text industry names have no option-set mapping and are skipped.
+  if (r.industry !== undefined && r.industry !== '') {
+    const code = Number(r.industry);
+    if (Number.isFinite(code)) dv.industrycode = code;
+  }
   return dv;
 }
 

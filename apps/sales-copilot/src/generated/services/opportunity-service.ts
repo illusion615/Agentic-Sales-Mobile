@@ -36,14 +36,14 @@ function fromDv(dv: Crf5c_opportunity1s): Opportunity {
     },
     blocker: dv.crf5c_blocker,
     closedon: dv.crf5c_closedon,
-    confidence: dvNum(dv.crf5c_confidence),
+    confidence: dv.crf5c_confidence,
     confidenceTrend: dvChoice(d, 'crf5c_confidencetrend', Crf5c_opportunity1scrf5c_confidencetrend),
     createdon: dv.crf5c_createdon,
     expectedclosedate: dv.crf5c_expectedclosedate,
     lastaction: dv.crf5c_lastaction,
     ownerid: (d._ownerid_value as string) ?? '',
     stage: dvChoice(d, 'crf5c_stage', Crf5c_opportunity1scrf5c_stage),
-    totalamount: dvNum(dv.crf5c_totalamount) ?? 0,
+    totalamount: dv.crf5c_totalamount ?? 0,
   };
 }
 

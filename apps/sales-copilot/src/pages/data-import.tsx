@@ -72,7 +72,7 @@ export default function DataImportPage() {
   const createActivity = useCreateActivity();
 
   const summary = getTestDataSummary();
-  const ownerId = user?.objectId || '';
+  const ownerId = user?.objectId?.toLowerCase() || '';
 
   const handleImport = async () => {
     setIsImporting(true);

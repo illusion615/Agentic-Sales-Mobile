@@ -12,24 +12,10 @@ export const dataSourcesInfo = {
     "dataSourceType": "Dataverse",
     "apis": {}
   },
-  "appointments": {
+  "activityparties": {
     "tableId": "",
     "version": "",
-    "primaryKey": "activityid",
-    "dataSourceType": "Dataverse",
-    "apis": {}
-  },
-  "phonecalls": {
-    "tableId": "",
-    "version": "",
-    "primaryKey": "activityid",
-    "dataSourceType": "Dataverse",
-    "apis": {}
-  },
-  "emails": {
-    "tableId": "",
-    "version": "",
-    "primaryKey": "activityid",
+    "primaryKey": "activitypartyid",
     "dataSourceType": "Dataverse",
     "apis": {}
   },
@@ -44,6 +30,20 @@ export const dataSourcesInfo = {
     "tableId": "",
     "version": "",
     "primaryKey": "crf5c_aisummaryid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
+  "appointments": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "activityid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
+  "activitymimeattachments": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "activitymimeattachmentid",
     "dataSourceType": "Dataverse",
     "apis": {}
   },
@@ -75,10 +75,137 @@ export const dataSourcesInfo = {
     "dataSourceType": "Dataverse",
     "apis": {}
   },
+  "emails": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "activityid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
+  "msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75c": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "",
+    "dataSourceType": "Dataverse",
+    "apis": {
+      "msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75c": {
+        "path": "/api/data/v9.2/msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75c",
+        "method": "POST",
+        "parameters": [
+          {
+            "name": "prompt_20text",
+            "in": "body",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responseInfo": {
+          "200": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  },
+  "msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "",
+    "dataSourceType": "Dataverse",
+    "apis": {
+      "msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323": {
+        "path": "/api/data/v9.2/msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323",
+        "method": "POST",
+        "parameters": [
+          {
+            "name": "Text",
+            "in": "body",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responseInfo": {
+          "200": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  },
+  "msdyn_aibdptcustomprompt228202435537pmbd0d86826d054e2ba9efc694a371f6fb": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "",
+    "dataSourceType": "Dataverse",
+    "apis": {
+      "msdyn_aibdptcustomprompt228202435537pmbd0d86826d054e2ba9efc694a371f6fb": {
+        "path": "/api/data/v9.2/msdyn_aibdptcustomprompt228202435537pmbd0d86826d054e2ba9efc694a371f6fb",
+        "method": "POST",
+        "parameters": [
+          {
+            "name": "Text",
+            "in": "body",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responseInfo": {
+          "200": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  },
+  "msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "",
+    "dataSourceType": "Dataverse",
+    "apis": {
+      "msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7": {
+        "path": "/api/data/v9.2/msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7",
+        "method": "POST",
+        "parameters": [
+          {
+            "name": "Special_20character",
+            "in": "body",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "Text",
+            "in": "body",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responseInfo": {
+          "200": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  },
+  "annotations": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "annotationid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
   "crf5c_opportunity1s": {
     "tableId": "",
     "version": "",
     "primaryKey": "crf5c_opportunity1id",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
+  "phonecalls": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "activityid",
     "dataSourceType": "Dataverse",
     "apis": {}
   },
@@ -96,45 +223,12 @@ export const dataSourcesInfo = {
     "dataSourceType": "Dataverse",
     "apis": {}
   },
-  "powerappsflow_llm": {
+  "systemusers": {
     "tableId": "",
     "version": "",
-    "primaryKey": "",
-    "dataSourceType": "Connector",
-    "apis": {
-      "Run": {
-        "path": "/{connectionId}/triggers/manual/run",
-        "method": "POST",
-        "parameters": [
-          {
-            "name": "connectionId",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "input",
-            "in": "body",
-            "required": true,
-            "type": "object"
-          },
-          {
-            "name": "api-version",
-            "in": "query",
-            "required": true,
-            "type": "string"
-          }
-        ],
-        "responseInfo": {
-          "200": {
-            "type": "object"
-          },
-          "default": {
-            "type": "object"
-          }
-        }
-      }
-    }
+    "primaryKey": "systemuserid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
   },
   "microsoftcopilotstudio": {
     "tableId": "",

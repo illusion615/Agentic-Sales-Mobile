@@ -32,7 +32,7 @@ export interface Crf5c_opportunity1sBase {
   "crf5c_Account@odata.bind": string;
   crf5c_blocker?: string;
   crf5c_closedon?: string;
-  crf5c_confidence?: string;
+  crf5c_confidence?: number;
   crf5c_confidencetrend?: Crf5c_opportunity1scrf5c_confidencetrend;
   crf5c_createdon?: string;
   crf5c_expectedclosedate?: string;
@@ -41,15 +41,15 @@ export interface Crf5c_opportunity1sBase {
   crf5c_opportunity1id: string;
   crf5c_ownerid: string;
   crf5c_stage: Crf5c_opportunity1scrf5c_stage;
-  crf5c_totalamount: string;
-  importsequencenumber?: string;
+  crf5c_totalamount: number;
+  importsequencenumber?: number;
   overriddencreatedon?: string;
   ownerid: string;
   owneridtype: string;
   statecode: Crf5c_opportunity1sstatecode;
   statuscode?: Crf5c_opportunity1sstatuscode;
-  timezoneruleversionnumber?: string;
-  utcconversiontimezonecode?: string;
+  timezoneruleversionnumber?: number;
+  utcconversiontimezonecode?: number;
 }
 
 export interface Crf5c_opportunity1s extends Crf5c_opportunity1sBase {
@@ -71,7 +71,7 @@ export interface Crf5c_opportunity1s extends Crf5c_opportunity1sBase {
   owningbusinessunitname: string;
   statecodename?: string;
   statuscodename?: string;
-  versionnumber?: string;
+  versionnumber?: number;
   createdby?: object;
   _createdby_value?: string;
   createdonbehalfby?: object;

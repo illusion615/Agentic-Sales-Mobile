@@ -96,7 +96,7 @@ function getDaysSince(dateStr?: string): number {
 
 function getActivityTypeIcon(type: string | null | undefined): React.ComponentType<{ className?: string }> {
   switch (type) {
-    case 'visit': return MapPin;
+    case 'visit': return Calendar;
     case 'call': return Phone;
     case 'meeting': return Calendar;
     case 'email': return Mail;
@@ -259,7 +259,7 @@ export default function ClientDetailPage() {
     if (!account) return;
     try {
       await deleteAccount.mutateAsync(account.id);
-      toast.success('Client deleted');
+      // Returning to the list (item now gone) is the feedback; no toast.
       navigate('/accounts');
     } catch (error: unknown) {
       toast.error('Failed to delete client');
@@ -292,8 +292,7 @@ export default function ClientDetailPage() {
         activities: activities.map((a: Activity) => ({ id: a.id, title: a.title, type: a.type, date: a.scheduleddate })),
         contacts: contacts.map((c: Contact) => ({ id: c.id, name: c.fullname, title: c.title })),
       });
-      
-      toast.success('Client updated');
+      // Exiting edit mode reveals the updated fields inline; no toast.
       setIsEditMode(false);
     } catch (error: unknown) {
       toast.error('Failed to update client');

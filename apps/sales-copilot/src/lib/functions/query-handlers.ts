@@ -55,7 +55,8 @@ const queryOpportunities: FunctionHandler = async (args, ctx) => {
   const oppLimit = (args.limit as number) || 20;
 
   if (ctx.userId && !getAdminMode()) {
-    filtered = filtered.filter((o: Opportunity) => o.ownerid === ctx.userId);
+    const uid = ctx.userId.toLowerCase();
+    filtered = filtered.filter((o: Opportunity) => o.ownerid === uid);
   }
   if (oppAccountId) filtered = filtered.filter((o: Opportunity) => o.account?.id === oppAccountId);
   if (stage) filtered = filtered.filter((o: Opportunity) => o.stage === stage);

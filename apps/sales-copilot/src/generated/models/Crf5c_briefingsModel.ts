@@ -17,17 +17,17 @@ export interface Crf5c_briefingsBase {
   crf5c_audiourl?: string;
   crf5c_briefingid: string;
   crf5c_generatedon: string;
-  crf5c_lastposition?: string;
+  crf5c_lastposition?: number;
   crf5c_ownerid: string;
   crf5c_payloadjson: string;
-  importsequencenumber?: string;
+  importsequencenumber?: number;
   overriddencreatedon?: string;
   ownerid: string;
   owneridtype: string;
   statecode: Crf5c_briefingsstatecode;
   statuscode?: Crf5c_briefingsstatuscode;
-  timezoneruleversionnumber?: string;
-  utcconversiontimezonecode?: string;
+  timezoneruleversionnumber?: number;
+  utcconversiontimezonecode?: number;
 }
 
 export interface Crf5c_briefings extends Crf5c_briefingsBase {
@@ -46,7 +46,7 @@ export interface Crf5c_briefings extends Crf5c_briefingsBase {
   owningbusinessunitname: string;
   statecodename?: string;
   statuscodename?: string;
-  versionnumber?: string;
+  versionnumber?: number;
   createdby?: object;
   _createdby_value?: string;
   createdonbehalfby?: object;

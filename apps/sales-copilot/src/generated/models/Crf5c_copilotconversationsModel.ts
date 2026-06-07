@@ -19,14 +19,14 @@ export interface Crf5c_copilotconversationsBase {
   crf5c_messagesjson: string;
   crf5c_ownerid: string;
   crf5c_startedon: string;
-  importsequencenumber?: string;
+  importsequencenumber?: number;
   overriddencreatedon?: string;
   ownerid: string;
   owneridtype: string;
   statecode: Crf5c_copilotconversationsstatecode;
   statuscode?: Crf5c_copilotconversationsstatuscode;
-  timezoneruleversionnumber?: string;
-  utcconversiontimezonecode?: string;
+  timezoneruleversionnumber?: number;
+  utcconversiontimezonecode?: number;
 }
 
 export interface Crf5c_copilotconversations extends Crf5c_copilotconversationsBase {
@@ -45,7 +45,7 @@ export interface Crf5c_copilotconversations extends Crf5c_copilotconversationsBa
   owningbusinessunitname: string;
   statecodename?: string;
   statuscodename?: string;
-  versionnumber?: string;
+  versionnumber?: number;
   createdby?: object;
   _createdby_value?: string;
   createdonbehalfby?: object;
