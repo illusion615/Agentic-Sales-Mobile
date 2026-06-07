@@ -120,6 +120,28 @@ function describeStep(intent: QueueIntent, isZh: boolean): string {
   }
 }
 
+/**
+ * Completion-tense copy for a finished single-step update/query.
+ * Phase 1b interim: prefer the handler's own past-tense `message` (already
+ * localized), else fall back to a labelled completion. Phase 3 will replace
+ * this with an LLM summary that states exactly what changed.
+ */
+function pickCompletionCopy(
+  intent: QueueIntent,
+  resData: { message?: string } | undefined,
+  isZh: boolean,
+): string {
+  // Handler messages are bilingual "中文 / English" — take the matching half.
+  const raw = resData?.message;
+  if (raw && raw.includes(' / ')) {
+    const [zh, en] = raw.split(' / ');
+    return (isZh ? zh : en).trim();
+  }
+  if (raw) return raw;
+  const label = labelFor(intent, isZh);
+  return isZh ? `${label}已完成。` : `${label} done.`;
+}
+
 function emitAnnounce(queue: IntentQueue, intent: QueueIntent, deps: RuntimeDeps): IntentQueue {
   if (intent.announced || intent.parentId) return queue;
   const { idx, total } = stepPosition(queue, intent);
@@ -671,8 +693,31 @@ async function executeIntent(
 
     if (res.invalidateQueries) deps.invalidate(res.invalidateQueries);
 
-    // For update*: patch announce with result.
-    if (intent.function.startsWith('update')) {
+    // Step position determines HOW the completion is surfaced:
+    //  - multi-step  → patch the existing announce row (narration bar) + final emitSummary
+    //  - single-step → there is NO announce message (emitAnnounce skips total<=1),
+    //                  so patching it is a no-op and the completion VANISHES (this was
+    //                  the "stuck on updating…" bug). Push a real completion message.
+    const { total } = stepPosition(queue, intent);
+    const isSingleStep = total <= 1;
+
+    if (isSingleStep) {
+      // Phase 1b (interim): emit a completion-tense message for single-step
+      // update/query so the turn ends on a result, not a dangling "updating…".
+      // Phase 3: replace this templated copy with an LLM-generated summary that
+      // describes WHAT changed (e.g. "已将商机X的客户更新为Y") from res.data.
+      const resData = res.data as { message?: string } | undefined;
+      const completion = pickCompletionCopy(intent, resData, isZh);
+      deps.pushMessage({
+        id: `complete-${queue.id}-${intent.id}-${Date.now()}`,
+        type: 'agent',
+        content: completion,
+        timestamp: Date.now(),
+        queueId: queue.id,
+        queueIntentId: intent.id,
+      });
+    } else if (intent.function.startsWith('update')) {
+      // For update*: patch announce with result.
       const updateAnnounceId = `announce-${queue.id}-${intent.id}`;
       deps.patchMessage(updateAnnounceId, {
         announceDetail: isZh ? '已更新' : 'Updated',

@@ -51,6 +51,8 @@ const queryOpportunities: FunctionHandler = async (args, ctx) => {
   const stage = args.stage as string | undefined;
   const closingWithinDays = args.closingWithinDays as number | undefined ?? (args.days as number | undefined);
   const minAmount = args.minAmount as number | undefined;
+  const minConfidence = args.minConfidence as number | undefined;
+  const maxConfidence = args.maxConfidence as number | undefined;
   const oppSortBy = args.sortBy as string | undefined;
   const oppLimit = (args.limit as number) || 20;
 
@@ -59,8 +61,18 @@ const queryOpportunities: FunctionHandler = async (args, ctx) => {
     filtered = filtered.filter((o: Opportunity) => o.ownerid === uid);
   }
   if (oppAccountId) filtered = filtered.filter((o: Opportunity) => o.account?.id === oppAccountId);
-  if (stage) filtered = filtered.filter((o: Opportunity) => o.stage === stage);
+  // Stage is stored lowercase (prospecting/qualification/proposal/negotiation/won/lost)
+  // but the LLM often emits it Capitalized ("Negotiation"). Compare case-insensitively
+  // so "negotiation stage" doesn't return 0. (Defect D1)
+  if (stage) {
+    const stageLc = stage.toLowerCase();
+    filtered = filtered.filter((o: Opportunity) => (o.stage ?? '').toLowerCase() === stageLc);
+  }
   if (minAmount) filtered = filtered.filter((o: Opportunity) => o.totalamount >= minAmount);
+  // Confidence range filter — used by "at risk" (minConfidence:0,maxConfidence:49).
+  // Previously these args were silently ignored, so risk queries never narrowed. (Defect D1)
+  if (minConfidence !== undefined) filtered = filtered.filter((o: Opportunity) => (o.confidence ?? 0) >= minConfidence);
+  if (maxConfidence !== undefined) filtered = filtered.filter((o: Opportunity) => (o.confidence ?? 0) <= maxConfidence);
   if (closingWithinDays) {
     const now = new Date();
     const cutoff = new Date(now.getTime() + closingWithinDays * 86400000);
@@ -75,6 +87,9 @@ const queryOpportunities: FunctionHandler = async (args, ctx) => {
     filtered.sort((a, b) => b.totalamount - a.totalamount);
   } else if (oppSortBy === 'closeDate') {
     filtered.sort((a, b) => new Date(a.expectedclosedate || 0).getTime() - new Date(b.expectedclosedate || 0).getTime());
+  } else if (oppSortBy === 'confidence') {
+    // Ascending: lowest-confidence (most at-risk) first.
+    filtered.sort((a, b) => (a.confidence ?? 0) - (b.confidence ?? 0));
   }
 
   return {
@@ -114,8 +129,15 @@ const queryActivities: FunctionHandler = async (args, ctx) => {
   }
 
   if (actAccountId) filteredAct = filteredAct.filter((a: Activity) => a.account?.id === actAccountId);
-  if (actType) filteredAct = filteredAct.filter((a: Activity) => a.type === actType);
-  if (actStatus) filteredAct = filteredAct.filter((a: Activity) => a.status === actStatus);
+  // Case-insensitive: type/status stored lowercase, LLM may Capitalize. (Defect D1 class)
+  if (actType) {
+    const t = actType.toLowerCase();
+    filteredAct = filteredAct.filter((a: Activity) => (a.type ?? '').toLowerCase() === t);
+  }
+  if (actStatus) {
+    const st = actStatus.toLowerCase();
+    filteredAct = filteredAct.filter((a: Activity) => (a.status ?? '').toLowerCase() === st);
+  }
 
   if (scheduledDate) {
     filteredAct = filteredAct.filter((a: Activity) => a.scheduleddate?.startsWith(scheduledDate));

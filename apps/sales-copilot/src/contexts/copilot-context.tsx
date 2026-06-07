@@ -78,50 +78,57 @@ function buildQueueAck(intent: IntentResult, locale: Locale): string {
     ? new Date(dateRaw).toLocaleDateString(isZh ? 'zh-CN' : 'en-US', { month: 'short', day: 'numeric' })
     : '';
   const q = (s: string) => (isZh ? `「${s}」` : `"${s}"`);
-  const reviewZh = '，请在下方卡片中核对，确认后我再为你保存。';
-  const reviewEn = ' — review the card below; I’ll save it once you confirm.';
+  // NOTE (Phase 3b): the ack must NOT promise UI that the runtime may not produce.
+  // A draft can end in a clarification card (no draft card), and an update executes
+  // with no card at all. So we only state what's KNOWN before running — that we're
+  // preparing a draft (the card that follows carries its own Confirm/Cancel, and a
+  // clarification card carries its own question). No "review the card below /
+  // I'll save once you confirm" promises that contradict reality (D3).
 
   switch (intent.function) {
     case 'draftActivity': {
       const who = contact ? (isZh ? `与${contact}` : ` with ${contact}`) : '';
-      const when = dateStr ? (isZh ? `${dateStr} ` : `${dateStr} `) : '';
+      const when = dateStr ? `${dateStr} ` : '';
       const what = title ? q(title) : account ? (isZh ? `对${account}的活动` : `an activity for ${account}`) : (isZh ? '一项活动' : 'an activity');
       return isZh
-        ? `我将为你起草${when}${who}的活动${what}${reviewZh}`
-        : `I'll draft ${when}${what}${who}${reviewEn}`;
+        ? `好的，我来为你准备${when}${who}的活动${what}。`
+        : `Sure — let me prepare ${when}${what}${who}.`;
     }
     case 'draftOpportunity':
       return isZh
-        ? `我将为你起草商机${title ? q(title) : ''}${account ? `（${account}）` : ''}${reviewZh}`
-        : `I'll draft opportunity ${title ? q(title) : ''}${account ? ` (${account})` : ''}${reviewEn}`;
+        ? `好的，我来为你准备商机${title ? q(title) : ''}${account ? `（${account}）` : ''}。`
+        : `Sure — let me prepare the opportunity ${title ? q(title) : ''}${account ? ` (${account})` : ''}.`;
     case 'draftContact':
       return isZh
-        ? `我将为你起草联系人${title ? q(title) : ''}${account ? `（${account}）` : ''}${reviewZh}`
-        : `I'll draft contact ${title ? q(title) : ''}${account ? ` (${account})` : ''}${reviewEn}`;
+        ? `好的，我来为你准备联系人${title ? q(title) : ''}${account ? `（${account}）` : ''}。`
+        : `Sure — let me prepare the contact ${title ? q(title) : ''}${account ? ` (${account})` : ''}.`;
     case 'draftAccount':
       return isZh
-        ? `我将为你起草客户${title ? q(title) : ''}${reviewZh}`
-        : `I'll draft account ${title ? q(title) : ''}${reviewEn}`;
+        ? `好的，我来为你准备客户${title ? q(title) : ''}。`
+        : `Sure — let me prepare the account ${title ? q(title) : ''}.`;
     case 'updateActivity':
     case 'updateOpportunity':
     case 'updateContact':
     case 'updateAccount': {
-      // Update functions execute directly in the queue (executeIntent's
-      // non-draft branch) — there is NO confirmation card. Do NOT promise one;
-      // describe the action as already happening so the message matches reality.
+      // Update functions execute directly in the queue (no confirmation card).
       const target = title || contact || account;
       return isZh
         ? `好的，正在更新${target ? q(target) : '该记录'}…`
         : `Got it — updating ${target ? q(target) : 'the record'}…`;
     }
     default:
-      // Fall back to the agent's own label if present, else a still-useful generic.
       if (intent.userFacingLabel) return isZh ? intent.userFacingLabel.zh : intent.userFacingLabel.en;
-      return isZh ? '我将根据你的请求准备操作，请在下方确认。' : "I'll prepare this based on your request — confirm below.";
+      return isZh ? '好的，我来处理。' : "Sure — on it.";
   }
 }
 
-/** Build an acknowledgement summarising a multi-step plan before the cards render. */
+/**
+ * Build an acknowledgement for a multi-step plan. Truthful + outcome-aware:
+ * steps that EXECUTE immediately (update / query) vs steps that produce a draft
+ * card for confirmation (draft) are knowable before running, so we phrase the
+ * confirmation note only when at least one draft step exists — never the blanket
+ * "confirm each" that misled the user when an update had already executed (D2).
+ */
 function buildMultiStepAck(intent: IntentResult, stepCount: number, locale: Locale): string {
   const isZh = locale === 'zh-Hans';
   const labels: string[] = [];
@@ -129,15 +136,21 @@ function buildMultiStepAck(intent: IntentResult, stepCount: number, locale: Loca
   for (const act of intent.additionalActions ?? []) {
     if (act.userFacingLabel) labels.push(isZh ? act.userFacingLabel.zh : act.userFacingLabel.en);
   }
+  // Does the plan include any draft step (which renders a confirmation card)?
+  const fns = [intent.function, ...((intent.additionalActions ?? []).map((x) => x.function))];
+  const hasDraft = fns.some((f) => typeof f === 'string' && f.startsWith('draft'));
+  const confirmNote = hasDraft
+    ? (isZh ? '需要确认的我会以卡片形式呈现。' : "I'll show a card for anything that needs your confirmation.")
+    : '';
   if (labels.length > 0) {
     const list = labels.join(isZh ? '、' : ', ');
     return isZh
-      ? `已识别 ${stepCount} 项任务：${list}。请依次在下方卡片中确认。`
-      : `Detected ${stepCount} tasks: ${list}. Confirm each in the cards below.`;
+      ? `好的，我来处理这 ${stepCount} 项：${list}。${confirmNote}`
+      : `On it — handling these ${stepCount} tasks: ${list}. ${confirmNote}`.trimEnd();
   }
   return isZh
-    ? `已识别 ${stepCount} 项任务，请依次在下方卡片中确认。`
-    : `Detected ${stepCount} tasks — confirm each in the cards below.`;
+    ? `好的，我来处理这 ${stepCount} 项任务。${confirmNote}`
+    : `On it — handling ${stepCount} tasks. ${confirmNote}`.trimEnd();
 }
 
 export type { ExtractedVisitData } from '@/lib/visit-extraction';

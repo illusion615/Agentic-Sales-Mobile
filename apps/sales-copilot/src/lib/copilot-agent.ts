@@ -402,6 +402,51 @@ async function processMessageInner(
     } else {
       const translated = frameToIntent(pipelineResult);
       if (!translated) {
+        // ===== Chat lane (Phase 3a) =====
+        // When the Frame classified the message as conversational (None|Chat) —
+        // a greeting, thanks, small talk — there is no actionable function and
+        // frameToIntent returns null. Previously this hit a harsh "Could not
+        // determine an actionable intent. Please rephrase." wall. Instead, give
+        // a friendly LLM-generated reply, like a real assistant would.
+        const frameIntents = (pipelineResult.frame?.intents ?? []) as Array<{ salesObject?: string; cognitiveTask?: string }>;
+        const isConversational =
+          frameIntents.length > 0 &&
+          frameIntents.every((i) => i?.salesObject === 'None' && i?.cognitiveTask === 'Chat');
+        if (isConversational) {
+          console.log('[CopilotAgent] Chat lane — generating a conversational reply');
+          if (onProgress) onProgress({ stage: 'generating', status: 'active' });
+          const chatSystem = isZh
+            ? '你是一位友好、专业的销售助手。用户刚刚说了一句寒暄、感谢或闲聊。用一到两句话自然地回应，保持温暖且简洁。如果合适，可以轻描淡写地提示你能帮忙查询客户、商机、活动或安排跟进——但不要生硬推销，也不要罗列功能清单。'
+            : 'You are a friendly, professional sales assistant. The user just made small talk, a greeting, or said thanks. Reply naturally in one or two sentences — warm and concise. If it fits, lightly mention you can help look up accounts, opportunities, activities, or plan follow-ups — but do not hard-sell or list features.';
+          let chatContent = '';
+          try {
+            const chatResp = await invokeFlowForLLM({
+              messages: [
+                { role: 'system', content: chatSystem },
+                { role: 'user', content: userMessage },
+              ],
+              responseFormat: 'text',
+            });
+            if (chatResp.success && chatResp.content) chatContent = chatResp.content.trim();
+          } catch (e) {
+            console.warn('[CopilotAgent] Chat lane LLM failed:', e);
+          }
+          if (!chatContent) {
+            // Fallback only if the LLM is unavailable — still friendly, never an error.
+            chatContent = isZh ? '好的！需要我帮你查客户、商机或安排跟进随时说。' : "You got it! Happy to help with accounts, opportunities, or planning follow-ups whenever you need.";
+          }
+          recordCircuitBreakerSuccess();
+          if (onProgress) onProgress({ stage: 'generating', status: 'completed' });
+          return {
+            success: true,
+            content: chatContent,
+            latencyMs: Date.now() - startTime,
+            thinkingSteps: [
+              { stage: 'intent' as const, status: 'completed' as const, label: isZh ? '日常对话' : 'Chat' },
+            ],
+          };
+        }
+
         recordCircuitBreakerFailure();
         recordMetrics({ success: false, latencyMs: Date.now() - startTime });
         return {
@@ -486,6 +531,35 @@ async function processMessageInner(
       },
       onProgress
     );
+  }
+
+  // ===== Single-executor guard (Phase 1: unify execution on the IntentQueue) =====
+  // The IntentQueue runtime is the SOLE execution engine. When copilot-context's
+  // shouldUseQueue() will route this intent to the queue, executing it here too is
+  // pure double-execution — the agent's result is discarded by the queue fork anyway,
+  // yet executeFunction runs twice (matching + the operation), causing duplicate
+  // Dataverse writes and the wasted second pass seen in logs.
+  //
+  // So: when the intent will be queue-handled, return early with ONLY the intent +
+  // thinking steps. copilot-context reads rawIntent (attached by the outer wrapper)
+  // and rebuilds/executes from it. This predicate MUST mirror shouldUseQueue exactly.
+  const willUseQueue =
+    intent.function.startsWith('draft') ||
+    (intent.additionalActions?.length ?? 0) > 0 ||
+    intent.requiresMatching === true ||
+    (intent.resolutions?.length ?? 0) > 0;
+  if (willUseQueue) {
+    console.log('[CopilotAgent] Deferring execution to the IntentQueue (single executor) — no agent-side run');
+    return {
+      success: true,
+      content: '',
+      functionCalled: intent.function,
+      functionDisplayName: getDisplayName(intent.function, isZh ? 'zh-Hans' : 'en-US'),
+      latencyMs: Date.now() - startTime,
+      thinkingSteps: [
+        ...(hasMultipleIntents ? [] : [{ stage: 'intent' as const, status: 'completed' as const, label: isZh ? `意图识别：${intentLabel}` : `Intent: ${intentLabel}` }]),
+      ],
+    };
   }
 
   // ===== Smart Matching: Pre-check for entity matching before draft functions =====
