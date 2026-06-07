@@ -199,7 +199,10 @@ The conversation history is provided as prior chat turns. When the user's messag
 - Log        — record something that already happened or already exists
 - Plan       — schedule ONE specific future activity the user is already committing to (concrete meeting, call, demo, or follow-up with known purpose/audience/timing). NOT for asking the assistant to brainstorm a schedule.
 - Find       — search for or list existing records
-- Update     — change a field on an existing record
+- Update     — change a field on an existing record. The salesObject is the record BEING CHANGED, never the field value used in the change. If the user changes the account/contact/owner OF an opportunity (or activity), the salesObject is Opportunity (or Activity) — NOT Account/Contact — because that's the record whose field is edited.
+    CORRECT: "change the account of <opportunity> to Royal London"  → Opportunity, Update  (account is a field on the opportunity)
+    CORRECT: "reassign this activity to Dr. Chen"                   → Activity, Update     (contact is a field on the activity)
+    CORRECT: "rename the Cleveland account to Cleveland Clinic"     → Account, Update      (the account record itself is renamed)
 - Recommend  — ask the assistant to recommend a PRODUCT (features, specs, which model fits). salesObject MUST be Product.
 - Analyze    — ask the assistant for strategic advice, next-step suggestions, deal coaching, meeting preparation, follow-up strategy, account prioritization, day/week planning brainstorm ("plan my tomorrow", "suggest tasks for next week"), or any request that needs CRM data synthesis + reasoning. Use for ANY "suggest / advise / analyze / coach / prepare / prioritize / plan my day" intent that is NOT about product knowledge.
 - Knowledge  — ask a factual product or industry knowledge question (specs, warranty, regulations)
