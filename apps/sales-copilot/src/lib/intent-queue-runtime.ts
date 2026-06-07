@@ -122,15 +122,44 @@ function describeStep(intent: QueueIntent, isZh: boolean): string {
 
 /**
  * Completion-tense copy for a finished single-step update/query.
- * Phase 1b interim: prefer the handler's own past-tense `message` (already
- * localized), else fall back to a labelled completion. Phase 3 will replace
- * this with an LLM summary that states exactly what changed.
+ * Result-driven (Phase 3): instead of the generic handler message ("商机信息已更新"),
+ * name the record and list the fields that actually changed ("已更新商机「X」：客户、阶段").
+ * Deterministic — no LLM call on the completion path. Falls back to the handler's
+ * bilingual message, then to a labelled completion.
  */
+const FIELD_LABELS: Record<string, { zh: string; en: string }> = {
+  name1: { zh: '名称', en: 'name' }, title: { zh: '标题', en: 'title' },
+  totalamount: { zh: '金额', en: 'amount' }, amount: { zh: '金额', en: 'amount' },
+  stage: { zh: '阶段', en: 'stage' }, confidence: { zh: '信心度', en: 'confidence' },
+  expectedclosedate: { zh: '预计关单日', en: 'close date' }, closedon: { zh: '关单日期', en: 'closed date' },
+  lastaction: { zh: '最近动态', en: 'last action' }, account: { zh: '客户', en: 'account' },
+  opportunity: { zh: '关联商机', en: 'opportunity' }, contact: { zh: '联系人', en: 'contact' },
+  contacts: { zh: '参与人', en: 'attendees' }, status: { zh: '状态', en: 'status' },
+  type: { zh: '类型', en: 'type' }, scheduleddate: { zh: '日期', en: 'date' },
+  notes: { zh: '备注', en: 'notes' }, industrycode: { zh: '行业', en: 'industry' },
+  phone: { zh: '电话', en: 'phone' }, email: { zh: '邮箱', en: 'email' }, address: { zh: '地址', en: 'address' },
+};
+
 function pickCompletionCopy(
   intent: QueueIntent,
-  resData: { message?: string } | undefined,
+  resData: { message?: string; updatedFields?: string[]; opportunity?: { name1?: string }; account?: { name1?: string }; contact?: { fullname?: string }; activity?: { title?: string } } | undefined,
   isZh: boolean,
 ): string {
+  // Result-specific: name + the fields that actually changed.
+  const updated = resData?.updatedFields?.filter((f) => f !== 'closedon') ?? [];
+  const recordName =
+    resData?.opportunity?.name1 ?? resData?.account?.name1 ??
+    resData?.contact?.fullname ?? resData?.activity?.title ??
+    (intent.arguments.opportunityName ?? intent.arguments.accountName ??
+     intent.arguments.contactName ?? intent.arguments.title) as string | undefined;
+  if (intent.function.startsWith('update') && updated.length > 0) {
+    const labels = updated.map((f) => (isZh ? FIELD_LABELS[f]?.zh : FIELD_LABELS[f]?.en) ?? f);
+    const fieldList = labels.join(isZh ? '、' : ', ');
+    const what = recordName ? (isZh ? `「${recordName}」` : ` "${recordName}"`) : '';
+    return isZh
+      ? `已更新${what}：${fieldList}。`
+      : `Updated${what}: ${fieldList}.`;
+  }
   // Handler messages are bilingual "中文 / English" — take the matching half.
   const raw = resData?.message;
   if (raw && raw.includes(' / ')) {
@@ -706,7 +735,7 @@ async function executeIntent(
       // update/query so the turn ends on a result, not a dangling "updating…".
       // Phase 3: replace this templated copy with an LLM-generated summary that
       // describes WHAT changed (e.g. "已将商机X的客户更新为Y") from res.data.
-      const resData = res.data as { message?: string } | undefined;
+      const resData = res.data as { message?: string; updatedFields?: string[] } | undefined;
       const completion = pickCompletionCopy(intent, resData, isZh);
       deps.pushMessage({
         id: `complete-${queue.id}-${intent.id}-${Date.now()}`,
