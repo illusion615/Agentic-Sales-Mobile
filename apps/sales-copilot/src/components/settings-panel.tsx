@@ -72,7 +72,6 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const [locale, setLocaleState] = useState<Locale>(getLocale);
   const [isDark, setIsDark] = useState(true);
   const [selectedVoice, setSelectedVoiceState] = useState(getSelectedVoice);
-  const voicesForLocale = getVoicesForLocale(locale);
   const [isPlaying, setIsPlaying] = useState(false);
   const [systemVoicesLoaded, setSystemVoicesLoaded] = useState(false);
   const [systemVoices, setSystemVoices] = useState<SpeechSynthesisVoice[]>([]);
@@ -735,30 +734,29 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                             {/* Group voices by language */}
                             {(() => {
                               const langCode = locale === 'zh-Hans' ? 'zh' : 'en';
-                              // Get premium and natural tier voice names from voiceOptions
-                              const premiumNaturalVoiceNames = voicesForLocale
-                                .filter((v: VoiceOption) => v.tier === 'premium' || v.tier === 'natural')
-                                .map((v: VoiceOption) => extractVoiceName(v.id).toLowerCase());
-                              
-                              // Filter system voices to only those matching premium/natural tiers
-                              const filteredVoices = systemVoices.filter((v: SpeechSynthesisVoice) => {
-                                const voiceNameLower = v.name.toLowerCase();
-                                const matchesLang = v.lang.startsWith(langCode);
-                                const matchesTier = premiumNaturalVoiceNames.some((name: string) => voiceNameLower.includes(name));
-                                return matchesLang && matchesTier;
-                              });
-                              
-                              // Fallback: if no premium/natural voices found, show all voices for the language
-                              const voicesToShow = filteredVoices.length > 0 
-                                ? filteredVoices 
-                                : systemVoices.filter((v: SpeechSynthesisVoice) => v.lang.startsWith(langCode));
+                              const forLang = systemVoices.filter((v: SpeechSynthesisVoice) => v.lang.startsWith(langCode));
+                              // D11: only show HIGH-QUALITY voices. Browser system voices carry no
+                              // tier metadata, but the high-quality ones reliably signal themselves
+                              // via name keywords (Natural / Neural / Online / Premium / Enhanced /
+                              // Eloquence) or by being cloud-backed (localService === false). Filter
+                              // on those real signals rather than the Azure voiceOptions names, which
+                              // rarely match the browser's own voice names.
+                              const QUALITY_RE = /natural|neural|online|premium|enhanced|eloquence|wavenet|studio/i;
+                              const hq = forLang.filter((v: SpeechSynthesisVoice) =>
+                                QUALITY_RE.test(v.name) || v.localService === false
+                              );
+                              // Fallback: if the platform exposes no obviously-premium voice, show all
+                              // for the language so the picker is never empty.
+                              const voicesToShow = hq.length > 0 ? hq : forLang;
                               
                               return (
                                 <>
                                   {voicesToShow.length > 0 && (
                                     <>
                                       <div className="px-2 py-1.5 text-xs text-muted-foreground font-medium">
-                                        {locale === 'zh-Hans' ? 'Premium & Natural' : 'Premium & Natural'}
+                                        {hq.length > 0
+                                          ? (locale === 'zh-Hans' ? '高质量语音' : 'High-quality voices')
+                                          : (locale === 'zh-Hans' ? '可用语音' : 'Available voices')}
                                       </div>
                                       {voicesToShow.map((voice: SpeechSynthesisVoice) => (
                                         <SelectItem key={voice.name} value={voice.name}>

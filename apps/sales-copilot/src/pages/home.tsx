@@ -13,6 +13,7 @@ import { useUpdateCopilotConversation, useCreateCopilotConversation } from '@/ge
 import { useCreateBusinessInsight, useBusinessInsightList, useDeleteBusinessInsight } from '@/generated/hooks/use-business-insight';
 import { useLocale } from '@/lib/i18n';
 import { t, getGreeting, getChatFontClass, getThinkingDotStyle, getAutoPlayAgentResponse, getSelectedVoice, findMatchingSystemVoice, getVoiceSummaryEnabled, generateVoiceSummary, getAgentFramework, getHomeHeaderWidget, getAdminMode, type Locale, type ThinkingDotStyle, type HomeHeaderWidget } from '@/lib/i18n';
+import { ensureVoicesReady } from '@/lib/speech';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { formatCurrencyCompact, formatCurrencyFull } from '@/lib/format-currency';
 
@@ -872,7 +873,11 @@ export default function HomeDashboard() {
     // Function to speak text
     const speakText = (text: string) => {
       if (!text.trim()) return;
-      if ('speechSynthesis' in window) {
+      if (!('speechSynthesis' in window)) return;
+      // D12: wait for the async voice list to populate before the first utterance
+      // so it uses the selected (premium) voice, not a default fallback. Resolves
+      // immediately once voices are ready.
+      void ensureVoicesReady().then(() => {
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.lang = locale === 'zh-Hans' ? 'zh-CN' : 'en-US';
         const selectedVoiceId = getSelectedVoice();
@@ -884,7 +889,7 @@ export default function HomeDashboard() {
         utterance.pitch = 1.0;
         speechSynthesisRef.current = utterance;
         window.speechSynthesis.speak(utterance);
-      }
+      });
     };
     
     // Extract plain text from content (remove markdown/json)
@@ -1145,7 +1150,11 @@ export default function HomeDashboard() {
     
     briefMeStartTimeRef.current = Date.now();
     setBriefMeIsPlaying(true);
-    speakNextSegment();
+    // D12: wait for the browser's async voice list to populate BEFORE the first
+    // utterance, otherwise segment 0 (the first sentence) speaks with a default
+    // low-quality voice while the premium voice is still loading. Resolves
+    // immediately once voices are ready (no delay on subsequent insights).
+    void ensureVoicesReady().then(speakNextSegment);
     
     // Start timer for current time
     if (briefMeTimerRef.current) {
@@ -1669,6 +1678,16 @@ ${agentResponse}`;
     setBriefMeExpanded(false);
   }, [handleBriefMeStop]);
 
+  // D13: bind the audio player's lifecycle to the Insight panel. The player is
+  // rendered as a floating bar only while the panel is CLOSED (briefMeExpanded
+  // && !insightsSheetOpen), which used to leave it playing/visible after the
+  // user dismissed the panel. Route every panel open/close through here so that
+  // CLOSING the panel also stops playback and retires the player.
+  const handleInsightsSheetOpenChange = useCallback((open: boolean) => {
+    setInsightsSheetOpen(open);
+    if (!open) handleInsightsPanelStop();
+  }, [handleInsightsPanelStop]);
+
   // State for clearing insights
   const [isClearingInsights, setIsClearingInsights] = useState(false);
 
@@ -1982,7 +2001,7 @@ ${agentResponse}`;
               activityInsights={businessInsights}
               allActivities={activities}
               insightsSheetOpen={insightsSheetOpen}
-              onInsightsSheetOpenChange={setInsightsSheetOpen}
+              onInsightsSheetOpenChange={handleInsightsSheetOpenChange}
               onRefreshInsights={handleRefreshInsight}
               isRefreshingInsights={isRefreshingInsight}
               insightRefreshStatus={insightRefreshStatus}
