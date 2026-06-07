@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Calendar as CalendarPicker } from '@/components/ui/calendar';
 import type { BusinessInsight } from '@/generated/models/business-insight-model';
 import type { Activity } from '@/generated/models/activity-model';
+import { ACTIVITY_TYPE_COLORS } from '@/lib/activity-colors';
 
 // Animation variants
 const itemVariants = {
@@ -108,14 +109,9 @@ interface KPICardsProps {
 }
 
 
-// Activity type colors for calendar view
-const activityTypeColors: Record<string, { bg: string; text: string; dot: string }> = {
-  'visit': { bg: 'bg-blue-500/20', text: 'text-blue-600 dark:text-blue-400', dot: 'bg-blue-500' },
-  'call': { bg: 'bg-emerald-500/20', text: 'text-emerald-600 dark:text-emerald-400', dot: 'bg-emerald-500' },
-  'meeting': { bg: 'bg-purple-500/20', text: 'text-purple-600 dark:text-purple-400', dot: 'bg-purple-500' },
-  'email': { bg: 'bg-orange-500/20', text: 'text-orange-600 dark:text-orange-400', dot: 'bg-orange-500' },
-  'other': { bg: 'bg-gray-500/20', text: 'text-gray-600 dark:text-gray-400', dot: 'bg-gray-500' },
-};
+// Activity type colors — single source of truth shared across Home, the
+// Activities calendar view, and activity-detail (see lib/activity-colors).
+const activityTypeColors = ACTIVITY_TYPE_COLORS;
 
 // Icons for each activity type - matching activities.tsx exactly
 const typeIcons: Record<string, React.ComponentType<{ className?: string }>> = {

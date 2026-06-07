@@ -18,6 +18,7 @@ import {
   CheckCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ACTIVITY_TYPE_COLORS } from '@/lib/activity-colors';
 import { MobileLayout } from '@/components/mobile-layout';
 import { GlassCard } from '@/components/glass-card';
 import { AISummaryCard } from '@/components/ai-summary-card';
@@ -56,13 +57,11 @@ const activityIcons: Record<string, typeof Phone> = {
   other: CheckSquare,
 };
 
-const activityColors: Record<string, string> = {
-  visit: 'bg-primary',
-  call: 'bg-[#0D8F8C]',
-  meeting: 'bg-[#6366F1]',
-  email: 'bg-[#10B981]',
-  other: 'bg-muted-foreground',
-};
+// Activity type colors come from the shared single source of truth so the
+// detail header icon matches Home and the Activities list (D10).
+const activityColors: Record<string, string> = Object.fromEntries(
+  Object.entries(ACTIVITY_TYPE_COLORS).map(([type, c]) => [type, c.solid]),
+);
 
 function formatDateTime(dateStr: string | undefined): string {
   if (!dateStr) return 'N/A';

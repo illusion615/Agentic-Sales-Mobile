@@ -21,6 +21,7 @@ import { FloatingQuickActions } from '@/components/floating-quick-actions';
 import { GlassCard } from '@/components/glass-card';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { ACTIVITY_TYPE_COLORS } from '@/lib/activity-colors';
 import { useActivityList } from '@/generated/hooks/use-activity';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Activity as DataverseActivity } from '@/generated/models/activity-model';
@@ -53,21 +54,15 @@ const activityIcons: Record<string, typeof Phone> = {
   other: CheckSquare,
 };
 
-const activityColors: Record<string, string> = {
-  visit: 'bg-primary',
-  call: 'bg-[#0D8F8C]',
-  meeting: 'bg-[#6366F1]',
-  email: 'bg-[#10B981]',
-  other: 'bg-muted-foreground',
-};
+// Activity type colors come from the shared single source of truth so the
+// calendar view and icon tiles match the Home dashboard exactly (D10).
+const activityColors: Record<string, string> = Object.fromEntries(
+  Object.entries(ACTIVITY_TYPE_COLORS).map(([type, c]) => [type, c.solid]),
+);
 
-const activityDotColors: Record<string, string> = {
-  visit: 'bg-primary',
-  call: 'bg-[#0D8F8C]',
-  meeting: 'bg-[#6366F1]',
-  email: 'bg-[#10B981]',
-  other: 'bg-muted-foreground/60',
-};
+const activityDotColors: Record<string, string> = Object.fromEntries(
+  Object.entries(ACTIVITY_TYPE_COLORS).map(([type, c]) => [type, c.dot]),
+);
 
 function formatTime(dateStr: string): string {
   const date = new Date(dateStr);
