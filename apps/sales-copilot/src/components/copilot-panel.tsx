@@ -713,11 +713,9 @@ export function CopilotPanel() {
                     matchSelection={message.matchSelection}
                     resolved={message.resolutionState === 'resolved'}
                     resolutionResult={message.resolutionResult}
-                    onSelect={(record) => {
-                      toast.success(locale === 'zh-Hans' 
-                        ? `已选择: ${record.name}` 
-                        : `Selected: ${record.name}`);
-                    }}
+                    // No toast on select: the card locks to a "Selected: X · Account"
+                    // pill inline and a completion message follows, so a toast would
+                    // be a third, redundant confirmation (D14).
                     onContinueWithSelection={(record, pendingIntent) => {
                       continuePendingAction(
                         record,
