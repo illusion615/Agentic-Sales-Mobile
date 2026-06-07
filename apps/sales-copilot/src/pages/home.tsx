@@ -541,17 +541,34 @@ export default function HomeDashboard() {
       name: a.name1 || 'Unnamed',
     }));
 
-    // Activities this week (count all activities as demo)
-    const activitiesThisWeek = activities.length;
+    // Weekly Momentum — count only THIS user's activities scheduled within the
+    // current week. Previously this counted `activities.length` (every activity
+    // ever, all users), so the momentum % was always wildly inflated. Use a
+    // midnight-normalized [Sunday, next Sunday) window so the bounds don't drift
+    // with the current time of day, and owner-scope to match the opportunity KPIs.
+    const weekWindowStart = new Date(today);
+    weekWindowStart.setHours(0, 0, 0, 0);
+    weekWindowStart.setDate(weekWindowStart.getDate() - today.getDay());
+    const weekWindowEnd = new Date(weekWindowStart);
+    weekWindowEnd.setDate(weekWindowEnd.getDate() + 7);
+
+    const weekActivities = activities.filter((a: Activity) => {
+      if (!isAdmin && a.ownerid !== userId) return false;
+      if (!a.scheduleddate) return false;
+      const d = new Date(a.scheduleddate);
+      return !Number.isNaN(d.getTime()) && d >= weekWindowStart && d < weekWindowEnd;
+    });
+
+    const activitiesThisWeek = weekActivities.length;
     const weeklyTarget = 15; // Default target
 
     // Activity breakdown - use type
-    const visitCount = activities.filter((a: Activity) => {
+    const visitCount = weekActivities.filter((a: Activity) => {
       const typeLabel = a.type;
       return typeLabel === 'visit' || typeLabel === 'meeting';
     }).length;
-    
-    const callCount = activities.filter((a: Activity) => {
+
+    const callCount = weekActivities.filter((a: Activity) => {
       const typeLabel = a.type;
       return typeLabel === 'call';
     }).length;
