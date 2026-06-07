@@ -22,6 +22,7 @@ import {
   recordCircuitBreakerSuccess,
   recordMetrics,
   getMatchThresholds,
+  extractBoundEntities,
   type ValidatedIntentResult,
   type SingleIntent,
   type PendingResolution,
@@ -230,11 +231,16 @@ async function processMessageInner(
   let intent: IntentResult | null = null;
 
   // ===== Frame mode: Frame + Orchestrator drives production =====
+  // Phase 2: derive boundEntities from the current page so the Orchestrator gets
+  // the IDs of the account/opportunity/contact the user is viewing (this link was
+  // previously missing — pipelineCtx never set boundEntities, so describeBoundEntities
+  // always rendered empty and the Orchestrator had to guess from the page summary).
   const pipelineCtx = {
       userMessage,
       pageContext: context.pageContext,
       conversationHistory: history,
       locale: (isZh ? 'zh-Hans' : 'en') as 'zh-Hans' | 'en',
+      boundEntities: extractBoundEntities(context.pageContext?.pageData),
     };
 
     let pipelineResult: PipelineResult;

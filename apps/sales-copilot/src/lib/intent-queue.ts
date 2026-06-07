@@ -15,7 +15,7 @@
  * fuzzy matching, function execution, and React message rendering.
  */
 
-import type { ResolutionItem } from './agent-utils';
+import { extractEntitySeed, type ResolutionItem } from './agent-utils';
 import type { IntentResult } from './copilot-agent';
 
 export type IntentStatus =
@@ -156,14 +156,9 @@ export function buildQueueFromIntent(intent: IntentResult): IntentQueue {
   // args (account / contact / opportunity id + name). buildEffectiveArgs only
   // fills MISSING keys, so this lets sibling additionalActions auto-link to the
   // same entity the user is acting on — e.g. "update this opportunity AND book a
-  // meeting" creates the meeting already linked to that opportunity. Mirrors the
-  // injection processAdditionalIntents does on the legacy path.
-  const seedContext: Record<string, string> = {};
-  const primaryArgs = (intent.arguments ?? {}) as Record<string, unknown>;
-  for (const key of ['accountId', 'accountName', 'contactId', 'contactName', 'opportunityId', 'opportunityName'] as const) {
-    const val = primaryArgs[key];
-    if (typeof val === 'string' && val.trim()) seedContext[key] = val;
-  }
+  // meeting" creates the meeting already linked to that opportunity.
+  // Phase 2: same canonical PAGE_ENTITY_KEYS the page-seed uses (no drift).
+  const seedContext = extractEntitySeed(intent.arguments ?? {});
 
   return {
     id,

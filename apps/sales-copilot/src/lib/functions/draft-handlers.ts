@@ -5,29 +5,46 @@
 
 import { registerHandlers, type FunctionHandler } from './handler-registry';
 
-const draftActivity: FunctionHandler = async (args) => ({
-  success: true,
-  data: {
-    type: 'activity' as const,
-    isNew: true,
+const draftActivity: FunctionHandler = async (args) => {
+  const type = (args.type as string) || 'visit';
+  const accountName = (args.accountName as string) || '';
+  const contactName = (args.contactName as string) || '';
+  // Defensive title synthesis (Defect D6): the Orchestrator LLM occasionally
+  // omits the title on a step, leaving the card's Title field blank. Never ship
+  // an empty title — synthesize a specific one from the account/contact + type.
+  const typeLabel: Record<string, string> = {
+    visit: 'Visit', call: 'Call', meeting: 'Meeting', email: 'Email', other: 'Activity',
+  };
+  let title = (args.title as string) || '';
+  if (!title.trim()) {
+    const who = accountName || contactName;
+    const label = typeLabel[type] || 'Activity';
+    title = who ? `${who} - ${label}` : label;
+  }
+  return {
+    success: true,
     data: {
-      title: args.title as string || '',
-      type: args.type as string || 'visit',
-      accountId: args.accountId as string || '',
-      accountName: args.accountName as string || '',
-      contactId: args.contactId as string || '',
-      contactName: args.contactName as string || '',
-      contactNames: (args.contactNames as string[]) || [],
-      contactTitle: args.contactTitle as string || '',
-      scheduledDate: args.scheduledDate as string || new Date().toISOString().split('T')[0],
-      result: args.result as string || '',
-      opportunityId: args.opportunityId as string || '',
-      opportunityName: args.opportunityName as string || '',
-      notes: args.notes as string || '',
-      temporalMode: args.temporalMode as string || '',
+      type: 'activity' as const,
+      isNew: true,
+      data: {
+        title,
+        type,
+        accountId: args.accountId as string || '',
+        accountName,
+        contactId: args.contactId as string || '',
+        contactName,
+        contactNames: (args.contactNames as string[]) || [],
+        contactTitle: args.contactTitle as string || '',
+        scheduledDate: args.scheduledDate as string || new Date().toISOString().split('T')[0],
+        result: args.result as string || '',
+        opportunityId: args.opportunityId as string || '',
+        opportunityName: args.opportunityName as string || '',
+        notes: args.notes as string || '',
+        temporalMode: args.temporalMode as string || '',
+      },
     },
-  },
-});
+  };
+};
 
 const draftOpportunity: FunctionHandler = async (args) => ({
   success: true,

@@ -765,3 +765,59 @@ export const AwaitingClarificationSchema = z.object({
 });
 export type AwaitingClarification = z.infer<typeof AwaitingClarificationSchema>;
 
+// ========== Phase 2: Unified page-entity context ==========
+// Single source of truth for turning a page's `pageData` into the two shapes
+// the agent pipeline needs:
+//   1. boundEntities  → fed to the Frame so the Orchestrator knows the IDs of
+//      the account / opportunity / contact the user is currently viewing
+//      (previously this link was broken — pipelineCtx never set boundEntities,
+//      so the Orchestrator only ever saw a free-text page summary, not IDs).
+//   2. resolvedContext seed → merged into the IntentQueue so every drafted/
+//      updated record auto-links to what the user is viewing.
+// Both derive from the SAME canonical key names below, so page → frame → queue
+// can no longer diverge on naming.
+
+/** The flat entity keys every detail page writes into setPageContext.pageData. */
+export const PAGE_ENTITY_KEYS = [
+  'accountId', 'accountName',
+  'contactId', 'contactName',
+  'opportunityId', 'opportunityName',
+] as const;
+
+export interface BoundEntities {
+  account?: { id?: string; name?: string };
+  opportunity?: { id?: string; name?: string };
+  contact?: { id?: string; name?: string };
+}
+
+function str(v: unknown): string | undefined {
+  return typeof v === 'string' && v.trim() ? v : undefined;
+}
+
+/** Build Frame boundEntities ({account,opportunity,contact}) from page pageData. */
+export function extractBoundEntities(pageData: unknown): BoundEntities | undefined {
+  if (!pageData || typeof pageData !== 'object') return undefined;
+  const pd = pageData as Record<string, unknown>;
+  const out: BoundEntities = {};
+  const acc = { id: str(pd.accountId), name: str(pd.accountName) };
+  const opp = { id: str(pd.opportunityId), name: str(pd.opportunityName) };
+  const con = { id: str(pd.contactId), name: str(pd.contactName) };
+  if (acc.id || acc.name) out.account = acc;
+  if (opp.id || opp.name) out.opportunity = opp;
+  if (con.id || con.name) out.contact = con;
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** Build a queue resolvedContext seed (flat string map) from page pageData. */
+export function extractEntitySeed(pageData: unknown): Record<string, string> {
+  const seed: Record<string, string> = {};
+  if (!pageData || typeof pageData !== 'object') return seed;
+  const pd = pageData as Record<string, unknown>;
+  for (const key of PAGE_ENTITY_KEYS) {
+    const v = str(pd[key]);
+    if (v) seed[key] = v;
+  }
+  return seed;
+}
+
+

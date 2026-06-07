@@ -14,7 +14,7 @@ import type * as QR from '@/lib/intent-queue-runtime';
 // Lazy-load the queue runtime — it pulls in function-executor.ts which is heavy.
 const loadQR = () => import('@/lib/intent-queue-runtime');
 import { narrateTask, type PriorTaskOutcome } from '@/lib/task-narrator';
-import type { AwaitingClarification, ResolutionItem } from '@/lib/agent-utils';
+import { extractEntitySeed, type AwaitingClarification, type ResolutionItem } from '@/lib/agent-utils';
 import { extractVisitDataFromText, type ExtractedVisitData } from '@/lib/visit-extraction';
 import { putAttachments, toAttachmentMeta, type CopilotAttachment, type AttachmentMeta } from '@/lib/attachments';
 import { assignAttachmentsToIntent } from '@/lib/attachment-assign';
@@ -1649,14 +1649,12 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             // viewing — e.g. on an Opportunity Detail page, a drafted activity links
             // to that opportunity. Primary-resolved values (already seeded by
             // buildQueueFromIntent) win; buildEffectiveArgs only fills missing keys.
+            // Phase 2: use the shared extractEntitySeed so page → frame → queue all
+            // derive entity context from the same canonical key set (no drift).
             if (pageContextRef.current?.pageData) {
-              const pd = pageContextRef.current.pageData as Record<string, unknown>;
-              const pageSeed: Record<string, string> = {};
-              for (const key of ['accountId', 'accountName', 'contactId', 'contactName', 'opportunityId', 'opportunityName'] as const) {
-                const val = pd[key];
-                if (typeof val === 'string' && val.trim() && !newQueue.resolvedContext[key]) {
-                  pageSeed[key] = val;
-                }
+              const pageSeed = extractEntitySeed(pageContextRef.current.pageData);
+              for (const key of Object.keys(pageSeed)) {
+                if (newQueue.resolvedContext[key]) delete pageSeed[key]; // primary wins
               }
               newQueue.resolvedContext = { ...pageSeed, ...newQueue.resolvedContext };
             }
