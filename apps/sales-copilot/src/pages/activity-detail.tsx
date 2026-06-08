@@ -1,6 +1,6 @@
-import { useMemo, useState, useCallback, useEffect } from 'react';
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   Phone,
   Calendar,
@@ -139,6 +139,13 @@ export default function ActivityDetailPage() {
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [profileSheetOpen, setProfileSheetOpen] = useState(false);
+  // Detail sections are presented as left-right switchable tabs (D20) instead of
+  // a long vertical scroll. Default tab is Details so the user sees the core
+  // activity info at a glance.
+  type DetailTab = 'details' | 'insights' | 'related';
+  const [activeTab, setActiveTab] = useState<DetailTab>('details');
+  const [tabDir, setTabDir] = useState(0);
+  const tabDragStartX = useRef(0);
   const locale = getLocale();
 
   // Find contacts related to this activity's account
@@ -294,6 +301,29 @@ export default function ActivityDetailPage() {
   const statusLabel = activity.status;
   const isCompleted = statusLabel === 'completed';
 
+  // Left-right switchable detail sections (D20). Order: Details | AI Insights | Related Context.
+  const detailTabs: { key: DetailTab; label: string }[] = [
+    { key: 'details', label: locale === 'zh-Hans' ? '详情' : 'Details' },
+    { key: 'insights', label: locale === 'zh-Hans' ? 'AI 洞察' : 'AI Insights' },
+    { key: 'related', label: locale === 'zh-Hans' ? '关联' : 'Related' },
+  ];
+  const activeTabIndex = detailTabs.findIndex((t) => t.key === activeTab);
+  const switchTab = (key: DetailTab) => {
+    const nextIndex = detailTabs.findIndex((t) => t.key === key);
+    setTabDir(nextIndex > activeTabIndex ? 1 : nextIndex < activeTabIndex ? -1 : 0);
+    setActiveTab(key);
+  };
+  const stepTab = (delta: number) => {
+    const next = activeTabIndex + delta;
+    if (next < 0 || next >= detailTabs.length) return;
+    switchTab(detailTabs[next].key);
+  };
+  const handleTabDragStart = (e: React.PointerEvent) => { tabDragStartX.current = e.clientX; };
+  const handleTabDragEnd = (e: React.PointerEvent) => {
+    const diff = tabDragStartX.current - e.clientX;
+    if (Math.abs(diff) > 50) stepTab(diff > 0 ? 1 : -1);
+  };
+
   const deleteButton = (
     <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
       <AlertDialogTrigger asChild>
@@ -374,7 +404,45 @@ export default function ActivityDetailPage() {
           </div>
         </GlassCard>
 
+        {/* Switchable detail sections (D20): Details | AI Insights | Related.
+            Left-right swipe + segmented control instead of a long scroll. */}
+        <div
+          className="touch-pan-y select-none"
+          onPointerDown={handleTabDragStart}
+          onPointerUp={handleTabDragEnd}
+        >
+          {/* Segmented control */}
+          <div className="flex gap-1 p-1 rounded-xl bg-muted/40 mb-3">
+            {detailTabs.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => switchTab(tab.key)}
+                className={cn(
+                  'flex-1 py-1.5 text-xs font-medium rounded-lg transition-colors',
+                  activeTab === tab.key
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <AnimatePresence mode="wait" custom={tabDir} initial={false}>
+            <motion.div
+              key={activeTab}
+              custom={tabDir}
+              initial={{ opacity: 0, x: tabDir >= 0 ? 40 : -40 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: tabDir >= 0 ? -40 : 40 }}
+              transition={{ duration: 0.2, ease: 'easeOut' as const }}
+              className="space-y-4"
+            >
+
         {/* AI Insights Card */}
+        {activeTab === 'insights' && (
         <AISummaryCard
           summary={aiSummary}
           isLoading={isLoadingAISummary}
@@ -384,9 +452,11 @@ export default function ActivityDetailPage() {
           isRefreshing={isRefreshingAI || isTriggering}
           onRefresh={handleRefreshAISummary}
         />
+        )}
 
         {/* Unified Related Context Card - Account, Contact, Opportunity */}
-        {(activity.account || activity.contact || activity.opportunity) && (
+        {activeTab === 'related' && (
+          (activity.account || activity.contact || activity.opportunity) ? (
           <GlassCard className="space-y-3">
             <h2 className="text-sm font-semibold text-foreground uppercase tracking-wide">
               {locale === 'zh-Hans' ? '关联上下文' : 'Related Context'}
@@ -544,8 +614,16 @@ export default function ActivityDetailPage() {
               )}
             </div>
           </GlassCard>
+          ) : (
+            <GlassCard className="py-10 text-center text-sm text-muted-foreground">
+              {locale === 'zh-Hans' ? '暂无关联的客户、联系人或商机' : 'No related account, contact, or opportunity'}
+            </GlassCard>
+          )
         )}
 
+        {/* Details tab: Notes + Attachments */}
+        {activeTab === 'details' && (
+          <>
         {/* Details Card - Notes */}
         {activity.notes && (
           <GlassCard className="space-y-4">
@@ -623,6 +701,19 @@ export default function ActivityDetailPage() {
             </div>
           </GlassCard>
         )}
+
+        {/* Empty details fallback */}
+        {!activity.notes && savedAttachments.length === 0 && (
+          <GlassCard className="py-10 text-center text-sm text-muted-foreground">
+            {locale === 'zh-Hans' ? '暂无详情备注或附件' : 'No notes or attachments'}
+          </GlassCard>
+        )}
+          </>
+        )}
+
+            </motion.div>
+          </AnimatePresence>
+        </div>
 
         {/* Metadata */}
         {activity.createdon && (
