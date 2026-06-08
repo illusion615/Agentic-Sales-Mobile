@@ -14,6 +14,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   TrendingUp,
+  FileText,
 } from 'lucide-react';
 import { MobileLayout } from '@/components/mobile-layout';
 import { FloatingQuickActions } from '@/components/floating-quick-actions';
@@ -173,6 +174,9 @@ export default function ActivitiesPage() {
   const [viewMode, setViewMode] = useState<ViewMode>(initialView && ['week', 'month'].includes(initialView) ? initialView : 'week');
   const [currentDate, setCurrentDate] = useState(initialDate);
   const [swipeDirection, setSwipeDirection] = useState<'left' | 'right' | null>(null);
+  // Week view shows the calendar by default; the weekly report is an explicit
+  // toggle so switching dates no longer auto-expands it and steals focus (D21).
+  const [weekPane, setWeekPane] = useState<'calendar' | 'report'>('calendar');
   const locale = getLocale();
 
   const copilot = useCopilot();
@@ -415,15 +419,40 @@ export default function ActivitiesPage() {
                   const weekDays = getWeekDays();
                   return (
                     <div className="space-y-3">
-                      {/* Persisted weekly report (D16) — lives in the week view,
-                          not the Copilot chat; cached per week. */}
-                      <WeeklyReportCard
-                        weekStart={weekReport.weekStart}
-                        weekEnd={weekReport.weekEnd}
-                        activities={weekReport.activities}
-                        completedCount={completedCount}
-                        totalCount={totalCount}
-                      />
+                      {/* Calendar ⇄ Weekly Report toggle (D21). Default Calendar;
+                          the report no longer auto-expands when switching dates. */}
+                      <div className="flex rounded-lg overflow-hidden border border-border/60 self-start w-fit">
+                        {([
+                          { key: 'calendar' as const, icon: Calendar, label: locale === 'zh-Hans' ? '日历' : 'Calendar' },
+                          { key: 'report' as const, icon: FileText, label: locale === 'zh-Hans' ? '周报' : 'Report' },
+                        ]).map(({ key, icon: PaneIcon, label }) => (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => setWeekPane(key)}
+                            className={cn(
+                              'flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium transition-colors',
+                              weekPane === key ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted text-muted-foreground'
+                            )}
+                          >
+                            <PaneIcon className="w-3.5 h-3.5" />
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {weekPane === 'report' ? (
+                        /* Persisted weekly report (D16) — only shown when the user
+                           explicitly toggles to it (D21). */
+                        <WeeklyReportCard
+                          weekStart={weekReport.weekStart}
+                          weekEnd={weekReport.weekEnd}
+                          activities={weekReport.activities}
+                          completedCount={completedCount}
+                          totalCount={totalCount}
+                        />
+                      ) : (
+                        <>
                       {/* Day selector with type dots */}
                       <div className="grid grid-cols-7 gap-1">
                         {weekDays.map((day: Date) => {
@@ -513,6 +542,8 @@ export default function ActivitiesPage() {
                             </div>
                           )}
                         </div>
+                      )}
+                        </>
                       )}
                     </div>
                   );
