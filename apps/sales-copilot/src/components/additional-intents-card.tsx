@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { Lightbulb, ChevronRight, Check, X, MapPin, Phone, Calendar, Mail, CheckSquare, Building2, Users, TrendingUp, CalendarClock } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -9,6 +10,9 @@ import { useCreateActivity } from '@/generated/hooks/use-activity';
 import { useCreateOpportunity } from '@/generated/hooks/use-opportunity';
 import { useCreateAccount } from '@/generated/hooks/use-account';
 import { useCreateContact } from '@/generated/hooks/use-contact';
+import { useAccountList } from '@/generated/hooks/use-account';
+import type { Account } from '@/generated/models/account-model';
+import type { Activity, ActivityType } from '@/generated/models/activity-model';
 
 export interface AdditionalIntentForm {
   type: 'activity' | 'opportunity' | 'account' | 'contact';
@@ -51,19 +55,33 @@ const EntityTypeLabels: Record<string, { zh: string; en: string }> = {
 
 export function AdditionalIntentsCard({ messageId, additionalIntents }: AdditionalIntentsCardProps) {
   const locale: Locale = getLocale();
-  const { updateFormCardStatus } = useCopilot();
+  const { updateFormCardStatus, closePanel } = useCopilot();
+  const navigate = useNavigate();
   
   // Get mutation hooks for each entity type
   const createActivityMutation = useCreateActivity();
   const createOpportunityMutation = useCreateOpportunity();
   const createAccountMutation = useCreateAccount();
   const createContactMutation = useCreateContact();
+  // Accounts for resolving a suggested activity's accountName → id so the
+  // created record links to its account (and shows under it).
+  const { data: accounts = [] } = useAccountList();
   
   // Track status of each form — persist to localStorage so status survives panel close/reopen
   const storageKey = `intent-status-${messageId}`;
   const [formStatuses, setFormStatuses] = useState<Record<number, 'pending' | 'confirmed' | 'skipped'>>(() => {
     try {
       const stored = localStorage.getItem(storageKey);
+      if (stored) return JSON.parse(stored);
+    } catch { /* ignore */ }
+    return {};
+  });
+  // Created record ids per form index, so a confirmed card can deep-link to the
+  // real record detail (also serves as proof the create actually persisted).
+  const createdKey = `intent-created-${messageId}`;
+  const [createdRecords, setCreatedRecords] = useState<Record<number, { id: string; type: string }>>(() => {
+    try {
+      const stored = localStorage.getItem(createdKey);
       if (stored) return JSON.parse(stored);
     } catch { /* ignore */ }
     return {};
@@ -99,6 +117,31 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
     });
   };
   
+  // Map an additional-intent activity form (LLM draft shape) to the Activity
+  // model shape ActivityService.create expects. Resolves the account by name so
+  // the created activity links to it.
+  const toActivityCreatePayload = (data: Record<string, unknown>): Omit<Activity, 'id'> => {
+    const title = (data.title as string) || (data.subject as string) || '';
+    const type = ((data.type as string) || 'visit') as ActivityType;
+    const scheduleddate = (data.scheduledDate as string) || (data.scheduleddate as string) || new Date().toISOString().split('T')[0];
+    const notes = (data.notes as string) || undefined;
+    const accountName = (data.accountName as string) || '';
+    const matched = accountName
+      ? accounts.find((a: Account) => a.name1?.toLowerCase() === accountName.toLowerCase())
+      : undefined;
+
+    const payload: Omit<Activity, 'id'> = {
+      title,
+      type,
+      scheduleddate,
+      status: 'open',
+      ownerid: '',
+      ...(notes ? { notes } : {}),
+      ...(matched ? { account: { id: matched.id, name1: matched.name1 } } : {}),
+    };
+    return payload;
+  };
+
   const handleConfirm = async (form: AdditionalIntentForm, index: number) => {
     setIsSubmitting(index);
 
@@ -107,22 +150,47 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
     const formData = chosenDate ? { ...form.data, scheduledDate: chosenDate } : form.data;
 
     try {
-      // Execute the appropriate create mutation based on type
+      // Execute the appropriate create mutation based on type, capturing the
+      // created record's id so the confirmed card can deep-link to its detail.
+      let createdId: string | undefined;
       switch (form.type) {
-        case 'activity':
-          await createActivityMutation.mutateAsync(formData as Parameters<typeof createActivityMutation.mutateAsync>[0]);
+        case 'activity': {
+          // The suggestPlan / additional-intent form uses the LLM "draft" shape
+          // (camelCase `scheduledDate`, `accountName` string). ActivityService
+          // expects the Activity model shape (lowercase `scheduleddate`,
+          // `account: {id}`). Without this mapping the date never reaches the
+          // Dataverse payload, and appointments (visit/meeting) hard-fail with
+          // "An appointment must have scheduled start and scheduled end set."
+          const r = await createActivityMutation.mutateAsync(
+            toActivityCreatePayload(formData) as Parameters<typeof createActivityMutation.mutateAsync>[0]
+          );
+          createdId = (r as { id?: string })?.id;
           break;
-        case 'opportunity':
-          await createOpportunityMutation.mutateAsync(formData as Parameters<typeof createOpportunityMutation.mutateAsync>[0]);
+        }
+        case 'opportunity': {
+          const r = await createOpportunityMutation.mutateAsync(formData as Parameters<typeof createOpportunityMutation.mutateAsync>[0]);
+          createdId = (r as { id?: string })?.id;
           break;
-        case 'account':
-          await createAccountMutation.mutateAsync(formData as Parameters<typeof createAccountMutation.mutateAsync>[0]);
+        }
+        case 'account': {
+          const r = await createAccountMutation.mutateAsync(formData as Parameters<typeof createAccountMutation.mutateAsync>[0]);
+          createdId = (r as { id?: string })?.id;
           break;
-        case 'contact':
-          await createContactMutation.mutateAsync(formData as Parameters<typeof createContactMutation.mutateAsync>[0]);
+        }
+        case 'contact': {
+          const r = await createContactMutation.mutateAsync(formData as Parameters<typeof createContactMutation.mutateAsync>[0]);
+          createdId = (r as { id?: string })?.id;
           break;
+        }
       }
-      
+
+      if (createdId) {
+        setCreatedRecords((prev) => {
+          const next = { ...prev, [index]: { id: createdId as string, type: form.type } };
+          try { localStorage.setItem(createdKey, JSON.stringify(next)); } catch { /* ignore */ }
+          return next;
+        });
+      }
       updateStatus(index, 'confirmed');
       // Inline status update reflects the save in-conversation; no toast.
     } catch (error: unknown) {
@@ -135,6 +203,20 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
   
   const handleSkip = (index: number) => {
     updateStatus(index, 'skipped');
+  };
+
+  // Deep-link a confirmed card to its record detail. Contacts have no detail
+  // route, so they land on the accounts list.
+  const openRecord = (index: number) => {
+    const rec = createdRecords[index];
+    if (!rec) return;
+    closePanel();
+    switch (rec.type) {
+      case 'activity': navigate(`/activities/${rec.id}`); break;
+      case 'opportunity': navigate(`/opportunities/${rec.id}`); break;
+      case 'account': navigate(`/accounts/${rec.id}`); break;
+      case 'contact': navigate('/accounts'); break;
+    }
   };
   
   // Get display info for an activity type
@@ -223,6 +305,8 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
             const title = getFormTitle(form);
             const subtitle = getFormSubtitle(form, idx);
             const isLoading = isSubmitting === idx;
+            const createdRec = createdRecords[idx];
+            const isNavigable = status === 'confirmed' && !!createdRec;
             
             return (
               <motion.div
@@ -232,13 +316,20 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 10, height: 0 }}
                 transition={{ delay: idx * 0.1, duration: 0.2 }}
+                onClick={isNavigable ? () => openRecord(idx) : undefined}
+                role={isNavigable ? 'button' : undefined}
+                tabIndex={isNavigable ? 0 : undefined}
+                onKeyDown={isNavigable ? (e: React.KeyboardEvent) => {
+                  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openRecord(idx); }
+                } : undefined}
                 className={cn(
                   'rounded-xl border p-3 transition-all',
                   status === 'confirmed' 
                     ? 'bg-green-500/10 border-green-500/30' 
                     : status === 'skipped'
                     ? 'bg-muted/50 border-border/50 opacity-60'
-                    : 'bg-card border-border hover:border-primary/50'
+                    : 'bg-card border-border hover:border-primary/50',
+                  isNavigable && 'cursor-pointer hover:bg-green-500/15 hover:border-green-500/50'
                 )}
               >
                 <div className="flex items-start gap-3">
@@ -272,8 +363,17 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
                       </span>
                       {/* Status indicator inline */}
                       {status === 'confirmed' && (
-                        <span className="text-xs text-green-600">
+                        <span className="text-xs text-green-600 inline-flex items-center gap-0.5">
                           {locale === 'zh-Hans' ? '已创建' : 'Created'}
+                          {isNavigable && (
+                            <>
+                              <span className="text-muted-foreground mx-0.5">·</span>
+                              <span className="text-primary">
+                                {locale === 'zh-Hans' ? '查看详情' : 'View detail'}
+                              </span>
+                              <ChevronRight className="w-3 h-3 text-primary" />
+                            </>
+                          )}
                         </span>
                       )}
                       {status === 'skipped' && (
