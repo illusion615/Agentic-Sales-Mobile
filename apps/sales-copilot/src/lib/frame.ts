@@ -197,14 +197,14 @@ The conversation history is provided as prior chat turns. When the user's messag
 
 # Cognitive tasks (each intent picks exactly one)
 - Log        — record something that already happened or already exists
-- Plan       — schedule ONE specific future activity the user is already committing to (concrete meeting, call, demo, or follow-up with known purpose/audience/timing). NOT for asking the assistant to brainstorm a schedule.
+- Plan       — schedule ONE specific future activity the user is already committing to (concrete meeting, call, demo, or follow-up with known purpose/audience/timing). NOT for asking the assistant to brainstorm a schedule. A request to plan MULTIPLE activities, or your visits/calls/meetings/tasks (plural) over a day/week/period, is a brainstorm → use Analyze, never Plan/Draft.
 - Find       — search for or list existing records
 - Update     — change a field on an existing record. The salesObject is the record BEING CHANGED, never the field value used in the change. If the user changes the account/contact/owner OF an opportunity (or activity), the salesObject is Opportunity (or Activity) — NOT Account/Contact — because that's the record whose field is edited.
     CORRECT: "change the account of <opportunity> to Royal London"  → Opportunity, Update  (account is a field on the opportunity)
     CORRECT: "reassign this activity to Dr. Chen"                   → Activity, Update     (contact is a field on the activity)
     CORRECT: "rename the Cleveland account to Cleveland Clinic"     → Account, Update      (the account record itself is renamed)
 - Recommend  — ask the assistant to recommend a PRODUCT (features, specs, which model fits). salesObject MUST be Product.
-- Analyze    — ask the assistant for strategic advice, next-step suggestions, deal coaching, meeting preparation, follow-up strategy, account prioritization, day/week planning brainstorm ("plan my tomorrow", "suggest tasks for next week"), or any request that needs CRM data synthesis + reasoning. Use for ANY "suggest / advise / analyze / coach / prepare / prioritize / plan my day" intent that is NOT about product knowledge.
+- Analyze    — ask the assistant for strategic advice, next-step suggestions, deal coaching, meeting preparation, follow-up strategy, account prioritization, day/week planning brainstorm ("plan my tomorrow", "plan my visits for this week", "plan my calls for next week", "suggest tasks for next week"), or any request that needs CRM data synthesis + reasoning. Use for ANY "suggest / advise / analyze / coach / prepare / prioritize / plan my day" intent that is NOT about product knowledge. KEY: "plan my <activity-type plural> for <period>" (plan my visits/calls/meetings for this week) is ALWAYS Analyze (the assistant proposes a multi-task schedule), NOT Draft/Plan of a single activity.
 - Knowledge  — ask a factual product or industry knowledge question (specs, warranty, regulations)
 - Report     — ask for a status overview, summary, or statistics about any entity type (accounts, pipeline, activities, territory, engagement)
 - Chat       — pure greeting / thanks / smalltalk
@@ -315,6 +315,11 @@ User: "help me plan my tomorrow"
 Expected intents: 1
   [0] Activity, Analyze, none — brainstorm tomorrow's schedule                   label {zh:"规划明日任务",en:"Plan my day"}
 Note: NO concrete activity is named — the user wants the assistant to PROPOSE what to do. This is Analyze, not Plan. Plan is reserved for one specific future activity the user is already committing to.
+
+User: "plan my visits for this week"
+Expected intents: 1
+  [0] Activity, Analyze, none — brainstorm this week's visits                    label {zh:"规划本周拜访",en:"Plan my visits"}
+Note: "visits" is PLURAL over a PERIOD ("this week") — the user wants the assistant to PROPOSE a multi-task schedule, not create one visit. This is Analyze → suggestPlan, NEVER Draft/Plan a single activity. Same for "plan my calls/meetings for <period>".
 
 User: "let's set up a Q&A meeting next Tuesday with the customer"
 Expected intents: 1
