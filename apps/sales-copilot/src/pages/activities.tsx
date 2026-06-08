@@ -351,6 +351,30 @@ export default function ActivitiesPage() {
     >
       <PullToRefresh onRefresh={handleRefresh} className="flex-1 overflow-y-auto pb-40">
         <div className="py-4 space-y-3">
+          {/* Calendar ⇄ Weekly Report toggle (D21) — top of page, full width.
+              Default Calendar; the report no longer auto-expands on date switch. */}
+          {viewMode === 'week' && (
+            <div className="flex rounded-lg overflow-hidden border border-border/60 w-full">
+              {([
+                { key: 'calendar' as const, icon: Calendar, label: locale === 'zh-Hans' ? '日历' : 'Calendar' },
+                { key: 'report' as const, icon: FileText, label: locale === 'zh-Hans' ? '周报' : 'Report' },
+              ]).map(({ key, icon: PaneIcon, label }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setWeekPane(key)}
+                  className={cn(
+                    'flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors',
+                    weekPane === key ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted text-muted-foreground'
+                  )}
+                >
+                  <PaneIcon className="w-3.5 h-3.5" />
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* Navigation Header */}
           <div className="flex items-center justify-between px-1">
             <Button variant="ghost" size="icon" onClick={goBack} className="h-8 w-8">
@@ -419,28 +443,6 @@ export default function ActivitiesPage() {
                   const weekDays = getWeekDays();
                   return (
                     <div className="space-y-3">
-                      {/* Calendar ⇄ Weekly Report toggle (D21). Default Calendar;
-                          the report no longer auto-expands when switching dates. */}
-                      <div className="flex rounded-lg overflow-hidden border border-border/60 self-start w-fit">
-                        {([
-                          { key: 'calendar' as const, icon: Calendar, label: locale === 'zh-Hans' ? '日历' : 'Calendar' },
-                          { key: 'report' as const, icon: FileText, label: locale === 'zh-Hans' ? '周报' : 'Report' },
-                        ]).map(({ key, icon: PaneIcon, label }) => (
-                          <button
-                            key={key}
-                            type="button"
-                            onClick={() => setWeekPane(key)}
-                            className={cn(
-                              'flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium transition-colors',
-                              weekPane === key ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted text-muted-foreground'
-                            )}
-                          >
-                            <PaneIcon className="w-3.5 h-3.5" />
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-
                       {weekPane === 'report' ? (
                         /* Persisted weekly report (D16) — only shown when the user
                            explicitly toggles to it (D21). */
