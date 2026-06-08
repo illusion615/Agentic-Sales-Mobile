@@ -6,9 +6,11 @@ import { MobileLayout } from '@/components/mobile-layout';
 import { cn } from '@/lib/utils';
 import { useAccountList } from '@/generated/hooks/use-account';
 import { useContactList } from '@/generated/hooks/use-contact';
+import { useActivityList } from '@/generated/hooks/use-activity';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Account } from '@/generated/models/account-model';
 import type { Contact } from '@/generated/models/contact-model';
+import type { Activity } from '@/generated/models/activity-model';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -67,6 +69,7 @@ export default function ClientsPage() {
   // Fetch from Dataverse only
   const { data: accounts = [], isLoading: isLoadingAccounts } = useAccountList();
   const { data: contacts = [] } = useContactList();
+  const { data: activities = [] } = useActivityList();
   const queryClient = useQueryClient();
 
   // Debug logging for account IDs
@@ -85,6 +88,7 @@ export default function ClientsPage() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['account-list'] }),
       queryClient.invalidateQueries({ queryKey: ['contact-list'] }),
+      queryClient.invalidateQueries({ queryKey: ['activity-list'] }),
     ]);
   }, [queryClient]);
 
@@ -93,15 +97,35 @@ export default function ClientsPage() {
     return contacts.filter((c: Contact) => c.account?.id === accountId);
   };
 
+  // Last engagement per account = the most recent COMPLETED activity tied to it.
+  // The old account.lastcontactedon field was dropped when we moved to the native
+  // activity entity, so "days since contact" must be derived from the activity log
+  // (D22). Only completed activities count as real engagement.
+  const lastCompletedByAccount = useMemo(() => {
+    const map = new Map<string, Date>();
+    for (const a of activities as Activity[]) {
+      if (a.status !== 'completed') continue;
+      const accId = a.account?.id;
+      if (!accId || !a.scheduleddate) continue;
+      const d = new Date(a.scheduleddate);
+      if (Number.isNaN(d.getTime())) continue;
+      const prev = map.get(accId);
+      if (!prev || d > prev) map.set(accId, d);
+    }
+    return map;
+  }, [activities]);
+
   // Enrich accounts with contact status
   const enrichedAccounts = useMemo(() => {
     return accounts.map((account: Account) => {
-      const daysSince = getDaysSinceContact(undefined);
+      const lastContact = lastCompletedByAccount.get(account.id);
+      const daysSince = getDaysSinceContact(lastContact?.toISOString());
       const contactStatus = getContactStatus(daysSince);
       const accountContacts = getContactsByAccountId(account.id);
       return { ...account, daysSince, contactStatus, contactCount: accountContacts.length };
     });
-  }, [accounts, contacts]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accounts, contacts, lastCompletedByAccount]);
 
   // Apply filters
   const filteredAccounts = useMemo(() => {
