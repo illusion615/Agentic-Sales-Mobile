@@ -90,6 +90,7 @@ function buildQueryStateMutation(
     executedArgsHash: computeArgumentsHash(fn, args || {}),
     filterSummary,
     resultRecords: records,
+    rawResultRecords: rows,
   };
   // Single-record resolution becomes a focus candidate (e.g. "the opportunity").
   if (records.length === 1 && records[0].id) {
@@ -932,28 +933,40 @@ async function processMessageInner(
     && !explicitQueryArgs
     && CONTEXT_REUSABLE_FUNCTIONS.includes(intent.function);
 
-  // ===== B5 SHADOW MODE (§14.1): deterministic data-source decision =====
-  // Compute resolveDataSource alongside the legacy LLM contextSufficient gate,
-  // log the comparison, but DO NOT change behaviour yet. This makes the new
-  // decision observable on a real LLM/published surface before we flip to it.
+  // ===== B5 (§6 / §14.1): deterministic data-source decision takes over =====
+  // When conversation state is present, resolveDataSource (rule-based, hash-keyed)
+  // REPLACES the non-deterministic LLM contextSufficient gate. A 'reuse' decision
+  // replays the exact hash-matched working set's raw rows through the normal
+  // display/analysis pipeline — no re-query, correct data, full display. When no
+  // state is present we fall back to the legacy contextSufficient behaviour.
+  let reuseWorkingSetRaw: unknown[] | null = null;
   if (context.state && isQuery(intent.function)) {
     try {
-      const shadowDecision = resolveDataSource(
+      const decision = resolveDataSource(
         { fn: intent.function, args: intent.arguments || {} },
         context.state,
       );
       const legacy = shouldUseConversationContext ? 'reuse(lastResult)' : 'requery';
       const agree =
-        (shadowDecision.kind === 'reuse' && shouldUseConversationContext) ||
-        (shadowDecision.kind !== 'reuse' && !shouldUseConversationContext);
+        (decision.kind === 'reuse' && shouldUseConversationContext) ||
+        (decision.kind !== 'reuse' && !shouldUseConversationContext);
+      if (decision.kind === 'reuse') {
+        const ws = context.state.workingSets.find((w) => w.id === decision.workingSetId);
+        if (ws && Array.isArray(ws.rawRecords) && ws.rawRecords.length > 0) {
+          reuseWorkingSetRaw = ws.rawRecords;
+        }
+      }
       console.log(
-        `[ConvState shadow] fn=${intent.function} new=${shadowDecision.kind} legacy=${legacy} ` +
-          `agree=${agree} hash=${computeArgumentsHash(intent.function, intent.arguments || {})}`,
+        `[ConvState] fn=${intent.function} decision=${decision.kind} legacy=${legacy} agree=${agree} ` +
+          `reuseApplied=${reuseWorkingSetRaw !== null} hash=${computeArgumentsHash(intent.function, intent.arguments || {})}`,
       );
     } catch (e) {
-      console.warn('[ConvState shadow] resolveDataSource threw:', e);
+      console.warn('[ConvState] resolveDataSource threw, falling back to requery:', e);
     }
   }
+  // Legacy reuse only when there is no conversation state to drive the decision.
+  const legacyReuse = !context.state && shouldUseConversationContext;
+
   
   if (shouldUsePageContext) {
     console.log('[CopilotAgent] Using page context data for', intent.function);
@@ -966,10 +979,19 @@ async function processMessageInner(
       data: records,
       message: `Found ${records.length} records from page context`,
     };
-  } else if (shouldUseConversationContext) {
-    // Frame LLM determined the user is asking a follow-up that can be answered
-    // from the previous query result. Reuse that data instead of re-querying
-    // Dataverse, then let the normal Pass 3 + recordList pipeline handle output.
+  } else if (reuseWorkingSetRaw) {
+    // B5 (§6): deterministic reuse — replay the hash-matched working set's raw
+    // rows through the normal pipeline. Same data as a re-query, no round-trip.
+    console.log('[ConvState] reusing working set (', reuseWorkingSetRaw.length, 'records) for', intent.function);
+    functionResult = {
+      success: true,
+      data: reuseWorkingSetRaw,
+      message: `Found ${reuseWorkingSetRaw.length} records from conversation state`,
+    };
+  } else if (legacyReuse) {
+    // Legacy fallback (no conversation state): Frame LLM determined the user is
+    // asking a follow-up answerable from the previous query result. Reuse that
+    // data instead of re-querying, then let Pass 3 + recordList handle output.
     console.log('[CopilotAgent] Context-sufficient: reusing lastFunctionResult for', intent.function);
     const lastData = context.lastFunctionResult;
     const records = Array.isArray(lastData)

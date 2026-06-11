@@ -121,6 +121,25 @@ describe('commitConversationState (§5.3)', () => {
     expect(s.workingSets).toHaveLength(2);
   });
 
+  it('stores raw rows on the working set for reuse replay (B5)', () => {
+    let s = emptyState();
+    const rawRows = [{ id: '1', name1: 'Acme', amount: 1000, stage: 'negotiation' }];
+    s = commitConversationState(
+      s,
+      {
+        executedFunction: 'queryOpportunities',
+        executedArgsHash: 'h',
+        resultRecords: [{ id: '1', title: 'Acme' }],
+        rawResultRecords: rawRows,
+      },
+      NOW.getTime(),
+    );
+    expect(s.workingSets[0].rawRecords).toEqual(rawRows);
+    // a hydrate pass must preserve rawRecords (so reuse still works next turn)
+    const h = hydrateConversationState({ prevState: s, turn: 1, now: NOW.getTime() + 1000 });
+    expect(h.workingSets[0].rawRecords).toEqual(rawRows);
+  });
+
   it('evicts the oldest working set beyond the per-entity cap', () => {
     let s = emptyState();
     for (let i = 0; i < MAX_WORKING_SETS_PER_ENTITY + 2; i++) {

@@ -71,6 +71,12 @@ export interface WorkingSet {
   /** Human-readable filter description, for display / prompt only. */
   filterSummary: string;
   records: WorkingSetRecord[];
+  /**
+   * Opaque original result rows (raw Dataverse shape) kept ONLY so a hash-matched
+   * reuse (§6) can replay the exact data through the normal display/analysis
+   * pipeline without a re-query. Never serialized into prompts.
+   */
+  rawRecords?: unknown[];
   createdAt: number;
   /** True once past TTL or invalidated by a write. */
   stale: boolean;
@@ -108,6 +114,8 @@ export interface StateMutation {
   executedArgsHash?: string;
   filterSummary?: string;
   resultRecords?: WorkingSetRecord[];
+  /** Opaque raw rows kept for reuse replay (§6). Not serialized into prompts. */
+  rawResultRecords?: unknown[];
   createdRecord?: { type: EntityType; id: string; name: string };
   resolvedFocus?: FocusEntity[];
   pendingGoal?: PendingGoal | 'CLEAR';
@@ -469,6 +477,7 @@ function upsertWorkingSet(
     argumentsHash: ws.argumentsHash,
     filterSummary,
     records: ws.records,
+    rawRecords: ws.rawRecords,
     createdAt: ws.createdAt,
     stale: ws.stale,
   };
@@ -509,6 +518,7 @@ export function commitConversationState(
       argumentsHash: m.executedArgsHash ?? computeArgumentsHash(m.executedFunction, {}, new Date(now)),
       filterSummary: m.filterSummary ?? '',
       records: m.resultRecords,
+      rawRecords: m.rawResultRecords,
       createdAt: now,
       stale: false,
     });
