@@ -6,13 +6,47 @@ import { AccountService } from '@/generated/services/account-service';
 import { OpportunityService } from '@/generated/services/opportunity-service';
 import { ActivityService } from '@/generated/services/activity-service';
 import { ContactService } from '@/generated/services/contact-service';
-import { getAdminMode } from '@/lib/i18n';
 import type { Account } from '@/generated/models/account-model';
 import type { Opportunity } from '@/generated/models/opportunity-model';
 import type { Activity } from '@/generated/models/activity-model';
 import type { Contact } from '@/generated/models/contact-model';
 import { registerHandlers, type FunctionHandler } from './handler-registry';
 import { diagRetrieve, resolveAccountByName } from './_shared';
+
+/**
+ * Canonical opportunity stages stored in Dataverse (lowercase):
+ * prospecting / qualification / proposal / negotiation / won / lost.
+ * The LLM may emit them Capitalized, in English variants, or in Chinese.
+ * Map all known synonyms to the canonical value so stage filters don't
+ * silently return 0. (Extends Defect D1 — adds Chinese + English aliases.)
+ */
+const STAGE_ALIASES: Record<string, string> = {
+  // prospecting
+  prospecting: 'prospecting', prospect: 'prospecting', lead: 'prospecting', leads: 'prospecting',
+  '潜在': 'prospecting', '潜在客户': 'prospecting', '线索': 'prospecting', '初步接触': 'prospecting', '勘探': 'prospecting',
+  // qualification
+  qualification: 'qualification', qualify: 'qualification', qualified: 'qualification',
+  '资格审查': 'qualification', '资格认定': 'qualification', '确认': 'qualification', '需求确认': 'qualification',
+  // proposal
+  proposal: 'proposal', proposing: 'proposal', quote: 'proposal', quotation: 'proposal',
+  '提案': 'proposal', '方案': 'proposal', '报价': 'proposal', '方案报价': 'proposal',
+  // negotiation
+  negotiation: 'negotiation', negotiating: 'negotiation', negotiate: 'negotiation',
+  '谈判': 'negotiation', '商务谈判': 'negotiation', '议价': 'negotiation',
+  // won
+  won: 'won', win: 'won', closedwon: 'won', 'closed won': 'won',
+  '赢单': 'won', '成交': 'won', '已赢': 'won', '赢得': 'won',
+  // lost
+  lost: 'lost', lose: 'lost', closedlost: 'lost', 'closed lost': 'lost',
+  '输单': 'lost', '丢单': 'lost', '已输': 'lost', '失败': 'lost',
+};
+
+function normalizeStage(raw: string): string {
+  const key = raw.trim().toLowerCase();
+  return STAGE_ALIASES[key] ?? STAGE_ALIASES[raw.trim()] ?? key;
+}
+
+export { normalizeStage };
 
 const queryAccounts: FunctionHandler = async (args, ctx) => {
   const accounts = await AccountService.getAll();
@@ -56,17 +90,16 @@ const queryOpportunities: FunctionHandler = async (args, ctx) => {
   const oppSortBy = args.sortBy as string | undefined;
   const oppLimit = (args.limit as number) || 20;
 
-  if (ctx.userId && !getAdminMode()) {
-    const uid = ctx.userId.toLowerCase();
-    filtered = filtered.filter((o: Opportunity) => o.ownerid === uid);
-  }
+  // No client-side owner filter: OpportunityService.getAll is already
+  // security-trimmed by Dataverse to the records this user can read.
   if (oppAccountId) filtered = filtered.filter((o: Opportunity) => o.account?.id === oppAccountId);
   // Stage is stored lowercase (prospecting/qualification/proposal/negotiation/won/lost)
-  // but the LLM often emits it Capitalized ("Negotiation"). Compare case-insensitively
-  // so "negotiation stage" doesn't return 0. (Defect D1)
+  // but the LLM often emits it Capitalized ("Negotiation"), in English variants, or in
+  // Chinese ("谈判"). normalizeStage maps all known synonyms to the canonical value so
+  // "谈判阶段商机" / "negotiation stage" don't return 0. (Defect D1 + Chinese aliases)
   if (stage) {
-    const stageLc = stage.toLowerCase();
-    filtered = filtered.filter((o: Opportunity) => (o.stage ?? '').toLowerCase() === stageLc);
+    const stageCanon = normalizeStage(stage);
+    filtered = filtered.filter((o: Opportunity) => (o.stage ?? '').toLowerCase() === stageCanon);
   }
   if (minAmount) filtered = filtered.filter((o: Opportunity) => o.totalamount >= minAmount);
   // Confidence range filter — used by "at risk" (minConfidence:0,maxConfidence:49).
@@ -140,7 +173,13 @@ const queryActivities: FunctionHandler = async (args, ctx) => {
   }
 
   if (scheduledDate) {
-    filteredAct = filteredAct.filter((a: Activity) => a.scheduleddate?.startsWith(scheduledDate));
+    const dayStart = new Date(`${scheduledDate}T00:00:00`);
+    const dayEnd = new Date(`${scheduledDate}T23:59:59.999`);
+    filteredAct = filteredAct.filter((a: Activity) => {
+      if (!a.scheduleddate) return false;
+      const d = new Date(a.scheduleddate);
+      return !Number.isNaN(d.getTime()) && d >= dayStart && d <= dayEnd;
+    });
   } else if (dateFrom || dateTo) {
     filteredAct = filteredAct.filter((a: Activity) => {
       if (!a.scheduleddate) return false;
@@ -151,9 +190,16 @@ const queryActivities: FunctionHandler = async (args, ctx) => {
     });
   } else if (dateRange) {
     const now = new Date();
-    const today = now.toISOString().split('T')[0];
     if (dateRange === 'today') {
-      filteredAct = filteredAct.filter((a: Activity) => a.scheduleddate?.startsWith(today));
+      const todayStart = new Date(now);
+      todayStart.setHours(0, 0, 0, 0);
+      const todayEnd = new Date(now);
+      todayEnd.setHours(23, 59, 59, 999);
+      filteredAct = filteredAct.filter((a: Activity) => {
+        if (!a.scheduleddate) return false;
+        const d = new Date(a.scheduleddate);
+        return !Number.isNaN(d.getTime()) && d >= todayStart && d <= todayEnd;
+      });
     } else {
       const days = dateRange === '7days' ? 7 : dateRange === '30days' ? 30 : 365;
       const cutoff = new Date(now.getTime() + days * 86400000);

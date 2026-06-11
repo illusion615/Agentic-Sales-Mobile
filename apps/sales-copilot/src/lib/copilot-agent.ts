@@ -50,9 +50,62 @@ import {
   DAILY_REPORT_PATTERN,
   buildIntentsOverview,
 } from './copilot-agent-types';
+import type { ConversationState, StateMutation, EntityType, WorkingSetRecord } from './conversation-state';
+import { computeArgumentsHash, isQuery, entityOf, FOCUS_INIT_QUERY, serializeStateForPrompt } from './conversation-state';
+import { resolveDataSource } from './data-source-resolver';
 
 // Re-export types so existing importers don't break
 export type { ThinkingProgress, ThinkingStep, AgentResponse, IntentResult } from './copilot-agent-types';
+
+/**
+ * Build a ConversationState mutation (§4.2) from a successful query result.
+ * Compresses raw Dataverse rows into WorkingSetRecord shape and, when the query
+ * resolved to a single record, surfaces it as a focus candidate. Returns
+ * undefined for non-query functions so callers can leave stateMutation empty.
+ */
+function buildQueryStateMutation(
+  fn: string,
+  args: Record<string, unknown>,
+  resultData: unknown,
+  filterSummary: string,
+): StateMutation | undefined {
+  if (!isQuery(fn)) return undefined;
+  const rows = Array.isArray(resultData) ? (resultData as Array<Record<string, unknown>>) : [];
+  const entity = entityOf(fn);
+  const titleOf = (item: Record<string, unknown>): string => {
+    switch (entity) {
+      case 'account': return String(item.name1 || item.name || '');
+      case 'contact': return String(item.fullname || item.name || '');
+      case 'opportunity': return String(item.name1 || item.name || '');
+      case 'activity': return String(item.title || item.subject || '');
+      default: return String(item.name || '');
+    }
+  };
+  const records: WorkingSetRecord[] = rows.map((item) => ({
+    id: String(item.id || ''),
+    title: titleOf(item),
+  }));
+  const mutation: StateMutation = {
+    executedFunction: fn,
+    executedArgsHash: computeArgumentsHash(fn, args || {}),
+    filterSummary,
+    resultRecords: records,
+  };
+  // Single-record resolution becomes a focus candidate (e.g. "the opportunity").
+  if (records.length === 1 && records[0].id) {
+    mutation.resolvedFocus = [
+      {
+        type: entity as EntityType,
+        id: records[0].id,
+        name: records[0].title,
+        confidence: FOCUS_INIT_QUERY,
+        source: 'query-result',
+        turnIntroduced: 0,
+      },
+    ];
+  }
+  return mutation;
+}
 
 /**
  * Parse JSON from LLM response using Zod validation
@@ -106,6 +159,8 @@ export async function processMessage(
       pageData?: unknown;
       summary?: string;
     };
+    /** Conversation State snapshot (read-only). See conversation-state.ts §4.2. */
+    state?: ConversationState;
   },
   onProgress?: (progress: ThinkingProgress) => void
 ): Promise<AgentResponse> {
@@ -131,6 +186,8 @@ async function processMessageInner(
       pageData?: unknown;
       summary?: string;
     };
+    /** Conversation State snapshot (read-only). See conversation-state.ts §4.2. */
+    state?: ConversationState;
   },
   onProgress?: (progress: ThinkingProgress) => void
 ): Promise<AgentResponse> {
@@ -303,6 +360,7 @@ async function processMessageInner(
       conversationHistory: history,
       locale: (isZh ? 'zh-Hans' : 'en') as 'zh-Hans' | 'en',
       boundEntities: extractBoundEntities(context.pageContext?.pageData),
+      conversationStateText: context.state ? serializeStateForPrompt(context.state) : undefined,
     };
 
     let pipelineResult: PipelineResult;
@@ -868,9 +926,34 @@ async function processMessageInner(
 
   // Check if Frame determined the conversation history data can satisfy this request
   const CONTEXT_REUSABLE_FUNCTIONS = ['queryActivities', 'queryOpportunities', 'queryAccounts', 'queryContacts'];
+  const explicitQueryArgs = Object.keys(intent.arguments || {}).length > 0;
   const shouldUseConversationContext = intent.contextSufficient === true
     && context.lastFunctionResult
+    && !explicitQueryArgs
     && CONTEXT_REUSABLE_FUNCTIONS.includes(intent.function);
+
+  // ===== B5 SHADOW MODE (§14.1): deterministic data-source decision =====
+  // Compute resolveDataSource alongside the legacy LLM contextSufficient gate,
+  // log the comparison, but DO NOT change behaviour yet. This makes the new
+  // decision observable on a real LLM/published surface before we flip to it.
+  if (context.state && isQuery(intent.function)) {
+    try {
+      const shadowDecision = resolveDataSource(
+        { fn: intent.function, args: intent.arguments || {} },
+        context.state,
+      );
+      const legacy = shouldUseConversationContext ? 'reuse(lastResult)' : 'requery';
+      const agree =
+        (shadowDecision.kind === 'reuse' && shouldUseConversationContext) ||
+        (shadowDecision.kind !== 'reuse' && !shouldUseConversationContext);
+      console.log(
+        `[ConvState shadow] fn=${intent.function} new=${shadowDecision.kind} legacy=${legacy} ` +
+          `agree=${agree} hash=${computeArgumentsHash(intent.function, intent.arguments || {})}`,
+      );
+    } catch (e) {
+      console.warn('[ConvState shadow] resolveDataSource threw:', e);
+    }
+  }
   
   if (shouldUsePageContext) {
     console.log('[CopilotAgent] Using page context data for', intent.function);
@@ -889,7 +972,11 @@ async function processMessageInner(
     // Dataverse, then let the normal Pass 3 + recordList pipeline handle output.
     console.log('[CopilotAgent] Context-sufficient: reusing lastFunctionResult for', intent.function);
     const lastData = context.lastFunctionResult;
-    const records = Array.isArray(lastData) ? lastData : [];
+    const records = Array.isArray(lastData)
+      ? lastData
+      : Array.isArray((lastData as { records?: unknown[] } | undefined)?.records)
+        ? (lastData as { records: unknown[] }).records
+        : [];
     functionResult = {
       success: true,
       data: records,
@@ -1368,6 +1455,12 @@ Please provide a brief summary and analysis, do not list individual records.`;
       latencyMs: Date.now() - startTime,
       thinkingSteps,
       recordList,
+      stateMutation: buildQueryStateMutation(
+        intent.function,
+        intent.arguments || {},
+        functionResult.data,
+        recordList?.title ?? '',
+      ),
     };
   }
 
@@ -1386,5 +1479,11 @@ Please provide a brief summary and analysis, do not list individual records.`;
     latencyMs: Date.now() - startTime,
     thinkingSteps,
     recordList,
+    stateMutation: buildQueryStateMutation(
+      intent.function,
+      intent.arguments || {},
+      functionResult.data,
+      recordList?.title ?? '',
+    ),
   };
 }

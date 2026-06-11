@@ -197,7 +197,8 @@ function buildUserBlock(
   userMessage: string,
   frame: FrameResult,
   pageContext?: { currentPage: string; summary?: string; pageData?: unknown },
-  conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>
+  conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>,
+  conversationStateText?: string
 ): string {
   const lines: string[] = [];
   lines.push(`[User message]\n${userMessage}`);
@@ -233,9 +234,20 @@ function buildUserBlock(
       if (dataSummary) lines.push(`[Page data available] ${dataSummary}`);
     }
   }
-  const tail = (conversationHistory ?? []).slice(-2);
-  if (tail.length) {
-    lines.push(`[Recent dialogue]\n${tail.map((m) => `${m.role}: ${m.content}`).join('\n')}`);
+  // §9: prefer structured conversation state over raw dialogue. When present,
+  // emit the state block and keep only the single most recent turn for tone/
+  // detail the state may not capture; otherwise fall back to the last 2 turns.
+  if (conversationStateText && conversationStateText.trim()) {
+    lines.push(`[Conversation state]\n${conversationStateText.trim()}`);
+    const last = (conversationHistory ?? []).slice(-1);
+    if (last.length) {
+      lines.push(`[Latest turn]\n${last.map((m) => `${m.role}: ${m.content}`).join('\n')}`);
+    }
+  } else {
+    const tail = (conversationHistory ?? []).slice(-2);
+    if (tail.length) {
+      lines.push(`[Recent dialogue]\n${tail.map((m) => `${m.role}: ${m.content}`).join('\n')}`);
+    }
   }
   return lines.join('\n\n');
 }
@@ -291,7 +303,7 @@ export async function runIntentPipeline(ctx: FrameRunContext): Promise<PipelineR
 
   // 3. Orchestrator (LLM call for argument filling — all intents, single or multi)
   const systemPrompt = buildOrchestratorPrompt(frame, skeleton, skillsText, locale);
-  const userPrompt = buildUserBlock(ctx.userMessage, frame, ctx.pageContext, ctx.conversationHistory);
+  const userPrompt = buildUserBlock(ctx.userMessage, frame, ctx.pageContext, ctx.conversationHistory, ctx.conversationStateText);
   // Exact text invokeFlowForLLM serialises and sends — captured for copy in the
   // Frame Inspector so the Orchestrator prompt can be tested offline.
   const planPrompt = [

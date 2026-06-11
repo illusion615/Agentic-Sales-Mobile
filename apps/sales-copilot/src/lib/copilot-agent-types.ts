@@ -4,6 +4,7 @@
  */
 
 import type { ValidatedIntentResult, SingleIntent, PendingResolution, AwaitingClarification } from './agent-utils';
+import type { StateMutation } from './conversation-state';
 
 export const GREETING_PATTERN = /^(hi|hello|hey|你好|您好|嗨|早上好|下午好|晚上好|good\s*(morning|afternoon|evening))\b/i;
 
@@ -68,6 +69,13 @@ export interface AgentResponse {
   rawIntent?: IntentResult;
   /** Awaiting clarification state for resolution cascade. */
   awaitingClarification?: AwaitingClarification;
+  /**
+   * Conversation State layer (§4.2): describes how this turn should mutate the
+   * conversation state. Applied by commitConversationState in the caller, so
+   * processMessage stays pure. Optional during phased rollout — undefined means
+   * "no state change this turn".
+   */
+  stateMutation?: StateMutation;
 }
 
 export interface IntentResult extends Partial<ValidatedIntentResult> {

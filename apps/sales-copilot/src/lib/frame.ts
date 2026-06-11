@@ -347,6 +347,12 @@ export interface FrameRunContext {
   /** Reserved for future page-binding injection; not yet wired. */
   boundEntities?: FrameResult['boundEntities'];
   locale?: 'zh-Hans' | 'en';
+  /**
+   * Pre-serialized ConversationState block (§9). Passed as a string so frame.ts
+   * stays decoupled from conversation-state types. Injected into the prompt to
+   * ground anaphora/follow-up resolution in structured state, not raw history.
+   */
+  conversationStateText?: string;
 }
 
 export interface FrameRunOutcome {
@@ -390,9 +396,12 @@ export async function runFrame(ctx: FrameRunContext): Promise<FrameRunOutcome> {
   // pays the most attention (recency bias).
   const tail = (ctx.conversationHistory ?? []).slice(-4);
   let contextBlock = '';
+  if (ctx.conversationStateText && ctx.conversationStateText.trim()) {
+    contextBlock += `\n\n# Conversation state\n${ctx.conversationStateText.trim()}\n\nUse this structured state to resolve pronouns and follow-ups; it is more reliable than the raw turns below.`;
+  }
   if (tail.length > 0) {
     const turns = tail.map((m) => `${m.role}: ${m.content}`).join('\n');
-    contextBlock = `\n\n# Conversation context\n${turns}\n\nThe user's next message follows. If it contains pronouns (them/it/those/these/this) or short commands (list/show/details/more), resolve the referent from the conversation above — the salesObject MUST match what was discussed, not a default.`;
+    contextBlock += `\n\n# Conversation context\n${turns}\n\nThe user's next message follows. If it contains pronouns (them/it/those/these/this) or short commands (list/show/details/more), resolve the referent from the conversation above — the salesObject MUST match what was discussed, not a default.`;
   }
 
   const messages: Array<{ role: 'system' | 'user'; content: string }> = [

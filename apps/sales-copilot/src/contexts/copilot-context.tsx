@@ -8,6 +8,7 @@ import {
 import { getLocale, getSimulateStreaming, type Locale } from '@/lib/i18n';
 import { toast } from 'sonner';
 import { type ThinkingProgress, type AgentResponse, type IntentResult, type ThinkingStep } from '@/lib/copilot-agent';
+import { emptyState, hydrateConversationState, commitConversationState, type ConversationState, type FocusPageContext, type EntityType } from '@/lib/conversation-state';
 import { buildQueueFromIntent, findIntentByMessageId, type IntentQueue } from '@/lib/intent-queue';
 import type * as QR from '@/lib/intent-queue-runtime';
 
@@ -464,6 +465,30 @@ export interface PageContext {
   summary?: string;
 }
 
+/**
+ * Map a PageContext to the minimal FocusPageContext for the conversation state
+ * layer (§5.2). pageData uses flat keys (accountId/accountName/opportunityId/…)
+ * set per page in src/pages/*-detail.tsx. Priority mirrors regardingobjectid:
+ * opportunity > account > contact.
+ */
+function pageContextToFocus(pc: PageContext | null): FocusPageContext | undefined {
+  const data = pc?.pageData as Record<string, unknown> | undefined;
+  if (!data) return undefined;
+  const pick = (idKey: string, nameKey: string, type: EntityType): FocusPageContext | undefined => {
+    const id = data[idKey];
+    const name = data[nameKey];
+    if (typeof name === 'string' && name) {
+      return { entityType: type, entityId: typeof id === 'string' ? id : undefined, entityName: name };
+    }
+    return undefined;
+  };
+  return (
+    pick('opportunityId', 'opportunityName', 'opportunity') ??
+    pick('accountId', 'accountName', 'account') ??
+    pick('contactId', 'contactName', 'contact')
+  );
+}
+
 const CopilotContext = createContext<CopilotContextValue | null>(null);
 
 export function CopilotProvider({ children }: { children: ReactNode }) {
@@ -506,6 +531,12 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
   // I-2 Stage 1: ref tracking latest messages (used by sendMessage to detect blocked state without stale closure)
   const messagesRef = useRef<ChatMessage[]>(messages);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
+
+  // Conversation State layer (§4.1): structured cross-turn business context.
+  // Held in a ref — read+written synchronously within a single sendMessage, so a
+  // ref avoids stale-closure reads (same rationale as messagesRef). Reset in
+  // startNewConversation. See src/lib/conversation-state.ts.
+  const conversationStateRef = useRef<ConversationState>(emptyState());
 
   // I-2 Round 3: parked intent — set when user replies 'create' to a contact awaiting-clarification.
   // The parked function is resumed by completeParkedIntentWithNewContact after the new contact is saved.
@@ -1588,6 +1619,16 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           );
 
           const { processMessage } = await import('@/lib/copilot-agent');
+          // Conversation State (§4.2): hydrate the prior state before processing,
+          // pass a read-only snapshot to the agent, and commit the returned
+          // mutation afterwards. Behaviour-neutral until the agent emits mutations
+          // and decision logic consumes the state (later Phase-B tasks).
+          const hydratedState = hydrateConversationState({
+            prevState: conversationStateRef.current,
+            pageContext: pageContextToFocus(pageContextRef.current),
+            turn: messagesRef.current.length,
+          });
+          conversationStateRef.current = hydratedState;
           const response = await processMessage(text.trim(), {
             userId: user?.objectId,
             userEmail: user?.userPrincipalName,
@@ -1600,10 +1641,17 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
               pageData: pageContextRef.current.pageData,
               summary: pageContextRef.current.summary,
             } : undefined,
+            state: hydratedState,
           }, handleProgress);
 
           // Bail out if the user cancelled while we were waiting for the LLM
           if (signal.aborted) return;
+
+          // Commit the conversation-state mutation (no-op when undefined).
+          conversationStateRef.current = commitConversationState(
+            conversationStateRef.current,
+            response.stateMutation ?? {},
+          );
           
           // ===== IntentQueue intercept =====
           // When the parsed intent triggers queue mode (draft / batch / matching / additionalActions),
@@ -2039,6 +2087,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     typingMessageIdRef.current = null;
     setMessages([]);
     messagesRef.current = []; // Clear ref immediately (avoids stale closure in sendMessage)
+    conversationStateRef.current = emptyState(); // §4.4: reset state with the same wipe to avoid cross-session bleed
     queueRef.current = null;
     
     // Clear persisted messages
