@@ -50,9 +50,11 @@ import {
   DAILY_REPORT_PATTERN,
   buildIntentsOverview,
 } from './copilot-agent-types';
-import type { ConversationState, StateMutation, EntityType, WorkingSetRecord } from './conversation-state';
+import type { ConversationState, StateMutation, EntityType, WorkingSetRecord, FocusEntity } from './conversation-state';
 import { computeArgumentsHash, isQuery, entityOf, FOCUS_INIT_QUERY, serializeStateForPrompt } from './conversation-state';
 import { resolveDataSource } from './data-source-resolver';
+import { resolveAnaphora, type AnaphoraRequest } from './anaphora';
+import type { BoundEntities } from './agent-utils';
 
 // Re-export types so existing importers don't break
 export type { ThinkingProgress, ThinkingStep, AgentResponse, IntentResult } from './copilot-agent-types';
@@ -109,6 +111,81 @@ function buildQueryStateMutation(
 }
 
 /**
+ * B6 (§7): detect a referring expression in the user message and, when present,
+ * map it to an AnaphoraRequest. Returns null when no referring expression is
+ * found (so the normal pipeline is unaffected). Entity type is inferred from
+ * explicit nouns ("客户"/"商机"/"单子"/"联系人"); otherwise left undefined so
+ * resolveAnaphora applies the type-unclear rules (§7 row 2).
+ */
+function detectAnaphora(msg: string): AnaphoraRequest | null {
+  const m = msg.trim();
+  // ordinal / superlative
+  const ordMatch = m.match(/第\s*([0-9一二三四五六七八九十]+)\s*个|the\s+(\d+)(?:st|nd|rd|th)/i);
+  const superl = /最贵的?那?个|金额最高|the\s+(?:most\s+expensive|highest|biggest)/i.test(m);
+  const plural = /他们|她们|它们|这些|那些|them|these|those/i.test(m);
+  const singular = /\b(it|its)\b|它的?|这个|那个|该(?:客户|商机|单子|联系人|项目)?/i.test(m);
+  if (!ordMatch && !superl && !plural && !singular) return null;
+
+  let entityType: EntityType | undefined;
+  if (/客户|account/i.test(m)) entityType = 'account';
+  else if (/商机|机会|单子|项目|opportunit/i.test(m)) entityType = 'opportunity';
+  else if (/联系人|contact/i.test(m)) entityType = 'contact';
+  else if (/活动|任务|拜访|会议|activit|task|visit|meeting/i.test(m)) entityType = 'activity';
+
+  if (ordMatch) {
+    const cn = ordMatch[1];
+    const en = ordMatch[2];
+    const cnMap: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+    const ordinal = en ? parseInt(en, 10) : (/^\d+$/.test(cn) ? parseInt(cn, 10) : cnMap[cn]);
+    return { kind: 'ordinal', entityType, ordinal };
+  }
+  if (superl) {
+    return { kind: 'ordinal', entityType, superlative: { field: 'amount', direction: 'max' } };
+  }
+  if (plural) return { kind: 'plural', entityType };
+  return { kind: 'singular', entityType };
+}
+
+/**
+ * B6 (§7): merge an anaphora-resolved focus into the Orchestrator boundEntities
+ * channel (page-bound entities win — they are the strongest signal). Only fills
+ * account/opportunity/contact slots (BoundEntities shape). Returns the resolved
+ * focus (for the StateMutation) alongside the merged boundEntities.
+ */
+function applyAnaphora(
+  userMessage: string,
+  state: ConversationState | undefined,
+  pageBound: BoundEntities | undefined,
+): { boundEntities: BoundEntities | undefined; resolvedFocus?: FocusEntity[] } {
+  if (!state) return { boundEntities: pageBound };
+  const req = detectAnaphora(userMessage);
+  if (!req) return { boundEntities: pageBound };
+  let result;
+  try {
+    result = resolveAnaphora(state, req);
+  } catch (e) {
+    console.warn('[ConvState] resolveAnaphora threw:', e);
+    return { boundEntities: pageBound };
+  }
+  if (result.status !== 'resolved') {
+    console.log(`[ConvState] anaphora kind=${req.kind} type=${req.entityType ?? '?'} status=${result.status} rule=${result.rule}`);
+    return { boundEntities: pageBound };
+  }
+  const f = result.entity;
+  const merged: BoundEntities = { ...(pageBound ?? {}) };
+  const slot = f.type === 'account' ? 'account' : f.type === 'opportunity' ? 'opportunity' : f.type === 'contact' ? 'contact' : null;
+  // Page-bound wins; only fill an empty slot. Activity focus has no BoundEntities slot.
+  if (slot && !merged[slot]) {
+    merged[slot] = { id: f.id, name: f.name };
+  }
+  console.log(`[ConvState] anaphora resolved → ${f.type} "${f.name}"${f.id ? ` (id=${f.id})` : ''} via ${result.rule}`);
+  return {
+    boundEntities: Object.keys(merged).length ? merged : pageBound,
+    resolvedFocus: [{ ...f, turnIntroduced: 0, source: 'user-mention' }],
+  };
+}
+
+/**
  * Parse JSON from LLM response using Zod validation
   if (intent.additionalActions) {
     intent.additionalActions.forEach((a, i) => {
@@ -145,6 +222,10 @@ function parseJsonResponse(text: string): IntentResult | null {
 // Module-level side-channel so the outer wrapper can attach rawIntent to the
 // response without threading it through ~30 nested return sites.
 let _lastParsedIntent: IntentResult | null = null;
+// B6 side-channel: anaphora-resolved focus for this turn, merged into the
+// response's stateMutation by the outer wrapper (so all return sites benefit).
+// Non-nullable ([] when none) to keep tsc happy across the await boundary.
+let _anaphoraResolvedFocus: FocusEntity[] = [];
 
 export async function processMessage(
   userMessage: string,
@@ -166,9 +247,18 @@ export async function processMessage(
   onProgress?: (progress: ThinkingProgress) => void
 ): Promise<AgentResponse> {
   _lastParsedIntent = null;
+  _anaphoraResolvedFocus = [];
   const result = await processMessageInner(userMessage, context, onProgress);
   if (_lastParsedIntent && !result.rawIntent) {
     result.rawIntent = _lastParsedIntent;
+  }
+  // B6: ensure the anaphora-resolved focus reaches the committed state even when
+  // the executed path produced no resolvedFocus of its own (e.g. update/draft).
+  const anaFocus = _anaphoraResolvedFocus;
+  if (anaFocus.length > 0) {
+    const existing = result.stateMutation ?? {};
+    const mergedFocus = [...anaFocus, ...(existing.resolvedFocus ?? [])];
+    result.stateMutation = { ...existing, resolvedFocus: mergedFocus };
   }
   return result;
 }
@@ -355,12 +445,18 @@ async function processMessageInner(
   // the IDs of the account/opportunity/contact the user is viewing (this link was
   // previously missing — pipelineCtx never set boundEntities, so describeBoundEntities
   // always rendered empty and the Orchestrator had to guess from the page summary).
+  // B6 (§7): when the message uses a referring expression, resolve it against
+  // conversation state and merge the resolved entity into boundEntities (page wins).
+  const pageBound = extractBoundEntities(context.pageContext?.pageData);
+  const anaphora = applyAnaphora(userMessage, context.state, pageBound);
+  const anaphoraResolvedFocus = anaphora.resolvedFocus;
+  _anaphoraResolvedFocus = anaphoraResolvedFocus ?? [];
   const pipelineCtx = {
       userMessage,
       pageContext: context.pageContext,
       conversationHistory: history,
       locale: (isZh ? 'zh-Hans' : 'en') as 'zh-Hans' | 'en',
-      boundEntities: extractBoundEntities(context.pageContext?.pageData),
+      boundEntities: anaphora.boundEntities,
       conversationStateText: context.state ? serializeStateForPrompt(context.state) : undefined,
     };
 
