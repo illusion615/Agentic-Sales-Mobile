@@ -594,3 +594,81 @@ export function serializeStateForPrompt(state: ConversationState): string {
   }
   return lines.join('\n');
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// C1: observability ring buffer — per-turn state snapshots for the Inspector.
+// Dev-only; mirrors frame.ts pipeline log. Nothing here affects behaviour.
+// ───────────────────────────────────────────────────────────────────────────
+
+const STATE_RING_KEY = 'copilot-convstate-log';
+const STATE_RING_MAX = 50;
+
+export interface ConversationStateSnapshot {
+  ts: number;
+  userMessage: string;
+  focus: Array<{ type: EntityType; id?: string; name: string; confidence: number; source: FocusSource }>;
+  workingSets: Array<{ sourceFunction: string; filterSummary: string; count: number; stale: boolean; argumentsHash: string }>;
+  pendingGoal?: { fn: string; state: PendingGoalState; missing: string[] };
+  rollingSummary: string;
+  /** Human-readable decision lines emitted by the agent this turn ([ConvState] …). */
+  decisions: string[];
+}
+
+/** Build a serializable snapshot from a committed state + this turn's decision lines. */
+export function buildStateSnapshot(
+  userMessage: string,
+  state: ConversationState,
+  decisions: string[],
+): ConversationStateSnapshot {
+  return {
+    ts: Date.now(),
+    userMessage,
+    focus: state.focus.map((f) => ({ type: f.type, id: f.id, name: f.name, confidence: Math.round(f.confidence * 100) / 100, source: f.source })),
+    workingSets: state.workingSets.map((w) => ({
+      sourceFunction: w.sourceFunction,
+      filterSummary: w.filterSummary,
+      count: w.records.length,
+      stale: w.stale,
+      argumentsHash: w.argumentsHash,
+    })),
+    pendingGoal: state.pendingGoal
+      ? {
+          fn: state.pendingGoal.fn,
+          state: state.pendingGoal.state,
+          missing: state.pendingGoal.requiredSlots.filter((s) => !(s in state.pendingGoal!.filledSlots)),
+        }
+      : undefined,
+    rollingSummary: state.rollingSummary,
+    decisions,
+  };
+}
+
+export function recordConversationState(snapshot: ConversationStateSnapshot): void {
+  try {
+    const list = readConversationStateLog();
+    list.unshift(snapshot);
+    while (list.length > STATE_RING_MAX) list.pop();
+    sessionStorage.setItem(STATE_RING_KEY, JSON.stringify(list));
+  } catch {
+    /* sessionStorage may be unavailable in some embeddings */
+  }
+}
+
+export function readConversationStateLog(): ConversationStateSnapshot[] {
+  try {
+    const raw = sessionStorage.getItem(STATE_RING_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as ConversationStateSnapshot[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function clearConversationStateLog(): void {
+  try {
+    sessionStorage.removeItem(STATE_RING_KEY);
+  } catch {
+    /* noop */
+  }
+}

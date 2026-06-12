@@ -76,6 +76,12 @@ export interface AgentResponse {
    * "no state change this turn".
    */
   stateMutation?: StateMutation;
+  /**
+   * C1 observability: human-readable [ConvState] decision lines emitted this
+   * turn (data-source decision, anaphora resolution). Dev-only; surfaced in the
+   * Frame Inspector State panel. Does not affect behaviour.
+   */
+  convStateDebug?: string[];
 }
 
 export interface IntentResult extends Partial<ValidatedIntentResult> {

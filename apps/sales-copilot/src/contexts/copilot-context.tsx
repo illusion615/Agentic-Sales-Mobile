@@ -8,7 +8,7 @@ import {
 import { getLocale, getSimulateStreaming, type Locale } from '@/lib/i18n';
 import { toast } from 'sonner';
 import { type ThinkingProgress, type AgentResponse, type IntentResult, type ThinkingStep } from '@/lib/copilot-agent';
-import { emptyState, hydrateConversationState, commitConversationState, type ConversationState, type FocusPageContext, type EntityType } from '@/lib/conversation-state';
+import { emptyState, hydrateConversationState, commitConversationState, buildStateSnapshot, recordConversationState, type ConversationState, type FocusPageContext, type EntityType } from '@/lib/conversation-state';
 import { buildQueueFromIntent, findIntentByMessageId, type IntentQueue } from '@/lib/intent-queue';
 import type * as QR from '@/lib/intent-queue-runtime';
 
@@ -1652,6 +1652,12 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             conversationStateRef.current,
             response.stateMutation ?? {},
           );
+          // C1: record a per-turn state snapshot for the Frame Inspector State panel.
+          try {
+            recordConversationState(
+              buildStateSnapshot(text.trim(), conversationStateRef.current, response.convStateDebug ?? []),
+            );
+          } catch { /* observability must never break the turn */ }
           
           // ===== IntentQueue intercept =====
           // When the parsed intent triggers queue mode (draft / batch / matching / additionalActions),

@@ -20,6 +20,11 @@ import {
   readBenchmarkLog,
   type BenchmarkEntry,
 } from '@/lib/orchestrator';
+import {
+  readConversationStateLog,
+  clearConversationStateLog,
+  type ConversationStateSnapshot,
+} from '@/lib/conversation-state';
 import { isDagPlan } from '@/lib/dag-schema';
 import type { Locale } from '@/lib/i18n';
 
@@ -32,12 +37,14 @@ interface PipelineViewerProps {
 export function PipelineViewer({ open, onClose, locale }: PipelineViewerProps) {
   const [entries, setEntries] = useState<PipelineLogEntry[]>([]);
   const [benchmarks, setBenchmarks] = useState<BenchmarkEntry[]>([]);
+  const [convStates, setConvStates] = useState<ConversationStateSnapshot[]>([]);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
     if (!open) return;
     setEntries(readPipelineLog());
     setBenchmarks(readBenchmarkLog());
+    setConvStates(readConversationStateLog());
   }, [open, tick]);
 
   const stats = useMemo(() => {
@@ -113,6 +120,7 @@ export function PipelineViewer({ open, onClose, locale }: PipelineViewerProps) {
                   title={locale === 'zh-Hans' ? '清空' : 'Clear'}
                   onClick={() => {
                     clearPipelineLog();
+                    clearConversationStateLog();
                     setTick((n) => n + 1);
                   }}
                 >
@@ -150,6 +158,9 @@ export function PipelineViewer({ open, onClose, locale }: PipelineViewerProps) {
               </div>
             </div>
 
+            {/* Conversation State panel (C1) */}
+            <ConversationStatePanel snapshot={convStates[0]} locale={locale} />
+
             {/* Entry list */}
             <div className="flex-1 overflow-y-auto px-4 py-3">
               {entries.length === 0 ? (
@@ -181,6 +192,96 @@ function Tile({ label, value, hint }: { label: string; value: string; hint?: str
       <div className="text-[10px] uppercase tracking-wide text-stone-400">{label}</div>
       <div className="text-base font-semibold text-stone-900">{value}</div>
       {hint && <div className="text-[10px] text-stone-400">{hint}</div>}
+    </div>
+  );
+}
+
+/**
+ * C1: Conversation State panel — shows the latest committed state snapshot
+ * (focus / working sets / pending goal) plus this turn's [ConvState] decision
+ * lines. Collapsible; dev-only observability, no effect on behaviour.
+ */
+function ConversationStatePanel({ snapshot, locale }: { snapshot?: ConversationStateSnapshot; locale: Locale }) {
+  const [open, setOpen] = useState(true);
+  const zh = locale === 'zh-Hans';
+  return (
+    <div className="border-b border-stone-200 bg-indigo-50/40 px-4 py-3 text-xs">
+      <button
+        className="mb-2 flex w-full items-center justify-between text-[10px] uppercase tracking-wide text-indigo-500"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span>{zh ? '🧠 会话状态（最近一轮）' : '🧠 Conversation State (latest turn)'}</span>
+        <span className="text-stone-400">{open ? '▾' : '▸'}</span>
+      </button>
+      {open && (
+        !snapshot ? (
+          <div className="text-stone-400">{zh ? '暂无状态 · 发出查询/指代消息后出现' : 'No state yet · send a query or referring message'}</div>
+        ) : (
+          <div className="space-y-2">
+            {/* Focus */}
+            <div>
+              <div className="text-[10px] font-semibold text-indigo-600">{zh ? 'Focus（实体焦点）' : 'Focus'}</div>
+              {snapshot.focus.length === 0 ? (
+                <div className="text-stone-400">—</div>
+              ) : (
+                <ul className="mt-0.5 space-y-0.5">
+                  {snapshot.focus.slice(0, 5).map((f, i) => (
+                    <li key={i} className="font-mono text-[11px] text-stone-700">
+                      <span className="text-indigo-700">{f.type}</span> "{f.name}"
+                      {f.id ? <span className="text-stone-400"> ({f.id.slice(0, 8)}…)</span> : null}
+                      <span className="text-stone-400"> · conf {f.confidence} · {f.source}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            {/* Working sets */}
+            <div>
+              <div className="text-[10px] font-semibold text-indigo-600">{zh ? 'Working sets（结果集缓存）' : 'Working sets'}</div>
+              {snapshot.workingSets.length === 0 ? (
+                <div className="text-stone-400">—</div>
+              ) : (
+                <ul className="mt-0.5 space-y-0.5">
+                  {snapshot.workingSets.map((w, i) => (
+                    <li key={i} className="font-mono text-[11px] text-stone-700">
+                      {w.sourceFunction} · {w.count} {zh ? '条' : 'recs'}
+                      <span className={w.stale ? 'text-rose-500' : 'text-emerald-600'}> · {w.stale ? 'stale' : 'fresh'}</span>
+                      {w.filterSummary ? <span className="text-stone-400"> · {w.filterSummary}</span> : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            {/* Pending goal */}
+            {snapshot.pendingGoal && (
+              <div>
+                <div className="text-[10px] font-semibold text-indigo-600">{zh ? 'Pending goal（未完成任务）' : 'Pending goal'}</div>
+                <div className="font-mono text-[11px] text-stone-700">
+                  {snapshot.pendingGoal.fn} · {snapshot.pendingGoal.state}
+                  {snapshot.pendingGoal.missing.length ? <span className="text-rose-500"> · missing: {snapshot.pendingGoal.missing.join(', ')}</span> : null}
+                </div>
+              </div>
+            )}
+            {/* Decisions */}
+            {snapshot.decisions.length > 0 && (
+              <div>
+                <div className="text-[10px] font-semibold text-indigo-600">{zh ? '本轮决策' : 'This turn'}</div>
+                <ul className="mt-0.5 space-y-0.5">
+                  {snapshot.decisions.map((d, i) => (
+                    <li key={i} className="font-mono text-[10px] text-stone-600">{d.replace('[ConvState] ', '')}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {snapshot.rollingSummary && (
+              <div>
+                <div className="text-[10px] font-semibold text-indigo-600">{zh ? '滚动摘要' : 'Rolling summary'}</div>
+                <div className="text-[11px] text-stone-600">{snapshot.rollingSummary}</div>
+              </div>
+            )}
+          </div>
+        )
+      )}
     </div>
   );
 }

@@ -168,7 +168,7 @@ function applyAnaphora(
     return { boundEntities: pageBound };
   }
   if (result.status !== 'resolved') {
-    console.log(`[ConvState] anaphora kind=${req.kind} type=${req.entityType ?? '?'} status=${result.status} rule=${result.rule}`);
+    convLog(`[ConvState] anaphora kind=${req.kind} type=${req.entityType ?? '?'} status=${result.status} rule=${result.rule}`);
     return { boundEntities: pageBound };
   }
   const f = result.entity;
@@ -178,7 +178,7 @@ function applyAnaphora(
   if (slot && !merged[slot]) {
     merged[slot] = { id: f.id, name: f.name };
   }
-  console.log(`[ConvState] anaphora resolved → ${f.type} "${f.name}"${f.id ? ` (id=${f.id})` : ''} via ${result.rule}`);
+  convLog(`[ConvState] anaphora resolved → ${f.type} "${f.name}"${f.id ? ` (id=${f.id})` : ''} via ${result.rule}`);
   return {
     boundEntities: Object.keys(merged).length ? merged : pageBound,
     resolvedFocus: [{ ...f, turnIntroduced: 0, source: 'user-mention' }],
@@ -226,6 +226,12 @@ let _lastParsedIntent: IntentResult | null = null;
 // response's stateMutation by the outer wrapper (so all return sites benefit).
 // Non-nullable ([] when none) to keep tsc happy across the await boundary.
 let _anaphoraResolvedFocus: FocusEntity[] = [];
+// C1 side-channel: [ConvState] decision lines collected this turn for the Inspector.
+let _convStateDebug: string[] = [];
+function convLog(line: string): void {
+  console.log(line);
+  _convStateDebug.push(line);
+}
 
 export async function processMessage(
   userMessage: string,
@@ -248,6 +254,7 @@ export async function processMessage(
 ): Promise<AgentResponse> {
   _lastParsedIntent = null;
   _anaphoraResolvedFocus = [];
+  _convStateDebug = [];
   const result = await processMessageInner(userMessage, context, onProgress);
   if (_lastParsedIntent && !result.rawIntent) {
     result.rawIntent = _lastParsedIntent;
@@ -259,6 +266,10 @@ export async function processMessage(
     const existing = result.stateMutation ?? {};
     const mergedFocus = [...anaFocus, ...(existing.resolvedFocus ?? [])];
     result.stateMutation = { ...existing, resolvedFocus: mergedFocus };
+  }
+  // C1: surface this turn's [ConvState] decision lines for the Inspector.
+  if (_convStateDebug.length > 0) {
+    result.convStateDebug = [..._convStateDebug];
   }
   return result;
 }
@@ -1052,7 +1063,7 @@ async function processMessageInner(
           reuseWorkingSetRaw = ws.rawRecords;
         }
       }
-      console.log(
+      convLog(
         `[ConvState] fn=${intent.function} decision=${decision.kind} legacy=${legacy} agree=${agree} ` +
           `reuseApplied=${reuseWorkingSetRaw !== null} hash=${computeArgumentsHash(intent.function, intent.arguments || {})}`,
       );
@@ -1079,6 +1090,7 @@ async function processMessageInner(
     // B5 (§6): deterministic reuse — replay the hash-matched working set's raw
     // rows through the normal pipeline. Same data as a re-query, no round-trip.
     console.log('[ConvState] reusing working set (', reuseWorkingSetRaw.length, 'records) for', intent.function);
+    _convStateDebug.push(`[ConvState] reused ${reuseWorkingSetRaw.length} records for ${intent.function}`);
     functionResult = {
       success: true,
       data: reuseWorkingSetRaw,
