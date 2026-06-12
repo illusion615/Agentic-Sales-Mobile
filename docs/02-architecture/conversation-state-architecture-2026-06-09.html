@@ -687,7 +687,7 @@ lines.push(`[Latest turn]\n` + lastTurnRaw);
         <table>
           <thead><tr><th>#</th><th>任务</th><th>改动文件</th><th>完成判据</th></tr></thead>
           <tbody>
-            <tr><td>C1</td><td>Frame Inspector State 面板：展示 focus / working set hash 比较 / 来源决策 / pendingGoal</td><td><span class="tag fix">改</span> <code>frame-viewer.tsx</code></td><td>每轮可见状态快照与决策依据</td></tr>
+            <tr><td>C1</td><td>Frame Inspector State 面板：展示 focus / working set hash 比较 / 来源决策 / pendingGoal</td><td><span class="tag fix">改</span> <code>frame-viewer.tsx</code></td><td>每轮可见状态快照与决策依据</td><td><span class="tag add">✓ 已发布面实测</span></td></tr>
             <tr><td>C2</td><td>会话级回归用例：把 §12 六轮做成断言</td><td><span class="tag add">新增</span> <code>conversation-state-trace.test.ts</code></td><td>逐轮 state 快照与 §12 标准答案一致</td><td><span class="tag add">✓ 完成（纯函数层）</span></td></tr>
             <tr><td>C3</td><td>构建 + 推送 + 浏览器实测 §12 三个验证点</td><td>—</td><td>§16 Checklist 全勾</td></tr>
           </tbody>
@@ -736,7 +736,7 @@ lines.push(`[Latest turn]\n` + lastTurnRaw);
 
         <h4>D. 可观测与测试</h4>
         <ul>
-          <li>☐ Frame Inspector 显示每轮 focus / hash 比较 / 来源决策 / pendingGoal（§13.2 / C1）</li>
+          <li>☑ Frame Inspector 显示每轮 focus / hash 比较 / 来源决策 / pendingGoal（§13.2 / C1）<span class="tag add">已发布面实测：🧠 会话状态面板渲染 working set+决策 2026-06-12</span></li>
           <li>☑ 纯函数单测全绿（A2–A8 各自完成判据）<span class="tag add">33/33 通过 2026-06-11</span></li>
           <li>◐ §12 六轮会话级用例逐轮断言通过（C2）；纯函数层已全绿（34/34），含轮3 requery·轮5 跑题保护·轮6 槽位补全；UI/LLM 端到端待阶段 B 实测（§13.1）<span class="tag add">纯函数层 34/34</span></li>
           <li>☐ 构建通过 + 推送 + 浏览器实测三个验证点（C3）</li>
