@@ -20,6 +20,8 @@ import type { Activityparties } from '@/generated/models/ActivitypartiesModel';
 
 /** Participation roles used for meeting/visit attendees. */
 export const PARTICIPATION = {
+  sender: 1,
+  toRecipient: 2,
   required: 5,
   optional: 6,
   organizer: 7,
@@ -29,6 +31,7 @@ export type ParticipationRole = keyof typeof PARTICIPATION;
 
 /** Masks representing real attendees (excludes auto-added Owner=9, Regarding=8, etc.). */
 const ATTENDEE_MASKS = new Set<number>([5, 6, 7]);
+const PRIMARY_CONTACT_MASKS = new Set<number>([1, 2]);
 
 /** A resolved participant on an activity. */
 export interface ActivityParticipant {
@@ -44,9 +47,22 @@ export interface ActivityParticipant {
 
 function roleFromMask(mask?: number): ParticipationRole {
   switch (mask) {
+    case PARTICIPATION.sender: return 'sender';
+    case PARTICIPATION.toRecipient: return 'toRecipient';
     case PARTICIPATION.organizer: return 'organizer';
     case PARTICIPATION.optional: return 'optional';
     default: return 'required';
+  }
+}
+
+async function resolveContactNames(rows: Array<Activityparties & Record<string, unknown>>): Promise<Map<string, string>> {
+  if (rows.length === 0) return new Map();
+  try {
+    const { ContactService } = await import('@/generated/services/contact-service');
+    const contacts = await ContactService.getAll();
+    return new Map(contacts.map((c) => [c.id, c.fullname || '']));
+  } catch {
+    return new Map();
   }
 }
 
@@ -68,13 +84,7 @@ export async function fetchActivityParticipants(activityId: string): Promise<Act
 
     if (rows.length === 0) return [];
 
-    // activityparty has no name column — resolve display names from contacts.
-    let nameById = new Map<string, string>();
-    try {
-      const { ContactService } = await import('@/generated/services/contact-service');
-      const contacts = await ContactService.getAll();
-      nameById = new Map(contacts.map((c) => [c.id, c.fullname || '']));
-    } catch { /* fall back to email/id */ }
+    const nameById = await resolveContactNames(rows);
 
     return rows.map((r): ActivityParticipant => {
       const id = r._partyid_value as string;
@@ -88,5 +98,34 @@ export async function fetchActivityParticipants(activityId: string): Promise<Act
     });
   } catch {
     return [];
+  }
+}
+
+export async function fetchPrimaryActivityContact(activityId: string): Promise<ActivityParticipant | undefined> {
+  if (!activityId) return undefined;
+  try {
+    const result = await ActivitypartiesService.getAll({
+      filter: `_activityid_value eq ${activityId}`,
+    });
+    if (!result.success || !result.data) return undefined;
+    const rows = (result.data as unknown as Array<Activityparties & Record<string, unknown>>)
+      .filter((r) => r.ispartydeleted !== true)
+      .filter((r) => PRIMARY_CONTACT_MASKS.has(r.participationtypemask as unknown as number))
+      .filter((r) => !!(r._partyid_value as string));
+
+    const preferred = rows.find((r) => (r.participationtypemask as unknown as number) === PARTICIPATION.toRecipient) ?? rows[0];
+    if (!preferred) return undefined;
+
+    const nameById = await resolveContactNames([preferred]);
+    const id = preferred._partyid_value as string;
+    const email = preferred.addressused;
+    return {
+      id,
+      name: nameById.get(id) || email || id,
+      email,
+      role: roleFromMask(preferred.participationtypemask as unknown as number),
+    };
+  } catch {
+    return undefined;
   }
 }

@@ -29,7 +29,8 @@ export const Crf5c_opportunity1sstatuscode = {
 export type Crf5c_opportunity1sstatuscode = keyof typeof Crf5c_opportunity1sstatuscode;
 
 export interface Crf5c_opportunity1sBase {
-  "crf5c_Account@odata.bind": string;
+  "biz_Account@odata.bind": string;
+  "crf5c_Account@odata.bind"?: string;
   crf5c_blocker?: string;
   crf5c_closedon?: string;
   crf5c_confidence?: number;
@@ -39,7 +40,7 @@ export interface Crf5c_opportunity1sBase {
   crf5c_lastaction?: string;
   crf5c_name: string;
   crf5c_opportunity1id: string;
-  crf5c_ownerid: string;
+  crf5c_ownerid?: string;
   crf5c_stage: Crf5c_opportunity1scrf5c_stage;
   crf5c_totalamount: number;
   importsequencenumber?: number;
@@ -53,6 +54,8 @@ export interface Crf5c_opportunity1sBase {
 }
 
 export interface Crf5c_opportunity1s extends Crf5c_opportunity1sBase {
+  biz_accountname?: string;
+  biz_accountyominame?: string;
   createdbyname?: string;
   createdbyyominame: string;
   createdon?: string;
@@ -72,6 +75,8 @@ export interface Crf5c_opportunity1s extends Crf5c_opportunity1sBase {
   statecodename?: string;
   statuscodename?: string;
   versionnumber?: number;
+  biz_account?: object;
+  _biz_account_value?: string;
   createdby?: object;
   _createdby_value?: string;
   createdonbehalfby?: object;

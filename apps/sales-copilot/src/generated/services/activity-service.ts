@@ -4,15 +4,15 @@
  * Read: queries all three tables in parallel, merges, sorts by scheduleddate desc.
  * Write: routes to the correct table based on activity type.
  *
- * regardingobjectid: points to opportunity (if present) or account.
- * Account is derived from opportunity when regarding points to an opp.
+ * regardingobjectid: points to the custom opportunity table when present,
+ * otherwise account. The custom opportunity table must have activities enabled.
  */
 import { AppointmentEntityService, PhonecallEntityService, EmailEntityService } from './ActivityEntityService';
 import type { ActivityEntityBase } from '../models/ActivityEntityModel';
 import type { IGetAllOptions } from '../models/CommonModels';
 import type { Activity, ActivityType } from '../models/activity-model';
 import { requireId } from './_adapter-utils';
-import { fetchActivityParticipants } from '@/lib/activity-party';
+import { fetchActivityParticipants, fetchPrimaryActivityContact } from '@/lib/activity-party';
 
 /** Participation only applies to appointment-backed activities. */
 function supportsParticipants(type: ActivityType): boolean {
@@ -41,7 +41,7 @@ function fromDv(dv: ActivityEntityBase, type: ActivityType): Activity {
   let account: Activity['account'];
   let opportunity: Activity['opportunity'];
 
-  if (regardingType === 'opportunity') {
+  if (regardingType === 'crf5c_opportunity1' || regardingType === 'opportunity') {
     opportunity = { id: regardingId, name1: regardingName };
     // Account will be resolved by the UI from the opportunity record
   } else if (regardingType === 'account') {
@@ -77,6 +77,13 @@ function getService(type: ActivityType): { svc: ServiceClass; tableName: string 
   }
 }
 
+function activityPartyCollection(type: ActivityType): string | undefined {
+  if (type === 'visit' || type === 'meeting') return 'appointment_activity_parties';
+  if (type === 'call') return 'phonecall_activity_parties';
+  if (type === 'email') return 'email_activity_parties';
+  return undefined;
+}
+
 function toDv(r: Partial<Omit<Activity, 'id'>>, type: ActivityType): Record<string, unknown> {
   const dv: Record<string, unknown> = {};
   if (r.title !== undefined) dv.subject = r.title;
@@ -106,9 +113,20 @@ function toDv(r: Partial<Omit<Activity, 'id'>>, type: ActivityType): Record<stri
     }));
   }
 
-  // regardingobjectid: prefer opportunity, fallback to account
+  if ((type === 'call' || type === 'email') && r.contact?.id) {
+    const partyCollection = activityPartyCollection(type);
+    if (partyCollection) {
+      dv[partyCollection] = [
+        {
+          'partyid_contact@odata.bind': `/contacts(${r.contact.id})`,
+          participationtypemask: 2,
+        },
+      ];
+    }
+  }
+
   if (r.opportunity?.id) {
-    dv['regardingobjectid_opportunity@odata.bind'] = `/opportunities(${r.opportunity.id})`;
+    dv['regardingobjectid_crf5c_opportunity1@odata.bind'] = `/crf5c_opportunity1s(${r.opportunity.id})`;
   } else if (r.account?.id) {
     dv['regardingobjectid_account@odata.bind'] = `/accounts(${r.account.id})`;
   }
@@ -128,6 +146,8 @@ export class ActivityService {
     // Attendees were deep-inserted via the appointment payload (appointment_activity_parties).
     if (supportsParticipants(type) && record.contacts && record.contacts.length > 0) {
       created.contacts = record.contacts;
+    } else if (!supportsParticipants(type) && record.contact) {
+      created.contact = record.contact;
     }
     return created;
   }
@@ -203,13 +223,20 @@ export class ActivityService {
         const result = await svc.get(id);
         if (result.success && result.data) {
           const activity = fromDv(result.data as ActivityEntityBase, type);
-          // Populate attendees for appointment-backed activities.
           if (supportsParticipants(type)) {
             const parties = await fetchActivityParticipants(id);
             if (parties.length > 0) {
-              activity.contacts = parties.map((p) => ({ id: p.id, fullname: p.name, email: p.email, role: p.role }));
+              activity.contacts = parties.map((p) => ({
+                id: p.id,
+                fullname: p.name,
+                email: p.email,
+                role: p.role === 'optional' || p.role === 'organizer' ? p.role : 'required',
+              }));
               // Appointment participants are attendees only — do NOT also set single contact.
             }
+          } else {
+            const contact = await fetchPrimaryActivityContact(id);
+            if (contact) activity.contact = { id: contact.id, fullname: contact.name };
           }
           return activity;
         }

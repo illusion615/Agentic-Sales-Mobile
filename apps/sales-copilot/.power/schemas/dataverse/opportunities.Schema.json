@@ -10,6 +10,32 @@
       "x-ms-dataverse-primary-id": "crf5c_opportunity1id",
       "x-ms-dataverse-primary-name": "crf5c_name",
       "properties": {
+        "biz_account": {
+          "type": "string",
+          "title": "Account",
+          "x-ms-dataverse-attribute": "biz_account",
+          "x-ms-dataverse-type": "LookupType",
+          "x-ms-schema-name": "biz_Account",
+          "required": true
+        },
+        "biz_accountname": {
+          "type": "string",
+          "title": "biz_accountname",
+          "x-ms-dataverse-attribute": "biz_accountname",
+          "x-ms-dataverse-type": "StringType",
+          "x-ms-schema-name": "biz_AccountName",
+          "x-ms-read-only": true,
+          "maxLength": 160
+        },
+        "biz_accountyominame": {
+          "type": "string",
+          "title": "biz_accountyominame",
+          "x-ms-dataverse-attribute": "biz_accountyominame",
+          "x-ms-dataverse-type": "StringType",
+          "x-ms-schema-name": "biz_AccountYomiName",
+          "x-ms-read-only": true,
+          "maxLength": 160
+        },
         "createdby": {
           "type": "string",
           "title": "Created By",
@@ -74,11 +100,10 @@
         },
         "crf5c_account": {
           "type": "string",
-          "title": "Account",
+          "title": "Account(Deprecated)",
           "x-ms-dataverse-attribute": "crf5c_account",
           "x-ms-dataverse-type": "LookupType",
-          "x-ms-schema-name": "crf5c_Account",
-          "required": true
+          "x-ms-schema-name": "crf5c_Account"
         },
         "crf5c_accountname": {
           "type": "string",
@@ -193,7 +218,6 @@
           "x-ms-dataverse-attribute": "crf5c_ownerid",
           "x-ms-dataverse-type": "StringType",
           "x-ms-schema-name": "crf5c_OwnerID",
-          "required": true,
           "maxLength": 100
         },
         "crf5c_stage": {
@@ -481,12 +505,11 @@
         }
       },
       "required": [
+        "biz_account",
         "createdbyyominame",
         "createdonbehalfbyyominame",
-        "crf5c_account",
         "crf5c_name",
         "crf5c_opportunity1id",
-        "crf5c_ownerid",
         "crf5c_stage",
         "crf5c_totalamount",
         "modifiedbyyominame",
