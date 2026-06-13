@@ -12,7 +12,7 @@ import { useAccountList } from '@/generated/hooks/use-account';
 import { useUpdateCopilotConversation, useCreateCopilotConversation } from '@/generated/hooks/use-copilot-conversation';
 import { useCreateBusinessInsight, useBusinessInsightList, useDeleteBusinessInsight } from '@/generated/hooks/use-business-insight';
 import { useLocale } from '@/lib/i18n';
-import { t, getGreeting, getChatFontClass, getThinkingDotStyle, getAutoPlayAgentResponse, getSelectedVoice, findMatchingSystemVoice, getVoiceSummaryEnabled, generateVoiceSummary, getAgentFramework, getHomeHeaderWidget, getAdminMode, type Locale, type ThinkingDotStyle, type HomeHeaderWidget } from '@/lib/i18n';
+import { t, getGreeting, getChatFontClass, getThinkingDotStyle, getAutoPlayAgentResponse, getSelectedVoice, findMatchingSystemVoice, getVoiceSummaryEnabled, generateVoiceSummary, getAgentFramework, getHomeHeaderWidget, type Locale, type ThinkingDotStyle, type HomeHeaderWidget } from '@/lib/i18n';
 import { ensureVoicesReady } from '@/lib/speech';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { formatCurrencyCompact, formatCurrencyFull } from '@/lib/format-currency';
@@ -433,11 +433,46 @@ export default function HomeDashboard() {
   const deleteBusinessInsight = useDeleteBusinessInsight();
   const updateActivity = useUpdateActivity();
 
+  // Read/unread tracking for insights so the bell badge reflects what the user
+  // has actually seen or heard. Read state is persisted by insight id; because
+  // regenerating insights mints new ids, fresh insights naturally become unread.
+  const [readInsightIds, setReadInsightIds] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem('sales-copilot-read-insights');
+      return new Set<string>(raw ? JSON.parse(raw) : []);
+    } catch {
+      return new Set<string>();
+    }
+  });
+  const markInsightRead = useCallback((id: string) => {
+    if (!id) return;
+    setReadInsightIds((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      try {
+        localStorage.setItem('sales-copilot-read-insights', JSON.stringify([...next]));
+      } catch {
+        // ignore storage failures
+      }
+      return next;
+    });
+  }, []);
+
+  // Current sales rep (Dataverse systemuserid, lowercased). Used to STAMP
+  // ownership on records this user creates and to scope destructive deletes to
+  // their own rows. It is NOT used to filter reads: Dataverse already trims
+  // retrieveMultiple to the records this user can read (owner / owner team /
+  // access team / business-unit depth) based on their security role, so any
+  // client-side owner filter would be both useless for security and wrong
+  // (it would hide team/shared records the user is legitimately allowed to see).
+  const userId = user?.objectId?.toLowerCase();
+
+  const unreadInsightCount = businessInsights.filter((i: { id: string }) => !readInsightIds.has(i.id)).length;
+
+
   // Activity-related filtering removed: the unified Insights sheet now shows
   // all business insights regardless of reference type.
-
-  const userId = user?.objectId?.toLowerCase();
-  const isAdmin = getAdminMode();
 
   // Get source data for drawer
   const sourceData = useMemo(() => {
@@ -463,9 +498,10 @@ export default function HomeDashboard() {
     const weekEnd = new Date(today);
     weekEnd.setDate(weekEnd.getDate() + (7 - today.getDay()));
 
-    // Active opportunities (not won/lost) - filtered to current user unless admin mode
+    // Active opportunities (not won/lost). Reads are already security-trimmed by
+    // Dataverse to what this user can access — no client-side owner filter.
     const activeOpps = opportunities.filter(
-      (o: Opportunity) => (isAdmin || o.ownerid === userId) && !isClosedStage(o.stage)
+      (o: Opportunity) => !isClosedStage(o.stage)
     );
 
     // Hot opportunities - top 3 active opportunities by amount
@@ -536,10 +572,17 @@ export default function HomeDashboard() {
       return !lastContact || lastContact < fourteenDaysAgo;
     });
     const clientsAtRisk = clientsAtRiskFiltered.length;
-    const clientsAtRiskList: AtRiskClient[] = clientsAtRiskFiltered.map((a: Account) => ({
-      id: a.id,
-      name: a.name1 || 'Unnamed',
-    }));
+    const clientsAtRiskList: AtRiskClient[] = clientsAtRiskFiltered.map((a: Account) => {
+      const lastContact = effectiveLastContact(a);
+      const lastContactDays = lastContact
+        ? Math.floor((Date.now() - lastContact.getTime()) / (24 * 60 * 60 * 1000))
+        : null;
+      return {
+        id: a.id,
+        name: a.name1 || 'Unnamed',
+        lastContactDays,
+      };
+    });
 
     // Weekly Momentum — count only THIS user's activities scheduled within the
     // current week. Previously this counted `activities.length` (every activity
@@ -553,7 +596,6 @@ export default function HomeDashboard() {
     weekWindowEnd.setDate(weekWindowEnd.getDate() + 7);
 
     const weekActivities = activities.filter((a: Activity) => {
-      if (!isAdmin && a.ownerid !== userId) return false;
       if (!a.scheduleddate) return false;
       const d = new Date(a.scheduleddate);
       return !Number.isNaN(d.getTime()) && d >= weekWindowStart && d < weekWindowEnd;
@@ -649,7 +691,6 @@ export default function HomeDashboard() {
     // NOT silently absorb it here, otherwise the same opp would be counted in
     // every quarter forever.
     const wonOpportunities = opportunities.filter((o: Opportunity) => {
-      if (!isAdmin && o.ownerid !== userId) return false;
       if (!isWonStage(o.stage)) return false;
       if (!o.closedon) return false;
       const d = new Date(o.closedon);
@@ -1008,46 +1049,34 @@ export default function HomeDashboard() {
     }
   }, [updateActivity, refetchActivities, locale]);
 
-  // Brief Me insight texts for TTS - USE STORED BRIEF TRANSCRIPT, not card titles
+  // Brief Me insight texts for TTS.
+  // Built per-insight-card (one array element == one card) and in the SAME order
+  // the Insights sheet renders them, so playback advancing `briefMeCurrentIndex`
+  // can drive the sheet to page to the card currently being read aloud.
   const briefMeInsightTexts = useMemo(() => {
-    // Priority 1: Check localStorage for the full brief transcript (generated during AI insight generation)
-    const storedTranscript = localStorage.getItem('sales-copilot-brief-transcript');
-    if (storedTranscript && storedTranscript.trim().length > 0) {
-      // Return as a single-element array since it's one continuous speech
-      return [storedTranscript];
-    }
-    
-    // Priority 2: If custom insight text is provided (from current session AI generation), use that
-    if (customInsightText && customInsightText.length > 0) {
-      return customInsightText;
-    }
-    
-    // Priority 3: Fallback - combine business insight titles into a basic script
-    // This is a fallback for when transcript wasn't generated
+    // Primary: speak each business insight card as its own segment so the sheet
+    // can follow the voice card-by-card. Reads are already security-trimmed by Dataverse.
     if (businessInsights && businessInsights.length > 0) {
-      const insightTexts = businessInsights.map((insight: { title: string; summary: string; detailsjson: string }) => {
+      return businessInsights.map((insight: { title: string; summary: string; detailsjson: string; rationale?: string }) => {
+        let body = insight.summary || '';
         try {
           const details = JSON.parse(insight.detailsjson || '[]');
           if (Array.isArray(details) && details.length > 0) {
-            return `${insight.title}：${details.join(' ')}`;
+            body = details.join(' ');
           }
         } catch {
-          // Fall back to summary if parsing fails
+          // keep summary
         }
-        return `${insight.title}：${insight.summary}`;
+        const rationale = insight.rationale && insight.rationale.trim() ? insight.rationale : '';
+        return [insight.title, body, rationale].filter(Boolean).join('. ');
       });
-      
-      // Combine into a single continuous speech
-      const intro = locale === 'zh-Hans'
-        ? '您好，这是今天的业务简报。'
-        : 'Good morning! Here is your business briefing for today.';
-      const outro = locale === 'zh-Hans'
-        ? '以上是今天的业务要点，祝您今天工作顺利！'
-        : 'That concludes your briefing. Have a productive day!';
-      
-      return [intro + ' ' + insightTexts.join(' ') + ' ' + outro];
     }
-    
+
+    // Fallback: current-session AI generation text (no Dataverse cards yet).
+    if (customInsightText && customInsightText.length > 0) {
+      return customInsightText;
+    }
+
     // No insights available - return empty array
     return [];
   }, [customInsightText, businessInsights, locale]);
@@ -1266,7 +1295,6 @@ export default function HomeDashboard() {
     () => [
       { id: 'new-visit', icon: Plus, label: t('newVisit', locale), onClick: handleNewVisit },
       { id: 'view-opps', icon: Eye, label: t('viewOpportunities', locale), onClick: handleViewOpportunities },
-      { id: 'brief-me', icon: Radio, label: t('briefMe', locale), onClick: handleBriefMe },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [locale],
@@ -1324,9 +1352,13 @@ export default function HomeDashboard() {
       const qProgress = kpiData.quarterlyTarget > 0 ? Math.round((kpiData.quarterlyWonAmount / kpiData.quarterlyTarget) * 100) : 0;
       const quarterlyPerformanceDetails = `已成交 $${(kpiData.quarterlyWonAmount / 1000).toFixed(0)}K / 目标 $${(kpiData.quarterlyTarget / 1000).toFixed(0)}K (完成率 ${qProgress}%)`;
       
-      const atRiskClientsDetails = kpiData.clientsAtRiskList.slice(0, 5).map((client: AtRiskClient) => 
-        `${client.name}`
-      ).join('; ');
+      const atRiskClientsDetails = kpiData.clientsAtRiskList.slice(0, 5).map((client: AtRiskClient) => {
+        const days = client.lastContactDays;
+        const reason = days == null
+          ? (locale === 'zh-Hans' ? '从未联系' : 'never contacted')
+          : (locale === 'zh-Hans' ? `${days} 天未联系` : `no contact for ${days} days`);
+        return `${client.name} (${reason})`;
+      }).join('; ');
       
       if (agentFramework === 'local-agent') {
         // Use local agent with BYOM to generate insights directly
@@ -1347,7 +1379,7 @@ ${todayAgendaDetails || '暂无待办'}
 === 季度业绩 ===
 ${quarterlyPerformanceDetails}
 
-=== 风险客户 (${kpiData.clientsAtRisk}个需要关注) ===
+=== 风险客户 (${kpiData.clientsAtRisk}个需要关注，判定标准：超过14天未联系) ===
 ${atRiskClientsDetails || '暂无风险客户'}
 
 === 其他统计 ===
@@ -1367,7 +1399,7 @@ ${todayAgendaDetails || 'No agenda items'}
 === Quarterly Performance ===
 Won $${(kpiData.quarterlyWonAmount / 1000).toFixed(0)}K / Target $${(kpiData.quarterlyTarget / 1000).toFixed(0)}K (${qProgress}% complete)
 
-=== At-Risk Clients (${kpiData.clientsAtRisk} need attention) ===
+=== At-Risk Clients (${kpiData.clientsAtRisk} need attention; criterion: no contact for 14+ days) ===
 ${atRiskClientsDetails || 'No at-risk clients'}
 
 === Other Metrics ===
@@ -1407,7 +1439,7 @@ ${todayAgendaDetails || '暂无待办'}
 === 季度业绩 ===
 ${quarterlyPerformanceDetails}
 
-=== 风险客户 (${kpiData.clientsAtRisk}个需要关注) ===
+=== 风险客户 (${kpiData.clientsAtRisk}个需要关注，判定标准：超过14天未联系) ===
 ${atRiskClientsDetails || '暂无风险客户'}
 
 === 其他统计 ===
@@ -1420,7 +1452,7 @@ ${todayAgendaDetails || 'No agenda items'}
 === Quarterly Performance ===
 Won $${(kpiData.quarterlyWonAmount / 1000).toFixed(0)}K / Target $${(kpiData.quarterlyTarget / 1000).toFixed(0)}K (${qProgress}% complete)
 
-=== At-Risk Clients (${kpiData.clientsAtRisk} need attention) ===
+=== At-Risk Clients (${kpiData.clientsAtRisk} need attention; criterion: no contact for 14+ days) ===
 ${atRiskClientsDetails || 'No at-risk clients'}
 
 === Other Metrics ===
@@ -1429,65 +1461,77 @@ ${atRiskClientsDetails || 'No at-risk clients'}
 - Activity progress: ${kpiData.activitiesThisWeek}/${kpiData.weeklyTarget}`;
 
       const insightSystemPrompt = locale === 'zh-Hans'
-        ? `你是一个业务洞察生成器。基于以下业务数据，生成 5-6 条业务洞察。
+        ? `你是一位资深销售教练（Senior Sales Coach），不是数据复述机器。基于以下业务数据，生成 5-6 条有教练价值的洞察。
 
-【最重要规则 - 必须严格遵守】
-- 只能使用下方"业务数据"中明确列出的客户名、商机名、活动名
-- 绝对禁止编造、杜撰任何不存在于数据中的名称
-- 如果数据中没有风险客户（显示"暂无风险客户"或数量为0），不要生成风险相关的洞察
-- 如果数据为空或"暂无"，如实反映，不要凭空填充
+【角色要求 - 核心】
+- 你的价值在于"诊断 + 处方"，不是"归纳 + 复述"
+- 每条洞察都要回答三个问题：是什么(What) → 为什么(Why，根因) → 怎么做(How，具体动作)
+- 绝不能只说"客户有风险""需要关注""建议跟进"这类空话——必须说清风险到底是什么、根源在哪、第一步该做什么
+
+【数据真实性 - 必须严格遵守】
+- 只能使用下方"业务数据"中明确列出的客户名、商机名、活动名和数字
+- 绝对禁止编造任何不存在于数据中的名称或数字
+- 风险客户数据已标注原因（如"X 天未联系"），必须在 rationale 中引用这个具体原因
+- 如果某类数据为空（显示"暂无"或为0），不要生成相关洞察
 
 每条洞察必须包含：
-1. insight: 简洁的洞察要点（不超过20字）
-2. rationale: 具体解释（限200字以内），必须包含：
-   - 引用原始数据中的具体数字（如金额、天数、百分比）
-   - 只提及数据中真实存在的客户名或商机名
-   - 说明数据之间的关联或趋势
-   - 给出具体的建议行动
+1. insight: 一句话点明问题或机会（不超过20字），要具体不要笼统
+2. rationale: 教练式分析（120-200字），必须包含：
+   - 【根因】用数据说清"为什么"——例如风险客户要写明"已 X 天未联系，超过 14 天预警线"，业绩要写明差距金额和占比
+   - 【影响】这个问题不处理会导致什么后果（流失、错失成交窗口、目标缺口等）
+   - 【行动】给出 1-2 个今天就能执行的具体步骤（打电话/发邮件/安排拜访/准备什么材料），点名具体客户或商机
 3. type: 洞察类型（followup/closing/risk/revisit/performance/opportunity/client/activity）
 
-【禁止】
-- 不要编造不存在于数据中的客户名或商机名
-- 不要使用"基于数据分析""根据历史记录"等模糊描述
-- 不要只说"需要关注"而不说明具体原因
+【反面示例 - 禁止这样写】
+- ✗ "Rush University 等客户有风险，需要重点关注"（没说风险是什么、为什么、怎么做）
+【正面示例 - 应该这样写】
+- ✓ "Rush University 已 21 天无接触，远超 14 天预警线，关系正在冷却。建议今天先发一封带价值点的邮件重启对话，本周内约一次 15 分钟电话了解其当前采购计划是否有变。"
 
 返回JSON数组格式：
 [
-  {"insight": "洞察要点", "rationale": "具体原因和建议", "type": "类型"}
+  {"insight": "洞察要点", "rationale": "根因+影响+具体行动", "type": "类型"}
 ]
 
 只返回JSON数组，不要其他文字。`
-        : `You are a business insight generator. Based on the following business data, generate 5-6 business insights.
+        : `You are a Senior Sales Coach, not a data-summarizing machine. Based on the following business data, generate 5-6 coaching-grade insights.
 
-[MOST CRITICAL RULE - MUST STRICTLY FOLLOW]
-- ONLY use client names, opportunity names, and activity names that are EXPLICITLY listed in the "Business Data" below
-- ABSOLUTELY FORBIDDEN to fabricate, invent, or make up any names not present in the data
-- If there are no at-risk clients in the data (shows "No at-risk clients" or count is 0), do NOT generate risk-related insights
-- If data is empty or shows "No data", reflect that honestly - do NOT fill in with made-up content
+[ROLE - CORE]
+- Your value is "diagnosis + prescription", not "summary + restatement"
+- Every insight must answer three questions: What → Why (root cause) → How (concrete action)
+- NEVER write empty phrases like "client is at risk", "needs attention", or "recommend follow-up" — you MUST state what the risk actually is, where it comes from, and the first concrete step to take
+
+[DATA INTEGRITY - MUST STRICTLY FOLLOW]
+- ONLY use client names, opportunity names, activity names, and numbers EXPLICITLY listed in the "Business Data" below
+- ABSOLUTELY FORBIDDEN to fabricate any name or number not present in the data
+- At-risk client data is annotated with the reason (e.g. "no contact for X days") — you MUST cite this specific reason in the rationale
+- If a data category is empty (shows "No data" or 0), do NOT generate insights about it
 
 Each insight must include:
-1. insight: A concise insight point (max 10 words)
-2. rationale: Specific explanation (max 200 words) with:
-   - Concrete numbers from the data (amounts, days, percentages)
-   - ONLY mention client or opportunity names that actually exist in the data
-   - Data relationships or trends
-   - Specific recommended action
+1. insight: A one-line, specific statement of the problem or opportunity (max 12 words) — concrete, not vague
+2. rationale: Coaching-grade analysis (80-150 words) that MUST include:
+   - [Root cause] Use the data to explain WHY — e.g. for an at-risk client, state "no contact for X days, past the 14-day warning line"; for performance, state the exact gap amount and percentage
+   - [Impact] What happens if this is left unaddressed (churn, missed closing window, target gap, etc.)
+   - [Action] 1-2 concrete steps the rep can take TODAY (call / email / schedule a visit / what to prepare), naming the specific client or opportunity
 3. type: Insight type (followup/closing/risk/revisit/performance/opportunity/client/activity)
 
-[FORBIDDEN]
-- Do NOT fabricate client names or opportunity names not present in the data
-- Do NOT use vague phrases like "based on data analysis" or "according to records"
-- Do NOT just say "needs attention" without explaining why
+[BAD EXAMPLE - DO NOT write like this]
+- ✗ "Rush University and others are at risk and need attention" (doesn't say what the risk is, why, or what to do)
+[GOOD EXAMPLE - write like this]
+- ✓ "Rush University has had no contact for 21 days, well past the 14-day warning line — the relationship is cooling. Send a value-led re-engagement email today, and book a 15-minute call this week to check whether their procurement plan has shifted."
 
 Return JSON array format:
 [
-  {"insight": "Insight point", "rationale": "Specific reason and recommendation", "type": "type"}
+  {"insight": "Insight point", "rationale": "Root cause + impact + concrete action", "type": "type"}
 ]
 
 Return only the JSON array, no other text.`;
       
-      // Pass raw data directly to insight generation instead of agentResponse
-      const insightResult = await generateVoiceSummary(rawDataForInsights, locale, insightSystemPrompt, undefined, undefined, 'json');
+      // Pass raw data directly to insight generation instead of agentResponse.
+      // NOTE: use 'text' (NOT 'json'): this platform's AI Builder JSON output mode
+      // returns a boilerplate schema instead of our array, which silently fails to
+      // parse and saves nothing. Text mode returns the JSON array as plain text and
+      // the parser below (strip code fences + JSON.parse) handles it reliably.
+      const insightResult = await generateVoiceSummary(rawDataForInsights, locale, insightSystemPrompt, undefined, undefined, 'text');
       
       if (!insightResult.success || !insightResult.summary) {
         throw new Error(insightResult.error || 'Failed to generate insight');
@@ -1496,11 +1540,20 @@ Return only the JSON array, no other text.`;
       // Parse the JSON response
       let parsedInsights: Array<{ insight: string; rationale: string; type: string }> = [];
       try {
-        // Try to extract JSON from the response (may have markdown code blocks)
+        // Try to extract JSON from the response (may have markdown code blocks
+        // or surrounding prose when the model replies in text mode).
         let jsonStr = insightResult.summary.trim();
         // Remove markdown code blocks if present
         if (jsonStr.startsWith('```')) {
           jsonStr = jsonStr.replace(/```json?\n?/g, '').replace(/```$/g, '').trim();
+        }
+        // If there is leading/trailing prose, isolate the first JSON array block.
+        if (!jsonStr.startsWith('[')) {
+          const start = jsonStr.indexOf('[');
+          const end = jsonStr.lastIndexOf(']');
+          if (start !== -1 && end !== -1 && end > start) {
+            jsonStr = jsonStr.slice(start, end + 1);
+          }
         }
         parsedInsights = JSON.parse(jsonStr);
       } catch (parseError) {
@@ -1581,11 +1634,15 @@ ${agentResponse}`;
       
       if (insightLines.length > 0) {
         
-        // Delete ALL existing insights before creating new ones (replace instead of append)
+        // Replace only THIS rep's existing insights (multi-user safe — never
+        // touch other reps' insights). Admin regeneration still only clears its
+        // own owner rows; clearing everyone's would be destructive.
         const { data: existingInsights } = await refetchBusinessInsights();
-        if (existingInsights && existingInsights.length > 0) {
-          // Delete all existing insights to prevent accumulation
-          await Promise.all(existingInsights.map((insight: { id: string }) => 
+        const myExisting = (existingInsights || []).filter(
+          (insight: { ownerid?: string }) => (insight.ownerid || '').toLowerCase() === (userId || '')
+        );
+        if (myExisting.length > 0) {
+          await Promise.all(myExisting.map((insight: { id: string }) => 
             deleteBusinessInsight.mutateAsync(insight.id)
           ));
         }
@@ -1715,17 +1772,21 @@ ${agentResponse}`;
     
     try {
       const { data: allInsights } = await refetchBusinessInsights();
-      
-      if (!allInsights || allInsights.length === 0) {
+      // Multi-user safe: only clear THIS rep's insights, never other reps'.
+      const myInsights = (allInsights || []).filter(
+        (insight: { ownerid?: string }) => (insight.ownerid || '').toLowerCase() === (userId || '')
+      );
+
+      if (myInsights.length === 0) {
         toast.info(locale === 'zh-Hans' ? '没有需要清除的洞察数据' : 'No insights to clear');
         return;
       }
       
       // Delete insights one by one with progress
-      const totalCount = allInsights.length;
+      const totalCount = myInsights.length;
       toast.loading(locale === 'zh-Hans' ? `正在清除 ${totalCount} 条洞察数据...` : `Clearing ${totalCount} insights...`, { id: 'clearing-insights' });
       
-      for (const insight of allInsights) {
+      for (const insight of myInsights) {
         await deleteBusinessInsight.mutateAsync(insight.id);
       }
       
@@ -1972,11 +2033,11 @@ ${agentResponse}`;
                   aria-label={locale === 'zh-Hans' ? '洞察' : 'Insights'}
                 >
                   <Bell className="w-5 h-5 text-foreground" />
-                  {businessInsights.length > 0 && (
+                  {unreadInsightCount > 0 && (
                     <span
                       className="absolute top-0.5 right-0 min-w-[16px] h-[16px] px-0.5 inline-flex items-center justify-center rounded-full bg-red-500 text-white text-[9px] font-bold border-[1.5px] border-background"
                     >
-                      {businessInsights.length > 99 ? '99+' : businessInsights.length}
+                      {unreadInsightCount > 99 ? '99+' : unreadInsightCount}
                     </span>
                   )}
                 </button>
@@ -2024,8 +2085,18 @@ ${agentResponse}`;
               insightRefreshStatus={insightRefreshStatus}
               onPlayInsights={handleInsightsPanelPlay}
               onStopInsights={handleInsightsPanelStop}
+              onPauseInsights={handleBriefMePause}
+              onSpeedToggle={handleBriefMeSpeedToggle}
+              playbackSpeed={briefMeSpeed}
+              onPrevInsight={handleBriefMePrev}
+              onNextInsight={handleBriefMeNext}
+              canPrevInsight={briefMeCurrentIndex > 0}
+              canNextInsight={briefMeCurrentIndex < briefMeInsightTexts.length - 1}
+              activeInsightIndex={briefMeCurrentIndex}
+              onInsightViewed={markInsightRead}
               isInsightPlaybackActive={briefMeIsPlaying}
               insightPlaybackElapsed={formatBriefMeTime(briefMeCurrentTime)}
+              insightPlaybackTotal={formatBriefMeTime(briefMeTotalTime)}
               insightPlaybackParagraphLabel={briefMeCurrentSegmentLabel}
               insightPlaybackParagraphIndex={briefMeCurrentSegmentIndex}
               insightPlaybackParagraphCount={briefMeSegmentCount}
@@ -2050,129 +2121,8 @@ ${agentResponse}`;
 
 
 
-      {/* Brief Me is now non-blocking - audio plays in background while user can interact with page */}
-
-      {/* Brief Me audio player (only visible when Brief Me is active) */}
-      {briefMeExpanded && !insightsSheetOpen && (
-      <div className={cn(
-        'fixed left-0 right-0 z-[60] safe-area-bottom pointer-events-none',
-        isCopilotConfigured ? 'bottom-36' : 'bottom-0'
-      )}>
-        <div className="flex flex-col items-center px-4 pb-4">
-          <AnimatePresence mode="wait">
-            {/* Brief Me Audio Player */}
-            {briefMeExpanded && (
-              <motion.div
-                key="brief-me-player"
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.9 }}
-                transition={{ duration: 0.25, ease: [0.25, 0.46, 0.45, 0.94] as const }}
-                className="flex items-center justify-center mb-4 pointer-events-auto"
-              >
-                <div
-                  className={cn(
-                    'flex items-center gap-3 px-4 py-2.5',
-                    'rounded-full glass-card',
-                    'border border-primary/30 bg-primary/5'
-                  )}
-                >
-                  {/* Speed button */}
-                  <button
-                    onClick={(e: React.MouseEvent) => {
-                      e.stopPropagation();
-                      handleBriefMeSpeedToggle();
-                    }}
-                    className="w-9 h-9 flex items-center justify-center rounded-full bg-muted/50 hover:bg-muted text-xs font-semibold text-foreground transition-colors"
-                    title={locale === 'zh-Hans' ? '\u64ad\u653e\u901f\u5ea6' : 'Playback speed'}
-                  >
-                    {briefMeSpeed}x
-                  </button>
-                  
-                  {/* Prev button */}
-                  <button
-                    onClick={(e: React.MouseEvent) => {
-                      e.stopPropagation();
-                      handleBriefMePrev();
-                    }}
-                    disabled={briefMeCurrentIndex === 0}
-                    className="w-7 h-7 flex items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
-                    aria-label={locale === 'zh-Hans' ? '上一条' : 'Previous'}
-                    title={locale === 'zh-Hans' ? '上一条' : 'Previous'}
-                  >
-                    <SkipBack className="w-4 h-4" />
-                  </button>
-                  
-                  {/* Play/Pause button */}
-                  <button
-                    onClick={(e: React.MouseEvent) => {
-                      e.stopPropagation();
-                      if (briefMeIsPlaying) {
-                        handleBriefMePause();
-                      } else {
-                        if (window.speechSynthesis.paused) {
-                          handleBriefMeResume();
-                        } else {
-                          handleBriefMePlay();
-                        }
-                      }
-                    }}
-                    className="w-12 h-12 flex items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-                    aria-label={briefMeIsPlaying ? (locale === 'zh-Hans' ? '暂停' : 'Pause') : (locale === 'zh-Hans' ? '播放' : 'Play')}
-                    title={briefMeIsPlaying ? (locale === 'zh-Hans' ? '暂停' : 'Pause') : (locale === 'zh-Hans' ? '播放' : 'Play')}
-                  >
-                    {briefMeIsPlaying ? (
-                      <Pause className="w-5 h-5" />
-                    ) : (
-                      <Play className="w-5 h-5 ml-0.5" />
-                    )}
-                  </button>
-                  
-                  {/* Next button */}
-                  <button
-                    onClick={(e: React.MouseEvent) => {
-                      e.stopPropagation();
-                      handleBriefMeNext();
-                    }}
-                    disabled={briefMeCurrentIndex >= briefMeInsightTexts.length - 1}
-                    className="w-7 h-7 flex items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
-                    aria-label={locale === 'zh-Hans' ? '下一条' : 'Next'}
-                    title={locale === 'zh-Hans' ? '下一条' : 'Next'}
-                  >
-                    <SkipForward className="w-4 h-4" />
-                  </button>
-                  
-                  {/* Time display */}
-                  <div className="flex items-center gap-1 text-xs font-mono text-muted-foreground min-w-[70px] justify-center">
-                    <span>{formatBriefMeTime(briefMeCurrentTime)}</span>
-                    <span>/</span>
-                    <span>{formatBriefMeTime(briefMeTotalTime)}</span>
-                  </div>
-                  
-                  {/* Close button */}
-                  <button
-                    onClick={(e: React.MouseEvent) => {
-                      e.stopPropagation();
-                      handleBriefMeClose();
-                    }}
-                    className="w-7 h-7 flex items-center justify-center rounded-full bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                    aria-label={locale === 'zh-Hans' ? '关闭' : 'Close'}
-                    title={locale === 'zh-Hans' ? '关闭' : 'Close'}
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-
-          {/* Collapse button when expanded */}
-
-        </div>
-      </div>
-      )}
-
+      {/* Brief Me playback controls now live inside the bell-triggered Insights
+          sheet (KPICards). The standalone floating player has been removed. */}
 
       {/* Source Detail Sheet */}
       <Sheet open={!!selectedSource} onOpenChange={() => setSelectedSource(null)}>

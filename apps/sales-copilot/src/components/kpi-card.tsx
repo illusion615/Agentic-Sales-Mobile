@@ -1,9 +1,9 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence, type PanInfo } from 'motion/react';
-import { ChevronRight, ChevronLeft, ChevronDown, Calendar, Target, Phone, MapPin, FileText, CheckCircle2, Clock, X, Lightbulb, AlertTriangle, TrendingUp, Sparkles, Mail, CheckSquare, RefreshCw, Play, Square, Loader2 } from 'lucide-react';
+import { ChevronRight, ChevronLeft, ChevronDown, Calendar, Target, Phone, MapPin, FileText, CheckCircle2, Clock, X, Lightbulb, AlertTriangle, TrendingUp, Sparkles, Mail, CheckSquare, RefreshCw, Play, Pause, Square, SkipBack, SkipForward, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatCurrencyCompact } from '@/lib/format-currency';
-import { getLocale, getWeekStartDay } from '@/lib/i18n';
+import { getLocale, getWeekStartDay, type Locale } from '@/lib/i18n';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
@@ -38,6 +38,8 @@ export interface HotOpportunity {
 export interface AtRiskClient {
   id: string;
   name: string;
+  /** Days since last contact; null = never contacted. Drives the "why at-risk" reason. */
+  lastContactDays?: number | null;
 }
 
 export interface ActivityInsight {
@@ -46,6 +48,25 @@ export interface ActivityInsight {
   summary: string;
   rationale: string;
   type: 'info' | 'warning' | 'success';
+  generatedon?: string;
+}
+
+/** Compact "generated X ago" label so users can judge an insight's freshness. */
+function formatGeneratedAt(iso: string | undefined, locale: Locale): string | null {
+  if (!iso) return null;
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return null;
+  const isZh = locale === 'zh-Hans';
+  const diffMs = Date.now() - then;
+  const mins = Math.floor(diffMs / 60000);
+  const prefix = isZh ? '生成于 ' : 'Generated ';
+  if (mins < 1) return isZh ? '生成于 刚刚' : 'Generated just now';
+  if (mins < 60) return prefix + (isZh ? `${mins} 分钟前` : `${mins}m ago`);
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return prefix + (isZh ? `${hours} 小时前` : `${hours}h ago`);
+  const days = Math.floor(hours / 24);
+  if (days < 30) return prefix + (isZh ? `${days} 天前` : `${days}d ago`);
+  return prefix + new Date(then).toLocaleDateString();
 }
 
 export interface KPIData {
@@ -101,8 +122,18 @@ interface KPICardsProps {
   insightRefreshStatus?: string;
   onPlayInsights?: () => void;
   onStopInsights?: () => void;
+  onPauseInsights?: () => void;
+  onSpeedToggle?: () => void;
+  playbackSpeed?: number;
+  onPrevInsight?: () => void;
+  onNextInsight?: () => void;
+  canPrevInsight?: boolean;
+  canNextInsight?: boolean;
+  activeInsightIndex?: number;
+  onInsightViewed?: (insightId: string) => void;
   isInsightPlaybackActive?: boolean;
   insightPlaybackElapsed?: string;
+  insightPlaybackTotal?: string;
   insightPlaybackParagraphLabel?: string;
   insightPlaybackParagraphIndex?: number;
   insightPlaybackParagraphCount?: number;
@@ -199,8 +230,18 @@ export function KPICards({
   insightRefreshStatus = '',
   onPlayInsights,
   onStopInsights,
+  onPauseInsights,
+  onSpeedToggle,
+  playbackSpeed = 1,
+  onPrevInsight,
+  onNextInsight,
+  canPrevInsight = false,
+  canNextInsight = false,
+  activeInsightIndex,
+  onInsightViewed,
   isInsightPlaybackActive = false,
   insightPlaybackElapsed,
+  insightPlaybackTotal,
   insightPlaybackParagraphLabel,
   insightPlaybackParagraphIndex,
   insightPlaybackParagraphCount,
@@ -267,9 +308,27 @@ export function KPICards({
         summary: summaryText.length > 120 ? summaryText.substring(0, 120) + '...' : summaryText,
         rationale: rationaleText,
         type: insightType,
+        generatedon: insight.generatedon,
       };
     });
   }, [activityInsights, locale]);
+
+  // Follow the voice: while playback is active, page the sheet to the insight
+  // card currently being read aloud (activeInsightIndex is the playing index).
+  useEffect(() => {
+    if (!isInsightPlaybackActive || typeof activeInsightIndex !== 'number') return;
+    const max = Math.max(0, parsedActivityInsights.length - 1);
+    setInsightsSheetIndex(Math.min(Math.max(0, activeInsightIndex), max));
+  }, [isInsightPlaybackActive, activeInsightIndex, parsedActivityInsights.length]);
+
+  // Mark an insight as read once its card is shown in the open sheet. This covers
+  // both manual viewing/swiping and the voice-followed paging above, so the bell
+  // badge (unread count) decrements as the user sees or hears each insight.
+  useEffect(() => {
+    if (!insightsSheetOpen) return;
+    const current = parsedActivityInsights[insightsSheetIndex];
+    if (current?.id) onInsightViewed?.(current.id);
+  }, [insightsSheetOpen, insightsSheetIndex, parsedActivityInsights, onInsightViewed]);
 
   // Calendar month view data - group activities by date for the current month
   const calendarMonthData = useMemo(() => {
@@ -1458,19 +1517,14 @@ export function KPICards({
                       <div className="min-w-0 text-xs font-normal text-muted-foreground">
                         <p className="truncate">
                           {insightPlaybackElapsed ?? '0:00'}
-                          {typeof insightPlaybackParagraphIndex === 'number' && typeof insightPlaybackParagraphCount === 'number' && insightPlaybackParagraphCount > 0
-                            ? ` • ${locale === 'zh-Hans' ? '段落' : 'Paragraph'} ${insightPlaybackParagraphIndex + 1}/${insightPlaybackParagraphCount}`
-                            : ''}
+                          {insightPlaybackTotal ? ` / ${insightPlaybackTotal}` : ''}
                         </p>
-                        {insightPlaybackParagraphLabel && (
-                          <p className="truncate">{insightPlaybackParagraphLabel}</p>
-                        )}
                       </div>
                     )}
                   </div>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 <button
                   type="button"
                   onClick={() => onRefreshInsights?.()}
@@ -1483,20 +1537,50 @@ export function KPICards({
                 </button>
                 <button
                   type="button"
+                  onClick={() => onSpeedToggle?.()}
+                  disabled={!onSpeedToggle}
+                  className="flex h-9 min-w-9 items-center justify-center rounded-full bg-muted/60 px-2 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                  aria-label={locale === 'zh-Hans' ? '播放速度' : 'Playback speed'}
+                  title={locale === 'zh-Hans' ? '播放速度' : 'Playback speed'}
+                >
+                  {playbackSpeed}x
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onPrevInsight?.()}
+                  disabled={!onPrevInsight || !canPrevInsight}
+                  className="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30"
+                  aria-label={locale === 'zh-Hans' ? '上一条' : 'Previous'}
+                  title={locale === 'zh-Hans' ? '上一条' : 'Previous'}
+                >
+                  <SkipBack className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
                   onClick={() => {
-                    if (isInsightPlaybackActive) onStopInsights?.();
+                    if (isInsightPlaybackActive) onPauseInsights?.();
                     else onPlayInsights?.();
                   }}
-                  disabled={isInsightPlaybackActive ? !onStopInsights : !onPlayInsights}
-                  className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={isInsightPlaybackActive ? !onPauseInsights : !onPlayInsights}
+                  className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
                   aria-label={isInsightPlaybackActive
-                    ? (locale === 'zh-Hans' ? '停止播报' : 'Stop playback')
+                    ? (locale === 'zh-Hans' ? '暂停' : 'Pause')
                     : (locale === 'zh-Hans' ? '播放洞察' : 'Play insights')}
                   title={isInsightPlaybackActive
-                    ? (locale === 'zh-Hans' ? '停止播报' : 'Stop playback')
+                    ? (locale === 'zh-Hans' ? '暂停' : 'Pause')
                     : (locale === 'zh-Hans' ? '播放洞察' : 'Play insights')}
                 >
-                  {isInsightPlaybackActive ? <Square className="h-4 w-4" /> : <Play className="ml-0.5 h-4 w-4" />}
+                  {isInsightPlaybackActive ? <Pause className="h-4 w-4" /> : <Play className="ml-0.5 h-4 w-4" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onNextInsight?.()}
+                  disabled={!onNextInsight || !canNextInsight}
+                  className="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30"
+                  aria-label={locale === 'zh-Hans' ? '下一条' : 'Next'}
+                  title={locale === 'zh-Hans' ? '下一条' : 'Next'}
+                >
+                  <SkipForward className="h-4 w-4" />
                 </button>
               </div>
             </SheetTitle>
@@ -1545,6 +1629,12 @@ export function KPICards({
                         <div className="flex-1 min-w-0">
                           <p className="text-xs font-medium text-muted-foreground mb-0.5">{currentInsight.title}</p>
                           <p className="text-base font-semibold text-foreground leading-snug">{currentInsight.summary}</p>
+                          {formatGeneratedAt(currentInsight.generatedon, locale) && (
+                            <p className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground/80">
+                              <Clock className="h-3 w-3" />
+                              {formatGeneratedAt(currentInsight.generatedon, locale)}
+                            </p>
+                          )}
                         </div>
                       </div>
                       

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { ArrowLeft, Moon, Sun, Globe, HelpCircle, LogOut, Volume2, Play, Type, Palette, CircleDot, LayoutGrid, Speech, X, Zap, MessageSquare, Gauge, LayoutDashboard, Database, Bug, FileCode, ChevronRight, Monitor, Calendar, Maximize } from 'lucide-react';
+import { ArrowLeft, Moon, Sun, Globe, HelpCircle, LogOut, Volume2, Play, Type, Palette, CircleDot, LayoutGrid, Speech, X, Zap, MessageSquare, LayoutDashboard, Database, Bug, FileCode, ChevronRight, Monitor, Calendar, Maximize } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
 import { ThinkingIndicator } from '@/components/thinking-indicator';
@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 
 import { useUser } from '@/hooks/use-user';
 import { useAppSettings } from '@/hooks/use-app-settings';
-import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, setSelectedVoice, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getOrganizeInStructureCard, setOrganizeInStructureCard, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, getCopilotDockLayout, setCopilotDockLayout, copilotDockLayoutLabels, getWeekStartDay, setWeekStartDay, getCopilotFullscreenDefault, setCopilotFullscreenDefault, getAdminMode, setAdminMode, getAgendaDefaultExpanded, setAgendaDefaultExpanded, type Locale, type VoiceOption, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget, type CopilotDockLayout, type WeekStartDay } from '@/lib/i18n';
+import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, setSelectedVoice, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, getCopilotDockLayout, setCopilotDockLayout, copilotDockLayoutLabels, getWeekStartDay, setWeekStartDay, getCopilotFullscreenDefault, setCopilotFullscreenDefault, getAgendaDefaultExpanded, setAgendaDefaultExpanded, getCopilotListDefaultView, setCopilotListDefaultView, getCopilotListTopN, setCopilotListTopN, type Locale, type VoiceOption, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget, type CopilotDockLayout, type WeekStartDay, type CopilotListDefaultView } from '@/lib/i18n';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
@@ -83,14 +83,14 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const [autoPlayResponse, setAutoPlayResponseState] = useState(getAutoPlayAgentResponse);
   const [colorTheme, setColorThemeState] = useState<ColorTheme>(() => getColorTheme());
   const [thinkingDotStyle, setThinkingDotStyleState] = useState<ThinkingDotStyle>(() => getThinkingDotStyle());
-  const [organizeInStructureCard, setOrganizeInStructureCardState] = useState(() => getOrganizeInStructureCard());
   const [voiceSummaryEnabled, setVoiceSummaryEnabledState] = useState(() => getVoiceSummaryEnabled());
   const [copilotInAllScreens, setCopilotInAllScreensState] = useState(() => getCopilotInAllScreens());
   const [copilotDockLayout, setCopilotDockLayoutState] = useState<CopilotDockLayout>(() => getCopilotDockLayout());
   const [simulateStreaming, setSimulateStreamingState] = useState(() => getSimulateStreaming());
   const [copilotFullscreenDefault, setCopilotFullscreenDefaultState] = useState(() => getCopilotFullscreenDefault());
-  const [adminMode, setAdminModeState] = useState(() => getAdminMode());
   const [agendaDefaultExpanded, setAgendaDefaultExpandedState] = useState(() => getAgendaDefaultExpanded());
+  const [copilotListDefaultView, setCopilotListDefaultViewState] = useState<CopilotListDefaultView>(() => getCopilotListDefaultView());
+  const [copilotListTopN, setCopilotListTopNState] = useState<number>(() => getCopilotListTopN());
   const [homeHeaderWidget, setHomeHeaderWidgetState] = useState<HomeHeaderWidget>(() => getHomeHeaderWidget());
   const [weekStartDay, setWeekStartDayState] = useState<WeekStartDay>(() => getWeekStartDay());
 
@@ -190,11 +190,6 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
     setAutoPlayAgentResponse(enabled);
   };
 
-  const handleOrganizeInStructureCardChange = (enabled: boolean) => {
-    setOrganizeInStructureCardState(enabled);
-    setOrganizeInStructureCard(enabled);
-  };
-
   const handleVoiceSummaryEnabledChange = (enabled: boolean) => {
     setVoiceSummaryEnabledState(enabled);
     setVoiceSummaryEnabled(enabled);
@@ -226,9 +221,17 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
     setAgendaDefaultExpanded(enabled);
   };
 
-  const handleAdminModeChange = (enabled: boolean) => {
-    setAdminModeState(enabled);
-    setAdminMode(enabled);
+  const handleCopilotListDefaultViewChange = (view: string) => {
+    const next = view as CopilotListDefaultView;
+    setCopilotListDefaultViewState(next);
+    setCopilotListDefaultView(next);
+  };
+
+  const handleCopilotListTopNChange = (value: string) => {
+    const next = Number.parseInt(value, 10);
+    if (!Number.isFinite(next)) return;
+    setCopilotListTopNState(next);
+    setCopilotListTopN(next);
   };
 
   const handleHomeHeaderWidgetChange = (widget: string) => {
@@ -464,6 +467,17 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                   </div>
                 }
               />
+              <SettingsItem
+                icon={Calendar}
+                label={locale === 'zh-Hans' ? '默认展开今日待办' : "Expand Today's Agenda by Default"}
+                rightElement={
+                  <Switch
+                    checked={agendaDefaultExpanded}
+                    onCheckedChange={handleAgendaDefaultExpandedChange}
+                    className="data-[state=checked]:bg-primary"
+                  />
+                }
+              />
             </div>
           </motion.div>
 
@@ -565,10 +579,6 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                   </Select>
                 }
               />
-              <div className="flex items-center gap-2 pl-8 mt-1">
-                <span className="text-xs text-muted-foreground">{locale === 'zh-Hans' ? '预览：' : 'Preview:'}</span>
-                <ThinkingIndicator />
-              </div>
             </div>
           </motion.div>
 
@@ -578,23 +588,56 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
               {locale === 'zh-Hans' ? 'AI 助手配置' : 'AI Assistant Configuration'}
             </h3>
             <div className="glass-card p-4 space-y-3">
-              {/* Information Structure toggles */}
-              <div className="space-y-2">
+              {/* ── List display ── */}
+              <p className="text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wide">
+                {locale === 'zh-Hans' ? '列表显示' : 'List Display'}
+              </p>
+              {/* Record list display behavior */}
+              <div className="space-y-3">
                 <SettingsItem
                   icon={LayoutGrid}
-                  label={t('organizeInStructureCard', locale)}
+                  label={locale === 'zh-Hans' ? 'Copilot 列表默认状态' : 'Copilot List Default State'}
                   rightElement={
-                    <Switch
-                      checked={organizeInStructureCard}
-                      onCheckedChange={handleOrganizeInStructureCardChange}
-                      className="data-[state=checked]:bg-primary"
-                    />
+                    <Select value={copilotListDefaultView} onValueChange={handleCopilotListDefaultViewChange}>
+                      <SelectTrigger className="w-28 h-8 text-sm bg-transparent border-border/50">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="expanded">{locale === 'zh-Hans' ? '展开' : 'Expanded'}</SelectItem>
+                        <SelectItem value="collapsed">{locale === 'zh-Hans' ? '收起' : 'Collapsed'}</SelectItem>
+                      </SelectContent>
+                    </Select>
                   }
                 />
+                <SettingsItem
+                  icon={LayoutGrid}
+                  label={locale === 'zh-Hans' ? '列表默认显示条数 (Top N)' : 'Default List Size (Top N)'}
+                  rightElement={
+                    <Select value={String(copilotListTopN)} onValueChange={handleCopilotListTopNChange}>
+                      <SelectTrigger className="w-24 h-8 text-sm bg-transparent border-border/50">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[3, 5, 10, 20].map((n) => (
+                          <SelectItem key={n} value={String(n)}>{n}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  }
+                />
+                <p className="text-xs text-muted-foreground mt-1 pl-8">
+                  {locale === 'zh-Hans'
+                    ? '当结果超过 Top N 时，先显示前 N 条，并在底部显示剩余条数，可点击展开全部。'
+                    : 'When results exceed Top N, Copilot shows the first N records and a remaining count that can expand all.'}
+                </p>
               </div>
 
               {/* Display copilot in all screens toggle */}
               <div className="pt-3 border-t border-border/30">
+                {/* ── Copilot panel ── */}
+                <p className="text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wide mb-2">
+                  {locale === 'zh-Hans' ? 'Copilot 面板' : 'Copilot Panel'}
+                </p>
                 <SettingsItem
                   icon={LayoutGrid}
                   label={locale === 'zh-Hans' ? '在所有页面显示 Copilot' : 'Display Copilot in all screens'}
@@ -659,44 +702,6 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                   {locale === 'zh-Hans'
                     ? '启用后，点击对话框将以全屏模式展开 Copilot（仅移动端）'
                     : 'When enabled, tapping the input opens Copilot in fullscreen mode (mobile only)'}
-                </p>
-              </div>
-
-              {/* Agenda default expanded toggle */}
-              <div className="pt-3 border-t border-border/30">
-                <SettingsItem
-                  icon={Calendar}
-                  label={locale === 'zh-Hans' ? '默认展开今日待办' : "Expand Today's Agenda by Default"}
-                  rightElement={
-                    <Switch
-                      checked={agendaDefaultExpanded}
-                      onCheckedChange={handleAgendaDefaultExpandedChange}
-                    />
-                  }
-                />
-                <p className="text-xs text-muted-foreground mt-1 pl-8">
-                  {locale === 'zh-Hans'
-                    ? '启用后，首页日历卡片中的今日待办列表默认展开'
-                    : "When enabled, the Today's Agenda list in the home calendar card is expanded by default"}
-                </p>
-              </div>
-
-              {/* Admin Mode toggle */}
-              <div className="pt-3 border-t border-border/30">
-                <SettingsItem
-                  icon={Database}
-                  label={locale === 'zh-Hans' ? '管理员模式' : 'Admin Mode'}
-                  rightElement={
-                    <Switch
-                      checked={adminMode}
-                      onCheckedChange={handleAdminModeChange}
-                    />
-                  }
-                />
-                <p className="text-xs text-muted-foreground mt-1 pl-8">
-                  {locale === 'zh-Hans'
-                    ? '启用后显示所有数据，关闭后仅显示当前用户的数据'
-                    : 'When enabled, shows all data. When disabled, filters data to current user only.'}
                 </p>
               </div>
 

@@ -671,16 +671,6 @@ export function setAutoPlayAgentResponse(enabled: boolean): void {
   window.dispatchEvent(new CustomEvent('autoplay-changed', { detail: enabled }));
 }
 
-// Information structure settings
-export function getOrganizeInStructureCard(): boolean {
-  return localStorage.getItem('organizeInStructureCard') !== 'false'; // default true
-}
-
-export function setOrganizeInStructureCard(enabled: boolean): void {
-  localStorage.setItem('organizeInStructureCard', String(enabled));
-  window.dispatchEvent(new CustomEvent('structurecard-changed', { detail: enabled }));
-}
-
 // BYOM (Bring Your Own Model) settings
 export function getLLMConfig(): LLMConfig | null {
   const saved = localStorage.getItem('llmConfig');
@@ -1182,6 +1172,33 @@ export function setCopilotInAllScreens(enabled: boolean): void {
   window.dispatchEvent(new CustomEvent('copilotinallscreens-changed', { detail: enabled }));
 }
 
+// Copilot record list display settings
+export type CopilotListDefaultView = 'expanded' | 'collapsed';
+
+export function getCopilotListDefaultView(): CopilotListDefaultView {
+  return localStorage.getItem('copilotListDefaultView') === 'collapsed' ? 'collapsed' : 'expanded';
+}
+
+export function setCopilotListDefaultView(view: CopilotListDefaultView): void {
+  localStorage.setItem('copilotListDefaultView', view);
+  window.dispatchEvent(new CustomEvent('copilot-list-default-view-changed', { detail: view }));
+}
+
+export function getCopilotListTopN(): number {
+  const raw = localStorage.getItem('copilotListTopN');
+  const parsed = Number.parseInt(raw ?? '', 10);
+  if (Number.isFinite(parsed) && parsed >= 1 && parsed <= 50) {
+    return parsed;
+  }
+  return 3;
+}
+
+export function setCopilotListTopN(topN: number): void {
+  const normalized = Math.min(50, Math.max(1, Math.floor(topN)));
+  localStorage.setItem('copilotListTopN', String(normalized));
+  window.dispatchEvent(new CustomEvent('copilot-list-top-n-changed', { detail: normalized }));
+}
+
 // Copilot dock layout setting (widescreen only)
 export type CopilotDockLayout = 'float' | 'right' | 'left';
 export const copilotDockLayoutLabels: Record<CopilotDockLayout, { zh: string; en: string }> = {
@@ -1234,16 +1251,6 @@ export function setAgendaDefaultExpanded(enabled: boolean): void {
 // Simulate streaming response setting
 export function getSimulateStreaming(): boolean {
   return localStorage.getItem('simulateStreaming') !== 'false'; // default true
-}
-
-// Admin Mode — bypasses ownerid filtering, shows all data
-export function getAdminMode(): boolean {
-  return localStorage.getItem('adminMode') === 'true';
-}
-
-export function setAdminMode(enabled: boolean): void {
-  localStorage.setItem('adminMode', String(enabled));
-  window.dispatchEvent(new CustomEvent('adminmode-changed', { detail: enabled }));
 }
 
 export function setSimulateStreaming(enabled: boolean): void {
@@ -1413,8 +1420,6 @@ export const translations = {
     selectModel: '选择模型',
 
     // Information structure settings
-    infoStructure: '信息结构',
-    organizeInStructureCard: '以卡片方式呈现数据',
     voiceSummary: '用语音播报摘要',
 
     // Font size settings
@@ -1550,8 +1555,6 @@ export const translations = {
     selectModel: 'Select model',
 
     // Information structure settings
-    infoStructure: 'Information Structure',
-    organizeInStructureCard: 'Organize Data in Cards',
     voiceSummary: 'Voice Summary for Response',
     activityConfirmed: 'Activity confirmed',
     pollTimeout: 'AI processing timed out, please retry',

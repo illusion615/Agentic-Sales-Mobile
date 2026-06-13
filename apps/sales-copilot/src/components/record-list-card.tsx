@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronDown, ChevronUp, Building2, Target, Calendar, ArrowRight, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { getLocale } from '@/lib/i18n';
+import { getLocale, getCopilotListDefaultView, getCopilotListTopN } from '@/lib/i18n';
 import { useCopilot } from '@/contexts/copilot-context';
 import { useCopilotSideDocked } from '@/components/global-copilot';
 import { prefetchForEntityType } from '@/lib/prefetch';
@@ -51,12 +51,14 @@ const typeConfig = {
 };
 
 export function RecordListCard({ type, records, title }: RecordListCardProps) {
-  const [isExpanded, setIsExpanded] = useState(true);
+  const [isExpanded, setIsExpanded] = useState(() => getCopilotListDefaultView() === 'expanded');
+  const [showAll, setShowAll] = useState(false);
   const navigate = useNavigate();
   const locale = getLocale();
   const isZh = locale === 'zh-Hans';
   const { closePanel, setPageContext } = useCopilot();
   const { docked } = useCopilotSideDocked();
+  const topN = getCopilotListTopN();
 
   // Prefetch the detail page chunk when this record list renders
   useEffect(() => { prefetchForEntityType(type); }, [type]);
@@ -64,6 +66,8 @@ export function RecordListCard({ type, records, title }: RecordListCardProps) {
   const config = typeConfig[type];
   const Icon = config.icon;
   const displayTitle = title || (isZh ? config.labelZh : config.labelEn);
+  const visibleRecords = showAll ? records : records.slice(0, topN);
+  const remainingCount = Math.max(0, records.length - visibleRecords.length);
 
   // Page name labels for each record type
   const pageLabels: Record<RecordType, { zh: string; en: string }> = {
@@ -126,13 +130,13 @@ export function RecordListCard({ type, records, title }: RecordListCardProps) {
       {/* 展开的记录列表 */}
       {isExpanded && (
         <div className="border-t border-border/50">
-          {records.map((record, index) => (
+          {visibleRecords.map((record, index) => (
             <button
               key={record.id}
               onClick={() => handleRecordClick(record)}
               className={cn(
                 "w-full flex items-center justify-between p-3 hover:bg-muted/50 transition-colors text-left",
-                index !== records.length - 1 && "border-b border-border/30"
+                index !== visibleRecords.length - 1 && "border-b border-border/30"
               )}
             >
               <div className="flex-1 min-w-0">
@@ -147,6 +151,17 @@ export function RecordListCard({ type, records, title }: RecordListCardProps) {
               <ArrowRight className="h-4 w-4 text-muted-foreground flex-shrink-0 ml-2" />
             </button>
           ))}
+
+          {remainingCount > 0 && (
+            <button
+              onClick={() => setShowAll(true)}
+              className="w-full p-3 text-xs text-primary hover:bg-primary/5 transition-colors border-t border-border/30"
+            >
+              {isZh
+                ? `还有 ${remainingCount} 条数据，点击展开全部`
+                : `${remainingCount} more record${remainingCount > 1 ? 's' : ''}. Tap to show all`}
+            </button>
+          )}
         </div>
       )}
     </div>
