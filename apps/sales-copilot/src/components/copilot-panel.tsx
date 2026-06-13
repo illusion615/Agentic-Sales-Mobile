@@ -1,10 +1,10 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence, useDragControls, type PanInfo } from 'motion/react';
-import { Sparkles, ArrowUp, SquarePen, X, ChevronDown, Copy, Volume2, VolumeX, Loader2, Square, Play, Pause, Paperclip, RotateCcw, Mic, Plus, Camera, ScrollText } from 'lucide-react';
+import { Sparkles, ArrowUp, SquarePen, X, ChevronDown, Copy, Volume2, VolumeX, Loader2, Square, Play, Pause, Paperclip, RotateCcw, Mic, ScrollText } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useCopilot, type ChatMessage } from '@/contexts/copilot-context';
-import { getLocale, getChatFontClass, getSelectedVoice, findMatchingSystemVoice, getLLMConfig, getVoiceSummaryEnabled, getCopilotDockLayout, getCopilotFullscreenDefault, type CopilotDockLayout, type Locale } from '@/lib/i18n';
+import { useCopilot, type ChatMessage, isUnresolvedBlockingCard } from '@/contexts/copilot-context';
+import { getLocale, getChatFontClass, getSelectedVoice, findMatchingSystemVoice, getLLMConfig, getVoiceSummaryEnabled, getCopilotDockLayout, getCopilotFullscreenDefault, getCopilotInAllScreens, type CopilotDockLayout, type Locale } from '@/lib/i18n';
 import { ThinkingIndicator } from '@/components/thinking-indicator';
 import { DynamicDataRenderer, tryParseJson } from '@/components/dynamic-data-renderer';
 import { FormCard } from '@/components/form-card';
@@ -66,10 +66,31 @@ export function CopilotPanel() {
   const effectiveLayout: CopilotDockLayout = isMobile ? 'float' : dockLayout;
   const isSideDocked = effectiveLayout === 'left' || effectiveLayout === 'right';
 
+  // "Display Copilot in all screens" — reactive so binary-mode recomputes live.
+  const [copilotInAllScreens, setCopilotInAllScreens] = useState(() => getCopilotInAllScreens());
+  useEffect(() => {
+    const handler = (e: Event) => setCopilotInAllScreens((e as CustomEvent<boolean>).detail);
+    window.addEventListener('copilotinallscreens-changed', handler);
+    return () => window.removeEventListener('copilotinallscreens-changed', handler);
+  }, []);
+
+  // Binary mode: no 78vh mid state — collapsed dock ⇄ fullscreen only.
+  // Active when copilot is shown in all screens AND the panel floats (bottom sheet),
+  // or when the mobile fullscreen-by-default toggle is on.
+  const binaryMode =
+    (isMobile && getCopilotFullscreenDefault()) ||
+    (copilotInAllScreens && effectiveLayout === 'float');
+
   // Side-docked mode: always keep the panel open (no collapse).
   useEffect(() => {
     if (isSideDocked && !isOpen) openPanel(false);
   }, [isSideDocked, isOpen, openPanel]);
+
+  // Binary mode: if the panel ever opens to the mid state, snap it to fullscreen
+  // so no intermediate height is ever shown (covers every open entry path).
+  useEffect(() => {
+    if (binaryMode && isOpen && !isFullScreen) openPanel(true);
+  }, [binaryMode, isOpen, isFullScreen, openPanel]);
 
   // Render counter — only warn on very rapid renders (>100 in 2 seconds)
   const renderCountRef = useRef(0);
@@ -89,6 +110,24 @@ export function CopilotPanel() {
   
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // §8: lock the composer (text + mic + attachments) while any blocking card
+  // (draft / batch / match-selection / awaiting-clarification) is unresolved, so
+  // the card is the only input entry and there is no "follow-up vs new command"
+  // ambiguity. Query-result lists do NOT lock. Derived from the live messages.
+  const inputLocked = messages.some(isUnresolvedBlockingCard);
+  // When the user taps the disabled composer, pulse the oldest unresolved
+  // blocking card to guide them to it.
+  const [pulseCardId, setPulseCardId] = useState<string | null>(null);
+  const guideToBlockingCard = useCallback(() => {
+    const target = messages.find(isUnresolvedBlockingCard);
+    if (!target) return;
+    setPulseCardId(target.id);
+    const el = document.getElementById(`message-${target.id}`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    window.setTimeout(() => setPulseCardId((id) => (id === target.id ? null : id)), 1200);
+  }, [messages]);
+
   
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
@@ -144,9 +183,6 @@ export function CopilotPanel() {
   const [playingInlineId, setPlayingInlineId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<Array<{ file: File; preview: string; type: 'image' | 'file' }>>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const cameraInputRef = useRef<HTMLInputElement>(null);
-  // "+" attachment popover (collapses low-frequency actions away from the input)
-  const [showAttachMenu, setShowAttachMenu] = useState(false);
   
   // Context chips that user can dismiss
   const [dismissedContexts, setDismissedContexts] = useState<Set<string>>(new Set());
@@ -321,10 +357,10 @@ export function CopilotPanel() {
   };
 
   // Handle input focus
-  // When fullscreen-by-default is on (mobile): only fullscreen ↔ collapsed, no mid state.
+  // When fullscreen-by-default / binary mode is on: only fullscreen ↔ collapsed, no mid state.
   // Otherwise: open to 78vh, then fullscreen on second tap.
   const handleInputFocus = () => {
-    const fullscreenDefault = isMobile && getCopilotFullscreenDefault();
+    const fullscreenDefault = (isMobile && getCopilotFullscreenDefault()) || binaryMode;
     if (!isOpen) {
       openPanel(fullscreenDefault);
     } else if (fullscreenDefault && !isFullScreen) {
@@ -629,11 +665,7 @@ export function CopilotPanel() {
               {message.type === 'user' && (
                 <div className="max-w-[85%] group">
                   <div
-                    className={cn('px-3 py-2 rounded-2xl rounded-br-md', getChatFontClass())}
-                    style={{
-                      background: 'rgba(255, 122, 0, 0.08)',
-                      border: '2px solid rgba(255, 122, 0, 0.4)',
-                    }}
+                    className={cn('px-3 py-2 rounded-2xl rounded-br-md bg-[rgba(255,122,0,0.08)] border-2 border-[rgba(255,122,0,0.4)]', getChatFontClass())}
                   >
                     {message.content}
                   </div>
@@ -680,10 +712,12 @@ export function CopilotPanel() {
                   {message.content && (
                     <p className="text-sm text-foreground mb-2">{message.content}</p>
                   )}
-                  <BatchFormCard 
-                    messageId={message.id} 
-                    batchFormCards={message.batchFormCards}
-                  />
+                  <div className={cn('rounded-2xl', pulseCardId === message.id && 'ring-2 ring-primary ring-offset-2 ring-offset-background animate-pulse')}>
+                    <BatchFormCard 
+                      messageId={message.id} 
+                      batchFormCards={message.batchFormCards}
+                    />
+                  </div>
                 </div>
               )}
 
@@ -708,6 +742,7 @@ export function CopilotPanel() {
                   {message.content && (
                     <p className="sr-only">{message.content}</p>
                   )}
+                  <div className={cn('rounded-2xl', pulseCardId === message.id && 'ring-2 ring-primary ring-offset-2 ring-offset-background animate-pulse')}>
                   <MatchSelectionCard
                     messageId={message.id}
                     matchSelection={message.matchSelection}
@@ -734,6 +769,7 @@ export function CopilotPanel() {
                       refreshResolution(message.id, newQuery, entityType, pendingIntent);
                     }}
                   />
+                  </div>
                 </div>
               )}
 
@@ -782,6 +818,7 @@ export function CopilotPanel() {
                         </p>
                       );
                     })()}
+                    <div className={cn('rounded-2xl', pulseCardId === message.id && 'ring-2 ring-primary ring-offset-2 ring-offset-background animate-pulse')}>
                     <MatchSelectionCard
                       messageId={message.id}
                       matchSelection={adapted}
@@ -800,6 +837,7 @@ export function CopilotPanel() {
                         refreshResolution(message.id, newQuery, et, pendingIntent);
                       }}
                     />
+                    </div>
                   </div>
                 );
               })()}
@@ -923,9 +961,9 @@ export function CopilotPanel() {
                             {speakingMessageId === message.id ? (
                               <>
                                 <span className="flex items-end gap-0.5 h-3">
-                                  <span className="w-0.5 bg-primary rounded-full animate-pulse" style={{ height: '60%' }} />
-                                  <span className="w-0.5 bg-primary rounded-full animate-pulse" style={{ height: '100%', animationDelay: '0.15s' }} />
-                                  <span className="w-0.5 bg-primary rounded-full animate-pulse" style={{ height: '40%', animationDelay: '0.3s' }} />
+                                  <span className="w-0.5 bg-primary rounded-full animate-pulse h-[60%]" />
+                                  <span className="w-0.5 bg-primary rounded-full animate-pulse h-full [animation-delay:0.15s]" />
+                                  <span className="w-0.5 bg-primary rounded-full animate-pulse h-[40%] [animation-delay:0.3s]" />
                                 </span>
                                 <span className="text-[10px] text-primary">Stop</span>
                               </>
@@ -958,10 +996,12 @@ export function CopilotPanel() {
                   {message.content && (
                     <p className="text-sm text-foreground mb-2">{message.content}</p>
                   )}
-                  <FormCard 
-                    messageId={message.id} 
-                    formCard={message.formCard}
-                  />
+                  <div className={cn('rounded-2xl', pulseCardId === message.id && 'ring-2 ring-primary ring-offset-2 ring-offset-background animate-pulse')}>
+                    <FormCard 
+                      messageId={message.id} 
+                      formCard={message.formCard}
+                    />
+                  </div>
                 </div>
               )}
               
@@ -1059,6 +1099,8 @@ export function CopilotPanel() {
                 )}
                 <button
                   onClick={() => handleRemoveAttachment(index)}
+                  aria-label={locale === 'zh-Hans' ? '移除附件' : 'Remove attachment'}
+                  title={locale === 'zh-Hans' ? '移除附件' : 'Remove attachment'}
                   className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                 >
                   <X className="w-3 h-3" />
@@ -1086,8 +1128,10 @@ export function CopilotPanel() {
       <div className="absolute inset-0 rounded-2xl neon-glow-blur" />
       <div className="absolute inset-0 rounded-2xl neon-glow" />
 
-      <div className="relative flex items-end gap-2 p-2 rounded-[14px] bg-background" style={{ backgroundColor: 'var(--background)' }}>
-        {/* Hidden inputs: file/photo picker and camera capture */}
+      <div className="relative flex items-end gap-2 p-2 rounded-[14px] bg-background">
+        {/* Hidden input: file/photo picker. On mobile the native sheet already
+            offers "Take Photo" as an option, so a separate camera shortcut is
+            redundant — a single attachment button covers both. */}
         <input
           ref={fileInputRef}
           type="file"
@@ -1095,76 +1139,25 @@ export function CopilotPanel() {
           multiple
           onChange={handleFileSelect}
           className="hidden"
-        />
-        <input
-          ref={cameraInputRef}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          onChange={handleFileSelect}
-          className="hidden"
+          aria-label={locale === 'zh-Hans' ? '选择照片或文件' : 'Choose photo or file'}
         />
 
-        {/* "+" Attachment menu — collapses low-frequency actions */}
-        <div className="relative shrink-0">
-          {showAttachMenu && (
-            <>
-              {/* Click-away overlay */}
-              <div
-                className="fixed inset-0 z-[70]"
-                onClick={() => setShowAttachMenu(false)}
-              />
-              <div
-                className="fixed z-[80] min-w-[160px] rounded-xl p-1.5 shadow-lg border border-border bg-popover"
-                style={{
-                  bottom: (() => {
-                    const btn = document.querySelector('[data-attach-trigger]');
-                    if (!btn) return 56;
-                    const rect = btn.getBoundingClientRect();
-                    return window.innerHeight - rect.top + 8;
-                  })(),
-                  left: (() => {
-                    const btn = document.querySelector('[data-attach-trigger]');
-                    if (!btn) return 16;
-                    return btn.getBoundingClientRect().left;
-                  })(),
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={() => { setShowAttachMenu(false); cameraInputRef.current?.click(); }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-foreground hover:bg-muted/60 transition-colors"
-                >
-                  <Camera className="w-4 h-4 text-muted-foreground" />
-                  {locale === 'zh-Hans' ? '拍照' : 'Take photo'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setShowAttachMenu(false); fileInputRef.current?.click(); }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-foreground hover:bg-muted/60 transition-colors"
-                >
-                  <Paperclip className="w-4 h-4 text-muted-foreground" />
-                  {locale === 'zh-Hans' ? '照片或文件' : 'Photo or file'}
-                </button>
-              </div>
-            </>
+        {/* Attachment button — opens the native picker directly (no popup menu) */}
+        <button
+          type="button"
+          onClick={() => { if (inputLocked) { guideToBlockingCard(); return; } fileInputRef.current?.click(); }}
+          disabled={inputLocked}
+          className={cn(
+            'w-10 h-10 flex items-center justify-center rounded-full transition-colors shrink-0',
+            inputLocked
+              ? 'text-muted-foreground/40 cursor-not-allowed'
+              : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
           )}
-          <button
-            type="button"
-            data-attach-trigger
-            onClick={() => setShowAttachMenu((v) => !v)}
-            className={cn(
-              'w-10 h-10 flex items-center justify-center rounded-full transition-colors',
-              showAttachMenu
-                ? 'bg-muted/60 text-foreground'
-                : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
-            )}
-            aria-label={locale === 'zh-Hans' ? '添加附件' : 'Add attachment'}
-            title={locale === 'zh-Hans' ? '添加附件' : 'Add attachment'}
-          >
-            <Plus className={cn('w-5 h-5 transition-transform', showAttachMenu && 'rotate-45')} />
-          </button>
-        </div>
+          aria-label={locale === 'zh-Hans' ? '添加附件' : 'Add attachment'}
+          title={locale === 'zh-Hans' ? '添加附件' : 'Add attachment'}
+        >
+          <Paperclip className="w-5 h-5" />
+        </button>
         {/* Input Field — auto-grows up to 4 lines, then scrolls internally */}
         <textarea
           ref={inputRef}
@@ -1175,8 +1168,15 @@ export function CopilotPanel() {
           onCompositionStart={handleCompositionStart}
           onCompositionEnd={handleCompositionEnd}
           onFocus={handleInputFocus}
-          placeholder={locale === 'zh-Hans' ? '向 Copilot 提问...' : 'Ask Copilot...'}
-          className="flex-1 bg-transparent border-0 outline-none text-sm text-foreground placeholder:text-muted-foreground resize-none leading-5 py-2 self-end"
+          onPointerDown={(e: React.PointerEvent) => { if (inputLocked) { e.preventDefault(); guideToBlockingCard(); } }}
+          disabled={inputLocked}
+          placeholder={inputLocked
+            ? (locale === 'zh-Hans' ? '请先完成上方卡片' : 'Please complete the card above')
+            : (locale === 'zh-Hans' ? '向 Copilot 提问...' : 'Ask Copilot...')}
+          className={cn(
+            'flex-1 bg-transparent border-0 outline-none text-sm text-foreground placeholder:text-muted-foreground resize-none leading-5 py-2 self-end',
+            inputLocked && 'cursor-not-allowed opacity-60'
+          )}
         />
 
         {/* Right action — mutually exclusive: Stop / Send / Mic */}
@@ -1188,6 +1188,16 @@ export function CopilotPanel() {
             title={locale === 'zh-Hans' ? '停止' : 'Stop'}
           >
             <Square className="w-4 h-4 fill-current" />
+          </button>
+        ) : inputLocked ? (
+          <button
+            type="button"
+            onClick={guideToBlockingCard}
+            className="w-10 h-10 flex items-center justify-center rounded-full text-muted-foreground/40 cursor-not-allowed shrink-0"
+            aria-label={locale === 'zh-Hans' ? '请先完成上方卡片' : 'Please complete the card above'}
+            title={locale === 'zh-Hans' ? '请先完成上方卡片' : 'Please complete the card above'}
+          >
+            <Mic className="w-5 h-5" />
           </button>
         ) : !isListening && inputValue.trim() ? (
           <button
@@ -1210,7 +1220,6 @@ export function CopilotPanel() {
                 ? 'bg-red-500/15 text-red-500 animate-pulse'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
             )}
-            style={{ touchAction: 'none' }}
             aria-label={
               isListening
                 ? (locale === 'zh-Hans' ? '点击停止聆听' : 'Tap to stop listening')
@@ -1280,12 +1289,12 @@ export function CopilotPanel() {
             </div>
           ) : (
           <button
-            onClick={isFullScreen ? () => openPanel(false) : handleClose}
+            onClick={isFullScreen && !binaryMode ? () => openPanel(false) : handleClose}
             className="w-8 h-8 flex items-center justify-center rounded-lg transition-all hover:brightness-125 active:brightness-75"
             aria-label={
               locale === 'zh-Hans'
-                ? (isFullScreen ? '返回面板' : '收起')
-                : (isFullScreen ? 'Back to panel' : 'Collapse')
+                ? (isFullScreen && !binaryMode ? '返回面板' : '收起')
+                : (isFullScreen && !binaryMode ? 'Back to panel' : 'Collapse')
             }
           >
             <ChevronDown className="w-4 h-4 text-foreground" />
@@ -1387,7 +1396,7 @@ export function CopilotPanel() {
           initial={false}
           animate={isSideDocked
             ? undefined
-            : { height: isFullScreen ? '100vh' : isOpen ? '78vh' : 'auto' }
+            : { height: (isFullScreen || (binaryMode && isOpen)) ? '100vh' : isOpen ? '78vh' : 'auto' }
           }
           transition={{ type: 'spring', damping: 32, stiffness: 280 }}
           drag={isOpen && !isSideDocked ? 'y' : false}
@@ -1397,10 +1406,10 @@ export function CopilotPanel() {
           dragElastic={{ top: 0.3, bottom: 0.5 }}
           onDragEnd={(_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
             if (isFullScreen) {
-              // Full-screen: down-swipe collapses. On mobile we skip the 78vh
-              // mid state (too little room) and close all the way to the dock.
+              // Full-screen: down-swipe collapses. On mobile / binary mode we skip the
+              // 78vh mid state (too little room) and close all the way to the dock.
               if (info.offset.y > 80 || info.velocity.y > 500) {
-                if (isMobile) closePanel();
+                if (isMobile || binaryMode) closePanel();
                 else openPanel(false);
               }
               return;

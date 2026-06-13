@@ -1,0 +1,8 @@
+{
+  "$schema": "https://raw.githubusercontent.com/webhintio/hint/main/packages/hint/src/lib/config/config-schema.json",
+  "extends": ["development"],
+  "hints": {
+    "no-inline-styles": "off"
+  },
+  "_comment": "Project lint baseline. 'no-inline-styles' is disabled because this is a Tailwind-first codebase that intentionally uses inline style={{...}} only for dynamic / one-off values (e.g. width:`${pct}%`, borderRadius:16, progress widths). Static styling lives in Tailwind classes. Accessibility hints (labels, discernible text, alt text) and cross-browser compat hints remain ON — fix those at the source, do not suppress."
+}

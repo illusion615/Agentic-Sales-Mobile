@@ -198,7 +198,7 @@ export const availableFunctions: FunctionDefinition[] = [
         contactNames: { type: 'array', items: { type: 'string' }, description: '会议/拜访的多个参会人姓名列表。当用户提到和多人开会/拜访时，把每个人的姓名都放进来。例如"和张经理、李医生开会" -> ["张经理","李医生"]。Multiple attendee names for a meeting/visit.' },
         contactTitle: { type: 'string', description: '联系人职位/科室 / Contact job title or department' },
         scheduledDate: { type: 'string', description: '日期，ISO格式 YYYY-MM-DD' },
-        result: { type: 'string', description: '结果/讨论要点' },
+        result: { type: 'string', description: '活动详情（写入 description 字段）。对已发生的活动：填写结果 / 讨论要点。对未来计划的活动：填写目的 / 议程 / 背景，使日后打开该任务时能仅凭此字段回忆起上下文（如"跟进 Lisa 提出的 RFP 报价，确认内部评审进度"）。Activity details (stored in the description column). For past activities: outcome / discussion points. For planned future activities: purpose / agenda / background so the task is self-explanatory later (e.g. "Follow up on Lisa\'s RFP quote, confirm internal-review progress").' },
         opportunityId: { type: 'string', description: '关联商机ID（如果已知）/ Related opportunity ID (if known)' },
         opportunityName: { type: 'string', description: '关联商机名称' },
         notes: { type: 'string', description: '备注 - 将所有不能映射到其他字段的有价值信息都放到这里（如：公司历史、特殊资质、重要背景、合作伙伴关系等）/ Notes - Put ALL valuable information that cannot be mapped to other structured fields here (e.g., company history, certifications, important background, partnerships, etc.)' },

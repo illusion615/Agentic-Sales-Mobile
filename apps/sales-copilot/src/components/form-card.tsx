@@ -61,7 +61,9 @@ function EditableField({
   type = 'text',
   options,
   placeholder,
-  className 
+  className,
+  required = false,
+  missingHint,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
@@ -71,14 +73,21 @@ function EditableField({
   options?: Array<{ value: string; label: string }>;
   placeholder?: string;
   className?: string;
+  /** §8: mark a required field; when empty, show an inline red hint below it. */
+  required?: boolean;
+  /** Custom hint text shown when a required field is empty. */
+  missingHint?: string;
 }) {
   const [isOpen, setIsOpen] = useState(false);
+  const isMissing = required && (value === undefined || value === null || String(value).trim() === '');
   
   return (
     <div className={cn('flex items-start gap-2 py-1', className)}>
-      <Icon className="w-4 h-4 text-muted-foreground mt-2 flex-shrink-0" />
+      <Icon className={cn('w-4 h-4 mt-2 flex-shrink-0', isMissing ? 'text-destructive' : 'text-muted-foreground')} />
       <div className="flex-1 min-w-0">
-        <span className="text-xs text-muted-foreground">{label}</span>
+        <span className={cn('text-xs', isMissing ? 'text-destructive' : 'text-muted-foreground')}>
+          {label}{required && <span className="text-destructive"> *</span>}
+        </span>
         {type === 'select' && options ? (
           <Select value={String(value || '')} onValueChange={onChange}>
             <SelectTrigger className="h-8 text-sm mt-0.5 w-full min-w-0">
@@ -93,6 +102,8 @@ function EditableField({
         ) : type === 'date' ? (
           <input
             type="date"
+            aria-label={label}
+            title={label}
             className="h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm mt-0.5"
             value={value ? String(value) : ''}
             onChange={(e) => onChange(e.target.value)}
@@ -120,6 +131,11 @@ function EditableField({
             placeholder={placeholder}
             className="h-8 text-sm mt-0.5"
           />
+        )}
+        {isMissing && (
+          <p className="mt-1 text-[11px] text-destructive">
+            {missingHint || (getLocale() === 'zh-Hans' ? `请填写${label}` : `${label} is required`)}
+          </p>
         )}
       </div>
     </div>
@@ -434,6 +450,7 @@ function ActivityFormCard({ data, formData, setFormData, onConfirm, onCancel, is
           value={formData.title as string}
           onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, title: v }))}
           placeholder={locale === 'zh-Hans' ? '输入活动标题' : 'Enter activity title'}
+          required
         />
         <EditableField 
           icon={Tag} 
@@ -483,18 +500,21 @@ function ActivityFormCard({ data, formData, setFormData, onConfirm, onCancel, is
             locale={locale}
           />
         )}
-        {/* I-8 Slice A: hide outcome when activity is planned (event hasn't happened). NextStep is handled
-            via multi-intent — concrete follow-ups become their own draftActivity rather than free text. */}
-        {formData.temporalMode !== 'planned' && (
-          <EditableField
-            icon={FileText}
-            label={locale === 'zh-Hans' ? '结果' : 'Result'}
-            value={formData.result as string}
-            onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, result: v }))}
-            type="textarea"
-            placeholder={locale === 'zh-Hans' ? '输入活动结果' : 'Enter activity result'}
-          />
-        )}
+        {/* Free-text context → persisted to the Dataverse `description` column. Shown for BOTH planned
+            and completed activities: for a planned task it captures the purpose/agenda/background so the
+            user can recall why the task exists; for a completed one it captures the outcome/discussion. */}
+        <EditableField
+          icon={FileText}
+          label={locale === 'zh-Hans' ? '详情' : 'Details'}
+          value={formData.result as string}
+          onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, result: v }))}
+          type="textarea"
+          placeholder={
+            formData.temporalMode === 'planned'
+              ? (locale === 'zh-Hans' ? '输入目的 / 议程 / 背景，便于日后回忆' : 'Add purpose / agenda / context for later recall')
+              : (locale === 'zh-Hans' ? '输入活动结果或讨论要点' : 'Enter outcome or discussion points')
+          }
+        />
       </div>
 
       <div className="flex gap-2 pt-2">
@@ -636,6 +656,7 @@ function OpportunityFormCard({ data, formData, setFormData, onConfirm, onCancel,
           value={formData.name as string}
           onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, name: v }))}
           placeholder={locale === 'zh-Hans' ? '输入商机名称' : 'Enter opportunity name'}
+          required
         />
         <AccountSelector
           value={formData.accountId as string}
@@ -738,6 +759,7 @@ function AccountFormCard({ data, formData, setFormData, onConfirm, onCancel, isC
           value={formData.name as string}
           onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, name: v }))}
           placeholder={locale === 'zh-Hans' ? '输入客户名称' : 'Enter account name'}
+          required
         />
         <EditableField 
           icon={Tag} 
@@ -839,6 +861,7 @@ function ContactFormCard({ data, formData, setFormData, onConfirm, onCancel, isC
           value={formData.fullName as string}
           onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, fullName: v }))}
           placeholder={locale === 'zh-Hans' ? '输入姓名' : 'Enter name'}
+          required
         />
         <AccountSelector
           value={formData.accountId as string}
@@ -911,6 +934,122 @@ function ConfirmedBadge({ locale }: { locale: Locale }) {
   );
 }
 
+// ── Saved-card read-only summary helpers ───────────────────────────────────
+type SummaryIcon = React.ComponentType<{ className?: string }>;
+
+const ACTIVITY_TYPE_LABELS: Record<string, [string, string]> = {
+  visit: ['拜访', 'Visit'],
+  call: ['电话', 'Call'],
+  meeting: ['会议', 'Meeting'],
+  email: ['邮件', 'Email'],
+  other: ['其他', 'Other'],
+};
+
+const STAGE_LABELS: Record<string, [string, string]> = {
+  prospecting: ['发现', 'Prospecting'],
+  qualification: ['资质', 'Qualification'],
+  proposal: ['提案', 'Proposal'],
+  negotiation: ['谈判', 'Negotiation'],
+  won: ['成交', 'Won'],
+  lost: ['失败', 'Lost'],
+};
+
+/** Format an ISO/date string for compact display; falls back to the raw value. */
+function formatCardDate(dateStr: string | undefined, locale: Locale): string {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return dateStr;
+  return format(d, locale === 'zh-Hans' ? 'yyyy年M月d日' : 'MMM d, yyyy');
+}
+
+/** A single read-only label/value row in the expanded saved card. */
+function ReadOnlyRow({ icon: Icon, label, value }: { icon: SummaryIcon; label: string; value: string }) {
+  if (!value) return null;
+  return (
+    <div className="flex items-start gap-2 py-1">
+      <Icon className="w-3.5 h-3.5 text-muted-foreground mt-0.5 shrink-0" />
+      <div className="min-w-0 flex-1">
+        <span className="text-[11px] text-muted-foreground block leading-tight">{label}</span>
+        <p className="text-sm text-foreground break-words leading-snug">{value}</p>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Build the collapsed one-line summary + the expanded read-only rows for a saved
+ * record, organized per record type so users can review without navigating away.
+ */
+function buildSavedCardDetails(
+  type: FormCardData['type'],
+  formData: Record<string, unknown>,
+  locale: Locale,
+): { summary: string; rows: Array<{ icon: SummaryIcon; label: string; value: string }> } {
+  const tr = (zh: string, en: string) => (locale === 'zh-Hans' ? zh : en);
+  const idx = locale === 'zh-Hans' ? 0 : 1;
+  const str = (k: string) => (typeof formData[k] === 'string' ? (formData[k] as string).trim() : '');
+  const rows: Array<{ icon: SummaryIcon; label: string; value: string }> = [];
+  let summary = '';
+
+  if (type === 'activity') {
+    const at = str('type') || 'visit';
+    const atLabel = ACTIVITY_TYPE_LABELS[at]?.[idx] || at;
+    const dateStr = formatCardDate(str('scheduledDate'), locale);
+    const accName = str('accountName');
+    const oppName = str('opportunityName');
+    const attendees = (formData.attendees as Array<{ id: string; fullname: string }>) || [];
+    const attendeeNames = attendees.map((a) => a.fullname).filter(Boolean).join(', ');
+    const contactName = str('contactName');
+    const isPlanned = str('temporalMode') === 'planned';
+
+    summary = [atLabel, dateStr, oppName || accName].filter(Boolean).join(' · ');
+    rows.push({ icon: Tag, label: tr('类型', 'Type'), value: atLabel });
+    rows.push({
+      icon: Calendar,
+      label: isPlanned ? tr('计划日期', 'Scheduled') : tr('日期', 'Date'),
+      value: dateStr,
+    });
+    rows.push({ icon: Building2, label: tr('客户', 'Account'), value: accName });
+    rows.push({ icon: Target, label: tr('关联商机', 'Opportunity'), value: oppName });
+    if (at === 'visit' || at === 'meeting') {
+      rows.push({ icon: Users, label: tr('参会人', 'Attendees'), value: attendeeNames });
+    } else {
+      rows.push({ icon: User, label: tr('联系人', 'Contact'), value: contactName });
+    }
+    rows.push({ icon: FileText, label: tr('结果', 'Result'), value: str('result') });
+  } else if (type === 'opportunity') {
+    const stage = str('stage') || 'prospecting';
+    const stageLabel = STAGE_LABELS[stage]?.[idx] || stage;
+    const amount = typeof formData.amount === 'number' ? formData.amount : Number(str('amount'));
+    const amountStr = amount ? formatCurrencyCompact(amount) : '';
+    const confidence = typeof formData.confidence === 'number' ? formData.confidence : Number(str('confidence'));
+    const confStr = Number.isFinite(confidence) && confidence > 0 ? `${confidence}%` : '';
+    const closeStr = formatCardDate(str('expectedCloseDate'), locale);
+
+    summary = [stageLabel, amountStr].filter(Boolean).join(' · ');
+    rows.push({ icon: Building2, label: tr('客户', 'Account'), value: str('accountName') });
+    rows.push({ icon: DollarSign, label: tr('金额', 'Amount'), value: amountStr });
+    rows.push({ icon: Tag, label: tr('阶段', 'Stage'), value: stageLabel });
+    rows.push({ icon: TrendingUp, label: tr('信心度', 'Confidence'), value: confStr });
+    rows.push({ icon: Calendar, label: tr('预计成交', 'Expected Close'), value: closeStr });
+  } else if (type === 'account') {
+    summary = [str('industry'), str('phone')].filter(Boolean).join(' · ');
+    rows.push({ icon: Tag, label: tr('行业', 'Industry'), value: str('industry') });
+    rows.push({ icon: Phone, label: tr('电话', 'Phone'), value: str('phone') });
+    rows.push({ icon: Mail, label: tr('邮箱', 'Email'), value: str('email') });
+    rows.push({ icon: MapPin, label: tr('地址', 'Address'), value: str('address') });
+    rows.push({ icon: FileText, label: tr('备注', 'Notes'), value: str('notes') });
+  } else if (type === 'contact') {
+    summary = [str('title'), str('accountName')].filter(Boolean).join(' · ');
+    rows.push({ icon: Tag, label: tr('职位', 'Title'), value: str('title') });
+    rows.push({ icon: Building2, label: tr('客户', 'Account'), value: str('accountName') });
+    rows.push({ icon: Phone, label: tr('电话', 'Phone'), value: str('phone') });
+    rows.push({ icon: Mail, label: tr('邮箱', 'Email'), value: str('email') });
+  }
+
+  return { summary, rows: rows.filter((r) => r.value) };
+}
+
 // Main Form Card Component
 export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps) {
   const navigate = useNavigate();
@@ -923,6 +1062,8 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
   const [createdRecordId, setCreatedRecordId] = useState<string | null>(formCard.createdRecordId || null);
   // Use ref to keep the latest createdRecordId available immediately (for async operations)
   const createdRecordIdRef = useRef<string | null>(formCard.createdRecordId || null);
+  // Saved-card expand toggle: reveals a read-only summary so users can review in place.
+  const [isExpanded, setIsExpanded] = useState(false);
   
   // Sync status and createdRecordId from props when they change (e.g., after context update)
   useEffect(() => {
@@ -1044,13 +1185,19 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
           temporalMode === 'completed' ? 'completed'
           : 'open';
 
+        const resultText = ((formData.result as string) || '').trim();
+        const notesText = ((formData.notes as string) || '').trim();
+        const activityNotes = [resultText, notesText]
+          .filter(Boolean)
+          .join('\n\n');
+
         const createInput: Omit<Activity, 'id'> = {
           title: formData.title as string || '',
           type: activityType as Activity['type'],
           status,
           ownerid: user?.objectId || 'unknown',
           scheduleddate: formData.scheduledDate as string || new Date().toISOString(),
-          notes: (formData.notes as string) || '',
+          notes: activityNotes,
           ...(targetAccount && { account: { id: targetAccount.id, name1: targetAccount.name1 } }),
           ...(targetOpportunity && { opportunity: { id: targetOpportunity.id, name1: targetOpportunity.name1 } }),
         };
@@ -1313,24 +1460,68 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="glass-card p-3 rounded-xl cursor-pointer hover:bg-muted/30 active:scale-[0.98] transition-all"
-        onClick={handleConfirmedClick}
+        className="glass-card rounded-xl overflow-hidden"
       >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            {formCard.type === 'activity' && <Calendar className="w-5 h-5 text-primary" />}
-            {formCard.type === 'contact' && <User className="w-5 h-5 text-purple-600" />}
-            {formCard.type === 'opportunity' && <TrendingUp className="w-5 h-5 text-green-600" />}
-            {formCard.type === 'account' && <Building2 className="w-5 h-5 text-blue-600" />}
-            <span className="text-sm font-medium text-foreground">
-              {formData.title as string || formData.name as string || formData.fullName as string || ''}
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <ConfirmedBadge locale={locale} />
-            <ChevronRight className="w-4 h-4 text-muted-foreground" />
-          </div>
-        </div>
+        {(() => {
+          const { summary, rows } = buildSavedCardDetails(formCard.type, formData, locale);
+          const title = (formData.title as string) || (formData.name as string) || (formData.fullName as string) || '';
+          return (
+            <>
+              <button
+                type="button"
+                onClick={() => setIsExpanded((v) => !v)}
+                data-state={isExpanded ? 'open' : 'closed'}
+                className="w-full flex items-center justify-between gap-2 p-3 text-left hover:bg-muted/30 transition-colors"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  {formCard.type === 'activity' && <Calendar className="w-5 h-5 text-primary shrink-0" />}
+                  {formCard.type === 'contact' && <User className="w-5 h-5 text-purple-600 shrink-0" />}
+                  {formCard.type === 'opportunity' && <TrendingUp className="w-5 h-5 text-green-600 shrink-0" />}
+                  {formCard.type === 'account' && <Building2 className="w-5 h-5 text-blue-600 shrink-0" />}
+                  <div className="min-w-0">
+                    <span className="text-sm font-medium text-foreground block truncate">{title}</span>
+                    {summary && (
+                      <span className="text-[11px] text-muted-foreground block truncate">{summary}</span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <ConfirmedBadge locale={locale} />
+                  <ChevronDown
+                    className={cn(
+                      'w-4 h-4 text-muted-foreground transition-transform',
+                      isExpanded && 'rotate-180',
+                    )}
+                  />
+                </div>
+              </button>
+
+              {isExpanded && (
+                <motion.div
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="border-t border-border/50 px-3 pt-2 pb-3"
+                >
+                  <div className="space-y-0.5">
+                    {rows.map((r, i) => (
+                      <ReadOnlyRow key={i} icon={r.icon} label={r.label} value={r.value} />
+                    ))}
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleConfirmedClick}
+                    className="w-full mt-2.5"
+                  >
+                    {locale === 'zh-Hans' ? '查看完整详情' : 'Open full details'}
+                    <ChevronRight className="w-3.5 h-3.5 ml-1.5" />
+                  </Button>
+                </motion.div>
+              )}
+            </>
+          );
+        })()}
       </motion.div>
     );
   }

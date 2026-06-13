@@ -325,6 +325,43 @@ export interface ChatMessage {
 // Form fill callback type
 export type FormFillCallback = (data: Record<string, unknown>) => void;
 
+/**
+ * §8: a "blocking card" requires user confirmation before the conversation can
+ * continue (draft form, batch draft, match selection, awaiting clarification).
+ * Query result lists and plain text replies do NOT block. Returns true when the
+ * given message carries an UNRESOLVED blocking card. Pure + exported for reuse
+ * (copilot-panel input-lock) and testing.
+ */
+export function isUnresolvedBlockingCard(m: ChatMessage): boolean {
+  // Draft form card — unresolved unless saved (confirmed) or cancelled.
+  if (m.formCard) {
+    const s = m.formCard.status;
+    return s !== 'confirmed' && s !== 'cancelled';
+  }
+  // Batch draft cards — unresolved while any item is still pending/modified.
+  if (m.batchFormCards) {
+    return m.batchFormCards.items.some((it) => it.status !== 'confirmed' && it.status !== 'cancelled');
+  }
+  // Match selection — unresolved until the user picks/skips (resolutionState).
+  if (m.matchSelection) {
+    return m.resolutionState !== 'resolved';
+  }
+  // Awaiting clarification — unresolved while blocked/resolving.
+  if (m.awaitingClarification) {
+    return m.resolutionState !== 'resolved';
+  }
+  // Clarification question card — unresolved until answered.
+  if (m.clarification) {
+    return m.resolutionState !== 'resolved';
+  }
+  return false;
+}
+
+/** §8: true when ANY message currently carries an unresolved blocking card. */
+export function hasUnresolvedBlockingCard(messages: ChatMessage[]): boolean {
+  return messages.some(isUnresolvedBlockingCard);
+}
+
 interface CopilotContextValue {
   // Panel state
   isOpen: boolean;
