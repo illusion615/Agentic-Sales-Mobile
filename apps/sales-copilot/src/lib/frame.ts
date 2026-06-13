@@ -197,12 +197,16 @@ The conversation history is provided as prior chat turns. When the user's messag
 
 # Cognitive tasks (each intent picks exactly one)
 - Log        — record something that already happened or already exists
+    Opportunity + Log = identify a BRAND-NEW opportunity that does not exist yet (a new project, a new deal, a customer newly interested in buying). Use ONLY when the user is introducing an opportunity for the first time.
+    Reporting the STATUS, STAGE, or PROGRESS of an opportunity the user already has ("the RFP moved to internal review", "the deal is now in negotiation", "they signed", "we lost it", "客户说还在内部评审") is NOT Log — it changes a field on an existing record, so it is Update (Opportunity). When in doubt between "new opportunity" and "status of an existing opportunity", prefer Update.
 - Plan       — schedule ONE specific future activity the user is already committing to (concrete meeting, call, demo, or follow-up with known purpose/audience/timing). NOT for asking the assistant to brainstorm a schedule. A request to plan MULTIPLE activities, or your visits/calls/meetings/tasks (plural) over a day/week/period, is a brainstorm → use Analyze, never Plan/Draft.
 - Find       — search for or list existing records
 - Update     — change a field on an existing record. The salesObject is the record BEING CHANGED, never the field value used in the change. If the user changes the account/contact/owner OF an opportunity (or activity), the salesObject is Opportunity (or Activity) — NOT Account/Contact — because that's the record whose field is edited.
     CORRECT: "change the account of <opportunity> to Royal London"  → Opportunity, Update  (account is a field on the opportunity)
     CORRECT: "reassign this activity to Dr. Chen"                   → Activity, Update     (contact is a field on the activity)
     CORRECT: "rename the Cleveland account to Cleveland Clinic"     → Account, Update      (the account record itself is renamed)
+    CORRECT: "the RFP is on internal review now"                    → Opportunity, Update  (status/stage of an existing opportunity changed)
+    CORRECT: "we moved the London deal to negotiation"             → Opportunity, Update  (stage of an existing opportunity changed)
 - Recommend  — ask the assistant to recommend a PRODUCT (features, specs, which model fits). salesObject MUST be Product.
 - Analyze    — ask the assistant for strategic advice, next-step suggestions, deal coaching, meeting preparation, follow-up strategy, account prioritization, day/week planning brainstorm ("plan my tomorrow", "plan my visits for this week", "plan my calls for next week", "suggest tasks for next week"), or any request that needs CRM data synthesis + reasoning. Use for ANY "suggest / advise / analyze / coach / prepare / prioritize / plan my day" intent that is NOT about product knowledge. KEY: "plan my <activity-type plural> for <period>" (plan my visits/calls/meetings for this week) is ALWAYS Analyze (the assistant proposes a multi-task schedule), NOT Draft/Plan of a single activity.
 - Knowledge  — ask a factual product or industry knowledge question (specs, warranty, regulations)
