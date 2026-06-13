@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sales Copilot Mobile · 架构演进摘要</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6efe4;
+        --bg2: #fffaf2;
+        --surface: rgba(255, 250, 244, 0.82);
+        --surface-strong: rgba(255, 255, 255, 0.92);
+        --text: #211b16;
+        --muted: #6c5e51;
+        --line: rgba(73, 48, 25, 0.14);
+        --accent: #bb5a2b;
+        --accent2: #d47a32;
+        --good: #2f7d51;
+        --warn: #9a5b10;
+        --bad: #b53c24;
+        --shadow: 0 24px 70px rgba(86, 52, 24, 0.13);
+      }
+      html.dark {
+        color-scheme: dark;
+        --bg: #151313;
+        --bg2: #221c18;
+        --surface: rgba(35, 29, 25, 0.78);
+        --surface-strong: rgba(28, 24, 21, 0.94);
+        --text: #f5eee8;
+        --muted: #c5b7aa;
+        --line: rgba(255, 233, 209, 0.13);
+        --accent: #ff9a53;
+        --accent2: #ffbf75;
+        --good: #75d99b;
+        --warn: #ffd07b;
+        --bad: #ff8b6d;
+        --shadow: 0 26px 80px rgba(0, 0, 0, 0.35);
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Avenir Next", "PingFang SC", "Hiragino Sans GB", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at 10% 8%, rgba(255, 169, 93, 0.32), transparent 26%),
+          radial-gradient(circle at 90% 18%, rgba(255, 207, 112, 0.22), transparent 24%),
+          linear-gradient(180deg, var(--bg), var(--bg2));
+        line-height: 1.65;
+        min-height: 100vh;
+      }
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        backdrop-filter: blur(18px);
+        background: color-mix(in srgb, var(--surface) 88%, transparent);
+        border-bottom: 1px solid var(--line);
+      }
+      .topbar-inner {
+        width: min(1120px, calc(100% - 2rem));
+        margin: 0 auto;
+        height: 64px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+      }
+      .brand { font-weight: 800; letter-spacing: -0.02em; }
+      .brand small { display: block; color: var(--muted); font-weight: 600; font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; }
+      .toggle {
+        border: 1px solid var(--line);
+        background: var(--surface-strong);
+        color: var(--text);
+        border-radius: 999px;
+        height: 36px;
+        padding: 0 0.9rem;
+        font-weight: 800;
+        cursor: pointer;
+      }
+      main { width: min(1120px, calc(100% - 2rem)); margin: 0 auto; padding: 3rem 0 4rem; }
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.7fr);
+        gap: 1.4rem;
+        align-items: stretch;
+      }
+      .panel {
+        border: 1px solid var(--line);
+        background: var(--surface);
+        box-shadow: var(--shadow);
+        border-radius: 24px;
+        padding: 1.45rem;
+      }
+      .eyebrow { color: var(--accent); font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; font-size: 0.78rem; }
+      h1 { font-size: clamp(2.3rem, 5vw, 4.7rem); line-height: 0.98; letter-spacing: -0.055em; margin: 0.65rem 0 1rem; }
+      h2 { font-size: 1.55rem; letter-spacing: -0.02em; margin: 0 0 0.8rem; }
+      h3 { font-size: 1.05rem; margin: 1.2rem 0 0.55rem; }
+      p { margin: 0 0 0.85rem; color: var(--muted); }
+      a { color: var(--accent); text-decoration: none; font-weight: 750; }
+      a:hover { text-decoration: underline; }
+      .metric-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.8rem; margin-top: 1.1rem; }
+      .metric { border: 1px solid var(--line); background: var(--surface-strong); border-radius: 16px; padding: 1rem; }
+      .metric strong { display: block; font-size: 1.55rem; line-height: 1; color: var(--accent); }
+      .metric span { color: var(--muted); font-size: 0.82rem; }
+      .timeline { margin-top: 1.6rem; display: grid; gap: 1rem; }
+      .stage {
+        display: grid;
+        grid-template-columns: 8rem 1fr;
+        gap: 1rem;
+        border: 1px solid var(--line);
+        background: var(--surface);
+        border-radius: 20px;
+        padding: 1.2rem;
+      }
+      .date { font-family: "SF Mono", ui-monospace, monospace; font-size: 0.82rem; color: var(--accent); font-weight: 800; }
+      .tag-row { display: flex; flex-wrap: wrap; gap: 0.45rem; margin: 0.65rem 0; }
+      .tag { font-size: 0.72rem; border: 1px solid var(--line); border-radius: 999px; padding: 0.2rem 0.55rem; color: var(--muted); background: var(--surface-strong); }
+      .tag.current { border-color: var(--accent); color: var(--accent); }
+      .tag.archive { border-color: var(--warn); color: var(--warn); }
+      .doc-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin-top: 1rem; }
+      .doc-card { border: 1px solid var(--line); background: var(--surface); border-radius: 18px; padding: 1rem; }
+      .doc-card .state { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 800; color: var(--muted); }
+      .doc-card.current .state { color: var(--accent); }
+      .doc-card.archive .state { color: var(--warn); }
+      .callout { border-left: 4px solid var(--accent); background: var(--surface-strong); border-radius: 0 18px 18px 0; padding: 1rem 1.2rem; margin-top: 1.2rem; }
+      .callout strong { color: var(--text); }
+      footer { margin-top: 3rem; color: var(--muted); border-top: 1px solid var(--line); padding-top: 1rem; font-size: 0.86rem; }
+      @media (max-width: 880px) { .hero, .doc-grid { grid-template-columns: 1fr; } .stage { grid-template-columns: 1fr; } .metric-grid { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand"><small>Architecture Index</small>Sales Copilot Mobile</div>
+        <button class="toggle" id="theme-toggle">◐</button>
+      </div>
+    </header>
+    <main>
+      <section class="hero">
+        <article class="panel">
+          <div class="eyebrow">Architecture Evolution · 2026-06-09</div>
+          <h1>架构演进摘要</h1>
+          <p>本页是 design-docs 的上层入口，用来解释 Sales Copilot Mobile 的架构文档如何从早期评审、单轮智能体设计、代码健壮性审查，演进到当前的多轮会话状态设计。它不替代具体设计文档，而是给出阅读顺序、文档状态和历史关系。</p>
+          <div class="metric-grid">
+            <div class="metric"><strong>4</strong><span>智能体架构文档（2 设计 + 1 演进 + 1 历史）</span></div>
+            <div class="metric"><strong>1</strong><span>当前智能体架构单一来源</span></div>
+            <div class="metric"><strong>v1.1</strong><span>新增会话状态与多轮演进</span></div>
+          </div>
+        </article>
+        <aside class="panel">
+          <h2>阅读顺序</h2>
+          <p><a href="agent-architecture-2026-05-17.html">agent-architecture-2026-05-17</a> 是智能体架构的权威文档。</p>
+          <p><a href="conversation-state-architecture-2026-06-09.html">conversation-state-architecture-2026-06-09</a> 是新的多轮会话状态设计，作为 v1.1 演进稿。</p>
+          <p><a href="../06-reviews/architecture-review-2026-05-30.html">architecture-review-2026-05-30</a> 保留为代码健壮性审查，不替代智能体架构文档。</p>
+        </aside>
+      </section>
+
+      <section class="panel" style="margin-top:1.4rem">
+        <h2>演进时间线</h2>
+        <div class="timeline">
+          <article class="stage">
+            <div class="date">2026-05-16</div>
+            <div>
+              <h3>Agent Orchestration 评审稿</h3>
+              <p>记录单轮 LLM 决策、规则补丁和多方案比较。本文档的结论是推荐 Frame · Plan · Execute 三段式管线。它是后续单一来源文档的前身。</p>
+              <div class="tag-row"><span class="tag archive">Archived predecessor</span><span class="tag">评审 / 选型</span></div>
+              <a href="history/agent-orchestration-2026-05-16.html">查看历史评审稿</a>
+            </div>
+          </article>
+          <article class="stage">
+            <div class="date">2026-05-17</div>
+            <div>
+              <h3>Agent Architecture 单一来源 v1.0</h3>
+              <p>将智能体相关判断收敛到一处：意图识别、三段式管线、领域知识编码、可见思考、澄清交互和质量闭环。后续架构变更应优先补充此文档或从此文档分支。</p>
+              <div class="tag-row"><span class="tag current">Source of truth</span><span class="tag">Frame · Plan · Execute</span></div>
+              <a href="agent-architecture-2026-05-17.html">查看单一来源</a>
+            </div>
+          </article>
+          <article class="stage">
+            <div class="date">2026-05-30</div>
+            <div>
+              <h3>整体架构健壮性审查</h3>
+              <p>从错误模型、契约、LLM 调用分散、手写代码寄居 generated 等角度审查系统可维护性。它是质量审查，不是智能体对话设计文档。</p>
+              <div class="tag-row"><span class="tag">Architecture review</span><span class="tag">健壮性 / 契约</span></div>
+              <a href="../06-reviews/architecture-review-2026-05-30.html">查看审查报告</a>
+            </div>
+          </article>
+          <article class="stage">
+            <div class="date">2026-06-09</div>
+            <div>
+              <h3>Conversation State v1.1</h3>
+              <p>识别当前管线的上限：它仍是无状态的单轮命令翻译器。新设计引入显式会话状态、working set、焦点实体、pending goal 和确定性数据复用规则，为多轮会话能力奠定基础。</p>
+              <div class="tag-row"><span class="tag current">Current evolution</span><span class="tag">多轮会话</span><span class="tag">状态管理</span></div>
+              <a href="conversation-state-architecture-2026-06-09.html">查看新设计</a>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel" style="margin-top:1.4rem">
+        <h2>文档目录状态</h2>
+        <div class="doc-grid">
+          <article class="doc-card current"><div class="state">current</div><h3>Agent Architecture</h3><p>智能体架构单一来源，保留并继续演进。</p><a href="agent-architecture-2026-05-17.html">打开</a></article>
+          <article class="doc-card current"><div class="state">current</div><h3>Conversation State Architecture</h3><p>新开文章，定义多轮会话状态层。</p><a href="conversation-state-architecture-2026-06-09.html">打开</a></article>
+          <article class="doc-card archive"><div class="state">archived</div><h3>Agent Orchestration</h3><p>作为评审前身保留，已被 Agent Architecture 吸收。</p><a href="history/agent-orchestration-2026-05-16.html">打开</a></article>
+          <article class="doc-card"><div class="state">reference</div><h3>Architecture Review</h3><p>系统健壮性审查，作为整改依据保留。</p><a href="../06-reviews/architecture-review-2026-05-30.html">打开</a></article>
+          <article class="doc-card"><div class="state">reference</div><h3>Code App Migration</h3><p>Power Apps Code App 迁移记录。</p><a href="../05-engineering/code-app-migration-2026-05-20.html">打开</a></article>
+          <article class="doc-card"><div class="state">reference</div><h3>Tense-aware Activity</h3><p>活动时态感知设计，被后续 Frame 体系吸收。</p><a href="../04-features/tense-aware-activity-2026-05-17.html">打开</a></article>
+        </div>
+        <div class="callout"><strong>维护规则：</strong> 新的智能体架构判断优先更新 Agent Architecture 或 Conversation State Architecture；本目录（docs/02-architecture/）只放架构设计与演进，评审归 06-reviews、迁移归 05-engineering、专题特性归 04-features。</div>
+      </section>
+      <footer>Last updated: 2026-06-09 · Root index for architecture docs.</footer>
+    </main>
+    <script>
+      const root = document.documentElement;
+      const saved = localStorage.getItem('asm-arch-theme');
+      if (saved === 'dark') root.classList.add('dark');
+      document.getElementById('theme-toggle').addEventListener('click', () => {
+        root.classList.toggle('dark');
+        localStorage.setItem('asm-arch-theme', root.classList.contains('dark') ? 'dark' : 'light');
+      });
+    </script>
+  </body>
+</html>

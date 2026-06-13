@@ -331,14 +331,15 @@ IntentResultSchema = z.object({
           </summary>
           <div class="body">
             <table class="compare">
-              <thead><tr><th>temporalMode</th><th>status</th><th>date 缺省</th><th>result/nextStep 字段</th><th>LLM 预填 result</th></tr></thead>
+              <thead><tr><th>temporalMode</th><th>status</th><th>date 缺省</th><th>详情字段（原 result/nextStep）</th><th>LLM 预填详情</th></tr></thead>
               <tbody>
-                <tr><td>planned</td><td>open</td><td>用户给的未来日期或今天</td><td>隐藏</td><td>否</td></tr>
-                <tr><td>completed</td><td>completed</td><td>用户给的过去/今天</td><td>显示</td><td>是</td></tr>
+                <tr><td>planned</td><td>open</td><td>用户给的未来日期或今天</td><td>显示</td><td>是（目的/议程/背景）</td></tr>
+                <tr><td>completed</td><td>completed</td><td>用户给的过去/今天</td><td>显示</td><td>是（结果/讨论要点）</td></tr>
                 <tr><td>unspecified</td><td>open</td><td>今天</td><td>显示（不预填）</td><td>否</td></tr>
               </tbody>
             </table>
             <p>"显示/隐藏"在 Activity Draft 表单组件层判定，单测可覆盖三个分支。</p>
+            <div class="callout"><strong>2026-06-13 修订：</strong> 原 Slice A 设计在 <code>planned</code> 时<strong>隐藏</strong>该字段（理由：未来任务还没有"结果"）。真机使用后发现弊端——未来计划任务保存后，用户日后打开只能靠 <code>subject</code> 回忆上下文，缺少目的/议程。现改为：<strong>三种时态均显示该字段</strong>，且对 <code>planned</code> 也由 LLM 预填（写入目的/议程/背景，而非结果）。同时把 UI 标签从"结果 / Result"改为中性的"<strong>详情 / Details</strong>"——该字段在 Dataverse 落到活动表标准列 <code>description</code>，并非只承载拜访结果，旧标签把语义起窄了。改动落点：<code>form-card.tsx</code>（去掉 <code>temporalMode==='planned'</code> 的隐藏分支 + 改标签 + 按时态切换 placeholder）、<code>function-registry.ts</code>（<code>draftActivity.result</code> 描述指示 LLM 对未来任务填写目的/议程/背景）。</div>
           </div>
         </details>
 
@@ -350,21 +351,22 @@ IntentResultSchema = z.object({
           <div class="body">
             <div class="grid-2">
               <div>
-                <small>Before（unspecified / planned）</small>
+                <small>planned（计划任务）</small>
                 <div class="mock">┌─ New Activity ──────────────┐
-│ Title    [________________] │
-│ Type     [Meeting ▼]        │
-│ Account  [________________] │
-│ Date     [2026-05-17]       │
+│ Title    [...auto...]       │
+│ Type     [Visit ▼]          │
+│ Account  [Royal London]     │
+│ Date     [2026-06-16]       │
 │ Opp      [None ▼]           │
-│ Contact  [________________] │
-│ Result   [________________] │  ← 字段在但用户多半留空
-│ NextStep [________________] │
+│ Contact  [Lisa]             │
+│ ─────────────────────────── │
+│ Details  [讨论 N22 报价，    │  ← LLM 预填目的/议程
+│           推进内部评审...]   │
 │         [Cancel] [Confirm]  │
 └─────────────────────────────┘</div>
               </div>
               <div>
-                <small>After (completed)</small>
+                <small>completed（已完成）</small>
                 <div class="mock">┌─ New Activity ──────────────┐
 │ Title    [...auto...]       │
 │ Type     [Visit ▼]          │
@@ -373,8 +375,7 @@ IntentResultSchema = z.object({
 │ Opp      [None ▼]           │
 │ Contact  [Rachel S.]        │
 │ ─────────────────────────── │
-│ Result   [Positive — ...]   │  ← LLM 预填
-│ NextStep [Schedule demo...] │  ← LLM 预填
+│ Details  [Positive — ...]   │  ← LLM 预填结果
 │         [Cancel] [Confirm]  │
 └─────────────────────────────┘</div>
               </div>

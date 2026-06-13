@@ -51,7 +51,7 @@
         min-height: 100vh;
         line-height: 1.65;
       }
-      .topbar { position: sticky; top: 0; z-index: 20; backdrop-filter: blur(18px); border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 88%, transparent); }
+      .topbar { position: sticky; top: 0; z-index: 20; -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 88%, transparent); }
       .topbar-inner { width: min(1160px, calc(100% - 2rem)); margin: 0 auto; height: 64px; display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
       .brand { font-weight: 850; letter-spacing: -0.02em; }
       .brand small { display: block; color: var(--muted); font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; }
@@ -93,6 +93,7 @@
       .diagram figcaption { margin-top: 0.4rem; color: var(--muted); font-size: 0.78rem; text-align: center; }
       .note { color: var(--muted); font-size: 0.82rem; border-top: 1px dashed var(--line); margin-top: 1.2rem; padding-top: 0.7rem; }
       .note b { color: var(--accent); }
+      .hbadge { margin-left: 0.5rem; }
       table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.88rem; }
       th, td { text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); padding: 0.6rem 0.7rem; }
       th { color: var(--muted); font-size: 0.74rem; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
@@ -121,7 +122,7 @@
     <main>
       <section class="hero">
         <article class="panel">
-          <div class="eyebrow">Conversation State · v1.3 · 2026-06-11</div>
+          <div class="eyebrow">Conversation State · v1.4 · 2026-06-13</div>
           <h1>会话状态架构：实施规格</h1>
           <p class="lead">本文定义在现有 Frame · Plan · Execute 管线之上增加一个会话状态层（Conversation State）的完整实施方案。目标是让系统在多轮对话中稳定地：解析指代（"它 / 那个单子"）、延续未完成的任务、按确定规则判断何时复用已查数据、何时必须重新查询。</p>
           <p>本文是实施依据。读完后，工程师应当无需再做架构推导即可开工；每一个会引起分歧的决定（状态归属、参数归一化、摘要生成、多意图提交顺序、阈值常量、范围边界）都已在文内给出明确结论，而非留给实现者自行判断。</p>
@@ -250,7 +251,7 @@ type PendingGoal = {
           <tbody>
             <tr><td><code>focus</code></td><td>指代消解</td><td>"它 / 这个客户"解析到 focus，而非让 LLM 从短历史猜测。</td></tr>
             <tr><td><code>workingSets</code></td><td>结果集延续与复用</td><td>复用必须比较 <code>argumentsHash</code>，不能只比较实体类型。</td></tr>
-            <tr><td><code>pendingGoal</code></td><td>跨轮任务</td><td>缺字段的创建/更新任务可等待补全，不被当成新命令。</td></tr>
+            <tr><td><code>pendingGoal</code></td><td>跨轮任务</td><td>缺字段的创建/更新任务可等待补全，不被当成新命令。<strong>注：该字段在状态层仍保留，但其"草稿补全"用途已由 §8 阻塞式卡片取代，当前无功能消费它。</strong></td></tr>
             <tr><td><code>rollingSummary</code></td><td>长历史压缩</td><td>超窗口的业务事实进摘要，token 与对话长度解耦。</td></tr>
           </tbody>
         </table>
@@ -521,7 +522,7 @@ flowchart TD
           <thead><tr><th>位置</th><th>表现</th></tr></thead>
           <tbody>
             <tr><td>聊天输入框</td><td>置灰禁用，placeholder 改为"请先完成上方卡片"</td></tr>
-            <tr><td>用户点击被禁用的输入框</td><td>待处理卡片高亮 / 脉冲一次，把视线引到卡片</td></tr>
+            <tr><td>用户点击被禁用的输入框</td><td>待处理卡片高亮 / 脉冲一次，把视线引到卡片。<strong>脉冲环（<code>ring-2 ring-primary</code>）紧贴每张卡片的圆角外缘，而非套在外层消息容器上（外层带 <code>pl-3 border-l-2</code> 留白，会让光圈过大、不贴卡）。</strong></td></tr>
             <tr><td>缺失字段提示</td><td>就近显示在对应录入控件下方（标红 + 文字），卡片渲染时即标出已知缺的必填项，不等保存失败、不用 toast</td></tr>
           </tbody>
         </table>
@@ -542,14 +543,15 @@ flowchart TD
         </ul>
 
         <h3>8.8 实施计划</h3>
+        <div class="callout"><strong>状态（2026-06-13）：</strong> 下表 5 项已全部实现，并在已发布应用上真机验证通过——草稿/澄清/选择卡待确认时三入口锁定、placeholder 显示"请先完成上方卡片"、点击禁用输入框时目标卡片脉冲、缺失必填项就近标红、每张阻塞卡均可取消/跳过后解锁。脉冲贴卡（8.4）为本轮真机测试后的补丁；同批另修复了 Frame 把"汇报已有商机状态"误判为新建商机的分类问题（属 Frame 分类范畴，记录于 <a href="agent-architecture-2026-05-17.html">Agent Architecture</a>）。</div></div>
         <table>
-          <thead><tr><th>#</th><th>任务</th><th>改动文件</th><th>完成判据</th></tr></thead>
+          <thead><tr><th>#</th><th>任务</th><th>改动文件</th><th>完成判据</th><th>状态</th></tr></thead>
           <tbody>
-            <tr><td>1</td><td>派生"是否存在未了结阻塞卡片"标志（<code>hasBlockingCard</code>），由 <code>messages</code> 计算</td><td><span class="tag fix">改</span> <code>copilot-context.tsx</code></td><td>草稿/澄清/选择卡未了结时为 true；查询结果不计入；全部终态后为 false</td></tr>
-            <tr><td>2</td><td>锁定输入：文本框 + 麦克风 + 附件按钮在 <code>hasBlockingCard</code> 时禁用；placeholder 改文案</td><td><span class="tag fix">改</span> <code>copilot-panel.tsx</code></td><td>有阻塞卡时三个入口均不可用；解锁后恢复</td></tr>
-            <tr><td>3</td><td>点击禁用输入框 → 触发待处理卡片高亮 / 脉冲</td><td><span class="tag fix">改</span> <code>copilot-panel.tsx</code></td><td>点禁用输入框时目标卡片有视觉响应</td></tr>
-            <tr><td>4</td><td>字段级缺失提示：缺失必填项就近标红 + 文字，渲染即标出</td><td><span class="tag fix">改</span> <code>form-card.tsx</code></td><td>缺日期等必填项在对应控件下方提示，非卡片底部一句、非 toast</td></tr>
-            <tr><td>5</td><td>逃生出口审计：确认每种阻塞卡都有始终可点的取消 / 跳过</td><td><span class="tag fix">改</span> <code>form-card.tsx</code> · 澄清/选择卡</td><td>任意阻塞卡均可 dismiss，dismiss 后输入解锁</td></tr>
+            <tr><td>1</td><td>派生"是否存在未了结阻塞卡片"标志（<code>hasBlockingCard</code>），由 <code>messages</code> 计算</td><td><span class="tag fix">改</span> <code>copilot-context.tsx</code></td><td>草稿/澄清/选择卡未了结时为 true；查询结果不计入；全部终态后为 false</td><td class="good">✓ 已验证</td></tr>
+            <tr><td>2</td><td>锁定输入：文本框 + 麦克风 + 附件按钮在 <code>hasBlockingCard</code> 时禁用；placeholder 改文案</td><td><span class="tag fix">改</span> <code>copilot-panel.tsx</code></td><td>有阻塞卡时三个入口均不可用；解锁后恢复</td><td class="good">✓ 已验证</td></tr>
+            <tr><td>3</td><td>点击禁用输入框 → 触发待处理卡片高亮 / 脉冲</td><td><span class="tag fix">改</span> <code>copilot-panel.tsx</code></td><td>点禁用输入框时目标卡片有视觉响应；脉冲环贴卡边</td><td class="good">✓ 已验证</td></tr>
+            <tr><td>4</td><td>字段级缺失提示：缺失必填项就近标红 + 文字，渲染即标出</td><td><span class="tag fix">改</span> <code>form-card.tsx</code></td><td>缺日期等必填项在对应控件下方提示，非卡片底部一句、非 toast</td><td class="good">✓ 已验证</td></tr>
+            <tr><td>5</td><td>逃生出口审计：确认每种阻塞卡都有始终可点的取消 / 跳过</td><td><span class="tag fix">改</span> <code>form-card.tsx</code> · 澄清/选择卡</td><td>任意阻塞卡均可 dismiss，dismiss 后输入解锁</td><td class="good">✓ 已验证</td></tr>
           </tbody>
         </table>
 
@@ -664,7 +666,7 @@ lines.push(`[Latest turn]\n` + lastTurnRaw);
   本轮可填 pendingGoal 的 scheduledDate → FILLING→READY
   生成确认卡片（写操作护栏），等待确认
   commit: pendingGoal.state = READY, filled:{account, date:明天}</code></pre>
-        <div class="callout good"><strong>验证点：</strong> 轮3 是"今天任务"故障的回归点——必须 requery 返回 5 条。轮5 验证跑题保护——pendingGoal 不被清除。轮6 验证跨轮槽位补全——"明天下午"接回轮4 的任务而非新命令。</div>
+        <div class="callout good"><strong>验证点：</strong> 轮3 是"今天任务"故障的回归点——必须 requery 返回 5 条。轮5 / 轮6 演示的草稿补全（pendingGoal OPEN/跨轮补槽位）<strong>为 v1.3 设计意图；该用户体验已由 §8 阻塞式卡片取代</strong>：轮4 弹出草稿卡后聊天输入即被锁定，轮5/轮6 的"在卡片上补字段"取代了原"跨轮口语补槽"。轮1–轮3 的 focus / working set / 来源决策部分仍为现行行为的标准答案。</div>
         <div class="callout"><strong>本 trace 已转为可执行回归测试（C2，2026-06-11）：</strong> <code>src/__tests__/conversation-state-trace.test.ts</code> 逐轮驱动 hydrate / resolveDataSource / commit / resolveAnaphora，断言上表每轮状态快照，与 §A 套件合计 34 例全绿。该测试暴露并修正了轮4 原描述的歧义：FOCUS_DECAY=0.8 下 account focus 到轮4 已衰减至 0.46（低于阈值），故「第一个客户」必须由 agent 重新解析为会话主体，而非依赖衰减 focus 或商机 working set。调优观察：若希望会话主体在 3 轮后仍可自动指代，需对持续提及的实体重新注入 focus，或上调 FOCUS_DECAY / FOCUS_MIN_CONFIDENCE——待回归期根据实测调整。</div>
       </section>
 
@@ -725,7 +727,7 @@ lines.push(`[Latest turn]\n` + lastTurnRaw);
         <h2>任务分解：从空仓库到 P5 验收通过</h2>
         <p>本章把 P5 拆成有序、可独立提交的任务。任务按依赖排序，每个任务给出：改动文件、产出、完成判据。建议每个任务一个 commit，便于回滚。"完成判据"是该任务自身可验证的最小标准，不等于整体验收（整体验收见 §16）。</p>
 
-        <h4>阶段 A · 纯函数地基（不接入 UI，全部可单测）<span class="tag add" style="margin-left:.5rem">已完成 2026-06-11</span></h4>
+        <h4>阶段 A · 纯函数地基（不接入 UI，全部可单测）<span class="tag add hbadge">已完成 2026-06-11</span></h4>
         <table>
           <thead><tr><th>#</th><th>任务</th><th>改动文件</th><th>完成判据</th><th>状态</th></tr></thead>
           <tbody>
@@ -741,23 +743,29 @@ lines.push(`[Latest turn]\n` + lastTurnRaw);
         </table>
         <div class="callout good"><strong>阶段 A 实施记录（2026-06-11）：</strong> 已新增 <code>conversation-state.ts</code>（A1–A6，含 §9 <code>serializeStateForPrompt</code>）、<code>data-source-resolver.ts</code>（A7）、<code>anaphora.ts</code>（A8），均为纯函数、不持有 React 引用。单测 <code>src/__tests__/conversation-state.test.ts</code> 共 33 例全绿，覆盖 A2–A8 各完成判据 + §9 序列化。运行命令：<code>npx vitest run --pool=forks --environment=node --no-isolate</code>（本工作区路径含空格，默认 jsdom worker 启动超时，纯函数测试用 node 环境单进程绕过——见下方测试说明）。阶段 B（接入管线）尚未开始。</div>
 
-        <h4>阶段 B · 接入管线（改 4 个现有文件）<span class="tag keep" style="margin-left:.5rem">B1–B3 已接线·待实测</span></h4>
+        <h4>阶段 B · 接入管线（改 4 个现有文件）<span class="tag add hbadge">B1–B6/B8 已发布面实测·B7→§8</span></h4>
         <table>
           <thead><tr><th>#</th><th>任务</th><th>改动文件</th><th>完成判据</th><th>状态</th></tr></thead>
           <tbody>
-            <tr><td>B1</td><td>持有状态：加 <code>conversationStateRef</code>；<code>startNewConversation</code> 同处重置</td><td><span class="tag fix">改</span> <code>copilot-context.tsx</code></td><td>新会话后状态为 <code>emptyState()</code>；与 <code>messagesRef</code> 并列</td><td><span class="tag keep">◐ 已接线·待实测</span></td></tr>
+            <tr><td>B1</td><td>持有状态：加 <code>conversationStateRef</code>；<code>startNewConversation</code> 同处重置</td><td><span class="tag fix">改</span> <code>copilot-context.tsx</code></td><td>新会话后状态为 <code>emptyState()</code>；与 <code>messagesRef</code> 并列</td><td><span class="tag add">✓ 已发布面实测（随 B5/B6/C1）</span></td></tr>
             <tr><td>B2</td><td>入口签名：<code>processMessage</code> 入参加 <code>state</code>、返回加 <code>stateMutation</code>（先返回空 mutation，不改行为）</td><td><span class="tag fix">改</span> <code>copilot-agent.ts</code></td><td>编译通过；旧行为不变（纯接线）</td><td><span class="tag add">✓ 完成（纯类型接线）</span></td></tr>
-            <tr><td>B3</td><td>接 hydrate / commit：<code>sendMessage</code> 内按 §4.2 调用链接好</td><td><span class="tag fix">改</span> <code>copilot-context.tsx</code></td><td>每轮 state 被 hydrate 与 commit；Frame Inspector 能打印当前 state</td><td><span class="tag keep">◐ 已接线·待实测</span></td></tr>
-            <tr><td>B4</td><td>来源决策接管查询：执行查询前调 <code>resolveDataSource</code>；reuse 命中走 working set，否则重查并写回</td><td><span class="tag fix">改</span> <code>copilot-agent.ts</code></td><td>§12 轮3"今天任务"走 requery 返回真实条数</td><td><span class="tag keep">◐ 发射状态+影子决策已接线·待实测</span></td></tr>
+            <tr><td>B3</td><td>接 hydrate / commit：<code>sendMessage</code> 内按 §4.2 调用链接好</td><td><span class="tag fix">改</span> <code>copilot-context.tsx</code></td><td>每轮 state 被 hydrate 与 commit；Frame Inspector 能打印当前 state</td><td><span class="tag add">✓ 已发布面实测（C1 面板可见每轮 state）</span></td></tr>
+            <tr><td>B4</td><td>来源决策接管查询：执行查询前调 <code>resolveDataSource</code>；reuse 命中走 working set，否则重查并写回</td><td><span class="tag fix">改</span> <code>copilot-agent.ts</code></td><td>§12 轮3"今天任务"走 requery 返回真实条数</td><td><span class="tag add">✓ 已发布面实测（无漂移回归）</span></td></tr>
             <tr><td>B5</td><td>替换旧结果提取：用 workingSets 查找替代 <code>lastAgentMsg.recordList</code>（旧 <code>shouldUseConversationContext</code> 进入影子模式：并行计算、只记录差异、不改行为）</td><td><span class="tag fix">改</span> <code>copilot-context.tsx</code> / <code>copilot-agent.ts</code></td><td>旧路径与新决策差异写入日志；行为以新决策为准</td><td><span class="tag add">✓ 已翻转·已发布面实测</span></td></tr>
             <tr><td>B6</td><td>指代接入 Frame 前置：把 anaphora 结果作为 resolvedFocus 注入</td><td><span class="tag fix">改</span> <code>copilot-agent.ts</code></td><td>"它/那个单子/第一个"解析结果进入 mutation</td><td><span class="tag add">✓ 已接线·已发布面实测</span></td></tr>
-            <tr><td>B7</td><td><s>Pending Goal 逐轮问答状态机</s> → <strong>已否决并重设计为 B7′</strong>（pendingGoal 收敛为指向未完成卡片的跨轮指针 + 跟进消息补卡门）</td><td><span class="tag fix">改</span> <code>conversation-state.ts</code> / <code>copilot-context.tsx</code></td><td>见 §8.8 B7′ 实施计划与完成判据</td><td><span class="tag keep">↳ 重设计完成·待实现（§8）</span></td></tr>
-            <tr><td>B8</td><td>Prompt 注入：<code>serializeStateForPrompt</code> + 仅留最近 1 轮原文</td><td><span class="tag fix">改</span> <code>orchestrator.ts</code> / <code>frame.ts</code></td><td>prompt 含 [Focus]/[Working set]/[Pending goal]/[Summary] 块</td><td><span class="tag keep">◐ 已接线·待实测</span></td></tr>
+            <tr><td>B7</td><td><s>Pending Goal 逐轮问答状态机</s> → <strong>已否决，重设计为阻塞式卡片（§8）</strong>：草稿/澄清卡待确认时锁定聊天输入，从源头消除"补充 vs 新命令"歧义</td><td><span class="tag fix">改</span> <code>copilot-panel.tsx</code> / <code>copilot-context.tsx</code> / <code>form-card.tsx</code></td><td>见 §8.8 实施计划与完成判据</td><td><span class="tag fix">↳ 重设计完成·代码已实现·待构建推送实测（§8）</span></td></tr>
+            <tr><td>B8</td><td>Prompt 注入：<code>serializeStateForPrompt</code> + 仅留最近 1 轮原文</td><td><span class="tag fix">改</span> <code>orchestrator.ts</code> / <code>frame.ts</code></td><td>prompt 含 [Focus]/[Working set]/[Pending goal]/[Summary] 块</td><td><span class="tag add">✓ 已发布面实测（多轮跟进未破坏）</span></td></tr>
           </tbody>
         </table>
-        <div class="callout"><strong>阶段 B 实施进度（2026-06-11 第二轮）：</strong> 在 B1–B3 基础上又完成：<strong>B4</strong>—查询路径现会发出 <code>stateMutation</code>（<code>buildQueryStateMutation</code> 压缩结果入 working set + 单记录转 focus），状态逐轮被填充；<strong>B5影子</strong>—在旧 <code>shouldUseConversationContext</code> 门旁并行计算 <code>resolveDataSource</code> 并 <code>console.log('[ConvState shadow]')</code> 打印 new/legacy/agree 对比，<em>不改行为</em>；<strong>B8</strong>—<code>serializeStateForPrompt</code> 注入 Frame（新增 [Conversation state] 块）与 Orchestrator（有状态时仅留最近 1 轮原文，无状态回退 2 轮）。均 TS 零错误。<strong>为何先到这里：</strong>本项目 LLM 管线为非确定性且本地无法驱动（已发布 iframe 不可 Playwright 驱动），按 §14.1 影子纪律，必须先在真实面观察 <code>[ConvState shadow]</code> 日志确认决策正确，再翻转 B5 行为与实施 B6/B7。<strong>B5翻转/B6/B7 是下一个增量，依赖本轮实测反馈。</strong></div>
-        <div class="callout good"><strong>已发布面实测（2026-06-12，浏览器驱动 published app）：</strong> （1）基本可用—「今天有哪些任务」返回 4 条。（2）<strong>无漂移回归</strong>—连续 3 次同一问题稳定返回 4 / 4 / 4，不再 0/9 闪动。（3）<strong>影子日志正确</strong>—首次 <code>new=requery legacy=requery agree=true</code>；重复查询 <code>new=reuse legacy=requery agree=false</code>（正是复用更优且安全之处）；hash 中 dateRange 已正确归一为本地日区间 <code>["2026-06-12T00:00","23:59"]</code>。（4）<strong>写确认流程未回归</strong>—「登记拜访」正常弹出草稿卡（Title/Type/Account/Date 齐全）与 Cancel/Confirm，取消后无数据写入。（5）多轮跟进「哪个金额最高」正确返回（\$1.5M），B8 prompt 注入未破坏多轮。结论：B1–B4/B5影子/B8 在生产面零回归；影子分歧集中在「重复查询可复用」上，为 B5 翻转提供了明确依据。<em>顺带发现一个与本改动无关的旧问题：「谈判阶段商机」传中文 stage 值「谈判」未映射到枚举 <code>negotiation</code> → 0 条（trap #40 同类，中→英枚举翻译缺口）。</em></div>
-        <div class="callout"><strong>阶段 B 实施进度（2026-06-11）：</strong> B1（<code>conversationStateRef</code> + <code>startNewConversation</code> 重置）、B2（<code>processMessage</code>/<code>processMessageInner</code> 入参 <code>state?</code> + <code>AgentResponse.stateMutation?</code>）、B3（<code>sendMessage</code> 内 hydrate→processMessage→commit 调用链 + <code>pageContextToFocus</code> 映射）均已接线，TS 语言服务零错误。<strong>刷为行为中性：</strong>agent 尚未消费 <code>state</code>，<code>stateMutation</code> 为 undefined→commit 为 no-op，故 live 消息路径未变。B4 起会真正改变数据来源决策，需构建+推送+浏览器实测才能交付。</div>
+        <div class="callout good"><strong>阶段 B 实施与实测时间线（截至 2026-06-12）：</strong>
+          <ul>
+            <li><strong>B1–B3 接线（行为中性）</strong>：<code>conversationStateRef</code> + 重置、<code>processMessage</code> 入参 <code>state?</code>/返回 <code>stateMutation?</code>、<code>sendMessage</code> 内 hydrate→process→commit 调用链 + <code>pageContextToFocus</code> 映射。</li>
+            <li><strong>B4 + B8</strong>：查询路径发出 <code>stateMutation</code>（<code>buildQueryStateMutation</code>）逐轮填充状态；<code>serializeStateForPrompt</code> 注入 Frame/Orchestrator（有状态时仅留最近 1 轮原文）。</li>
+            <li><strong>B5 先影子后翻转</strong>：先并行计算 <code>resolveDataSource</code> 打印 <code>[ConvState]</code> 对比（不改行为）；在真实面观察决策正确后翻转为确定性复用（hash 命中回放 working set 原始行，不重查）。</li>
+            <li><strong>B6</strong>：指代词检测 + <code>resolveAnaphora</code> 注入 boundEntities。</li>
+          </ul>
+          <strong>已发布面实测（浏览器驱动 published app）：</strong>（a）「今天任务」连续 3 次稳定 4/4/4，无 0/9 漂移；（b）重复查询 <code>decision=reuse</code>、从缓存回放 20 条、不重查；（c）「这个客户」→Cleveland Clinic via singular/typed-focus；（d）写确认流程/多轮跟进未回归；（e）C1 State 面板渲染正常。结论：<strong>B1–B6/B8 生产面零回归。</strong>「谈判阶段商机」中文 stage 枚举问题已同步修复（0→3）。
+        </div>
 
         <h4>阶段 C · 可观测与回归</h4>
         <table>
@@ -785,9 +793,10 @@ lines.push(`[Latest turn]\n` + lastTurnRaw);
           <li>☑ "它/这个客户/那个单子"解析到正确 focus（§7 / A8）<span class="tag add">已发布面实测：「这个客户」→Cleveland Clinic via singular/typed-focus 2026-06-12</span></li>
           <li>☑ "它"类型不明确且多 focus 并列时，追问而非猜测（§7 第2行 / A8）<span class="tag add">纯函数层已验证</span></li>
           <li>☑ "第一个/最贵的那个"对最近 working set 取值正确（§7 / A8）<span class="tag add">纯函数层已验证</span></li>
-          <li>☐ 缺字段的 draft 渲染 form-card 并建立 OUTSTANDING pendingGoal（§8.3 / B7′-2）</li>
-          <li>☐ 跨轮补字段（"明天下午"）经跟进门补进挂起卡片，不被当新命令（§8.5 / B7′-3）</li>
-          <li>☐ 跑题时 pendingGoal 置 SUSPENDED 不清除，回复尾部附回归提示（§8.5 / B7′-4）<span class="tag keep">B7′ 重设计完成·待实现（§8）</span></li>
+          <li>☑ 阶段卡片（草稿/澄清）待确认时，聊天输入（文本框+麦克风+附件）被锁定（§8.2/8.3 / §8任务1-2）<span class="tag add">已发布面实测 2026-06-13</span></li>
+          <li>☑ 点击被锁输入框 → 目标卡片脉冲高亮引导，脉冲环紧贴卡边（§8.4 / §8任务3）<span class="tag add">已发布面实测 2026-06-13</span></li>
+          <li>☑ 缺失必填字段在对应控件下方就近标红（非 toast、渲染即标出）（§8.4 / §8任务4）<span class="tag add">已发布面实测 2026-06-13</span></li>
+          <li>☑ 每种阶段卡片均有始终可用的取消/跳过（逃生出口），dismiss 后输入解锁（§8.5 / §8任务5）<span class="tag add">已发布面实测 2026-06-13</span></li>
         </ul>
 
         <h4>B. 状态正确性</h4>
@@ -797,8 +806,8 @@ lines.push(`[Latest turn]\n` + lastTurnRaw);
           <li>☑ working set 超 TTL 置 stale 但仍可用于指代（§5.2 / A5）<span class="tag add">纯函数层已验证</span></li>
           <li>☑ focus 每轮衰减，低于阈值不自动指代（§5.4 / A5）<span class="tag add">纯函数层已验证</span></li>
           <li>☑ 每实体 working set 不超过上限，超出淘汰最旧（§5.3 / A4）<span class="tag add">纯函数层已验证</span></li>
-          <li>◐ startNewConversation 后状态清空为 emptyState（§4.4 / B1）<span class="tag keep">代码已接线·待实测</span></li>
-          <li>◐ 用户连发消息时 commit 串行、无竞态（§4.3 / B3）<span class="tag keep">代码已接线·待实测</span></li>
+          <li>☑ startNewConversation 后状态清空为 emptyState（§4.4 / B1）<span class="tag add">已发布面实测（随 C1/B5）</span></li>
+          <li>☑ 用户连发消息时 commit 串行、无竞态（§4.3 / B3）<span class="tag add">已发布面实测</span></li>
         </ul>
 
         <h4>C. 集成与不回归</h4>
@@ -815,20 +824,20 @@ lines.push(`[Latest turn]\n` + lastTurnRaw);
           <li>☑ Frame Inspector 显示每轮 focus / hash 比较 / 来源决策 / pendingGoal（§13.2 / C1）<span class="tag add">已发布面实测：🧠 会话状态面板渲染 working set+决策 2026-06-12</span></li>
           <li>☑ 纯函数单测全绿（A2–A8 各自完成判据）<span class="tag add">33/33 通过 2026-06-11</span></li>
           <li>◐ §12 六轮会话级用例逐轮断言通过（C2）；纯函数层已全绿（34/34），含轮3 requery·轮5 跑题保护·轮6 槽位补全；UI/LLM 端到端待阶段 B 实测（§13.1）<span class="tag add">纯函数层 34/34</span></li>
-          <li>☐ 构建通过 + 推送 + 浏览器实测三个验证点（C3）</li>
+          <li>☑ 构建通过 + 推送 + 浏览器实测三个验证点（C3）<span class="tag add">§8 阻塞输入已发布面实测 2026-06-13</span></li>
         </ul>
 
         <h4>E. 工程纪律</h4>
         <ul>
           <li>☑ §10 常量集中在 conversation-state.ts，无散落魔法数字<span class="tag add">已核对</span></li>
           <li>☑ 阶段 A 纯函数不持有 React 引用（可脱离 UI 测试）<span class="tag add">已核对</span></li>
-          <li>☐ 每个任务独立 commit，commit message 指明任务编号</li>
+          <li>☑ 每个任务独立 commit，commit message 指明任务编号<span class="tag add">6aeac83/d0535bf/291af4e/9310fb5 等逐项提交</span></li>
           <li>☐ 多字节 rollingSummary 若进入持久化（P6）才需 base64；P5 不持久化，确认未误触持久化路径（§11 持久化地雷）</li>
         </ul>
         <div class="callout good"><strong>放行标准：</strong> A/B/C/D/E 全部勾选 = P5 达到 §14.2 DoD，可进入 P6。任一项未勾不得宣布 P5 完成。</div>
       </section>
 
-      <footer>会话状态架构 v1.4 · 实施规格 · 2026-06-12 · 延续 agent-architecture-2026-05-17 v1.0，并入 v1.1/v1.2/v1.3；v1.4 重设计 §8（B7→B7′：pendingGoal 调和为卡片跨轮指针）。</footer>
+      <footer>会话状态架构 v1.4 · 实施规格 · 2026-06-13 · 延续 agent-architecture-2026-05-17 v1.0，并入 v1.1/v1.2/v1.3；v1.4 重设计 §8（阻塞式卡片锁定输入，取代 pendingGoal 跨轮指针）。§8 五项已于 2026-06-13 在已发布应用上真机验证。</footer>
     </main>
     <script>
       const root = document.documentElement;

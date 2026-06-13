@@ -1507,6 +1507,18 @@
           align-items: flex-start;
         }
       }
+      .archive-banner {
+        margin: 1rem 0 0;
+        border: 1px solid rgba(161, 93, 17, 0.45);
+        border-left: 4px solid var(--warn);
+        border-radius: 0 18px 18px 0;
+        background: rgba(161, 93, 17, 0.10);
+        padding: 1rem 1.15rem;
+        color: var(--text);
+      }
+      .archive-banner strong { display: block; margin-bottom: 0.25rem; color: var(--warn); }
+      .archive-banner a { color: var(--accent); font-weight: 800; text-decoration: none; }
+      .archive-banner a:hover { text-decoration: underline; }
     </style>
   </head>
   <body>
@@ -1519,7 +1531,7 @@
           <div class="brand-mark">AO</div>
           <div class="brand-copy">
             <strong>Sales Copilot Mobile · Agent Orchestration</strong>
-            <span>架构设计与评审 · v2 合并 · 2026-05-17（单一来源，取代 architecture / tense-aware 两份草稿）</span>
+            <span>架构设计与评审 · v2 合并 · 2026-05-17（历史评审稿，已被 05-17 单一来源吸收）</span>
           </div>
         </div>
         <div class="topbar-actions">
@@ -1528,6 +1540,15 @@
           <button class="toggle" id="theme-toggle" type="button">切换深浅色</button>
         </div>
       </header>
+
+      <div class="archive-banner">
+        <strong>历史评审稿 · 已归档</strong>
+        本文档记录 2026-05-16/17 的 agent orchestration 评审与方案选择。其结论已被
+        <a href="../agent-architecture-2026-05-17.html">Agent Architecture（单一来源）</a>
+        吸收；新的多轮会话状态设计见
+        <a href="../conversation-state-architecture-2026-06-09.html">Conversation State Architecture v1.1</a>。
+        本文保留作历史背景，不再作为当前架构权威来源。
+      </div>
 
       <section class="summary-ribbon" aria-label="Executive Summary">
         <article class="summary-tile priority">

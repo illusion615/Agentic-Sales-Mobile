@@ -42,7 +42,7 @@ const toastMessages = {
     
     // Info messages
     processing: '正在处理...',
-    reportSaved: '完整报告已保存到 code/reviews/',
+    reportSaved: '完整报告已保存到 docs/06-reviews/',
     featureComingSoon: '功能即将上线',
     
     // Warning messages
@@ -80,7 +80,7 @@ const toastMessages = {
     
     // Info messages
     processing: 'Processing...',
-    reportSaved: 'Full report saved to code/reviews/',
+    reportSaved: 'Full report saved to docs/06-reviews/',
     featureComingSoon: 'Coming soon',
     
     // Warning messages

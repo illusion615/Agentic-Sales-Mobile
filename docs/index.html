@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sales Copilot Mobile · 文档库</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6efe4; --bg2: #fffaf2;
+        --surface: rgba(255, 250, 244, 0.82);
+        --surface-strong: rgba(255, 255, 255, 0.94);
+        --text: #211b16; --muted: #6c5e51;
+        --line: rgba(73, 48, 25, 0.14);
+        --accent: #bb5a2b; --accent2: #d47a32;
+        --shadow: 0 24px 70px rgba(86, 52, 24, 0.13);
+      }
+      html.dark {
+        color-scheme: dark;
+        --bg: #151313; --bg2: #221c18;
+        --surface: rgba(35, 29, 25, 0.78);
+        --surface-strong: rgba(28, 24, 21, 0.94);
+        --text: #f5eee8; --muted: #c5b7aa;
+        --line: rgba(255, 233, 209, 0.13);
+        --accent: #ff9a53; --accent2: #ffbf75;
+        --shadow: 0 26px 80px rgba(0, 0, 0, 0.35);
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; color: var(--text); line-height: 1.65;
+        font-family: "Avenir Next", "PingFang SC", "Hiragino Sans GB", sans-serif;
+        background:
+          radial-gradient(circle at 8% 6%, rgba(255, 169, 93, 0.30), transparent 26%),
+          radial-gradient(circle at 92% 16%, rgba(255, 207, 112, 0.20), transparent 24%),
+          linear-gradient(180deg, var(--bg), var(--bg2));
+        min-height: 100vh;
+      }
+      .topbar { position: sticky; top: 0; z-index: 10; backdrop-filter: blur(18px); border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 88%, transparent); }
+      .topbar-inner { width: min(1180px, calc(100% - 2rem)); margin: 0 auto; height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+      .brand { font-weight: 850; letter-spacing: -0.02em; }
+      .brand small { display: block; color: var(--muted); font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; }
+      .toolbar { display: flex; gap: 0.55rem; align-items: center; }
+      .toggle, .search { border: 1px solid var(--line); background: var(--surface-strong); color: var(--text); border-radius: 999px; height: 38px; font-weight: 750; }
+      .toggle { width: 42px; cursor: pointer; }
+      .search { padding: 0 0.95rem; min-width: 220px; font-size: 0.88rem; }
+      main { width: min(1180px, calc(100% - 2rem)); margin: 0 auto; padding: 3rem 0 4rem; }
+      .hero { border: 1px solid var(--line); background: var(--surface); border-radius: 24px; box-shadow: var(--shadow); padding: 1.7rem; }
+      .eyebrow { color: var(--accent); font-size: 0.78rem; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 850; }
+      h1 { margin: 0.6rem 0 0.7rem; font-size: clamp(2.2rem, 5vw, 4.2rem); line-height: 1; letter-spacing: -0.05em; }
+      p { margin: 0 0 0.8rem; color: var(--muted); }
+      a { color: var(--accent); text-decoration: none; font-weight: 750; }
+      a:hover { text-decoration: underline; }
+      .cat { margin-top: 1.6rem; }
+      .cat-head { display: flex; align-items: baseline; gap: 0.7rem; margin: 0 0 0.4rem; }
+      .cat-head .num { font-family: "SF Mono", ui-monospace, monospace; color: var(--accent); font-weight: 850; }
+      .cat-head h2 { margin: 0; font-size: 1.3rem; letter-spacing: -0.02em; }
+      .cat-head .desc { color: var(--muted); font-size: 0.86rem; }
+      .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.9rem; margin-top: 0.7rem; }
+      .doc { display: block; border: 1px solid var(--line); background: var(--surface); border-radius: 18px; padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+      .doc:hover { text-decoration: none; border-color: var(--accent); }
+      .doc .t { font-weight: 800; color: var(--text); margin-bottom: 0.25rem; }
+      .doc .d { color: var(--muted); font-size: 0.82rem; }
+      .doc .meta { margin-top: 0.55rem; display: flex; gap: 0.35rem; flex-wrap: wrap; }
+      .chip { font-size: 0.68rem; border: 1px solid var(--line); border-radius: 999px; padding: 0.12rem 0.5rem; color: var(--muted); background: var(--surface-strong); }
+      .chip.html { border-color: var(--accent); color: var(--accent); }
+      .chip.current { border-color: #2f7d51; color: #2f7d51; }
+      .chip.archive { border-color: #9a5b10; color: #9a5b10; }
+      .empty { display: none; color: var(--muted); padding: 1rem; }
+      footer { margin-top: 3rem; border-top: 1px solid var(--line); padding-top: 1rem; color: var(--muted); font-size: 0.85rem; }
+      @media (max-width: 920px) { .grid { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand"><small>Documentation Library</small>Sales Copilot Mobile</div>
+        <div class="toolbar">
+          <input class="search" id="search" type="search" placeholder="搜索文档…" />
+          <button class="toggle" id="theme-toggle">◐</button>
+        </div>
+      </div>
+    </header>
+    <main>
+      <section class="hero">
+        <div class="eyebrow">Docs Index · 2026-06-09</div>
+        <h1>文档库</h1>
+        <p>本页是 Sales Copilot Mobile 的文档总入口。文档按类型分为 7 个类别：产品概览、架构、数据模型、功能子系统、工程、评审、运维。在上方搜索框可按标题/描述过滤。</p>
+        <p>仓库说明见根目录 <a href="../README.md">README.md</a>。</p>
+      </section>
+
+      <div id="catalog">
+        <section class="cat" data-cat>
+          <div class="cat-head"><span class="num">01</span><h2>产品概览</h2><span class="desc">Overview</span></div>
+          <div class="grid">
+            <a class="doc" href="01-overview/product-overview.md" data-doc><div class="t">Product Overview</div><div class="d">产品定位、目标用户、核心能力。</div><div class="meta"><span class="chip">md</span></div></a>
+          </div>
+        </section>
+
+        <section class="cat" data-cat>
+          <div class="cat-head"><span class="num">02</span><h2>架构</h2><span class="desc">Architecture · 设计与演进</span></div>
+          <div class="grid">
+            <a class="doc" href="02-architecture/architecture-history.html" data-doc><div class="t">架构演进摘要</div><div class="d">架构文档的历史关系与阅读顺序入口。</div><div class="meta"><span class="chip html">html</span><span class="chip current">index</span></div></a>
+            <a class="doc" href="02-architecture/agent-architecture-2026-05-17.html" data-doc><div class="t">Agent Architecture v1.0</div><div class="d">智能体架构单一来源：Frame · Plan · Execute。</div><div class="meta"><span class="chip html">html</span><span class="chip current">current</span></div></a>
+            <a class="doc" href="02-architecture/conversation-state-architecture-2026-06-09.html" data-doc><div class="t">Conversation State v1.1</div><div class="d">多轮会话状态层：focus / working set / pending goal。</div><div class="meta"><span class="chip html">html</span><span class="chip current">current</span></div></a>
+            <a class="doc" href="02-architecture/history/agent-orchestration-2026-05-16.html" data-doc><div class="t">Agent Orchestration（历史评审稿）</div><div class="d">已被 v1.0 吸收，保留作历史背景。</div><div class="meta"><span class="chip html">html</span><span class="chip archive">archived</span></div></a>
+          </div>
+        </section>
+
+        <section class="cat" data-cat>
+          <div class="cat-head"><span class="num">03</span><h2>数据模型</h2><span class="desc">Data Model</span></div>
+          <div class="grid">
+            <a class="doc" href="03-data-model/full-data-model.json" data-doc><div class="t">Full Data Model</div><div class="d">完整 Dataverse 数据模型（JSON）。</div><div class="meta"><span class="chip">json</span></div></a>
+            <a class="doc" href="03-data-model/existing-tables-discovery.md" data-doc><div class="t">Existing Tables Discovery</div><div class="d">已有表盘点：Account / Opportunity / Activity / AgentLog。</div><div class="meta"><span class="chip">md</span></div></a>
+            <a class="doc" href="03-data-model/sample-data-specification.md" data-doc><div class="t">Sample Data Specification</div><div class="d">跨表一致的样例数据规范。</div><div class="meta"><span class="chip">md</span></div></a>
+          </div>
+        </section>
+
+        <section class="cat" data-cat>
+          <div class="cat-head"><span class="num">04</span><h2>功能子系统</h2><span class="desc">Features</span></div>
+          <div class="grid">
+            <a class="doc" href="04-features/data-access-and-security.md" data-doc><div class="t">数据访问与多用户安全</div><div class="d">服务适配层、所有权落章、平台安全裁剪模型。</div><div class="meta"><span class="chip">md</span><span class="chip current">reverse-gen</span></div></a>
+            <a class="doc" href="04-features/insights-and-briefing.md" data-doc><div class="t">业务洞察与简报</div><div class="d">Insight 生成、铃铛未读、Brief 语音播报与跟随翻页。</div><div class="meta"><span class="chip">md</span><span class="chip current">reverse-gen</span></div></a>
+            <a class="doc" href="04-features/settings-and-personalization.md" data-doc><div class="t">设置与个性化</div><div class="d">设置存储双层结构、Copilot 列表/面板偏好。</div><div class="meta"><span class="chip">md</span><span class="chip current">reverse-gen</span></div></a>
+            <a class="doc" href="04-features/tense-aware-activity-2026-05-17.html" data-doc><div class="t">时态感知活动（专题）</div><div class="d">活动时态识别设计，已被 Frame 体系吸收。</div><div class="meta"><span class="chip html">html</span><span class="chip archive">superseded</span></div></a>
+          </div>
+        </section>
+
+        <section class="cat" data-cat>
+          <div class="cat-head"><span class="num">05</span><h2>工程</h2><span class="desc">Engineering</span></div>
+          <div class="grid">
+            <a class="doc" href="05-engineering/ai-builder-structured-output-schemas.md" data-doc><div class="t">AI Builder 结构化输出 Schema</div><div class="d">门户 prompt 输出与客户端 Zod 校验对齐约定。</div><div class="meta"><span class="chip">md</span></div></a>
+            <a class="doc" href="05-engineering/code-app-migration-2026-05-20.html" data-doc><div class="t">Code App Migration</div><div class="d">Power Apps Code App 迁移记录。</div><div class="meta"><span class="chip html">html</span></div></a>
+          </div>
+        </section>
+
+        <section class="cat" data-cat>
+          <div class="cat-head"><span class="num">06</span><h2>评审</h2><span class="desc">Reviews &amp; Audits</span></div>
+          <div class="grid">
+            <a class="doc" href="06-reviews/architecture-review-2026-05-30.html" data-doc><div class="t">Architecture Review 2026-05-30</div><div class="d">系统健壮性审查：契约 / 错误模型 / 巨型文件。</div><div class="meta"><span class="chip html">html</span></div></a>
+            <a class="doc" href="06-reviews/code-review-2026-05-16.html" data-doc><div class="t">Code Review 2026-05-16</div><div class="d">代码质量审查报告。</div><div class="meta"><span class="chip html">html</span></div></a>
+            <a class="doc" href="06-reviews/code-review-2026-05-11.md" data-doc><div class="t">Code Review 2026-05-11</div><div class="d">早期架构与代码审查（健康分 72/100）。</div><div class="meta"><span class="chip">md</span></div></a>
+          </div>
+        </section>
+
+        <section class="cat" data-cat>
+          <div class="cat-head"><span class="num">07</span><h2>运维</h2><span class="desc">Operations &amp; Known Issues</span></div>
+          <div class="grid">
+            <a class="doc" href="07-operations/pac-cli-deletes-logicflows.md" data-doc><div class="t">PAC CLI 删除 logicflows 连接器</div><div class="d">已知问题：add-data-source 会移除 flow 连接器条目。</div><div class="meta"><span class="chip">md</span></div></a>
+          </div>
+        </section>
+      </div>
+      <p class="empty" id="empty">没有匹配的文档。</p>
+      <footer>Last updated: 2026-06-09 · docs/ 是唯一文档根。新文档按类型放入对应 NN-* 目录。</footer>
+    </main>
+    <script>
+      const root = document.documentElement;
+      if (localStorage.getItem('asm-docs-theme') === 'dark') root.classList.add('dark');
+      document.getElementById('theme-toggle').addEventListener('click', () => {
+        root.classList.toggle('dark');
+        localStorage.setItem('asm-docs-theme', root.classList.contains('dark') ? 'dark' : 'light');
+      });
+      const search = document.getElementById('search');
+      const empty = document.getElementById('empty');
+      search.addEventListener('input', () => {
+        const q = search.value.trim().toLowerCase();
+        let anyVisible = false;
+        document.querySelectorAll('[data-cat]').forEach((cat) => {
+          let catVisible = false;
+          cat.querySelectorAll('[data-doc]').forEach((doc) => {
+            const match = doc.textContent.toLowerCase().includes(q) || doc.getAttribute('href').toLowerCase().includes(q);
+            doc.style.display = match ? '' : 'none';
+            if (match) { catVisible = true; anyVisible = true; }
+          });
+          cat.style.display = catVisible ? '' : 'none';
+        });
+        empty.style.display = anyVisible ? 'none' : 'block';
+      });
+    </script>
+  </body>
+</html>

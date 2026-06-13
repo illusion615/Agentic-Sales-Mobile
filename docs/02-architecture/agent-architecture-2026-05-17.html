@@ -269,6 +269,7 @@
           <div class="hero-chip-grid">
             <div class="hero-chip"><small>Replaces</small><strong data-zh="2 docs → 1" data-en="2 docs → 1">2 docs → 1</strong><span data-zh="架构 + 时态特性 合一" data-en="Architecture + tense feature, merged">架构 + 时态特性 合一</span></div>
             <div class="hero-chip"><small>Decision</small><strong data-zh="已批准方案" data-en="Approved redesign">已批准方案</strong><span data-zh="3 段式 LLM 推理 + 流式可见思考" data-en="3-stage LLM reasoning + visible thinking">3 段式 LLM 推理 + 流式可见思考</span></div>
+            <div class="hero-chip"><small>Next Evolution</small><strong data-zh="v1.1 多轮会话" data-en="v1.1 Multi-turn">v1.1 多轮会话</strong><span><a href="conversation-state-architecture-2026-06-09.html" data-zh="Conversation State 设计" data-en="Conversation State design">Conversation State 设计</a></span></div>
           </div>
         </aside>
       </section>
@@ -508,6 +509,11 @@
                   <li data-zh="不确定时走结构化澄清，永不文本输入" data-en="When uncertain, fall back to structured chip clarification — never free-text">不确定时走结构化澄清，永不文本输入</li>
                 </ul>
               </article>
+            </div>
+
+            <div class="callout warn">
+              <small data-zh="实现修订 · 2026-06-13" data-en="Implementation revision · 2026-06-13">实现修订 · 2026-06-13</small>
+              <p style="margin:.2rem 0 0" data-zh="同一类「认知任务轴歧义」在 Frame 落地后复现：用户汇报「这个 RFP 进入内部评审了」被判为 <span class='inline-code'>Opportunity + Log</span>，而 <span class='inline-code'>Log + Opportunity</span> 映射到 <span class='inline-code'>draftOpportunity</span>（新建商机），于是凭一句状态更新错误地新建了一个商机。根因：Frame prompt 未区分「识别一个全新商机」与「汇报已有商机的状态/阶段」。修复：在 <span class='inline-code'>frame.ts</span> 的 cognitiveTask 定义里明确——汇报已有商机的状态/阶段/进展（进入评审、推进谈判、签单、丢单）属 <span class='inline-code'>Update</span>（映射 <span class='inline-code'>updateOpportunity</span>），仅首次引入全新商机才用 <span class='inline-code'>Log</span>；并补两条 Update 正例锚定。已随 §8 批次构建推送、真机验证。" data-en="The same “cognitive-task axis ambiguity” recurred after Frame shipped: the user reporting “this RFP moved to internal review” was classified as <span class='inline-code'>Opportunity + Log</span>, and <span class='inline-code'>Log + Opportunity</span> maps to <span class='inline-code'>draftOpportunity</span> (create new) — so a mere status update wrongly created a brand-new opportunity. Root cause: the Frame prompt didn't separate “identify a brand-new opportunity” from “report the status/stage of an existing one”. Fix: in <span class='inline-code'>frame.ts</span> the cognitiveTask definition now states that reporting the status/stage/progress of an existing opportunity (entered review, advanced to negotiation, signed, lost) is <span class='inline-code'>Update</span> (→ <span class='inline-code'>updateOpportunity</span>); <span class='inline-code'>Log</span> is reserved for first-time introduction of a new opportunity — plus two anchoring Update examples. Built, pushed, and verified live with the §8 batch.">同一类「认知任务轴歧义」在 Frame 落地后复现：用户汇报「这个 RFP 进入内部评审了」被判为 <span class="inline-code">Opportunity + Log</span>，而 <span class="inline-code">Log + Opportunity</span> 映射到 <span class="inline-code">draftOpportunity</span>（新建商机），于是凭一句状态更新错误地新建了一个商机。根因：Frame prompt 未区分「识别一个全新商机」与「汇报已有商机的状态/阶段」。修复：在 <span class="inline-code">frame.ts</span> 的 cognitiveTask 定义里明确——汇报已有商机的状态/阶段/进展（进入评审、推进谈判、签单、丢单）属 <span class="inline-code">Update</span>（映射 <span class="inline-code">updateOpportunity</span>），仅首次引入全新商机才用 <span class="inline-code">Log</span>；并补两条 Update 正例锚定。已随 §8 批次构建推送、真机验证。</p>
             </div>
           </section>
 
