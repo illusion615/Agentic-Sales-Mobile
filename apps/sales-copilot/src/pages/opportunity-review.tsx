@@ -5,7 +5,7 @@ import { ArrowLeft, MoreHorizontal, AlertTriangle, TrendingUp, TrendingDown, Min
 import { cn } from '@/lib/utils';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useUser } from '@/hooks/use-user';
-import { getLocale, getAdminMode, type Locale } from '@/lib/i18n';
+import { getLocale, type Locale } from '@/lib/i18n';
 import { useFirstMount } from '@/hooks/use-first-mount';
 import type { Opportunity } from '@/generated/models/opportunity-model';
 
@@ -91,14 +91,13 @@ export default function OpportunityReviewPage() {
   const { data: opportunities = [] } = useOpportunityList();
   const { data: user } = useUser();
 
-  const userId = user?.objectId?.toLowerCase();
-  const isAdmin = getAdminMode();
-
+  // Reads are already security-trimmed by Dataverse to the opportunities this
+  // user can access — no client-side owner filter.
   const activeOpps = useMemo(() =>
     opportunities
-      .filter((o: Opportunity) => (isAdmin || o.ownerid === userId) && !isClosedStage(o.stage))
+      .filter((o: Opportunity) => !isClosedStage(o.stage))
       .sort(sortByUrgency),
-    [opportunities, userId]
+    [opportunities]
   );
 
   const actionRequired = useMemo(() => activeOpps.filter(needsAction), [activeOpps]);
