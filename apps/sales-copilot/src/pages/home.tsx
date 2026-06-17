@@ -38,7 +38,13 @@ import {
   writeCopilotConversationLogId,
 } from '@/lib/copilot-conversation-log';
 
-
+// Stable empty-array references for react-query list defaults. Using an inline
+// `= []` default creates a NEW array on every render while `data` is undefined
+// (during load/refetch), which would change the identity of `kpiData`/`kpiSummary`
+// every render and drive the page-context effect into an infinite re-render loop.
+const EMPTY_ACTIVITIES: Activity[] = [];
+const EMPTY_OPPORTUNITIES: Opportunity[] = [];
+const EMPTY_ACCOUNTS: Account[] = [];
 
 // Use ChatMessage from context for unified type across all pages
 
@@ -411,9 +417,9 @@ export default function HomeDashboard() {
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(() => readCopilotConversationLogId());
 
   // Data queries — each loads independently, page renders immediately with loading states
-  const { data: activities = [], refetch: refetchActivities, isLoading: isLoadingActivities } = useActivityList();
-  const { data: opportunities = [], refetch: refetchOpportunities, isLoading: isLoadingOpportunities } = useOpportunityList();
-  const { data: accounts = [], refetch: refetchAccounts, isLoading: isLoadingAccounts } = useAccountList();
+  const { data: activities = EMPTY_ACTIVITIES, refetch: refetchActivities, isLoading: isLoadingActivities } = useActivityList();
+  const { data: opportunities = EMPTY_OPPORTUNITIES, refetch: refetchOpportunities, isLoading: isLoadingOpportunities } = useOpportunityList();
+  const { data: accounts = EMPTY_ACCOUNTS, refetch: refetchAccounts, isLoading: isLoadingAccounts } = useAccountList();
   const isDataLoading = isLoadingActivities || isLoadingOpportunities || isLoadingAccounts;
 
   // Prefetch all detail page chunks once home data starts loading — the user
