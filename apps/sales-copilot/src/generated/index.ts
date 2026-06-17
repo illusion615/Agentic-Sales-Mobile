@@ -44,8 +44,6 @@ export * as index from './models/index';
 export * as opportunityModel from './models/opportunity-model';
 export * as productModel from './models/product-model';
 export * as settingModel from './models/setting-model';
-export * as signalModel from './models/signal-model';
-export * as taskModel from './models/task-model';
 
 // Services
 export * from './services/AccountEntityService';
@@ -87,5 +85,3 @@ export * from './services/index';
 export * from './services/opportunity-service';
 export * from './services/product-service';
 export * from './services/setting-service';
-export * from './services/signal-service';
-export * from './services/task-service';

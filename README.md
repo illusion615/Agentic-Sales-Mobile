@@ -25,7 +25,6 @@ copilot-studio/          # Copilot Studio 智能体设计（instructions / skill
 docs/                    # 文档库（见 docs/index.html）
   01-overview/           # 产品概览
   02-architecture/       # 系统与智能体架构（设计 + 演进）
-  03-data-model/         # 数据模型与 Dataverse 表
   04-features/           # 功能子系统设计
   05-engineering/        # 工程约定、集成契约、迁移
   06-reviews/            # 代码与架构评审
@@ -47,10 +46,47 @@ npx -y @microsoft/power-apps-cli@0.11.6 push   # 推送 dist 到 Power Apps
 
 ## 文档入口
 
-- 文档库总入口：[`docs/index.html`](docs/index.html)
-- 架构演进摘要：[`docs/02-architecture/architecture-history.html`](docs/02-architecture/architecture-history.html)
-- 智能体架构（单一来源）：[`docs/02-architecture/agent-architecture-2026-05-17.html`](docs/02-architecture/agent-architecture-2026-05-17.html)
+文档库总入口：[`docs/index.html`](docs/index.html)（在浏览器中打开可分类浏览全部文档）。
+
+### 01 · 产品概览
+- 产品概览：[`docs/01-overview/product-overview.md`](docs/01-overview/product-overview.md)
+
+### 02 · 架构
+- 智能体架构（**单一来源**）：[`docs/02-architecture/agent-architecture-2026-05-17.html`](docs/02-architecture/agent-architecture-2026-05-17.html)
 - 多轮会话状态设计（v1.1）：[`docs/02-architecture/conversation-state-architecture-2026-06-09.html`](docs/02-architecture/conversation-state-architecture-2026-06-09.html)
+- 架构演进摘要：[`docs/02-architecture/architecture-history.html`](docs/02-architecture/architecture-history.html)
+- 编排历史评审稿（archived）：[`docs/02-architecture/history/agent-orchestration-2026-05-16.html`](docs/02-architecture/history/agent-orchestration-2026-05-16.html)
+
+### 03 · 数据模型（单一来源）
+> 数据模型不再保留独立快照文档。权威来源有两个，二者须保持一致：
+> - 机器可读 / 运行时真相：[`apps/sales-copilot/power.config.json`](apps/sales-copilot/power.config.json)（18 个 Dataverse 数据源）
+> - 人读说明（客户视角）：Study-Room「Agentic Sales Mobile 数据模型」文章
+
+### 04 · 功能子系统
+- 数据访问与安全：[`docs/04-features/data-access-and-security.md`](docs/04-features/data-access-and-security.md)
+- 洞察与简报：[`docs/04-features/insights-and-briefing.md`](docs/04-features/insights-and-briefing.md)
+- 设置与个性化：[`docs/04-features/settings-and-personalization.md`](docs/04-features/settings-and-personalization.md)
+- 时态感知活动记录：[`docs/04-features/tense-aware-activity-2026-05-17.html`](docs/04-features/tense-aware-activity-2026-05-17.html)
+
+### 05 · 工程
+- AI Builder 结构化输出 Schema：[`docs/05-engineering/ai-builder-structured-output-schemas.md`](docs/05-engineering/ai-builder-structured-output-schemas.md)
+- Code App 迁移记录：[`docs/05-engineering/code-app-migration-2026-05-20.html`](docs/05-engineering/code-app-migration-2026-05-20.html)
+- 构建 / 推送纪律与依赖陷阱：[`.github/copilot-instructions.md`](.github/copilot-instructions.md)
+
+### 06 · 评审
+- 架构评审（2026-05-30）：[`docs/06-reviews/architecture-review-2026-05-30.html`](docs/06-reviews/architecture-review-2026-05-30.html)
+- 代码评审（2026-05-16）：[`docs/06-reviews/code-review-2026-05-16.html`](docs/06-reviews/code-review-2026-05-16.html)
+- 代码评审（2026-05-11）：[`docs/06-reviews/code-review-2026-05-11.md`](docs/06-reviews/code-review-2026-05-11.md)
+- 评审方法与门槛标准：[`.github/instructions/code-review.instructions.md`](.github/instructions/code-review.instructions.md)
+
+### 07 · 运维
+- PAC CLI 误删 Logic Flow 问题：[`docs/07-operations/pac-cli-deletes-logicflows.md`](docs/07-operations/pac-cli-deletes-logicflows.md)
+
+### Copilot Studio 后端智能体
+- 智能体说明：[`copilot-studio/instructions.md`](copilot-studio/instructions.md)
+- 技能定义：[`copilot-studio/skills/`](copilot-studio/skills/)（记录活动 / 客户联系人 / 商机 / 规划推荐 / 查询报表）
+- 测试脚本：[`copilot-studio/test-script.md`](copilot-studio/test-script.md)
+
 
 ## 文档维护规则
 

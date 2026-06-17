@@ -29,10 +29,12 @@ const queryCopilotStudio: FunctionHandler = async (args, ctx) => {
 
   try {
     const csConfig = getCopilotConfig();
-    console.log('[CS] Calling MicrosoftCopilotStudioService.ExecuteCopilotAsyncV2...');
+    const priorConversationId = csConfig?.conversationId;
+    console.log('[CS] Calling MicrosoftCopilotStudioService.ExecuteCopilotAsyncV2... priorConversationId:', priorConversationId);
     const result = await MicrosoftCopilotStudioService.ExecuteCopilotAsyncV2(
       csConfig?.agentName || COPILOT_STUDIO_AGENT_NAME,
       { message: enrichedQuery, notificationUrl: 'https://notificationurlplaceholder' },
+      priorConversationId,
     );
 
     if (!result.success) {
@@ -40,9 +42,10 @@ const queryCopilotStudio: FunctionHandler = async (args, ctx) => {
       return { success: false, error: result.error?.message ?? 'Copilot Studio 调用失败' };
     }
 
-    const responseData = result.data as unknown as { lastResponse?: string; responses?: string[]; conversationId?: string } | undefined;
+    const responseData = result.data as unknown as { lastResponse?: string; responses?: string[]; conversationId?: string; ConversationId?: string } | undefined;
     const answer = responseData?.lastResponse || responseData?.responses?.join('\n\n') || '';
-    const conversationId = responseData?.conversationId;
+    // 平台返回的会话 ID 属性大小写不一致（conversationId / ConversationId），两者都读以保证多轮续接生效
+    const conversationId = responseData?.conversationId || responseData?.ConversationId;
     console.log('[CS] FINAL answer length:', answer.length, 'conversationId:', conversationId);
 
     if (conversationId && csConfig) saveCopilotConfig({ ...csConfig, conversationId });
