@@ -62,7 +62,11 @@ export class ContactService {
     requireId(id, 'update', 'Contact');
     const result = await ContactEntityService.update(id, toDv(changedFields) as any);
     if (!result.success) throw result.error;
-    return fromDv(result.data!);
+    // Desktop SDK returns the updated record body; the mobile native player
+    // returns success with NO body (like HTTP 204). Re-read so we never call
+    // fromDv(undefined) — which would throw even though the write succeeded.
+    if (result.data) return fromDv(result.data);
+    return ContactService.get(id);
   }
 
   static async delete(id: string): Promise<void> {

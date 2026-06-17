@@ -161,13 +161,60 @@ export class ActivityService {
   static async update(id: string, changedFields: Partial<Omit<Activity, 'id'>>, type?: ActivityType): Promise<Activity> {
     requireId(id, 'update', 'Activity');
 
+    // When probing tables blindly (no type), a write to the WRONG table fails
+    // with a not-found error that we must swallow and keep trying. But a write
+    // to the RIGHT table that fails for a real reason (e.g. an invalid statecode/
+    // statuscode transition, a permission error) must NOT be masked behind the
+    // generic "Activity update failed" — capture it and rethrow so it surfaces.
+    const isNotFound = (e: unknown): boolean => {
+      const msg = (e instanceof Error ? e.message : String(e ?? '')).toLowerCase();
+      return msg.includes('not found') || msg.includes('resourcenotfound') ||
+        msg.includes('does not exist') || msg.includes('404');
+    };
+    let lastRealError: unknown = null;
+
+    // Synthesize a result Activity from the write input. The desktop SDK returns
+    // the updated record body, but the mobile native player's updateRecordAsync
+    // returns success with NO representation body (like HTTP 204). In that case
+    // the write DID succeed — we must not treat an empty body as failure, or the
+    // probe falls through and throws "Activity update failed" even though the row
+    // was updated. Build a best-effort object from id + changedFields so callers
+    // (which mostly invalidate queries and refetch) get a non-null success value.
+    const synthFromInput = (t: ActivityType): Activity => ({
+      id,
+      title: changedFields.title ?? '',
+      type: t,
+      account: changedFields.account,
+      opportunity: changedFields.opportunity,
+      contact: changedFields.contact,
+      contacts: changedFields.contacts,
+      notes: changedFields.notes,
+      scheduleddate: changedFields.scheduleddate ?? '',
+      status: changedFields.status ?? 'open',
+      ownerid: changedFields.ownerid ?? '',
+      createdon: undefined,
+    });
+
     const tryOne = async (svc: ServiceClass, t: ActivityType): Promise<Activity | null> => {
       try {
         const dvPayload = toDv(changedFields, t);
         const result = await svc.update(id, dvPayload);
-        if (!result.success || !result.data) return null;
-        return fromDv(result.data as ActivityEntityBase, t);
-      } catch {
+        if (!result.success) {
+          // A wrong-table write fails as not-found — swallow and keep probing.
+          // A real failure on the right table is captured and rethrown later.
+          if (result.error && !isNotFound(result.error)) lastRealError = result.error;
+          return null;
+        }
+        // Success. The right table is the only one that returns success (wrong
+        // tables 404). Use the returned body when present (desktop); otherwise
+        // synthesize from input (mobile native player returns no body).
+        const data = result.data as ActivityEntityBase | undefined;
+        if (data && (data as unknown as { activityid?: string }).activityid) {
+          return fromDv(data, t);
+        }
+        return synthFromInput(t);
+      } catch (e) {
+        if (!isNotFound(e)) lastRealError = e;
         return null;
       }
     };
@@ -179,6 +226,7 @@ export class ActivityService {
         if (changedFields.contacts) updated.contacts = changedFields.contacts;
         return updated;
       }
+      if (lastRealError) throw lastRealError instanceof Error ? lastRealError : new Error(String(lastRealError));
       throw new Error('Activity update failed');
     }
 
@@ -194,6 +242,7 @@ export class ActivityService {
         return updated;
       }
     }
+    if (lastRealError) throw lastRealError instanceof Error ? lastRealError : new Error(String(lastRealError));
     throw new Error('Activity update failed');
   }
 
