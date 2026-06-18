@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { ArrowLeft, Moon, Sun, Globe, HelpCircle, LogOut, Volume2, Play, Type, Palette, CircleDot, LayoutGrid, Speech, X, Zap, MessageSquare, LayoutDashboard, Database, Bug, FileCode, ChevronRight, Monitor, Calendar, Maximize } from 'lucide-react';
+import { ArrowLeft, Moon, Sun, Globe, HelpCircle, LogOut, Volume2, Play, Type, Palette, CircleDot, LayoutGrid, Speech, X, Zap, MessageSquare, LayoutDashboard, Database, Bug, FileCode, ChevronRight, Monitor, Calendar, Maximize, Bot } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
 import { ThinkingIndicator } from '@/components/thinking-indicator';
@@ -8,7 +8,9 @@ import { Button } from '@/components/ui/button';
 
 import { useUser } from '@/hooks/use-user';
 import { useAppSettings } from '@/hooks/use-app-settings';
-import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, setSelectedVoice, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, getCopilotDockLayout, setCopilotDockLayout, copilotDockLayoutLabels, getWeekStartDay, setWeekStartDay, getCopilotFullscreenDefault, setCopilotFullscreenDefault, getAgendaDefaultExpanded, setAgendaDefaultExpanded, getCopilotListDefaultView, setCopilotListDefaultView, getCopilotListTopN, setCopilotListTopN, type Locale, type VoiceOption, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget, type CopilotDockLayout, type WeekStartDay, type CopilotListDefaultView } from '@/lib/i18n';
+import { useCopilotConfigured } from '@/hooks/use-copilot-configured';
+import { getCopilotConfig } from '@/services/copilot-service';
+import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, setSelectedVoice, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getDebugMode, setDebugMode, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, getCopilotDockLayout, setCopilotDockLayout, copilotDockLayoutLabels, getWeekStartDay, setWeekStartDay, getCopilotFullscreenDefault, setCopilotFullscreenDefault, getAgendaDefaultExpanded, setAgendaDefaultExpanded, getCopilotListDefaultView, setCopilotListDefaultView, getCopilotListTopN, setCopilotListTopN, type Locale, type VoiceOption, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget, type CopilotDockLayout, type WeekStartDay, type CopilotListDefaultView } from '@/lib/i18n';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
@@ -69,6 +71,14 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   
   // Load settings from database
   const { settings: appSettings, isLoading: isLoadingSettings, isFetched: isSettingsFetched } = useAppSettings();
+  // Copilot connection status (reactive): the agent the app will actually call,
+  // and whether configuration has resolved. The agent name comes ONLY from the
+  // Setting table (authoritative) → cache. There is no hardcoded fallback: when
+  // it's missing the UI must tell the user to contact an administrator.
+  const isCopilotConfigured = useCopilotConfigured();
+  const resolvedAgentName = appSettings.copilotStudioAgentName || getCopilotConfig().agentName;
+  const agentFromSettingTable = !!appSettings.copilotStudioAgentName;
+  const hasAgent = !!resolvedAgentName;
   const [locale, setLocaleState] = useState<Locale>(getLocale);
   const [isDark, setIsDark] = useState(true);
   const [selectedVoice, setSelectedVoiceState] = useState(getSelectedVoice);
@@ -87,6 +97,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const [copilotInAllScreens, setCopilotInAllScreensState] = useState(() => getCopilotInAllScreens());
   const [copilotDockLayout, setCopilotDockLayoutState] = useState<CopilotDockLayout>(() => getCopilotDockLayout());
   const [simulateStreaming, setSimulateStreamingState] = useState(() => getSimulateStreaming());
+  const [debugMode, setDebugModeState] = useState(() => getDebugMode());
   const [copilotFullscreenDefault, setCopilotFullscreenDefaultState] = useState(() => getCopilotFullscreenDefault());
   const [agendaDefaultExpanded, setAgendaDefaultExpandedState] = useState(() => getAgendaDefaultExpanded());
   const [copilotListDefaultView, setCopilotListDefaultViewState] = useState<CopilotListDefaultView>(() => getCopilotListDefaultView());
@@ -209,6 +220,11 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const handleSimulateStreamingChange = (enabled: boolean) => {
     setSimulateStreamingState(enabled);
     setSimulateStreaming(enabled);
+  };
+
+  const handleDebugModeChange = (enabled: boolean) => {
+    setDebugModeState(enabled);
+    setDebugMode(enabled);
   };
 
   const handleCopilotFullscreenDefaultChange = (enabled: boolean) => {
@@ -863,6 +879,82 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                 </div>
                 <ChevronRight className="w-5 h-5 text-muted-foreground" />
               </button>
+              {/* Debug mode toggle — gates developer-only UI like the Frame log icon */}
+              <div className="border-t border-border/30 pt-2">
+                <SettingsItem
+                  icon={Bug}
+                  label={locale === 'zh-Hans' ? '调试模式' : 'Debug Mode'}
+                  rightElement={
+                    <Switch
+                      checked={debugMode}
+                      onCheckedChange={handleDebugModeChange}
+                      className="data-[state=checked]:bg-primary"
+                    />
+                  }
+                />
+                <p className="text-xs text-muted-foreground px-2 -mt-1">
+                  {locale === 'zh-Hans'
+                    ? '开启后在 Copilot 面板显示 Frame 思考记录图标'
+                    : 'Shows the Frame reasoning-log icon on the Copilot panel when enabled'}
+                </p>
+              </div>
+              {/* Copilot connection status (moved here from a standalone section) */}
+              <div className="border-t border-border/30 pt-2">
+                <SettingsItem
+                  icon={Bot}
+                  label={locale === 'zh-Hans' ? 'Copilot 连接状态' : 'Copilot Connection'}
+                  rightElement={
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          'w-2.5 h-2.5 rounded-full',
+                          !isSettingsFetched
+                            ? 'bg-muted-foreground/40'
+                            : (isCopilotConfigured && hasAgent)
+                              ? 'bg-green-500'
+                              : 'bg-amber-500'
+                        )}
+                      />
+                      <span className="text-sm text-muted-foreground">
+                        {!isSettingsFetched
+                          ? (locale === 'zh-Hans' ? '检查中…' : 'Checking…')
+                          : (isCopilotConfigured && hasAgent)
+                            ? (locale === 'zh-Hans' ? '已连接' : 'Connected')
+                            : (locale === 'zh-Hans' ? '未配置' : 'Not configured')}
+                      </span>
+                    </div>
+                  }
+                />
+                <SettingsItem
+                  icon={MessageSquare}
+                  label={locale === 'zh-Hans' ? '当前 Agent' : 'Current Agent'}
+                  rightElement={
+                    hasAgent ? (
+                      <div className="flex flex-col items-end max-w-[60%]">
+                        <span className="text-sm text-foreground font-mono truncate max-w-full">
+                          {resolvedAgentName}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">
+                          {agentFromSettingTable
+                            ? (locale === 'zh-Hans' ? '来自 Setting 表' : 'From Setting table')
+                            : (locale === 'zh-Hans' ? '已缓存' : 'Cached')}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-sm text-amber-600 dark:text-amber-500 text-right max-w-[65%]">
+                        {locale === 'zh-Hans' ? '未配置' : 'Not configured'}
+                      </span>
+                    )
+                  }
+                />
+                {isSettingsFetched && !hasAgent && (
+                  <p className="text-xs text-muted-foreground px-2 pt-1 leading-relaxed">
+                    {locale === 'zh-Hans'
+                      ? '尚未配置知识库 Agent。请联系管理员在 Setting 表中设置 copilot_studio_agent_name。'
+                      : 'No knowledge-base agent is configured. Please contact your administrator to set copilot_studio_agent_name in the Setting table.'}
+                  </p>
+                )}
+              </div>
               <div className="border-t border-border/30 pt-2">
                 <p className="text-xs text-muted-foreground px-2">
                   {locale === 'zh-Hans'

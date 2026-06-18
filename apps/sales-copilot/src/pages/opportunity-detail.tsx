@@ -1,9 +1,8 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import {
   Target,
-  Edit,
   Building2,
   Calendar,
   TrendingUp,
@@ -145,8 +144,6 @@ export default function OpportunityDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const firstMount = useFirstMount(`opportunity-detail:${id ?? ''}`);
-  const [searchParams] = useSearchParams();
-  const isEditMode = searchParams.get('edit') === 'true';
   const [activeTab, setActiveTab] = useState('overview');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -649,12 +646,6 @@ export default function OpportunityDetailPage() {
             icon: Plus,
             label: locale === 'zh-Hans' ? '新建活动' : 'New Activity',
             onClick: () => navigate(`/activity/${opportunity.account?.id || 'new'}`),
-          },
-          {
-            id: 'edit',
-            icon: Edit,
-            label: locale === 'zh-Hans' ? '编辑' : 'Edit',
-            onClick: () => navigate(`/opportunities/${id}/edit`),
           },
         ]}
       />

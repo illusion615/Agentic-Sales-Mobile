@@ -6,6 +6,10 @@ export interface QuickAction {
   icon: LucideIcon;
   label: string;
   onClick: () => void;
+  /** When true the action is non-interactive (dimmed, clicks ignored). */
+  disabled?: boolean;
+  /** When true the icon spins — pair with `disabled` for a busy state. */
+  busy?: boolean;
 }
 
 interface FloatingQuickActionsProps {

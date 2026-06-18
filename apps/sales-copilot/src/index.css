@@ -252,6 +252,46 @@ html.light {
       font-size: 16px !important;
     }
   }
+
+  /*
+   * Native date/time inputs in dark mode.
+   * `<input type="date">` renders its calendar-picker indicator using the
+   * browser's UA palette. With the default (light) color-scheme the icon is
+   * BLACK and nearly invisible on a dark background. Setting `color-scheme: dark`
+   * is sufficient — Chromium/WebKit then render a LIGHT picker glyph that matches
+   * the surrounding shadcn controls. (Do NOT also `filter: invert()` the
+   * indicator: color-scheme already lightens it, and inverting would turn the
+   * now-light glyph black again — that double-negative was the original bug.)
+   */
+  input[type="date"],
+  input[type="time"],
+  input[type="datetime-local"],
+  input[type="month"],
+  input[type="week"] {
+    color-scheme: light;
+  }
+  .dark input[type="date"],
+  .dark input[type="time"],
+  .dark input[type="datetime-local"],
+  .dark input[type="month"],
+  .dark input[type="week"] {
+    color-scheme: dark;
+  }
+  .dark input[type="date"]::-webkit-calendar-picker-indicator,
+  .dark input[type="time"]::-webkit-calendar-picker-indicator,
+  .dark input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+  .dark input[type="month"]::-webkit-calendar-picker-indicator,
+  .dark input[type="week"]::-webkit-calendar-picker-indicator {
+    opacity: 0.8;
+    cursor: pointer;
+  }
+  .dark input[type="date"]::-webkit-calendar-picker-indicator:hover,
+  .dark input[type="time"]::-webkit-calendar-picker-indicator:hover,
+  .dark input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover,
+  .dark input[type="month"]::-webkit-calendar-picker-indicator:hover,
+  .dark input[type="week"]::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+  }
 }
 
 /* ========================================

@@ -17,6 +17,7 @@ import {
   MapPin,
   Calendar,
   CheckSquare,
+  Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MobileLayout } from '@/components/mobile-layout';
@@ -45,7 +46,6 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import { FloatingQuickActions } from '@/components/floating-quick-actions';
 import { useContact, useUpdateContact, useDeleteContact } from '@/generated/hooks/use-contact';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAccountList } from '@/generated/hooks/use-account';
@@ -183,6 +183,7 @@ export default function ContactDetailPage() {
 
   const handleDelete = async () => {
     if (!contact) return;
+    if (deleteContact.isPending) return; // guard against double-tap
     try {
       await deleteContact.mutateAsync(contact.id);
       // Returning to the list (item now gone) is the feedback; no toast.
@@ -194,6 +195,7 @@ export default function ContactDetailPage() {
 
   const handleSave = async () => {
     if (!contact) return;
+    if (updateContact.isPending) return; // guard against double-tap
     try {
       const selectedAccount = accounts.find((a: Account) => a.id === editForm.accountId);
       await updateContact.mutateAsync({
@@ -289,13 +291,35 @@ export default function ContactDetailPage() {
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction
             onClick={handleDelete}
+            disabled={deleteContact.isPending}
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
-            Delete
+            {deleteContact.isPending ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Deleting...
+              </>
+            ) : (
+              'Delete'
+            )}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  );
+
+  // View-mode header actions: Edit (primary entry, was a hidden dock chip) + Delete.
+  const viewHeaderActions = (
+    <div className="flex items-center gap-1">
+      <button
+        onClick={() => setIsEditMode(true)}
+        className="p-2 rounded-full hover:bg-muted/50 transition-colors"
+        aria-label={locale === 'zh-Hans' ? '编辑' : 'Edit contact'}
+      >
+        <Edit className="w-5 h-5 text-foreground" />
+      </button>
+      {deleteButton}
+    </div>
   );
 
   // Edit Mode UI
@@ -387,8 +411,17 @@ export default function ContactDetailPage() {
               onClick={handleSave}
               disabled={!editForm.fullname || updateContact.isPending}
             >
-              <Save className="w-4 h-4" />
-              Save
+              {updateContact.isPending ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4" />
+                  Save
+                </>
+              )}
             </Button>
           </div>
         </motion.div>
@@ -398,7 +431,7 @@ export default function ContactDetailPage() {
 
   // View Mode UI
   return (
-    <MobileLayout title="Contact Details" hideVoiceButton headerRight={deleteButton}>
+    <MobileLayout title="Contact Details" hideVoiceButton headerRight={viewHeaderActions}>
       <PullToRefresh onRefresh={handleRefresh} className="flex-1 overflow-y-auto">
         <motion.div
           className="py-4 space-y-4 pb-48"
@@ -612,16 +645,6 @@ export default function ContactDetailPage() {
       </motion.div>
       </PullToRefresh>
 
-      <FloatingQuickActions
-        actions={[
-          {
-            id: 'edit',
-            icon: Edit,
-            label: locale === 'zh-Hans' ? '编辑' : 'Edit',
-            onClick: () => setIsEditMode(true),
-          },
-        ]}
-      />
     </MobileLayout>
   );
 }

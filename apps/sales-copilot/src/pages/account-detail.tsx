@@ -19,6 +19,7 @@ import {
   Save,
   X,
   ChevronRight,
+  Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MobileLayout } from '@/components/mobile-layout';
@@ -257,6 +258,7 @@ export default function ClientDetailPage() {
 
   const handleDelete = async () => {
     if (!account) return;
+    if (deleteAccount.isPending) return; // guard against double-tap
     try {
       await deleteAccount.mutateAsync(account.id);
       // Returning to the list (item now gone) is the feedback; no toast.
@@ -268,6 +270,7 @@ export default function ClientDetailPage() {
 
   const handleSave = async () => {
     if (!account) return;
+    if (updateAccount.isPending) return; // guard against double-tap
     try {
       const updatedData = {
         name1: editForm.name1,
@@ -392,13 +395,35 @@ export default function ClientDetailPage() {
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction
             onClick={handleDelete}
+            disabled={deleteAccount.isPending}
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
-            Delete
+            {deleteAccount.isPending ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Deleting...
+              </>
+            ) : (
+              'Delete'
+            )}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  );
+
+  // View-mode header actions: Edit (primary entry, was a hidden dock chip) + Delete.
+  const viewHeaderActions = (
+    <div className="flex items-center gap-1">
+      <button
+        onClick={() => setIsEditMode(true)}
+        className="p-2 rounded-full hover:bg-muted/50 transition-colors"
+        aria-label={locale === 'zh-Hans' ? '编辑' : 'Edit client'}
+      >
+        <Edit className="w-5 h-5 text-foreground" />
+      </button>
+      {deleteButton}
+    </div>
   );
 
   // Edit Mode UI
@@ -493,8 +518,17 @@ export default function ClientDetailPage() {
               onClick={handleSave}
               disabled={!editForm.name1 || updateAccount.isPending}
             >
-              <Save className="w-4 h-4" />
-              Save
+              {updateAccount.isPending ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4" />
+                  Save
+                </>
+              )}
             </Button>
           </div>
         </motion.div>
@@ -504,7 +538,7 @@ export default function ClientDetailPage() {
 
   // View Mode UI
   return (
-    <MobileLayout title="Client Details" hideVoiceButton headerRight={deleteButton}>
+    <MobileLayout title="Client Details" hideVoiceButton headerRight={viewHeaderActions}>
       <PullToRefresh onRefresh={handleRefresh} className="flex-1 overflow-y-auto">
         <motion.div
           className="py-4 space-y-4 pb-48"
@@ -800,12 +834,6 @@ export default function ClientDetailPage() {
             icon: Plus,
             label: locale === 'zh-Hans' ? '新建活动' : 'New Activity',
             onClick: () => navigate(`/activity/${id}`),
-          },
-          {
-            id: 'edit',
-            icon: Edit,
-            label: locale === 'zh-Hans' ? '编辑' : 'Edit',
-            onClick: () => setIsEditMode(true),
           },
         ]}
       />

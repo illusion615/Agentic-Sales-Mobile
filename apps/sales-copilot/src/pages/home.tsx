@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence, useDragControls, type PanInfo } from 'motion/react';
-import { Settings, Sparkles, Plus, Eye, Radio, Mic, WifiOff, ArrowUp, SquarePen, Maximize2, X, Square, Copy, Forward, ThumbsDown, ChevronRight, ChevronDown, Play, Pause, Loader2, Volume2, VolumeX, Bell, RefreshCw, SkipForward, SkipBack, BookOpen } from 'lucide-react';
+import { Settings, Sparkles, Eye, Radio, Mic, WifiOff, ArrowUp, SquarePen, Maximize2, X, Square, Copy, Forward, ThumbsDown, ChevronRight, ChevronDown, Play, Pause, Loader2, Volume2, VolumeX, Bell, RefreshCw, SkipForward, SkipBack, BookOpen } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { useUser } from '@/hooks/use-user';
@@ -28,7 +28,6 @@ import { RecordListCard } from '@/components/record-list-card';
 import { KPICards, type KPIData, type AgendaItem, type AtRiskClient } from '@/components/kpi-card';
 import { MarkdownContent } from '@/components/markdown-content';
 import type { BusinessInsight } from '@/generated/models/business-insight-model';import { useCopilot, type ChatMessage } from '@/contexts/copilot-context';
-import { useRegisterDockChips, type ActionDockChip } from '@/contexts/action-dock-context';
 import { useCopilotSideDocked } from '@/components/global-copilot';
 import {
   clearCopilotConversationLogId,
@@ -1011,21 +1010,6 @@ export default function HomeDashboard() {
     await Promise.all([refetchActivities(), refetchOpportunities(), refetchAccounts()]);
   }, [refetchActivities, refetchOpportunities, refetchAccounts, locale]);
 
-  // Quick actions
-  const handleNewVisit = () => {
-    const firstAccount = accounts[0];
-    if (firstAccount) {
-      navigate(`/activity/${firstAccount.id}`);
-    } else {
-      navigate('/activity-capture');
-    }
-  };
-
-
-  const handleViewOpportunities = () => {
-    navigate('/opportunity-review');
-  };
-
   // Overdue agenda handlers
   const handleMarkOverdueDone = useCallback(async (activityId: string) => {
     try {
@@ -1296,16 +1280,10 @@ export default function HomeDashboard() {
     setBriefMeExpanded(false);
   };
 
-  // Register page-scoped chips into the global ActionDock.
-  const dockChips = useMemo<ActionDockChip[]>(
-    () => [
-      { id: 'new-visit', icon: Plus, label: t('newVisit', locale), onClick: handleNewVisit },
-      { id: 'view-opps', icon: Eye, label: t('viewOpportunities', locale), onClick: handleViewOpportunities },
-    ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [locale],
-  );
-  useRegisterDockChips(dockChips);
+  // Page-scoped ActionDock chips intentionally NOT registered on Home: the
+  // collapsed copilot dock now surfaces the contextual suggestion pills instead.
+  // (Previously "New Visit" / "View Opps" lived here but duplicated the home
+  // quick-action area and bottom nav, and blocked the suggestion pills.)
 
   const formatBriefMeTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);

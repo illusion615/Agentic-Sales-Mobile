@@ -1258,6 +1258,17 @@ export function setSimulateStreaming(enabled: boolean): void {
   window.dispatchEvent(new CustomEvent('simulatestreaming-changed', { detail: enabled }));
 }
 
+// Debug mode setting — gates developer-only UI (e.g. the Frame shadow log icon
+// on the Copilot panel). Default off so end users never see debug affordances.
+export function getDebugMode(): boolean {
+  return localStorage.getItem('debugMode') === 'true'; // default false
+}
+
+export function setDebugMode(enabled: boolean): void {
+  localStorage.setItem('debugMode', String(enabled));
+  window.dispatchEvent(new CustomEvent('debugmode-changed', { detail: enabled }));
+}
+
 // Intent detection mode. As of the cutover, production always runs 'frame'
 // (Frame + Orchestrator pipeline). The 'legacy' single-LLM branch in
 // copilot-agent.ts is kept as in-source reference during the stabilization

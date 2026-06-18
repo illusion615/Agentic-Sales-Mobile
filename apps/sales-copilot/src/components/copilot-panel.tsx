@@ -4,7 +4,7 @@ import { motion, AnimatePresence, useDragControls, type PanInfo } from 'motion/r
 import { Sparkles, ArrowUp, SquarePen, X, ChevronDown, Copy, Volume2, VolumeX, Loader2, Square, Play, Pause, Paperclip, RotateCcw, Mic, ScrollText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useCopilot, type ChatMessage, isUnresolvedBlockingCard } from '@/contexts/copilot-context';
-import { getLocale, getChatFontClass, getSelectedVoice, findMatchingSystemVoice, getLLMConfig, getVoiceSummaryEnabled, getCopilotDockLayout, getCopilotFullscreenDefault, getCopilotInAllScreens, type CopilotDockLayout, type Locale } from '@/lib/i18n';
+import { getLocale, getChatFontClass, getSelectedVoice, findMatchingSystemVoice, getLLMConfig, getVoiceSummaryEnabled, getCopilotDockLayout, getCopilotFullscreenDefault, getCopilotInAllScreens, getDebugMode, type CopilotDockLayout, type Locale } from '@/lib/i18n';
 import { ThinkingIndicator } from '@/components/thinking-indicator';
 import { DynamicDataRenderer, tryParseJson } from '@/components/dynamic-data-renderer';
 import { FormCard } from '@/components/form-card';
@@ -20,6 +20,7 @@ import { toast } from 'sonner';
 import { useActionDock } from '@/contexts/action-dock-context';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { newAttachmentId, type CopilotAttachment } from '@/lib/attachments';
+import { getContextualSuggestions } from '@/lib/contextual-suggestions';
 
 
 
@@ -72,6 +73,14 @@ export function CopilotPanel() {
     const handler = (e: Event) => setCopilotInAllScreens((e as CustomEvent<boolean>).detail);
     window.addEventListener('copilotinallscreens-changed', handler);
     return () => window.removeEventListener('copilotinallscreens-changed', handler);
+  }, []);
+
+  // Debug mode — reactive; gates the Frame shadow-log icon so end users don't see it.
+  const [debugMode, setDebugModeState] = useState(() => getDebugMode());
+  useEffect(() => {
+    const handler = (e: Event) => setDebugModeState((e as CustomEvent<boolean>).detail);
+    window.addEventListener('debugmode-changed', handler);
+    return () => window.removeEventListener('debugmode-changed', handler);
   }, []);
 
   // Binary mode: no 78vh mid state — collapsed dock ⇄ fullscreen only.
@@ -530,20 +539,18 @@ export function CopilotPanel() {
     if (clarificationSuggestions.length > 0) {
       return clarificationSuggestions;
     }
-    
-    if (messages.length === 0) {
-      return [
-        { text: locale === 'zh-Hans' ? '今日待办' : "Today's tasks", query: locale === 'zh-Hans' ? '今天有哪些待办事项？' : 'What are my tasks for today?' },
-        { text: locale === 'zh-Hans' ? '商机状态' : 'Pipeline status', query: locale === 'zh-Hans' ? '我的商机总览' : 'Show my pipeline overview' },
-        { text: locale === 'zh-Hans' ? '新建拜访' : 'New visit', query: locale === 'zh-Hans' ? '帮我新建一条拜访记录' : 'Create a new visit record for me' },
-        { text: locale === 'zh-Hans' ? '客户跟进' : 'Follow-ups', query: locale === 'zh-Hans' ? '哪些客户需要跟进？' : 'Which customers need follow-up?' },
-      ];
-    }
-    return [
-      { text: locale === 'zh-Hans' ? '更多详情' : 'More details', query: locale === 'zh-Hans' ? '告诉我更多详情' : 'Tell me more details' },
-      { text: locale === 'zh-Hans' ? '今日待办' : "Today's tasks", query: locale === 'zh-Hans' ? '今天有哪些待办事项？' : 'What are my tasks for today?' },
-      { text: locale === 'zh-Hans' ? '帮助' : 'Help', query: locale === 'zh-Hans' ? '你能帮我做什么？' : 'What can you help me with?' },
-    ];
+
+    // Contextual follow-ups: derive from the most recent agent turn's function
+    // (e.g. after "list opportunities" → opportunity focus dimensions), so the
+    // suggestions track the latest conversation state instead of being static.
+    const lastAgentWithFn = [...messages].reverse().find(
+      (m) => m.role === 'assistant' && !!m.functionCalled
+    );
+    return getContextualSuggestions({
+      hasMessages: messages.length > 0,
+      lastFunctionCalled: lastAgentWithFn?.functionCalled,
+      locale,
+    });
   }, [messages, locale, clarificationSuggestions]);
 
   const quickActions = getQuickActions();
@@ -1041,7 +1048,7 @@ export function CopilotPanel() {
             {locale === 'zh-Hans' ? '请选择一个操作：' : 'Please choose an option:'}
           </p>
         )}
-        <div className="flex flex-wrap gap-2">
+        <div className="flex gap-2 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
           {quickActions.map((action: { text: string; query: string; action?: { function: string; arguments: Record<string, unknown> } }, idx: number) => (
             <button
               key={idx}
@@ -1061,7 +1068,7 @@ export function CopilotPanel() {
               }}
               disabled={isSending}
               className={cn(
-                'px-3 py-1.5 rounded-full text-xs font-medium',
+                'shrink-0 whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-medium',
                 'transition-all active:scale-95',
                 'disabled:opacity-50 disabled:cursor-not-allowed',
                 hasClarificationSuggestions
@@ -1277,15 +1284,17 @@ export function CopilotPanel() {
               <span className="text-sm font-medium text-foreground">Sales Copilot</span>
               {isConnected && <span className="w-2 h-2 bg-green-500 rounded-full" />}
               {isConnecting && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
-              <button
-                type="button"
-                onClick={() => setFrameViewerOpen(true)}
-                className="ml-1 w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-                title={locale === 'zh-Hans' ? 'Frame 影子模式 · 销售专家思考记录' : 'Frame shadow mode · sales-coach reasoning log'}
-                aria-label="Frame shadow log"
-              >
-                <ScrollText className="w-3.5 h-3.5" />
-              </button>
+              {debugMode && (
+                <button
+                  type="button"
+                  onClick={() => setFrameViewerOpen(true)}
+                  className="ml-1 w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                  title={locale === 'zh-Hans' ? 'Frame 影子模式 · 销售专家思考记录' : 'Frame shadow mode · sales-coach reasoning log'}
+                  aria-label="Frame shadow log"
+                >
+                  <ScrollText className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
           ) : (
           <button
@@ -1306,15 +1315,17 @@ export function CopilotPanel() {
             <span className="text-sm font-medium text-foreground">Sales Copilot</span>
             {isConnected && <span className="w-2 h-2 bg-green-500 rounded-full" />}
             {isConnecting && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
-            <button
-              type="button"
-              onClick={() => setFrameViewerOpen(true)}
-              className="ml-1 w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-              title={locale === 'zh-Hans' ? 'Frame 影子模式 · 销售专家思考记录' : 'Frame shadow mode · sales-coach reasoning log'}
-              aria-label="Frame shadow log"
-            >
-              <ScrollText className="w-3.5 h-3.5" />
-            </button>
+            {debugMode && (
+              <button
+                type="button"
+                onClick={() => setFrameViewerOpen(true)}
+                className="ml-1 w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                title={locale === 'zh-Hans' ? 'Frame 影子模式 · 销售专家思考记录' : 'Frame shadow mode · sales-coach reasoning log'}
+                aria-label="Frame shadow log"
+              >
+                <ScrollText className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
           )}
           <div className="flex items-center gap-1">
@@ -1450,19 +1461,23 @@ export function CopilotPanel() {
               {isSideDocked && dockChips.length > 0 && (
                 <div className="px-3 py-2 border-t border-border/20 flex items-center gap-2 flex-wrap shrink-0">
                   {dockChips.map((c) => {
-                    const Icon = c.icon;
+                    const Icon = c.busy ? Loader2 : c.icon;
                     return (
                       <button
                         key={c.id}
-                        onClick={c.onClick}
+                        onClick={c.disabled ? undefined : c.onClick}
+                        disabled={c.disabled}
                         className={cn(
                           'flex items-center gap-1.5 px-3 py-1.5',
                           'rounded-full bg-muted/50 border border-border/50',
                           'text-xs font-medium text-foreground',
-                          'hover:bg-muted active:scale-95 transition-all'
+                          'transition-all',
+                          c.disabled
+                            ? 'opacity-50 cursor-not-allowed'
+                            : 'hover:bg-muted active:scale-95'
                         )}
                       >
-                        <Icon className="w-3.5 h-3.5 text-primary" />
+                        <Icon className={cn('w-3.5 h-3.5 text-primary', c.busy && 'animate-spin')} />
                         <span>{c.label}</span>
                       </button>
                     );
@@ -1478,19 +1493,21 @@ export function CopilotPanel() {
               ) : dockChips.length > 0 ? (
                 <div className="flex items-center justify-center gap-2 flex-wrap">
                   {dockChips.map((c) => {
-                    const Icon = c.icon;
+                    const Icon = c.busy ? Loader2 : c.icon;
                     return (
                       <button
                         key={c.id}
-                        onClick={c.onClick}
+                        onClick={c.disabled ? undefined : c.onClick}
+                        disabled={c.disabled}
                         className={cn(
                           'flex items-center gap-2 px-4 py-2.5',
                           'rounded-full bg-background border border-border/60 shadow-sm',
                           'text-xs font-medium text-foreground',
-                          'active:scale-95 transition-transform'
+                          'transition-transform',
+                          c.disabled ? 'opacity-50 cursor-not-allowed' : 'active:scale-95'
                         )}
                       >
-                        <Icon className="w-4 h-4 text-primary" />
+                        <Icon className={cn('w-4 h-4 text-primary', c.busy && 'animate-spin')} />
                         <span>{c.label}</span>
                       </button>
                     );

@@ -219,6 +219,10 @@ export default function ActivityDetailPage() {
 
   const handleMarkComplete = async () => {
     if (!activity) return;
+    // Guard against double-taps: the dock chip stays interactive until the dock
+    // re-renders, so re-entry is possible. updateActivity.isPending also drives
+    // the chip's busy state, but guard here too so a fast second tap is a no-op.
+    if (updateActivity.isPending) return;
     try {
       await updateActivity.mutateAsync({
         id: activity.id,
@@ -354,8 +358,22 @@ export default function ActivityDetailPage() {
     </AlertDialog>
   );
 
+  // Header actions: Edit (primary entry, was a hidden dock chip) + Delete.
+  const headerActions = (
+    <div className="flex items-center gap-1">
+      <button
+        onClick={() => navigate(`/activity/${activity.account?.id || 'new'}?edit=${activity.id}`)}
+        className="p-2 rounded-full hover:bg-muted/50 transition-colors"
+        aria-label={locale === 'zh-Hans' ? '编辑' : 'Edit activity'}
+      >
+        <Edit className="w-5 h-5 text-foreground" />
+      </button>
+      {deleteButton}
+    </div>
+  );
+
   return (
-    <MobileLayout title="Activity Details" hideVoiceButton headerRight={deleteButton}>
+    <MobileLayout title="Activity Details" hideVoiceButton headerRight={headerActions}>
       <PullToRefresh onRefresh={handleRefresh} className="flex-1 overflow-y-auto">
         {/* Main scrollable content - add padding bottom for fixed action bar */}
         <motion.div
@@ -738,15 +756,13 @@ export default function ActivityDetailPage() {
           ...(!isCompleted ? [{
             id: 'complete',
             icon: CheckCircle,
-            label: locale === 'zh-Hans' ? '完成' : 'Complete',
+            label: updateActivity.isPending
+              ? (locale === 'zh-Hans' ? '完成中…' : 'Completing…')
+              : (locale === 'zh-Hans' ? '完成' : 'Complete'),
             onClick: handleMarkComplete,
+            disabled: updateActivity.isPending,
+            busy: updateActivity.isPending,
           }] : []) as QuickAction[],
-          {
-            id: 'edit',
-            icon: Edit,
-            label: locale === 'zh-Hans' ? '编辑' : 'Edit',
-            onClick: () => navigate(`/activity/${activity.account?.id || 'new'}?edit=${activity.id}`),
-          },
         ]}
       />
 

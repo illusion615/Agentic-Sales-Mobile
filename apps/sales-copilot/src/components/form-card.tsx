@@ -104,7 +104,7 @@ function EditableField({
             type="date"
             aria-label={label}
             title={label}
-            className="h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm mt-0.5"
+            className="h-8 w-full rounded-md border border-input bg-transparent dark:bg-input/30 px-3 py-1 text-sm mt-0.5 text-foreground shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
             value={value ? String(value) : ''}
             onChange={(e) => onChange(e.target.value)}
           />
@@ -1115,6 +1115,7 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
 
   // Handle confirmation - create the record
   const handleConfirm = async () => {
+    if (isConfirming) return; // guard against double-tap / modal remount races
     setIsConfirming(true);
     setValidationError(null);
     try {

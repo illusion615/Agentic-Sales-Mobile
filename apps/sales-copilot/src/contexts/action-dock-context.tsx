@@ -14,6 +14,14 @@ export interface ActionDockChip {
   icon: LucideIcon;
   label: string;
   onClick: () => void;
+  /**
+   * When true the chip is non-interactive (dimmed, clicks ignored). Use this to
+   * reflect an in-flight async action (e.g. a mutation is running) so the user
+   * gets immediate feedback and cannot fire the action twice.
+   */
+  disabled?: boolean;
+  /** When true the chip icon spins — pair with `disabled` for a busy state. */
+  busy?: boolean;
 }
 
 interface ActionDockState {
@@ -59,12 +67,12 @@ export function useActionDock(): ActionDockState {
 
 /**
  * Register page-level chips into the ActionDock for the lifetime of the calling component.
- * Stable across renders: only re-fires when the chip id/label signature changes,
- * so callers don't need to memoize. The latest onClick closures are always used.
+ * Stable across renders: only re-fires when the chip id/label/disabled/busy signature
+ * changes, so callers don't need to memoize. The latest onClick closures are always used.
  */
 export function useRegisterDockChips(chips: ActionDockChip[]): void {
   const { setChips } = useActionDock();
-  const signature = chips.map((c) => `${c.id}|${c.label}`).join('||');
+  const signature = chips.map((c) => `${c.id}|${c.label}|${c.disabled ? 1 : 0}|${c.busy ? 1 : 0}`).join('||');
   const chipsRef = useRef(chips);
   chipsRef.current = chips;
   useEffect(() => {

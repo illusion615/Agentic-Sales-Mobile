@@ -421,6 +421,7 @@ export default function OpportunityDraftReviewPage() {
   const [sourceDrawerOpen, setSourceDrawerOpen] = useState(false);
   const [selectedSource, setSelectedSource] = useState<SourceData | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isAbandoning, setIsAbandoning] = useState(false);
 
   const userId = user?.objectId || '';
 
@@ -519,15 +520,22 @@ export default function OpportunityDraftReviewPage() {
   }, []);
 
   const handleAbandon = useCallback(async () => {
-    if (finalActivityId) {
-      await updateActivity.mutateAsync({
-        id: finalActivityId,
-        changedFields: { status: 'open' },
-      });
+    if (isAbandoning || isSubmitting) return; // guard against double-tap
+    setIsAbandoning(true);
+    try {
+      if (finalActivityId) {
+        await updateActivity.mutateAsync({
+          id: finalActivityId,
+          changedFields: { status: 'open' },
+        });
+      }
+      toast.info(t('abandonedDraft', locale));
+      navigate('/home');
+    } catch {
+      // Global MutationCache.onError surfaces the real error; let the user retry.
+      setIsAbandoning(false);
     }
-    toast.info(t('abandonedDraft', locale));
-    navigate('/home');
-  }, [finalActivityId, updateActivity, locale, navigate]);
+  }, [finalActivityId, updateActivity, locale, navigate, isAbandoning, isSubmitting]);
 
   const handleSubmit = useCallback(async () => {
     if (!draft) return;
@@ -820,14 +828,17 @@ export default function OpportunityDraftReviewPage() {
           <div className="flex items-center gap-3">
             <button
               onClick={handleAbandon}
-              disabled={isSubmitting}
-              className="flex-shrink-0 py-3.5 px-6 rounded-xl text-body font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+              disabled={isSubmitting || isAbandoning}
+              className="flex-shrink-0 py-3.5 px-6 rounded-xl text-body font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50 flex items-center gap-2"
             >
+              {isAbandoning && (
+                <div className="w-4 h-4 rounded-full border-2 border-current border-t-transparent animate-spin" />
+              )}
               {t('abandon', locale)}
             </button>
             <button
               onClick={handleSubmit}
-              disabled={isSubmitting}
+              disabled={isSubmitting || isAbandoning}
               className="flex-1 py-3.5 rounded-xl accent-gradient text-body font-semibold text-white shadow-lg shadow-primary/30 flex items-center justify-center gap-2 disabled:opacity-50"
             >
               {isSubmitting ? (
