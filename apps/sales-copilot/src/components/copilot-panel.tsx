@@ -1053,6 +1053,14 @@ export function CopilotPanel() {
             <button
               key={idx}
               onClick={() => {
+                // While a blocking card is unresolved the composer is locked; the
+                // suggestion pills must be locked too, otherwise tapping one would
+                // send a new message and bypass the card. Route the tap to the
+                // card instead (same behaviour as the disabled composer).
+                if (inputLocked) {
+                  guideToBlockingCard();
+                  return;
+                }
                 // If action has function info, execute directly without LLM re-analysis
                 if (action.action) {
                   executeClarificationAction(
@@ -1071,6 +1079,7 @@ export function CopilotPanel() {
                 'shrink-0 whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-medium',
                 'transition-all active:scale-95',
                 'disabled:opacity-50 disabled:cursor-not-allowed',
+                inputLocked && 'opacity-50 cursor-not-allowed',
                 hasClarificationSuggestions
                   ? 'bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 hover:border-primary/50'
                   : 'bg-muted/50 hover:bg-muted text-foreground border border-border/50 hover:border-border'
