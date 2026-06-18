@@ -5,7 +5,7 @@ import { ContactEntityService } from './ContactEntityService';
 import type { ContactEntity } from '../models/ContactEntityModel';
 import type { IGetAllOptions } from '../models/CommonModels';
 import type { Contact } from '../models/contact-model';
-import { dvLookupName, mapOptions, createWithReadback, requireId } from './_adapter-utils';
+import { dvLookupName, mapOptions, createWithReadback, requireId, withActiveState } from './_adapter-utils';
 
 const FIELD_MAP: Record<string, string> = {
   id: 'contactid',
@@ -82,7 +82,9 @@ export class ContactService {
   }
 
   static async getAll(options?: IGetAllOptions): Promise<Contact[]> {
-    const result = await ContactEntityService.getAll(mapOptions(options, FIELD_MAP) as any);
+    // Only read ACTIVE contacts: an Inactive contact is a soft-delete and must
+    // not surface in lists or lookups.
+    const result = await ContactEntityService.getAll(withActiveState(mapOptions(options, FIELD_MAP)) as any);
     if (!result.success) throw result.error;
     return (result.data ?? []).map(fromDv);
   }

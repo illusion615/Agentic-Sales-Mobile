@@ -5,7 +5,7 @@ import { AccountEntityService } from './AccountEntityService';
 import type { AccountEntity } from '../models/AccountEntityModel';
 import type { IGetAllOptions } from '../models/CommonModels';
 import type { Account } from '../models/account-model';
-import { dvNum, numToDv, mapOptions, createWithReadback, requireId } from './_adapter-utils';
+import { dvNum, numToDv, mapOptions, createWithReadback, requireId, withActiveState } from './_adapter-utils';
 
 const FIELD_MAP: Record<string, string> = {
   id: 'accountid',
@@ -90,7 +90,9 @@ export class AccountService {
   }
 
   static async getAll(options?: IGetAllOptions): Promise<Account[]> {
-    const result = await AccountEntityService.getAll(mapOptions(options, FIELD_MAP) as any);
+    // Only read ACTIVE accounts: an Inactive account is a soft-delete and must
+    // not surface in lists or lookups.
+    const result = await AccountEntityService.getAll(withActiveState(mapOptions(options, FIELD_MAP)) as any);
     if (!result.success) throw result.error;
     return (result.data ?? []).map(fromDv);
   }

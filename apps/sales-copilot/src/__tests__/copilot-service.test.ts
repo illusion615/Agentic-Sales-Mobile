@@ -9,7 +9,6 @@ import {
   isCopilotStudioAvailable,
   clearCopilotConversation,
   clearCopilotConfig,
-  COPILOT_STUDIO_AGENT_NAME,
 } from '@/services/copilot-service';
 
 describe('copilot-service', () => {
@@ -17,16 +16,10 @@ describe('copilot-service', () => {
     localStorage.clear();
   });
 
-  describe('COPILOT_STUDIO_AGENT_NAME', () => {
-    it('should be the expected bot schema name', () => {
-      expect(COPILOT_STUDIO_AGENT_NAME).toBe('crf5c_agentrl2oCW');
-    });
-  });
-
   describe('getCopilotConfig', () => {
-    it('returns default config when nothing is stored', () => {
+    it('returns undefined agentName when nothing is stored (no hardcoded fallback)', () => {
       const config = getCopilotConfig();
-      expect(config.agentName).toBe(COPILOT_STUDIO_AGENT_NAME);
+      expect(config.agentName).toBeUndefined();
       expect(config.conversationId).toBeUndefined();
     });
 
@@ -37,21 +30,26 @@ describe('copilot-service', () => {
       expect(config.conversationId).toBe('conv-123');
     });
 
-    it('falls back to default if stored JSON is invalid', () => {
+    it('returns undefined agentName if stored JSON is invalid', () => {
       localStorage.setItem('copilot-config', 'not-json');
       const config = getCopilotConfig();
-      expect(config.agentName).toBe(COPILOT_STUDIO_AGENT_NAME);
+      expect(config.agentName).toBeUndefined();
     });
 
-    it('falls back to default if stored object has no agentName', () => {
+    it('returns undefined agentName if stored object has no agentName', () => {
       localStorage.setItem('copilot-config', JSON.stringify({ foo: 'bar' }));
       const config = getCopilotConfig();
-      expect(config.agentName).toBe(COPILOT_STUDIO_AGENT_NAME);
+      expect(config.agentName).toBeUndefined();
     });
   });
 
   describe('isCopilotStudioAvailable', () => {
-    it('returns true (SDK connector is always available)', () => {
+    it('returns false when no agent is configured', () => {
+      expect(isCopilotStudioAvailable()).toBe(false);
+    });
+
+    it('returns true once an agent name is stored', () => {
+      saveCopilotConfig({ agentName: 'crf5c_agentX' });
       expect(isCopilotStudioAvailable()).toBe(true);
     });
   });

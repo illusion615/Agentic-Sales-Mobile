@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useAppSettings } from '@/hooks/use-app-settings';
 import { setLLMConfig, type LLMConfig } from '@/lib/i18n';
-import { saveCopilotConfig } from '@/services/copilot-service';
+import { saveCopilotConfig, getCopilotConfig } from '@/services/copilot-service';
 
 export type SettingsInitStatus = 'loading' | 'not-configured' | 'configured' | 'error';
 
@@ -65,10 +65,19 @@ export function useInitSettings(): InitSettingsResult {
     };
     setLLMConfig(config);
 
-    // Initialize Copilot Studio agent name (single config source via copilot-service)
+    // Initialize Copilot Studio agent name (single config source via copilot-service).
+    // The Setting table is the AUTHORITATIVE source: when its agent name differs
+    // from what's cached in localStorage (e.g. after deploying to a new environment
+    // where the agent schema name changed), overwrite the cache so the app connects
+    // to the right agent. Preserve any in-flight conversationId.
     if (hasCopilotConfig && appSettings.copilotStudioAgentName) {
-      console.log('[InitSettings] Found Copilot Studio agent name in Dataverse');
-      saveCopilotConfig({ agentName: appSettings.copilotStudioAgentName });
+      const current = getCopilotConfig();
+      if (current.agentName !== appSettings.copilotStudioAgentName) {
+        console.log('[InitSettings] Copilot agent from Setting table differs from cache — syncing:', appSettings.copilotStudioAgentName);
+        saveCopilotConfig({ agentName: appSettings.copilotStudioAgentName, conversationId: current.conversationId });
+      } else {
+        console.log('[InitSettings] Copilot agent name already in sync with Setting table');
+      }
     }
 
     statusRef.current = 'configured';

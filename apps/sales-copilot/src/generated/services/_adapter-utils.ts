@@ -236,6 +236,27 @@ export function lookupBind(entitySet: string, id: string | undefined): string | 
 }
 
 /**
+ * AND a `statecode eq 0` (Active) clause into a query's filter so soft-deleted /
+ * deactivated rows are never read. Use for entities where Inactive means
+ * "removed" (Setting, Account, Contact). Do NOT use for Activity/Opportunity,
+ * where Inactive is a legitimate business state (completed / closed) that must
+ * still be read.
+ *
+ * Apply AFTER `mapOptions` so the existing filter is already in DV column names —
+ * `statecode` is the real Dataverse column on every table, so it passes through
+ * unchanged. Any caller-supplied filter is parenthesised then ANDed.
+ */
+export function withActiveState(
+  opts: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  const base = (opts ?? {}) as Record<string, unknown>;
+  const existing = typeof base.filter === 'string' ? base.filter.trim() : '';
+  const activeClause = 'statecode eq 0';
+  const filter = existing ? `(${existing}) and ${activeClause}` : activeClause;
+  return { ...base, filter };
+}
+
+/**
  * Map query options (select/orderBy/filter) from friendly field names to DV column names.
  * The fieldMap maps friendly names → DV names.
  */

@@ -2,7 +2,7 @@ import { Crf5c_settingsService } from './Crf5c_settingsService';
 import type { Crf5c_settings } from '../models/Crf5c_settingsModel';
 import type { IGetAllOptions } from '../models/CommonModels';
 import type { Setting } from '../models/setting-model';
-import { createWithReadback, requireId } from './_adapter-utils';
+import { createWithReadback, requireId, withActiveState } from './_adapter-utils';
 
 function fromDv(dv: Crf5c_settings): Setting {
   return {
@@ -55,7 +55,9 @@ export class SettingService {
   }
 
   static async getAll(options?: IGetAllOptions): Promise<Setting[]> {
-    const result = await Crf5c_settingsService.getAll(options);
+    // Only read ACTIVE settings: an admin may deactivate (not delete) a setting,
+    // and a deactivated setting must not take effect.
+    const result = await Crf5c_settingsService.getAll(withActiveState(options as Record<string, unknown> | undefined) as any);
     if (!result.success) throw result.error;
     return (result.data ?? []).map(fromDv);
   }

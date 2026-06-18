@@ -6,7 +6,8 @@ import { OpportunityService } from '@/generated/services/opportunity-service';
 import { ActivityService } from '@/generated/services/activity-service';
 import { AccountService } from '@/generated/services/account-service';
 import { buildCSQuery } from '../cs-context-builder';
-import { getCopilotConfig, saveCopilotConfig, isCopilotStudioAvailable, COPILOT_STUDIO_AGENT_NAME } from '@/services/copilot-service';
+import { getCopilotConfig, saveCopilotConfig } from '@/services/copilot-service';
+import { getContext } from '@microsoft/power-apps/app';
 import { MicrosoftCopilotStudioService } from '@/generated/services/MicrosoftCopilotStudioService';
 import { registerHandlers, type FunctionHandler } from './handler-registry';
 
@@ -22,19 +23,39 @@ const queryCopilotStudio: FunctionHandler = async (args, ctx) => {
   });
   console.log('[CS] enriched query length:', enrichedQuery.length, 'preview:', enrichedQuery.slice(0, 200));
 
-  if (!isCopilotStudioAvailable()) {
-    console.log('[CS] NOT AVAILABLE - connector not ready');
-    return { success: false, error: 'Copilot Studio 连接器未就绪' };
+  // The knowledge-base agent MUST be configured via the Setting table. There is
+  // no hardcoded fallback (identical schema names across environments would make
+  // a baked-in default ambiguous). If it's missing, tell the user to contact an
+  // administrator instead of silently calling the wrong/none agent.
+  const csConfig = getCopilotConfig();
+  const agentName = csConfig?.agentName;
+  if (!agentName) {
+    console.warn('[CS] No agent configured in Setting table — refusing to call.');
+    const isZh = ctx.locale === 'zh-Hans';
+    return {
+      success: false,
+      error: isZh
+        ? '尚未配置知识库 Agent，请联系管理员在系统设置中配置 Copilot Studio Agent。'
+        : 'No knowledge-base agent is configured. Please contact your administrator to set up the Copilot Studio agent in system settings.',
+    };
   }
 
   try {
-    const csConfig = getCopilotConfig();
     const priorConversationId = csConfig?.conversationId;
-    console.log('[CS] Calling MicrosoftCopilotStudioService.ExecuteCopilotAsyncV2... priorConversationId:', priorConversationId);
+    // Constrain the connector to the environment this app is actually running in,
+    // so an identically-named agent schema in another environment can't be hit.
+    let runtimeEnvironmentId: string | undefined;
+    try {
+      runtimeEnvironmentId = (await getContext())?.app?.environmentId;
+    } catch (e) {
+      console.warn('[CS] Could not resolve runtime environmentId:', e);
+    }
+    console.log('[CS] Calling ExecuteCopilotAsyncV2... agent:', agentName, 'env:', runtimeEnvironmentId, 'priorConversationId:', priorConversationId);
     const result = await MicrosoftCopilotStudioService.ExecuteCopilotAsyncV2(
-      csConfig?.agentName || COPILOT_STUDIO_AGENT_NAME,
+      agentName,
       { message: enrichedQuery, notificationUrl: 'https://notificationurlplaceholder' },
       priorConversationId,
+      runtimeEnvironmentId,
     );
 
     if (!result.success) {

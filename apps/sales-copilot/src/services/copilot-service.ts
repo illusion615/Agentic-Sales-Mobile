@@ -4,13 +4,18 @@
  * Configuration and availability for the Copilot Studio SDK connector.
  * All actual API calls go through CopilotStudioConnectorService (generated).
  * This module manages the agent name and multi-turn conversation ID.
+ *
+ * IMPORTANT: there is NO hardcoded fallback agent. The knowledge-base agent's
+ * schema name MUST come from the `copilot_studio_agent_name` Setting (Dataverse),
+ * which is hydrated into the cache by useInitSettings. If it's missing, the app
+ * must tell the user to contact an administrator — never silently connect to a
+ * baked-in agent (which, with identical schema names across environments, could
+ * resolve to the wrong environment's agent).
  */
 
-/** Agent schema name — matches the bot deployed in the solution */
-export const COPILOT_STUDIO_AGENT_NAME = 'crf5c_agentrl2oCW';
-
 export interface CopilotConfig {
-  agentName: string;
+  /** Agent schema name. Undefined until the Setting table value is hydrated. */
+  agentName?: string;
   /** Conversation ID for multi-turn (returned by ExecuteCopilotAsyncV2) */
   conversationId?: string;
 }
@@ -18,7 +23,9 @@ export interface CopilotConfig {
 const STORAGE_KEY = 'copilot-config';
 
 /**
- * Get Copilot config. Falls back to default agent name if nothing is stored.
+ * Get Copilot config from the cache. Returns `agentName: undefined` when nothing
+ * has been hydrated from the Setting table yet — callers MUST handle the missing
+ * case (show "contact admin"), NOT fall back to a default agent.
  */
 export function getCopilotConfig(): CopilotConfig {
   try {
@@ -28,15 +35,16 @@ export function getCopilotConfig(): CopilotConfig {
       if (raw.agentName) return raw as CopilotConfig;
     }
   } catch { /* ignore */ }
-  return { agentName: COPILOT_STUDIO_AGENT_NAME };
+  return { agentName: undefined };
 }
 
 /**
- * Whether Copilot Studio is available.
- * With the SDK connector baked into the app, this is always true.
+ * Whether a Copilot Studio agent is configured (i.e. an agent name was hydrated
+ * from the Setting table into the cache). When false, the app should prompt the
+ * user to contact an administrator rather than attempting a call.
  */
 export function isCopilotStudioAvailable(): boolean {
-  return true;
+  return !!getCopilotConfig().agentName;
 }
 
 /** Persist config (agent name + conversation ID for multi-turn). */
