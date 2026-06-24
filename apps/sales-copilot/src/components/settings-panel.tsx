@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { ArrowLeft, Moon, Sun, Globe, HelpCircle, LogOut, Volume2, Play, Type, Palette, CircleDot, LayoutGrid, Speech, X, Zap, MessageSquare, LayoutDashboard, Database, Bug, FileCode, ChevronRight, Monitor, Calendar, Maximize, Bot } from 'lucide-react';
+import { ArrowLeft, Moon, Sun, Globe, HelpCircle, LogOut, Volume2, Play, Type, Palette, CircleDot, LayoutGrid, Speech, X, Zap, MessageSquare, LayoutDashboard, Database, Bug, FileCode, ChevronRight, Monitor, Calendar, Maximize, Bot, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
 import { ThinkingIndicator } from '@/components/thinking-indicator';
@@ -10,6 +10,7 @@ import { useUser } from '@/hooks/use-user';
 import { useAppSettings } from '@/hooks/use-app-settings';
 import { useCopilotConfigured } from '@/hooks/use-copilot-configured';
 import { getCopilotConfig } from '@/services/copilot-service';
+import { getPromptResolutionStatus, PROMPT_RESOLUTION_EVENT } from '@/services/prompt-resolver';
 import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, setSelectedVoice, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getDebugMode, setDebugMode, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, getCopilotDockLayout, setCopilotDockLayout, copilotDockLayoutLabels, getWeekStartDay, setWeekStartDay, getCopilotFullscreenDefault, setCopilotFullscreenDefault, getAgendaDefaultExpanded, setAgendaDefaultExpanded, getCopilotListDefaultView, setCopilotListDefaultView, getCopilotListTopN, setCopilotListTopN, type Locale, type VoiceOption, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget, type CopilotDockLayout, type WeekStartDay, type CopilotListDefaultView } from '@/lib/i18n';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -79,6 +80,14 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const resolvedAgentName = appSettings.copilotStudioAgentName || getCopilotConfig().agentName;
   const agentFromSettingTable = !!appSettings.copilotStudioAgentName;
   const hasAgent = !!resolvedAgentName;
+  // AI prompt resolution status (reactive): which AI model GUID the app resolved
+  // for this environment, and whether it's ready or still on the build-time fallback.
+  const [promptStatus, setPromptStatus] = useState(getPromptResolutionStatus);
+  useEffect(() => {
+    const update = () => setPromptStatus(getPromptResolutionStatus());
+    window.addEventListener(PROMPT_RESOLUTION_EVENT, update);
+    return () => window.removeEventListener(PROMPT_RESOLUTION_EVENT, update);
+  }, []);
   const [locale, setLocaleState] = useState<Locale>(getLocale);
   const [isDark, setIsDark] = useState(true);
   const [selectedVoice, setSelectedVoiceState] = useState(getSelectedVoice);
@@ -952,6 +961,52 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                     {locale === 'zh-Hans'
                       ? '尚未配置知识库 Agent。请联系管理员在 Setting 表中设置 copilot_studio_agent_name。'
                       : 'No knowledge-base agent is configured. Please contact your administrator to set copilot_studio_agent_name in the Setting table.'}
+                  </p>
+                )}
+              </div>
+              {/* AI prompt resolution status */}
+              <div className="border-t border-border/30 pt-2">
+                <SettingsItem
+                  icon={Sparkles}
+                  label={locale === 'zh-Hans' ? 'AI Prompt 状态' : 'AI Prompt Status'}
+                  rightElement={
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          'w-2.5 h-2.5 rounded-full',
+                          promptStatus.state === 'checking'
+                            ? 'bg-muted-foreground/40 animate-pulse'
+                            : promptStatus.state === 'fallback'
+                              ? 'bg-amber-500'
+                              : 'bg-green-500'
+                        )}
+                      />
+                      <span className="text-sm text-muted-foreground">
+                        {promptStatus.state === 'checking'
+                          ? (locale === 'zh-Hans' ? '解析中…' : 'Resolving…')
+                          : promptStatus.state === 'resolved'
+                            ? (locale === 'zh-Hans' ? '已就绪' : 'Ready')
+                            : promptStatus.state === 'cached'
+                              ? (locale === 'zh-Hans' ? '已就绪（缓存）' : 'Ready (cached)')
+                              : (locale === 'zh-Hans' ? '默认配置' : 'Default')}
+                      </span>
+                    </div>
+                  }
+                />
+                <SettingsItem
+                  icon={FileCode}
+                  label={locale === 'zh-Hans' ? '模型名称' : 'Model Name'}
+                  rightElement={
+                    <span className="text-sm text-foreground font-mono truncate max-w-[60%] text-right">
+                      {promptStatus.modelName}
+                    </span>
+                  }
+                />
+                {promptStatus.state === 'fallback' && (
+                  <p className="text-xs text-muted-foreground px-2 pt-1 leading-relaxed">
+                    {locale === 'zh-Hans'
+                      ? '正在使用内置默认 Prompt 配置。若 AI 回复异常，请确认当前环境已导入并发布名为 SalesCopilotCorePrompt 的 AI 模型，且账号具有读取权限。'
+                      : 'Using the built-in default prompt configuration. If AI replies fail, confirm the AI model named SalesCopilotCorePrompt is imported and published in this environment and that your account has read access.'}
                   </p>
                 )}
               </div>

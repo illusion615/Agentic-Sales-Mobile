@@ -1617,22 +1617,13 @@ ${agentResponse}`;
       localStorage.setItem('sales-copilot-brief-transcript', briefTranscript);
       
       if (insightLines.length > 0) {
-        
-        // Replace only THIS rep's existing insights (multi-user safe — never
-        // touch other reps' insights). Admin regeneration still only clears its
-        // own owner rows; clearing everyone's would be destructive.
-        const { data: existingInsights } = await refetchBusinessInsights();
-        const myExisting = (existingInsights || []).filter(
-          (insight: { ownerid?: string }) => (insight.ownerid || '').toLowerCase() === (userId || '')
-        );
-        if (myExisting.length > 0) {
-          await Promise.all(myExisting.map((insight: { id: string }) => 
-            deleteBusinessInsight.mutateAsync(insight.id)
-          ));
-        }
-        
 
-        // Save new insights to Dataverse
+        // Save new insights to Dataverse FIRST, then remove the user's older
+        // ones. We create first so we can read back the Dataverse-stamped owner
+        // (`_ownerid_value`) of a brand-new row — that is the reliable identity
+        // of the current user, obtained WITHOUT querying the systemuser table
+        // (which the Code App runtime cannot read). This makes the "replace my
+        // previous insights" cleanup both correct and multi-user safe.
         const now = new Date().toISOString();
         const validUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // Valid for 24 hours
         
@@ -1684,7 +1675,7 @@ ${agentResponse}`;
             detailsjson: JSON.stringify([item.insight]),
             rationale: item.rationale, // Full rationale (Dataverse field increased to support longer text)
             displayorder: idx,
-            generatedon: now,
+            generatedon: now, // batch marker — used to distinguish this run's rows
             isactive: true,
             ownerid: userId || '',
             referenceidsjson: '[]',
@@ -1694,8 +1685,39 @@ ${agentResponse}`;
           });
         });
         
-        await Promise.all(savePromises);
-        
+        const created = await Promise.all(savePromises);
+        const newIds = new Set(
+          created.map((c: { id?: string }) => c?.id).filter((id): id is string => !!id)
+        );
+
+        // Re-read so we can see the Dataverse-stamped owner of the rows we just
+        // created (this run is marked by generatedon === now).
+        const { data: afterCreate } = await refetchBusinessInsights();
+        const all = afterCreate || [];
+        const myNewRows = all.filter(
+          (r: { id: string; generatedon?: string }) => r.generatedon === now || newIds.has(r.id)
+        );
+        // The current user's Dataverse owner id, taken from a row we just made.
+        const myOwnerId = (myNewRows[0]?.ownerid || '').toLowerCase();
+
+        // Delete only THIS user's PRIOR insights (same owner, not part of this
+        // run). Scoping by the Dataverse owner of our own fresh row guarantees
+        // we never touch another rep's insights, and it also clears legacy rows
+        // that were created before ownership stamping worked.
+        if (myOwnerId) {
+          const stale = all.filter(
+            (r: { id: string; ownerid?: string; generatedon?: string }) =>
+              (r.ownerid || '').toLowerCase() === myOwnerId &&
+              r.generatedon !== now &&
+              !newIds.has(r.id)
+          );
+          if (stale.length > 0) {
+            await Promise.all(
+              stale.map((insight: { id: string }) => deleteBusinessInsight.mutateAsync(insight.id))
+            );
+          }
+        }
+
         // Clear custom insight text so the component uses database data
         setCustomInsightText(null);
         
@@ -1756,10 +1778,20 @@ ${agentResponse}`;
     
     try {
       const { data: allInsights } = await refetchBusinessInsights();
-      // Multi-user safe: only clear THIS rep's insights, never other reps'.
-      const myInsights = (allInsights || []).filter(
-        (insight: { ownerid?: string }) => (insight.ownerid || '').toLowerCase() === (userId || '')
+      const all = allInsights || [];
+      // We cannot resolve the current user's Dataverse owner id directly (the
+      // systemuser table is not queryable from the Code App runtime). Derive it
+      // from the most recently generated insight the user can see — in a
+      // per-user panel that row belongs to the current user — and clear only
+      // rows with that same owner, so we never delete another rep's insights.
+      const newestFirst = [...all].sort(
+        (a: { generatedon?: string }, b: { generatedon?: string }) =>
+          (b.generatedon || '').localeCompare(a.generatedon || '')
       );
+      const myOwnerId = (newestFirst[0]?.ownerid || '').toLowerCase();
+      const myInsights = myOwnerId
+        ? all.filter((insight: { ownerid?: string }) => (insight.ownerid || '').toLowerCase() === myOwnerId)
+        : [];
 
       if (myInsights.length === 0) {
         toast.info(locale === 'zh-Hans' ? '没有需要清除的洞察数据' : 'No insights to clear');

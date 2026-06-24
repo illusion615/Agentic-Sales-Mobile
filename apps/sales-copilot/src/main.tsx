@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './index.css';
 import App from '@/app.tsx';
 import { initColorTheme } from '@/lib/i18n';
+import { refreshPromptResolution } from '@/services/prompt-resolver';
 
 // Initialize theme from localStorage or default to light
 const savedTheme = localStorage.getItem('theme');
@@ -30,3 +31,8 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </StrictMode>
 );
+
+// Resolve the AI prompt operation name for this environment in the background.
+// Self-heals (one reload) if the AI model GUID differs from the build-time value;
+// no-op when the GUID is unchanged.
+void refreshPromptResolution();

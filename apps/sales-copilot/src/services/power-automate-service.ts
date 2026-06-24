@@ -14,6 +14,9 @@
 
 import { getLLMConfig } from '@/lib/i18n';
 import { jsonrepair } from 'jsonrepair';
+import { getClient } from '@microsoft/power-apps/data';
+import { dataSourcesInfo } from '../../.power/schemas/appschemas/dataSourcesInfo';
+import { getTextPromptOpName } from './prompt-resolver';
 import { Msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75cService as TextPromptService } from '@/generated/services/Msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75cService';
 import { Msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323Service as JsonPromptService } from '@/generated/services/Msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323Service';
 import { Msdyn_aibdptcustomprompt228202435537pmbd0d86826d054e2ba9efc694a371f6fbService as DagPromptService } from '@/generated/services/Msdyn_aibdptcustomprompt228202435537pmbd0d86826d054e2ba9efc694a371f6fbService';
@@ -66,6 +69,28 @@ export function isFlowAvailable(): boolean {
 }
 
 /**
+ * Invoke a custom prompt by its (possibly runtime-resolved) Custom API operation
+ * name. Mirrors the generated TextPromptService call but with a dynamic name so
+ * it keeps working when the AI model GUID differs across environments.
+ */
+async function invokeTextPromptByOpName(
+  opName: string,
+  text: string,
+): Promise<{ success: boolean; data?: Record<string, unknown> | null; error?: { message?: string } }> {
+  const client = getClient(dataSourcesInfo);
+  return client.executeAsync<{ prompt_20text: string }, Record<string, unknown>>({
+    dataverseRequest: {
+      action: 'customapi',
+      parameters: {
+        operationName: opName,
+        tableName: opName,
+        body: { prompt_20text: text },
+      },
+    },
+  });
+}
+
+/**
  * Invoke AI Builder custom prompt directly via Dataverse Custom API.
  */
 export async function invokeFlowForLLM(
@@ -105,9 +130,17 @@ export async function invokeFlowForLLM(
       case 'json-generic':
         result = await JsonGenericPromptService.msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7('', text);
         break;
-      default: // 'text'
-        result = await TextPromptService.msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75c(text);
+      default: { // 'text' — main path, uses the runtime-resolved operation name
+        const opName = getTextPromptOpName();
+        result = await invokeTextPromptByOpName(opName, text);
+        // If a resolved (non build-time) name fails, fall back to the generated
+        // service so we are never worse off than before the dynamic resolver.
+        if (!result.success) {
+          console.warn('[AI Tool] dynamic prompt op failed, retrying with build-time service:', opName);
+          result = await TextPromptService.msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75c(text);
+        }
         break;
+      }
     }
 
     const latencyMs = Date.now() - startTime;

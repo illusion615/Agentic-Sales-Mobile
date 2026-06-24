@@ -115,6 +115,11 @@
           "entitySetName": "activityparties",
           "logicalName": "activityparty",
           "isHidden": false
+        },
+        "aimodels": {
+          "entitySetName": "msdyn_aimodels",
+          "logicalName": "msdyn_aimodel",
+          "isHidden": false
         }
       },
       "version": "v9.0",

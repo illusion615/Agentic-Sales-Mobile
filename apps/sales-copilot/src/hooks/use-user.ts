@@ -1,44 +1,30 @@
 import { useQuery } from '@tanstack/react-query';
 import { getContext } from '@microsoft/power-apps/app';
-import { getClient } from '@microsoft/power-apps/data';
-import { dataSourcesInfo } from '../../.power/schemas/appschemas/dataSourcesInfo';
-
-const dvClient = getClient(dataSourcesInfo);
 
 /**
- * Resolve the Dataverse systemuserid for the current user via email.
- * Uses the 'users' data source (registered via CLI as systemuser table).
+ * Current user context.
+ *
+ * `objectId` is the Entra (Azure AD) object id provided by the Power Apps host.
+ * It is always present and stable, so it is the reliable per-user key used to
+ * stamp/scope app-owned records (conversations, opportunities, etc.).
+ *
+ * Note: we deliberately do NOT resolve the Dataverse `systemuserid` by querying
+ * the `systemuser` table here — that query is not permitted from the deployed
+ * Code App runtime (it returns `success:false`), which previously left this
+ * value empty and broke every owner-scoped feature. Code that needs the
+ * Dataverse owner id (e.g. clearing the current user's own insights) derives it
+ * from a record the user just created, whose `_ownerid_value` Dataverse stamps
+ * automatically — see the insight regeneration logic in home.tsx.
  */
-async function resolveSystemUserId(email: string): Promise<string> {
-  for (const field of ['windowsliveid', 'internalemailaddress']) {
-    try {
-      const result = await dvClient.retrieveMultipleRecordsAsync<{
-        systemuserid: string;
-      }>('users', {
-        filter: `${field} eq '${email}'`,
-        select: ['systemuserid'],
-        top: 1,
-      } as any);
-      if (result.success && result.data?.[0]?.systemuserid) {
-        return result.data[0].systemuserid.toLowerCase();
-      }
-    } catch (e) {
-      console.warn(`[useUser] ${field} query failed:`, e);
-    }
-  }
-  return '';
-}
-
 export const useUser = () => {
   return useQuery({
     queryKey: ['user'],
     queryFn: async () => {
       const context = await getContext();
       const user = context.user;
-      const systemUserId = user.userPrincipalName
-        ? await resolveSystemUserId(user.userPrincipalName)
-        : undefined;
-      return { ...user, objectId: systemUserId };
+      // objectId already holds the Entra object id; keep it as the stable key.
+      return { ...user, objectId: (user.objectId || '').toLowerCase() };
     },
   });
 };
+

@@ -28,6 +28,7 @@ export * as Msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75cModel from '
 export * as Msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323Model from './models/Msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323Model';
 export * as Msdyn_aibdptcustomprompt228202435537pmbd0d86826d054e2ba9efc694a371f6fbModel from './models/Msdyn_aibdptcustomprompt228202435537pmbd0d86826d054e2ba9efc694a371f6fbModel';
 export * as Msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7Model from './models/Msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7Model';
+export * as Msdyn_aimodelsModel from './models/Msdyn_aimodelsModel';
 export * as PhonecallsModel from './models/PhonecallsModel';
 export * as PowerAppsFlow_LLMModel from './models/PowerAppsFlow_LLMModel';
 export * as SystemusersModel from './models/SystemusersModel';
@@ -69,6 +70,7 @@ export * from './services/Msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd7
 export * from './services/Msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323Service';
 export * from './services/Msdyn_aibdptcustomprompt228202435537pmbd0d86826d054e2ba9efc694a371f6fbService';
 export * from './services/Msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7Service';
+export * from './services/Msdyn_aimodelsService';
 export * from './services/PhonecallsService';
 export * from './services/PowerAppsFlow_LLMService';
 export * from './services/SystemusersService';

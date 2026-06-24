@@ -20,7 +20,7 @@ import { toast } from 'sonner';
 import { useActionDock } from '@/contexts/action-dock-context';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { newAttachmentId, type CopilotAttachment } from '@/lib/attachments';
-import { getContextualSuggestions } from '@/lib/contextual-suggestions';
+import { useDynamicSuggestions } from '@/hooks/use-dynamic-suggestions';
 
 
 
@@ -534,27 +534,20 @@ export function CopilotPanel() {
 
 
   // Get quick actions based on conversation or clarification suggestions
-  const getQuickActions = useCallback(() => {
-    // If there are clarification suggestions, show them as priority
-    if (clarificationSuggestions.length > 0) {
-      return clarificationSuggestions;
-    }
-
-    // Contextual follow-ups: derive from the most recent agent turn's function
-    // (e.g. after "list opportunities" → opportunity focus dimensions), so the
-    // suggestions track the latest conversation state instead of being static.
-    const lastAgentWithFn = [...messages].reverse().find(
-      (m) => m.role === 'assistant' && !!m.functionCalled
-    );
-    return getContextualSuggestions({
-      hasMessages: messages.length > 0,
-      lastFunctionCalled: lastAgentWithFn?.functionCalled,
-      locale,
-    });
-  }, [messages, locale, clarificationSuggestions]);
-
-  const quickActions = getQuickActions();
   const hasClarificationSuggestions = clarificationSuggestions.length > 0;
+
+  // Dynamic, LLM-generated follow-up pills. Generated in the background after
+  // each reply (while the user reads), with hidden→generating→ready states so
+  // the panel can fade pills out on send and show a skeleton while generating.
+  // Disabled while clarification/blocking pills must take priority.
+  const { status: suggestionStatus, pills: dynamicPills } = useDynamicSuggestions({
+    messages,
+    isSending,
+    locale,
+    enabled: !hasClarificationSuggestions && !inputLocked,
+  });
+
+  const quickActions = hasClarificationSuggestions ? clarificationSuggestions : dynamicPills;
 
   // For overlay mode, the AnimatePresence handles the open/close animation,
   // so we don't return null here - it's handled in the overlay render section below
@@ -1043,51 +1036,85 @@ export function CopilotPanel() {
           ? 'border-primary/30 bg-primary/5' 
           : 'border-border/20'
       )}>
-        {hasClarificationSuggestions && (
-          <p className="text-xs text-primary mb-2 font-medium">
-            {locale === 'zh-Hans' ? '请选择一个操作：' : 'Please choose an option:'}
-          </p>
-        )}
-        <div className="flex gap-2 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-          {quickActions.map((action: { text: string; query: string; action?: { function: string; arguments: Record<string, unknown> } }, idx: number) => (
-            <button
-              key={idx}
-              onClick={() => {
-                // While a blocking card is unresolved the composer is locked; the
-                // suggestion pills must be locked too, otherwise tapping one would
-                // send a new message and bypass the card. Route the tap to the
-                // card instead (same behaviour as the disabled composer).
-                if (inputLocked) {
-                  guideToBlockingCard();
-                  return;
-                }
-                // If action has function info, execute directly without LLM re-analysis
-                if (action.action) {
-                  executeClarificationAction(
-                    action.action.function,
-                    action.action.arguments,
-                    action.text
-                  );
-                } else {
-                  // Regular query - send as message
-                  shouldAutoScrollRef.current = true;
-                  sendMessage(action.query);
-                }
-              }}
-              disabled={isSending}
-              className={cn(
-                'shrink-0 whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-medium',
-                'transition-all active:scale-95',
-                'disabled:opacity-50 disabled:cursor-not-allowed',
-                inputLocked && 'opacity-50 cursor-not-allowed',
-                hasClarificationSuggestions
-                  ? 'bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 hover:border-primary/50'
-                  : 'bg-muted/50 hover:bg-muted text-foreground border border-border/50 hover:border-border'
-              )}
-            >
-              {action.text}
-            </button>
-          ))}
+        {/* Center the pills to the same max-width column as the input bar so that
+            on wide screens they cluster near the (centered) composer instead of
+            stretching across the full panel width. */}
+        <div className="mx-auto w-full max-w-md">
+          {hasClarificationSuggestions && (
+            <p className="text-xs text-primary mb-2 font-medium">
+              {locale === 'zh-Hans' ? '请选择一个操作：' : 'Please choose an option:'}
+            </p>
+          )}
+          {/* min-height keeps the bar a constant height so pills fade out → skeleton
+              → pills fade in without a layout jump. */}
+          <div className="relative min-h-[30px] flex items-center">
+            <AnimatePresence mode="wait" initial={false}>
+              {(hasClarificationSuggestions || suggestionStatus === 'ready') ? (
+                <motion.div
+                  key="pills"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.18 }}
+                  className="flex gap-2 overflow-x-auto w-full [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+                >
+                  {quickActions.map((action: { text: string; query: string; action?: { function: string; arguments: Record<string, unknown> } }, idx: number) => (
+                    <button
+                      key={idx}
+                      onClick={() => {
+                        // While a blocking card is unresolved the composer is locked; the
+                        // suggestion pills must be locked too, otherwise tapping one would
+                        // send a new message and bypass the card. Route the tap to the
+                        // card instead (same behaviour as the disabled composer).
+                        if (inputLocked) {
+                          guideToBlockingCard();
+                          return;
+                        }
+                        // If action has function info, execute directly without LLM re-analysis
+                        if (action.action) {
+                          executeClarificationAction(
+                            action.action.function,
+                            action.action.arguments,
+                            action.text
+                          );
+                        } else {
+                          // Regular query - send as message
+                          shouldAutoScrollRef.current = true;
+                          sendMessage(action.query);
+                        }
+                      }}
+                      disabled={isSending}
+                      className={cn(
+                        'shrink-0 whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-medium',
+                        'transition-all active:scale-95',
+                        'disabled:opacity-50 disabled:cursor-not-allowed',
+                        inputLocked && 'opacity-50 cursor-not-allowed',
+                        hasClarificationSuggestions
+                          ? 'bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 hover:border-primary/50'
+                          : 'bg-muted/50 hover:bg-muted text-foreground border border-border/50 hover:border-border'
+                      )}
+                    >
+                      {action.text}
+                    </button>
+                  ))}
+                </motion.div>
+              ) : suggestionStatus === 'generating' ? (
+                <motion.div
+                  key="skeleton"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.18 }}
+                  className="flex gap-2"
+                  aria-label={locale === 'zh-Hans' ? '正在生成建议' : 'Generating suggestions'}
+                >
+                  <div className="h-[26px] w-16 rounded-full bg-muted/60 animate-pulse" />
+                  <div className="h-[26px] w-24 rounded-full bg-muted/60 animate-pulse" />
+                  <div className="h-[26px] w-20 rounded-full bg-muted/60 animate-pulse" />
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+          </div>
         </div>
       </div>
 

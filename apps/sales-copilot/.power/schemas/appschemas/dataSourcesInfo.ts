@@ -26,6 +26,13 @@ export const dataSourcesInfo = {
     "dataSourceType": "Dataverse",
     "apis": {}
   },
+  "msdyn_aimodels": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "msdyn_aimodelid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
   "crf5c_aisummaries": {
     "tableId": "",
     "version": "",
