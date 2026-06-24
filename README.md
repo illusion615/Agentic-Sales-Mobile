@@ -50,9 +50,9 @@ npx -y @microsoft/power-apps-cli@0.11.6 push   # 推送 dist 到 Power Apps
 
 ## 部署到你自己的环境（Deployment Guide）
 
-本应用是 **Power Apps Code App**，运行时直连一个 **Dataverse** 环境，并依赖若干自定义表、一个 AI Builder 自定义 Prompt，以及（可选）一个 Copilot Studio 智能体。把它部署到你自己的租户，需要先在目标环境里准备好这些后端对象，再把前端构建产物推上去。
+本应用是 **Power Apps Code App**，运行时直连一个 **Dataverse** 环境，并依赖若干自定义表、一个 AI Builder 自定义 Prompt，以及一个 Copilot Studio 后端智能体（承载产品知识问答等场景）。部署到目标租户需先在环境中备齐这些后端对象，再推送前端构建产物。
 
-> ⚠️ 仓库里的 `power.config.json`、`playwright.config.ts` 等文件包含的是**原作者的 demo 环境标识**（org URL、environmentId、appId 等）。这些不是密钥，但你必须全部替换成自己的，否则会推到（或连到）错误的环境。下文「环境标识替换清单」列出了每一处。
+> 仓库内 `power.config.json`、`playwright.config.ts` 等文件中的环境标识（org URL、environmentId、appId 等）为示例值，并非密钥，但须全部替换为目标环境的对应值，否则会连接或推送到错误的环境。完整清单见下文「环境标识替换清单」。
 
 ### 前置条件
 
@@ -60,8 +60,8 @@ npx -y @microsoft/power-apps-cli@0.11.6 push   # 推送 dist 到 Power Apps
 | --- | --- |
 | Power Platform | 一个含 **Dataverse** 的环境，且已启用 **Code Apps**（Power Apps Code App 预览特性）。 |
 | AI Builder | 环境已启用 AI Builder（用于自定义 Prompt，**会消耗 AI Builder 额度**）。 |
-| Copilot Studio | 仅当你要用 Copilot Studio 后端模式时需要；否则可用前端 BYOM（自带模型）模式。 |
-| 本地工具 | Node.js **22 LTS**（必须，见陷阱说明）、`pnpm`、Power Apps CLI（`@microsoft/power-apps-cli`）。 |
+| Copilot Studio | 产品知识问答等场景的后端智能体；不需这类场景时可改用前端 BYOM（自带模型）模式。 |
+| 本地工具 | Node.js **22 LTS**（Node 23+ 存在 esbuild/fsevents 兼容问题）、`pnpm`、Power Apps CLI（`@microsoft/power-apps-cli`）。 |
 | 权限 | 目标环境的 **System Administrator / System Customizer**（导入方案、注册 Code App 需要）。 |
 | 解决方案文件 | 本应用的后端对象（自定义表等）由一个 **Dataverse 解决方案 `.zip`** 提供，**不在本仓库内**，需向应用维护者单独获取。 |
 
@@ -98,17 +98,17 @@ npx -y @microsoft/power-apps-cli@0.11.6 push   # 推送 dist 到 Power Apps
 - **输出**：**Text**（纯文本；不要用 AI Builder 的 JSON 结构化输出，本项目客户端自行做 Zod 解析）。
 - 创建后**发布**，并确保运行账号有读取权限。
 
-> ✅ 这一步是**自愈**的：你环境里的 Prompt GUID 一定和仓库里的不同，但只要**名字一致**，应用首启会自动解析正确 GUID 并缓存，无需改代码。若 AI 回复异常，应用设置页会提示确认该 Prompt 是否已导入并发布。
+> Prompt 的 GUID 在不同环境各不相同；应用按显示名称在运行时解析对应 GUID 并缓存，无需修改代码。若 AI 回复异常，应用设置页会提示确认该 Prompt 是否已导入并发布。
 
-### 步骤 3 —（可选）配置 Copilot Studio 后端智能体
+### 步骤 3 — 配置 Copilot Studio 后端智能体
 
-如果使用 Copilot Studio 后端模式（而非前端 BYOM）：
+Copilot Studio 后端承载产品知识问答等场景，这些场景下必须配置。仅当部署不涉及该类场景时，可改用前端 BYOM 模式（见本步骤末尾）。
 
 1. 智能体若随解决方案导入并发布则直接复用；否则按 [`copilot-studio/`](copilot-studio/) 的设计（`instructions.md` + `skills/`）在 Copilot Studio 创建并发布。
 2. 在 `crf5c_setting` 表新增一行：`settingKey = copilot_studio_agent_name`，`settingValue = <你的智能体 schema 名>`。
 3. 在 `power.config.json` 的 `connectionReferences` 里，把 Copilot Studio 连接换成你自己环境的连接。
 
-> 不配置 Copilot Studio 时，应用使用前端**本地轻量级智能体（BYOM）**模式，你在应用「设置」页填入自己的 LLM provider / endpoint / API Key 即可（这些是按用户存储的运行时配置，不入库、不进仓库）。
+> 在不涉及产品知识问答等场景、未配置 Copilot Studio 时，应用使用前端**本地轻量级智能体（BYOM）**模式，在应用「设置」页填入 LLM provider / endpoint / API Key（这些为按用户存储的运行时配置，不入库、不进仓库）。
 
 ### 步骤 4 — 把应用指向你的环境（替换环境标识）
 
@@ -122,7 +122,7 @@ npx -y @microsoft/power-apps-cli@0.11.6 push   # 推送 dist 到 Power Apps
 | `connectionReferences.*` | 你自己的连接引用（如使用 Copilot Studio） |
 | `tags.projectId` | 你自己的，或留空 |
 
-> 更干净的做法是在目标环境对着空目录跑一次 Code App 初始化（`init`）重新生成 `power.config.json`，再逐张表 `add-data-source`。注意：**`pac code add-data-source` 对 Dataverse 有 bug**，请用 npm 版 CLI，例如：
+> 另一种方式：在目标环境对空目录运行 Code App 初始化（`init`）重新生成 `power.config.json`，再逐表执行 `add-data-source`。注意：**`pac code add-data-source` 对 Dataverse 有 bug**，请用 npm 版 CLI，例如：
 > ```bash
 > npx -y @microsoft/power-apps-cli@0.11.6 add-data-source \
 >   --api-id dataverse --resource-name <logicalName> \
@@ -141,7 +141,7 @@ export POWER_APPS_URL="https://apps.powerapps.com/play/e/<env>/app/<appId>?tenan
 cd apps/sales-copilot
 nvm use            # Node.js 22 LTS（Node 23+ 有 esbuild/fsevents 问题）
 pnpm install
-pnpm build         # tsc -b && vite build（首次冷编译可能耗时较久，勿中断）
+pnpm build         # tsc -b && vite build（首次冷编译耗时较长，属正常现象）
 npx -y @microsoft/power-apps-cli@0.11.6 push
 ```
 

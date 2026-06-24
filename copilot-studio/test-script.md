@@ -79,12 +79,12 @@
 | A7.2 | 给我排个本周计划。 | 同上，horizon=本周。 | |
 | A7.3 | Who haven't I contacted in a while? | 找出最近无活动的 account/deal，列出最后联系日期，建议 follow-up。 | |
 
-### A8. Mindray Knowledge Agent (connected) — 产品问答（只读）
+### A8. Knowledge Agent (connected) — 产品问答（只读）
 
 | # | Input | Expected | Result |
 |---|-------|----------|--------|
-| A8.1 | What's the warranty on the BeneVision N22? | 路由到连接的 Mindray Knowledge Agent。从 Mindray 知识库回答，不查 Dataverse。 | |
-| A8.2 | Recommend a patient monitor suitable for a high-acuity ICU. | 推荐 Mindray 监护仪型号+理由。不涉及 CRM 写入。 | |
+| A8.1 | What's the warranty on the BeneVision N22? | 路由到连接的 Knowledge Agent。从知识库回答，不查 Dataverse。 | |
+| A8.2 | Recommend a patient monitor suitable for a high-acuity ICU. | 推荐监护仪型号+理由。不涉及 CRM 写入。 | |
 | A8.3 | Compare the Resona I9 and Resona R9 ultrasound systems. | 从知识库对比两款产品的关键参数。 | |
 | A8.4 | BeneVision N22 的屏幕尺寸是多少？ | 中文产品问答，从知识库回答。 | |
 
@@ -233,9 +233,9 @@
 
 | # | Input | Expected | Result |
 |---|-------|----------|--------|
-| J1 | What is the warranty on the BeneVision N22? | → 连接的 Mindray Knowledge Agent (Knowledge intent, 只读) | |
+| J1 | What is the warranty on the BeneVision N22? | → 连接的 Knowledge Agent (Knowledge intent, 只读) | |
 | J2 | I demoed the BeneVision N22 at the hospital today. | → log-sales-activity (Log intent, 写入 CRM) | |
-| J3 | Does the Resona I9 support 3D imaging? | → 连接的 Mindray Knowledge Agent | |
+| J3 | Does the Resona I9 support 3D imaging? | → 连接的 Knowledge Agent | |
 | J4 | 今天在客户那边演示了 Resona I9。 | → log-sales-activity | |
 
 ---
