@@ -226,6 +226,9 @@ export interface ChatMessage {
       matchType: 'exact' | 'contains' | 'fuzzy';
       accountId?: string;
       accountName?: string;
+      title?: string;
+      phone?: string;
+      email?: string;
     }>;
     // Low-confidence matches (<70) for the "Show more" collapsible
     lowConfidenceMatches?: Array<{
@@ -236,6 +239,9 @@ export interface ChatMessage {
       matchType: 'exact' | 'contains' | 'fuzzy';
       accountId?: string;
       accountName?: string;
+      title?: string;
+      phone?: string;
+      email?: string;
     }>;
     confidence: 'high' | 'medium' | 'low' | 'none';
     pendingAction?: string;
@@ -1866,8 +1872,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             // Create a match-selection message for fuzzy matching
             setIsSending(false);
             const matchResult = response.functionResult as { 
-              matches: Array<{ id: string; name: string; industry?: string; title?: string; score: number; matchType: 'exact' | 'contains' | 'fuzzy'; accountId?: string; accountName?: string }>; 
-              lowConfidenceMatches?: Array<{ id: string; name: string; industry?: string; title?: string; score: number; matchType: 'exact' | 'contains' | 'fuzzy'; accountId?: string; accountName?: string }>;
+              matches: Array<{ id: string; name: string; industry?: string; title?: string; phone?: string; email?: string; score: number; matchType: 'exact' | 'contains' | 'fuzzy'; accountId?: string; accountName?: string }>; 
+              lowConfidenceMatches?: Array<{ id: string; name: string; industry?: string; title?: string; phone?: string; email?: string; score: number; matchType: 'exact' | 'contains' | 'fuzzy'; accountId?: string; accountName?: string }>;
               confidence: 'high' | 'medium' | 'low' | 'none'; 
               needsConfirmation: boolean; 
               exactMatch?: { id: string; name: string };
@@ -1942,6 +1948,9 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                     id: m.id,
                     name: m.name,
                     subtitle: m.industry || m.title,
+                    title: m.title,
+                    phone: m.phone,
+                    email: m.email,
                     score: m.score,
                     matchType: m.matchType,
                     accountId: m.accountId,
@@ -1951,6 +1960,9 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                     id: m.id,
                     name: m.name,
                     subtitle: m.industry || m.title,
+                    title: m.title,
+                    phone: m.phone,
+                    email: m.email,
                     score: m.score,
                     matchType: m.matchType,
                     accountId: m.accountId,
@@ -2366,7 +2378,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           }
 
           const matchData = matchResult.data as {
-            matches: Array<{ id: string; name: string; score: number; matchType: 'exact' | 'contains' | 'fuzzy'; accountId?: string; accountName?: string; subtitle?: string }>;
+            matches: Array<{ id: string; name: string; score: number; matchType: 'exact' | 'contains' | 'fuzzy'; accountId?: string; accountName?: string; subtitle?: string; title?: string; phone?: string; email?: string }>;
           };
           const highConf = matchData.matches.filter((m) => m.score >= 70);
 
@@ -2444,6 +2456,10 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             name: m.name,
             score: m.score,
             subtitle: m.accountName,
+            title: m.title,
+            phone: m.phone,
+            email: m.email,
+            accountName: m.accountName,
           }));
           const pendingKind: 'contact' | 'account' | 'opportunity' =
             item.entityType === 'activity' ? 'opportunity' : (item.entityType as 'contact' | 'account' | 'opportunity');
@@ -3097,13 +3113,16 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       );
       if (!result.success || !result.data) return;
       const matchData = result.data as {
-        matches: Array<{ id: string; name: string; subtitle?: string; industry?: string; title?: string; score: number; matchType: 'exact' | 'contains' | 'fuzzy'; accountId?: string; accountName?: string }>;
+        matches: Array<{ id: string; name: string; subtitle?: string; industry?: string; title?: string; phone?: string; email?: string; score: number; matchType: 'exact' | 'contains' | 'fuzzy'; accountId?: string; accountName?: string }>;
         confidence: 'high' | 'medium' | 'low' | 'none';
       };
       const normalize = (m: typeof matchData.matches[number]) => ({
         id: m.id,
         name: m.name,
         subtitle: m.subtitle || m.industry || m.title || m.accountName,
+        title: m.title,
+        phone: m.phone,
+        email: m.email,
         score: m.score,
         matchType: m.matchType,
         accountId: m.accountId,

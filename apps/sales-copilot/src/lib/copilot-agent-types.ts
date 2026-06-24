@@ -122,6 +122,9 @@ export interface FuzzyMatchData {
     matchType: string;
     accountId?: string;
     accountName?: string;
+    title?: string;
+    phone?: string;
+    email?: string;
   }>;
   confidence: 'high' | 'medium' | 'low' | 'none';
   needsConfirmation: boolean;

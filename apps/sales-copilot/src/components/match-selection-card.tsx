@@ -16,7 +16,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { Search, Check, Building2, User, TrendingUp, AlertCircle, Plus, SkipForward, ChevronDown, ChevronUp, CheckCircle2 } from 'lucide-react';
+import { Search, Check, Building2, User, TrendingUp, AlertCircle, Plus, SkipForward, ChevronDown, ChevronUp, CheckCircle2, Phone, Mail } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
@@ -32,6 +32,9 @@ type MatchRecord = {
   accountId?: string;
   accountName?: string;
   stage?: string;
+  title?: string;
+  phone?: string;
+  email?: string;
 };
 
 /**
@@ -311,23 +314,46 @@ export function MatchSelectionCard({
         isLowConf && 'opacity-75',
       )}
     >
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-1 min-w-0">
         <div className={cn(
-          'w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium',
+          'w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium shrink-0',
           match.score >= 90 ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
           match.score >= 70 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
           'bg-muted text-muted-foreground',
         )}>
           {Math.round(match.score)}
         </div>
-        <div>
-          <p className="text-sm font-medium text-foreground">{match.name}</p>
-          {match.subtitle && (
-            <p className="text-xs text-muted-foreground">{match.subtitle}</p>
-          )}
-        </div>
+        {matchSelection.entityType === 'contact' ? (
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground truncate">{match.name}</p>
+            {(match.title || match.accountName) && (
+              <p className="text-xs text-muted-foreground truncate">
+                {[match.title, match.accountName].filter(Boolean).join(' · ')}
+              </p>
+            )}
+            {match.phone && (
+              <p className="text-[11px] text-muted-foreground flex items-center gap-1 truncate">
+                <Phone className="w-3 h-3 shrink-0" />
+                <span className="truncate">{match.phone}</span>
+              </p>
+            )}
+            {match.email && (
+              <p className="text-[11px] text-muted-foreground flex items-center gap-1 truncate">
+                <Mail className="w-3 h-3 shrink-0" />
+                <span className="truncate">{match.email}</span>
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground truncate">{match.name}</p>
+            {match.subtitle && (
+              <p className="text-xs text-muted-foreground truncate">{match.subtitle}</p>
+            )}
+          </div>
+        )}
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 shrink-0">
         <span className="text-xs text-muted-foreground">
           {getMatchTypeLabel(match.matchType)}
         </span>

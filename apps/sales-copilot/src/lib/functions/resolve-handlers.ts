@@ -53,6 +53,7 @@ const fuzzyMatchContact: FunctionHandler = async (args) => {
       const enhancedScore = calculateEnhancedMatchScore(query, name);
       return {
         id: c.id, name: c.fullname || '', title: c.title,
+        phone: c.phone, email: c.email,
         accountName: c.account?.name1, accountId: c.account?.id,
         score: enhancedScore.score, matchType: enhancedScore.matchType,
       };

@@ -7,6 +7,7 @@
 
 import { toast, ExternalToast } from 'sonner';
 import { getLocale, type Locale } from '@/lib/i18n';
+import { fireFeedback } from '@/lib/feedback';
 
 // Toast message keys for i18n
 const toastMessages = {
@@ -130,6 +131,8 @@ export function showSuccess(
     duration: TOAST_DURATION.success,
     ...toastOptions,
   });
+  // Atmospheric feedback (Settings ▸ Success). No-op unless the user opts in.
+  fireFeedback('success');
 }
 
 /**
@@ -153,6 +156,8 @@ export function showError(
     duration: TOAST_DURATION.error,
     ...toastOptions,
   });
+  // Atmospheric feedback (Settings ▸ Failure). No-op unless the user opts in.
+  fireFeedback('failure');
 }
 
 /**
@@ -189,6 +194,8 @@ export function showWarning(
     duration: TOAST_DURATION.warning,
     ...toastOptions,
   });
+  // Atmospheric feedback (Settings ▸ Warning). No-op unless the user opts in.
+  fireFeedback('warning');
 }
 
 /**

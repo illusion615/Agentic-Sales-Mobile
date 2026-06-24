@@ -453,3 +453,70 @@ html.light {
     background: linear-gradient(135deg, #FF7A00 0%, #FF9933 100%);
   }
 }
+
+/* ========================================
+   Onboarding tour (driver.js) — brand + dark-mode theme
+   ======================================== */
+.driver-popover.sc-onboarding {
+  border-radius: 14px;
+  padding: 18px 18px 14px;
+  max-width: 320px;
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.22);
+}
+.driver-popover.sc-onboarding .driver-popover-title {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.driver-popover.sc-onboarding .driver-popover-description {
+  font-size: 13px;
+  line-height: 1.55;
+}
+.driver-popover.sc-onboarding .driver-popover-progress-text {
+  font-size: 12px;
+  opacity: 0.55;
+}
+.driver-popover.sc-onboarding .driver-popover-next-btn,
+.driver-popover.sc-onboarding .driver-popover-prev-btn {
+  text-shadow: none;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 7px 16px;
+}
+.driver-popover.sc-onboarding .driver-popover-next-btn {
+  background: var(--scm-orange, #008a7a);
+  color: #fff;
+}
+.driver-popover.sc-onboarding .driver-popover-prev-btn {
+  background: transparent;
+  color: var(--scm-orange, #008a7a);
+}
+
+/* Dark mode */
+.dark .driver-popover.sc-onboarding {
+  background: #161b2c;
+  color: #e6e9f4;
+}
+.dark .driver-popover.sc-onboarding .driver-popover-title {
+  color: #ffffff;
+}
+.dark .driver-popover.sc-onboarding .driver-popover-description {
+  color: rgba(230, 233, 244, 0.72);
+}
+.dark .driver-popover.sc-onboarding .driver-popover-close-btn {
+  color: rgba(230, 233, 244, 0.6);
+}
+.dark .driver-popover.sc-onboarding .driver-popover-arrow-side-left.driver-popover-arrow {
+  border-left-color: #161b2c;
+}
+.dark .driver-popover.sc-onboarding .driver-popover-arrow-side-right.driver-popover-arrow {
+  border-right-color: #161b2c;
+}
+.dark .driver-popover.sc-onboarding .driver-popover-arrow-side-top.driver-popover-arrow {
+  border-top-color: #161b2c;
+}
+.dark .driver-popover.sc-onboarding .driver-popover-arrow-side-bottom.driver-popover-arrow {
+  border-bottom-color: #161b2c;
+}

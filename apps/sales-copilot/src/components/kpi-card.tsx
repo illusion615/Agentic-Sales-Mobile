@@ -4,6 +4,7 @@ import { ChevronRight, ChevronLeft, ChevronDown, Calendar, Target, Phone, MapPin
 import { cn } from '@/lib/utils';
 import { formatCurrencyCompact } from '@/lib/format-currency';
 import { getLocale, getWeekStartDay, type Locale } from '@/lib/i18n';
+import { fireFeedback } from '@/lib/feedback';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
@@ -398,82 +399,17 @@ export function KPICards({
     // If we had overdue items before and now we have 0, celebrate!
     if (prevOverdueCount !== null && prevOverdueCount > 0 && currentOverdueCount === 0) {
       setShowCelebration(true);
-      // Auto-hide celebration after animation
+      // Atmospheric animation is user-configurable (Settings ▸ Milestone).
+      fireFeedback('milestone');
+      // Auto-hide the message box after the animation window.
       const timer = setTimeout(() => setShowCelebration(false), 3000);
       return () => clearTimeout(timer);
     }
     setPrevOverdueCount(currentOverdueCount);
   }, [data.overdueItems?.length, prevOverdueCount]);
 
-  // Confetti particle component - shoots from bottom corners diagonally upward
-  const ConfettiParticle = ({ index }: { index: number }) => {
-    const colors = ['#f59e0b', '#10b981', '#3b82f6', '#ec4899', '#8b5cf6', '#f43f5e', '#06b6d4', '#84cc16'];
-    const color = colors[index % colors.length];
-    
-    // Determine which side (left or right bottom corner)
-    const isLeftSide = index % 2 === 0;
-    
-    // Random parameters for natural variation
-    const randomDelay = Math.random() * 0.3;
-    const randomDuration = 1.8 + Math.random() * 0.8;
-    const size = 6 + Math.random() * 10;
-    const shape = index % 3; // 0: square, 1: circle, 2: rectangle
-    
-    // Shooting angle - diagonal upward from corner
-    // Left side shoots up-right, right side shoots up-left
-    const baseAngle = isLeftSide ? 60 : 120; // degrees from horizontal
-    const angleVariation = (Math.random() - 0.5) * 40; // ±20 degrees variation
-    const angle = (baseAngle + angleVariation) * (Math.PI / 180);
-    
-    // Initial velocity
-    const velocity = 400 + Math.random() * 200;
-    
-    // Calculate trajectory
-    const peakX = Math.cos(angle) * velocity * 0.4;
-    const peakY = -Math.sin(angle) * velocity * 0.4; // negative because Y increases downward
-    
-    // Starting position (bottom corners)
-    const startX = isLeftSide ? 10 : 90; // percentage from left
-    const startY = 100; // percentage from top (bottom of screen)
-    
-    // Rotation during flight
-    const rotationAmount = (Math.random() - 0.5) * 1080;
-    
-    return (
-      <motion.div
-        className="absolute pointer-events-none"
-        style={{
-          left: `${startX}%`,
-          bottom: 0,
-          width: shape === 2 ? size * 1.5 : size,
-          height: shape === 2 ? size * 0.6 : size,
-          backgroundColor: color,
-          borderRadius: shape === 1 ? '50%' : shape === 2 ? 2 : 0,
-        }}
-        initial={{ 
-          x: 0, 
-          y: 0, 
-          opacity: 1, 
-          rotate: 0,
-          scale: 0.5
-        }}
-        animate={{
-          // Parabolic motion: shoot up diagonally then fall
-          x: [0, peakX * 0.5, peakX, peakX + (isLeftSide ? 30 : -30), peakX + (isLeftSide ? 50 : -50)],
-          y: [0, peakY * 0.6, peakY, peakY + 150, peakY + 400],
-          opacity: [1, 1, 1, 0.8, 0],
-          rotate: [0, rotationAmount * 0.3, rotationAmount * 0.6, rotationAmount * 0.85, rotationAmount],
-          scale: [0.5, 1, 1, 0.9, 0.7],
-        }}
-        transition={{
-          duration: randomDuration,
-          delay: randomDelay,
-          ease: [0.25, 0.1, 0.25, 1] as const,
-          times: [0, 0.25, 0.5, 0.75, 1],
-        }}
-      />
-    );
-  };
+  // Confetti particles for the celebration now come from the global
+  // FeedbackHost (Settings ▸ Milestone). This card only renders the message.
 
   
   // Get overdue items count
@@ -513,12 +449,7 @@ export function KPICards({
     
     return (
       <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden">
-        {/* Confetti particles */}
-        {Array.from({ length: 50 }).map((_, i: number) => (
-          <ConfettiParticle key={i} index={i} />
-        ))}
-        
-        {/* Success message */}
+        {/* Success message (confetti is rendered globally by FeedbackHost) */}
         <motion.div
           className="absolute inset-0 flex items-center justify-center"
           initial={{ opacity: 0, scale: 0.8 }}

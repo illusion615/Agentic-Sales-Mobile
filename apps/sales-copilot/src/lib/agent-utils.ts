@@ -728,6 +728,10 @@ export const ResolutionCandidateSchema = z.object({
   name: z.string(),
   score: z.number(),
   subtitle: z.string().optional(),
+  title: z.string().optional(),
+  phone: z.string().optional(),
+  email: z.string().optional(),
+  accountName: z.string().optional(),
 });
 export type ResolutionCandidate = z.infer<typeof ResolutionCandidateSchema>;
 

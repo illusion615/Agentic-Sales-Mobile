@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { ArrowLeft, Moon, Sun, Globe, HelpCircle, LogOut, Volume2, Play, Type, Palette, CircleDot, LayoutGrid, Speech, X, Zap, MessageSquare, LayoutDashboard, Database, Bug, FileCode, ChevronRight, Monitor, Calendar, Maximize, Bot, Sparkles } from 'lucide-react';
+import { ArrowLeft, Moon, Sun, Globe, HelpCircle, LogOut, Volume2, Play, Type, Palette, CircleDot, LayoutGrid, Speech, X, Zap, MessageSquare, LayoutDashboard, Database, Bug, FileCode, ChevronRight, Monitor, Calendar, Maximize, Bot, Sparkles, Compass } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
 import { ThinkingIndicator } from '@/components/thinking-indicator';
@@ -14,6 +14,19 @@ import { getPromptResolutionStatus, PROMPT_RESOLUTION_EVENT } from '@/services/p
 import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, setSelectedVoice, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getDebugMode, setDebugMode, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, getCopilotDockLayout, setCopilotDockLayout, copilotDockLayoutLabels, getWeekStartDay, setWeekStartDay, getCopilotFullscreenDefault, setCopilotFullscreenDefault, getAgendaDefaultExpanded, setAgendaDefaultExpanded, getCopilotListDefaultView, setCopilotListDefaultView, getCopilotListTopN, setCopilotListTopN, type Locale, type VoiceOption, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget, type CopilotDockLayout, type WeekStartDay, type CopilotListDefaultView } from '@/lib/i18n';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
+import {
+  getFeedbackEnabled,
+  setFeedbackEnabled,
+  getScenarioStyle,
+  setScenarioStyle,
+  fireFeedback,
+  SCENARIOS,
+  STYLE_META,
+  FEEDBACK_SCENARIO_ORDER,
+  type FeedbackScenario,
+  type FeedbackStyleId,
+} from '@/lib/feedback';
+import { startOnboarding } from '@/lib/onboarding';
 import {
   Select,
   SelectContent,
@@ -102,6 +115,13 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const [autoPlayResponse, setAutoPlayResponseState] = useState(getAutoPlayAgentResponse);
   const [colorTheme, setColorThemeState] = useState<ColorTheme>(() => getColorTheme());
   const [thinkingDotStyle, setThinkingDotStyleState] = useState<ThinkingDotStyle>(() => getThinkingDotStyle());
+  const [feedbackEnabled, setFeedbackEnabledState] = useState(() => getFeedbackEnabled());
+  const [feedbackStyles, setFeedbackStylesState] = useState<Record<FeedbackScenario, FeedbackStyleId>>(() => ({
+    success: getScenarioStyle('success'),
+    milestone: getScenarioStyle('milestone'),
+    failure: getScenarioStyle('failure'),
+    warning: getScenarioStyle('warning'),
+  }));
   const [voiceSummaryEnabled, setVoiceSummaryEnabledState] = useState(() => getVoiceSummaryEnabled());
   const [copilotInAllScreens, setCopilotInAllScreensState] = useState(() => getCopilotInAllScreens());
   const [copilotDockLayout, setCopilotDockLayoutState] = useState<CopilotDockLayout>(() => getCopilotDockLayout());
@@ -193,6 +213,18 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const handleThinkingDotStyleChange = (style: ThinkingDotStyle) => {
     setThinkingDotStyleState(style);
     setThinkingDotStyle(style);
+  };
+
+  const handleFeedbackEnabledChange = (enabled: boolean) => {
+    setFeedbackEnabledState(enabled);
+    setFeedbackEnabled(enabled);
+  };
+
+  const handleFeedbackStyleChange = (scenario: FeedbackScenario, style: FeedbackStyleId) => {
+    setFeedbackStylesState((prev) => ({ ...prev, [scenario]: style }));
+    setScenarioStyle(scenario, style);
+    // Live preview: play the chosen animation immediately (skips if 'none').
+    fireFeedback(scenario);
   };
 
   const handleVoiceChange = (voiceId: string) => {
@@ -503,6 +535,16 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                   />
                 }
               />
+              <SettingsItem
+                icon={Compass}
+                label={locale === 'zh-Hans' ? '新手指引' : 'App Tour'}
+                onClick={() => {
+                  if (onClose) onClose();
+                  // Let the home screen mount so spotlight anchors are present.
+                  window.setTimeout(() => startOnboarding(locale), 500);
+                }}
+                rightElement={<ChevronRight className="w-4 h-4 text-muted-foreground" />}
+              />
             </div>
           </motion.div>
 
@@ -604,6 +646,48 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                   </Select>
                 }
               />
+              {/* ── Scenario feedback animations ── */}
+              <SettingsItem
+                icon={Sparkles}
+                label={locale === 'zh-Hans' ? '场景反馈动画' : 'Scenario Feedback'}
+                rightElement={
+                  <Switch checked={feedbackEnabled} onCheckedChange={handleFeedbackEnabledChange} />
+                }
+              />
+              {feedbackEnabled && (
+                <div className="pl-8 pr-1 space-y-2">
+                  {FEEDBACK_SCENARIO_ORDER.map((scenario: FeedbackScenario) => {
+                    const meta = SCENARIOS[scenario];
+                    return (
+                      <div key={scenario} className="flex items-center gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-foreground truncate">
+                            {locale === 'zh-Hans' ? meta.label.zh : meta.label.en}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground truncate">
+                            {locale === 'zh-Hans' ? meta.hint.zh : meta.hint.en}
+                          </p>
+                        </div>
+                        <Select
+                          value={feedbackStyles[scenario]}
+                          onValueChange={(val: string) => handleFeedbackStyleChange(scenario, val as FeedbackStyleId)}
+                        >
+                          <SelectTrigger className="w-28 h-8 text-sm bg-transparent border-border/50 shrink-0">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {meta.styles.map((styleId: FeedbackStyleId) => (
+                              <SelectItem key={styleId} value={styleId}>
+                                {locale === 'zh-Hans' ? STYLE_META[styleId].label.zh : STYLE_META[styleId].label.en}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </motion.div>
 

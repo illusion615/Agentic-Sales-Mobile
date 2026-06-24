@@ -941,11 +941,15 @@ async function processMessageInner(
         } else {
           const isDraftFn = typeof intent.function === 'string' && intent.function.startsWith('draft');
           if (isDraftFn) {
-            const topCandidates: ResolutionCandidate[] = matchData.matches.slice(0, 3).map((m: { id: string; name: string; score: number; accountName?: string }) => ({
+            const topCandidates: ResolutionCandidate[] = matchData.matches.slice(0, 3).map((m: { id: string; name: string; score: number; accountName?: string; title?: string; phone?: string; email?: string }) => ({
               id: m.id,
               name: m.name,
               score: m.score,
               subtitle: m.accountName,
+              title: m.title,
+              phone: m.phone,
+              email: m.email,
+              accountName: m.accountName,
             }));
             const pendingKind: 'contact' | 'account' | 'opportunity' =
               entityType === 'activity' ? 'opportunity' : (entityType as 'contact' | 'account' | 'opportunity');

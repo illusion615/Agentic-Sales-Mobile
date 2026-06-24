@@ -788,6 +788,10 @@ export function CopilotPanel() {
                     id: c.id,
                     name: c.name,
                     subtitle: c.subtitle,
+                    title: c.title,
+                    phone: c.phone,
+                    email: c.email,
+                    accountName: c.accountName,
                     score: c.score,
                     matchType: 'fuzzy' as const,
                   })),
@@ -1204,6 +1208,7 @@ export function CopilotPanel() {
         {/* Input Field — auto-grows up to 4 lines, then scrolls internally */}
         <textarea
           ref={inputRef}
+          data-tour="copilot-input"
           rows={1}
           value={inputValue}
           onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setInputValue(e.target.value)}

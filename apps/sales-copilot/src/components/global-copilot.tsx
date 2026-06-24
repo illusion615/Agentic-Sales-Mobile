@@ -28,7 +28,8 @@ export function GlobalCopilot() {
   const isCopilotConfigured = useCopilotConfigured();
   const isHomePage = location.pathname === '/' || location.pathname === '/home';
   const isSettingsPage = location.pathname === '/settings';
-  const shouldShowCopilot = !isSettingsPage && isCopilotConfigured && (isHomePage || enabled);
+  const isHelpPage = location.pathname === '/help-feedback';
+  const shouldShowCopilot = !isSettingsPage && !isHelpPage && isCopilotConfigured && (isHomePage || enabled);
   const effectiveLayout: CopilotDockLayout = isMobile ? 'float' : dockLayout;
 
   if (!shouldShowCopilot) {

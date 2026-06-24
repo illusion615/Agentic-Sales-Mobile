@@ -4,6 +4,7 @@ import { GlobalCopilot, useCopilotSideDocked } from '@/components/global-copilot
 import { CopilotProvider } from '@/contexts/copilot-context';
 import { SettingsProvider } from '@/contexts/settings-context';
 import { ActionDockProvider } from '@/contexts/action-dock-context';
+import { FeedbackHost } from '@/components/feedback/feedback-host';
 
 function LayoutInner() {
   const { docked, side } = useCopilotSideDocked();
@@ -15,6 +16,7 @@ function LayoutInner() {
         <Outlet />
         <GlobalCopilot />
         <Toaster richColors position="top-center" toastOptions={{ className: 'max-w-[280px] mx-auto' }} />
+        <FeedbackHost />
       </div>
     );
   }
@@ -28,6 +30,7 @@ function LayoutInner() {
       </div>
       {side === 'right' && <GlobalCopilot />}
       <Toaster richColors position="top-center" toastOptions={{ className: 'max-w-[280px] mx-auto' }} />
+      <FeedbackHost />
     </div>
   );
 }

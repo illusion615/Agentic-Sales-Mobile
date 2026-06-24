@@ -20,6 +20,7 @@ import { formatCurrencyCompact, formatCurrencyFull } from '@/lib/format-currency
 import { SettingsPanel } from '@/components/settings-panel';
 import type { Activity } from '@/generated/models/activity-model';import type { Opportunity } from '@/generated/models/opportunity-model';import type { Account } from '@/generated/models/account-model';import { useCopilotConfigured } from '@/hooks/use-copilot-configured';
 import { useFirstMount } from '@/hooks/use-first-mount';
+import { maybeStartOnboarding } from '@/lib/onboarding';
 import { DynamicDataRenderer, tryParseJson } from '@/components/dynamic-data-renderer';
 import { FormCard } from '@/components/form-card';
 import { RecordListCard } from '@/components/record-list-card';
@@ -357,6 +358,11 @@ export default function HomeDashboard() {
   });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [homeHeaderWidget, setHomeHeaderWidgetState] = useState<HomeHeaderWidget>(() => getHomeHeaderWidget());
+
+  // First-launch onboarding tour (runs once; re-runnable from Settings/Help).
+  useEffect(() => {
+    maybeStartOnboarding();
+  }, []);
 
   // Listen for home header widget changes from settings
   useEffect(() => {
@@ -2035,6 +2041,7 @@ ${agentResponse}`;
               {/* Product Manual Icon */}
               <button
                 onClick={() => navigate('/products')}
+                data-tour="nav-products"
                 className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-muted/50 active:bg-muted transition-colors"
                 aria-label={locale === 'zh-Hans' ? '产品手册' : 'Product Manual'}
               >
@@ -2045,6 +2052,7 @@ ${agentResponse}`;
               <div className="relative inline-flex">
                 <button
                   onClick={() => setInsightsSheetOpen(true)}
+                  data-tour="home-insights"
                   className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-muted/50 active:bg-muted transition-colors relative"
                   aria-label={locale === 'zh-Hans' ? '洞察' : 'Insights'}
                 >
@@ -2068,6 +2076,7 @@ ${agentResponse}`;
                     navigate('/settings');
                   }
                 }}
+                data-tour="nav-settings"
                 className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-muted/50 active:bg-muted transition-colors relative"
                 aria-label="Settings"
               >
@@ -2085,7 +2094,7 @@ ${agentResponse}`;
 
 
           {/* KPI Cards - New comprehensive design */}
-          <motion.div variants={itemVariants}>
+          <motion.div variants={itemVariants} data-tour="home-dashboard">
             <KPICards
               data={kpiData}
               isLoading={isDataLoading}

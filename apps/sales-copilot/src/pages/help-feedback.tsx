@@ -24,10 +24,12 @@ import {
   ChevronRight,
   Info,
   Lightbulb,
+  Compass,
 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useLocale, type Locale } from '@/lib/i18n';
+import { startOnboarding } from '@/lib/onboarding';
 import { cn } from '@/lib/utils';
 import { useFirstMount } from '@/hooks/use-first-mount';
 
@@ -355,7 +357,7 @@ export default function HelpFeedbackPage() {
       </motion.header>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto scrollbar-auto-hide">
         <motion.div
           variants={containerVariants}
           initial={firstMount ? 'hidden' : false}
@@ -380,6 +382,30 @@ export default function HelpFeedbackPage() {
               </div>
             </div>
           </motion.div>
+
+          {/* App Tour replay */}
+          <motion.button
+            variants={itemVariants}
+            onClick={() => {
+              navigate('/');
+              // Let the home screen mount so the spotlight anchors exist.
+              window.setTimeout(() => startOnboarding(locale), 600);
+            }}
+            className="w-full glass-card p-4 rounded-2xl flex items-center gap-3 text-left hover:bg-white/5 transition-colors"
+          >
+            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+              <Compass className="w-5 h-5 text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h2 className="text-sm font-semibold text-foreground">
+                {locale === 'zh-Hans' ? '新手指引' : 'App Tour'}
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                {locale === 'zh-Hans' ? '重新观看快速上手引导' : 'Replay the quick-start walkthrough'}
+              </p>
+            </div>
+            <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+          </motion.button>
 
           {/* Entity Relationship Diagram */}
           <motion.div variants={itemVariants} className="glass-card p-4 rounded-2xl">
