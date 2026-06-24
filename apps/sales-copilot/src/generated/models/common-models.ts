@@ -1,5 +1,5 @@
-export type { IOperationOptions } from '../../../app-gen-sdk/data/common/types';
+export type { IOperationOptions } from '@microsoft/power-apps/data';
 
-export type IGetAllOptions = import("../../../app-gen-sdk/data/common/types").IOperationOptions;
+export type IGetAllOptions = import("@microsoft/power-apps/data").IOperationOptions;
 
 export const _IGetAllOptions = 'IGetAllOptions' as const;

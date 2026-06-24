@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AccountService } from "../services/account-service";
 import type { Account } from "../models/account-model";
-import type { IOperationOptions } from '../../../app-gen-sdk/data/common/types';
+import type { IOperationOptions } from '@microsoft/power-apps/data';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -15,6 +15,7 @@ export function useAccountList(options?: IOperationOptions) {
   return useQuery({
     queryKey: ["account-list", options],
     queryFn: () => AccountService.getAll(options),
+    staleTime: 60_000,
   });
 }
 
@@ -23,10 +24,16 @@ export function useAccountList(options?: IOperationOptions) {
  * @param id The id of the record (must be a valid UUID)
  */
 export function useAccount(id: string) {
+  const client = useQueryClient();
   return useQuery({
     queryKey: ["account", id],
     queryFn: () => AccountService.get(id),
     enabled: !!id && UUID_REGEX.test(id),
+    placeholderData: () => {
+      const list = client.getQueryData<Account[]>(["account-list"]);
+      return list?.find((a) => a.id === id);
+    },
+    staleTime: 30_000,
   });
 }
 

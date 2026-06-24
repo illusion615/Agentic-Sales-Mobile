@@ -5,8 +5,15 @@
  * Consolidates all date-fns format() calls into reusable functions.
  */
 
-import { format, isToday, isYesterday, isTomorrow, startOfWeek, endOfWeek, parseISO } from 'date-fns';
-import { zhCN, enUS } from 'date-fns/locale';
+import { format } from 'date-fns/format';
+import { isToday } from 'date-fns/isToday';
+import { isYesterday } from 'date-fns/isYesterday';
+import { isTomorrow } from 'date-fns/isTomorrow';
+import { startOfWeek } from 'date-fns/startOfWeek';
+import { endOfWeek } from 'date-fns/endOfWeek';
+import { parseISO } from 'date-fns/parseISO';
+import { zhCN } from 'date-fns/locale/zh-CN';
+import { enUS } from 'date-fns/locale/en-US';
 import { getLocale, type Locale } from '@/lib/i18n';
 
 /**

@@ -22,7 +22,6 @@ import { useActivity, useUpdateActivity } from '@/generated/hooks/use-activity';
 import { useAccountList } from '@/generated/hooks/use-account';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { getLocale, type Locale } from '@/lib/i18n';
-import { OpportunityStageKeyToLabel, type OpportunityStageKey } from '@/generated/models/opportunity-model';
 import {
   Sheet,
   SheetContent,
@@ -44,7 +43,7 @@ import {
 } from '@/components/ui/select';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { format } from 'date-fns';
+import { format } from 'date-fns/format';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useFirstMount } from '@/hooks/use-first-mount';
@@ -391,7 +390,7 @@ function SourceChip({
 // OpportunityDraft interface
 interface OpportunityDraft {
   accountId: string;
-  stageKey: OpportunityStageKey;
+  stage: string;
   amount: number;
   expectedCloseDate: string;
   nextAction: string;
@@ -422,6 +421,7 @@ export default function OpportunityDraftReviewPage() {
   const [sourceDrawerOpen, setSourceDrawerOpen] = useState(false);
   const [selectedSource, setSelectedSource] = useState<SourceData | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isAbandoning, setIsAbandoning] = useState(false);
 
   const userId = user?.objectId || '';
 
@@ -438,7 +438,7 @@ export default function OpportunityDraftReviewPage() {
         // Generate mock draft based on activity data
         const mockDraft: OpportunityDraft = {
           accountId: activity.account?.id || accounts[0]?.id || '',
-          stageKey: 'StageKey2', // proposal
+          stage: 'proposal', // proposal
           amount: 620000,
           expectedCloseDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
           nextAction: locale === 'zh-Hans' ? '下周签约' : 'Sign contract next week',
@@ -470,7 +470,7 @@ export default function OpportunityDraftReviewPage() {
         setDraft(mockDraft);
         setOriginalValues({
           accountId: mockDraft.accountId,
-          stageKey: mockDraft.stageKey,
+          stage: mockDraft.stage,
           amount: String(mockDraft.amount),
           expectedCloseDate: mockDraft.expectedCloseDate,
           nextAction: mockDraft.nextAction,
@@ -492,8 +492,8 @@ export default function OpportunityDraftReviewPage() {
         const updated = { ...prev };
         if (field === 'amount') {
           updated.amount = parseFloat(newValue) || 0;
-        } else if (field === 'stageKey') {
-          updated.stageKey = newValue as OpportunityStageKey;
+        } else if (field === 'stage') {
+          updated.stage = newValue;
         } else {
           (updated as Record<string, unknown>)[field] = newValue;
         }
@@ -520,15 +520,22 @@ export default function OpportunityDraftReviewPage() {
   }, []);
 
   const handleAbandon = useCallback(async () => {
-    if (finalActivityId) {
-      await updateActivity.mutateAsync({
-        id: finalActivityId,
-        changedFields: { draftstatusKey: 'DraftstatusKey0' }, // back to draft
-      });
+    if (isAbandoning || isSubmitting) return; // guard against double-tap
+    setIsAbandoning(true);
+    try {
+      if (finalActivityId) {
+        await updateActivity.mutateAsync({
+          id: finalActivityId,
+          changedFields: { status: 'open' },
+        });
+      }
+      toast.info(t('abandonedDraft', locale));
+      navigate('/home');
+    } catch {
+      // Global MutationCache.onError surfaces the real error; let the user retry.
+      setIsAbandoning(false);
     }
-    toast.info(t('abandonedDraft', locale));
-    navigate('/home');
-  }, [finalActivityId, updateActivity, locale, navigate]);
+  }, [finalActivityId, updateActivity, locale, navigate, isAbandoning, isSubmitting]);
 
   const handleSubmit = useCallback(async () => {
     if (!draft) return;
@@ -542,14 +549,15 @@ export default function OpportunityDraftReviewPage() {
       if (finalActivityId) {
         await updateActivity.mutateAsync({
           id: finalActivityId,
-          changedFields: { draftstatusKey: 'DraftstatusKey1' }, // confirmed
+          changedFields: { status: 'open' },
         });
       }
 
       toast.success(t('submittedToQueue', locale));
       navigate('/home');
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'Submit failed');
+      // Toast is shown by the global MutationCache.onError handler.
+      console.error('Submit failed:', error);
     } finally {
       setIsSubmitting(false);
     }
@@ -564,7 +572,7 @@ export default function OpportunityDraftReviewPage() {
       if (activity) {
         const newDraft: OpportunityDraft = {
           accountId: activity.account?.id || accounts[0]?.id || '',
-          stageKey: 'StageKey2',
+          stage: 'proposal',
           amount: 580000,
           expectedCloseDate: new Date(Date.now() + 25 * 24 * 60 * 60 * 1000).toISOString(),
           nextAction: locale === 'zh-Hans' ? '本周回访确认' : 'Follow up this week',
@@ -583,7 +591,7 @@ export default function OpportunityDraftReviewPage() {
         setDraft(newDraft);
         setOriginalValues({
           accountId: newDraft.accountId,
-          stageKey: newDraft.stageKey,
+          stage: newDraft.stage,
           amount: String(newDraft.amount),
           expectedCloseDate: newDraft.expectedCloseDate,
           nextAction: newDraft.nextAction,
@@ -598,7 +606,7 @@ export default function OpportunityDraftReviewPage() {
     if (finalActivityId) {
       await updateActivity.mutateAsync({
         id: finalActivityId,
-        changedFields: { draftstatusKey: 'DraftstatusKey3' }, // cancelled
+        changedFields: { status: 'canceled' },
       });
     }
     toast.info(t('abandonedDraft', locale));
@@ -606,10 +614,9 @@ export default function OpportunityDraftReviewPage() {
   }, [finalActivityId, updateActivity, locale, navigate]);
 
   // Stage options
-  const stageOptions = Object.entries(OpportunityStageKeyToLabel)
-    .filter(([, label]) => label !== 'won' && label !== 'lost')
-    .map(([key, label]) => ({
-      value: key,
+  const stageOptions = ['prospecting', 'qualification', 'proposal', 'negotiation']
+    .map((label) => ({
+      value: label,
       label: t(label as keyof (typeof translations)['zh-Hans'], locale),
     }));
 
@@ -629,7 +636,7 @@ export default function OpportunityDraftReviewPage() {
   return (
     <div className="min-h-screen flex flex-col bg-background">
       {/* Header */}
-      <header className="fixed top-0 left-0 right-0 z-40 glass-surface border-b border-border/50 safe-area-top">
+      <header className="fixed top-0 left-0 right-0 z-40 bg-background/80 backdrop-blur-md border-b border-border/50 safe-area-top">
         <div className="flex items-center justify-between h-14 px-4">
           <button
             onClick={() => navigate('/')}
@@ -735,10 +742,10 @@ export default function OpportunityDraftReviewPage() {
                   />
                   <EditableRow
                     label={t('stage', locale)}
-                    value={draft.stageKey}
-                    originalValue={originalValues.stageKey}
-                    onEdit={(v: string) => handleFieldEdit('stageKey', v)}
-                    isModified={modifiedFields.has('stageKey')}
+                    value={draft.stage}
+                    originalValue={originalValues.stage}
+                    onEdit={(v: string) => handleFieldEdit('stage', v)}
+                    isModified={modifiedFields.has('stage')}
                     type="select"
                     options={stageOptions}
                     locale={locale}
@@ -821,14 +828,17 @@ export default function OpportunityDraftReviewPage() {
           <div className="flex items-center gap-3">
             <button
               onClick={handleAbandon}
-              disabled={isSubmitting}
-              className="flex-shrink-0 py-3.5 px-6 rounded-xl text-body font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+              disabled={isSubmitting || isAbandoning}
+              className="flex-shrink-0 py-3.5 px-6 rounded-xl text-body font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50 flex items-center gap-2"
             >
+              {isAbandoning && (
+                <div className="w-4 h-4 rounded-full border-2 border-current border-t-transparent animate-spin" />
+              )}
               {t('abandon', locale)}
             </button>
             <button
               onClick={handleSubmit}
-              disabled={isSubmitting}
+              disabled={isSubmitting || isAbandoning}
               className="flex-1 py-3.5 rounded-xl accent-gradient text-body font-semibold text-white shadow-lg shadow-primary/30 flex items-center justify-center gap-2 disabled:opacity-50"
             >
               {isSubmitting ? (

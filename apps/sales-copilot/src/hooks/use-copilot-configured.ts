@@ -42,5 +42,6 @@ export function useCopilotConfigured(): boolean {
 function compute(): boolean {
   const copilotConfig = getCopilotConfig();
   const llmConfig = getLLMConfig();
-  return !!copilotConfig?.tokenEndpoint || (!!llmConfig?.enabled && !!llmConfig?.endpoint);
+  // Flow is always available via SDK connector — no endpoint check needed
+  return !!copilotConfig?.agentName || !!llmConfig?.enabled;
 }

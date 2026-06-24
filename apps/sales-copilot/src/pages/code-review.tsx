@@ -537,7 +537,7 @@ export default function CodeReviewPage() {
               <Button
                 className="w-full"
                 variant="outline"
-                onClick={() => toast.info(locale === 'zh-Hans' ? '完整报告已保存到 code/reviews/code-review-2026-05-11.md' : 'Full report saved to code/reviews/code-review-2026-05-11.md')}
+                onClick={() => toast.info(locale === 'zh-Hans' ? '完整报告已保存到 docs/06-reviews/code-review-2026-05-11.md' : 'Full report saved to docs/06-reviews/code-review-2026-05-11.md')}
               >
                 <Download className="w-4 h-4 mr-2" />
                 {locale === 'zh-Hans' ? '下载完整 Markdown 报告' : 'Download Full Markdown Report'}

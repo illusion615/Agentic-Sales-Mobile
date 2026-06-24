@@ -20,8 +20,7 @@
 
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"],
-      "@microsoft/power-apps/app": ["app-gen-sdk/power-apps-stub.ts"]
+      "@/*": ["src/*"]
     },
 
     "resolveJsonModule": true,
@@ -29,5 +28,5 @@
     "allowSyntheticDefaultImports": true,
     "isolatedModules": true
   },
-  "include": ["src", "app-gen-sdk"]
+  "include": ["src"]
 }

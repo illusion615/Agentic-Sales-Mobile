@@ -1,16 +1,16 @@
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { Building2, Phone, ChevronRight, AlertTriangle, Search, Users } from 'lucide-react';
+import { Building2, Phone, ChevronRight, AlertTriangle, Search, Users, Sparkles, RefreshCw, Loader2 } from 'lucide-react';
 import { MobileLayout } from '@/components/mobile-layout';
 import { cn } from '@/lib/utils';
 import { useAccountList } from '@/generated/hooks/use-account';
 import { useContactList } from '@/generated/hooks/use-contact';
+import { useActivityList } from '@/generated/hooks/use-activity';
 import { useQueryClient } from '@tanstack/react-query';
-import { AccountTierKeyToLabel, AccountRegionKeyToLabel } from '@/generated/models/account-model';
-import type { Account, AccountTierKey, AccountRegionKey } from '@/generated/models/account-model';
+import type { Account } from '@/generated/models/account-model';
 import type { Contact } from '@/generated/models/contact-model';
-import { getRegionEnglish } from '@/lib/display-labels';
+import type { Activity } from '@/generated/models/activity-model';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -69,6 +69,7 @@ export default function ClientsPage() {
   // Fetch from Dataverse only
   const { data: accounts = [], isLoading: isLoadingAccounts } = useAccountList();
   const { data: contacts = [] } = useContactList();
+  const { data: activities = [] } = useActivityList();
   const queryClient = useQueryClient();
 
   // Debug logging for account IDs
@@ -87,6 +88,7 @@ export default function ClientsPage() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['account-list'] }),
       queryClient.invalidateQueries({ queryKey: ['contact-list'] }),
+      queryClient.invalidateQueries({ queryKey: ['activity-list'] }),
     ]);
   }, [queryClient]);
 
@@ -95,15 +97,35 @@ export default function ClientsPage() {
     return contacts.filter((c: Contact) => c.account?.id === accountId);
   };
 
+  // Last engagement per account = the most recent COMPLETED activity tied to it.
+  // The old account.lastcontactedon field was dropped when we moved to the native
+  // activity entity, so "days since contact" must be derived from the activity log
+  // (D22). Only completed activities count as real engagement.
+  const lastCompletedByAccount = useMemo(() => {
+    const map = new Map<string, Date>();
+    for (const a of activities as Activity[]) {
+      if (a.status !== 'completed') continue;
+      const accId = a.account?.id;
+      if (!accId || !a.scheduleddate) continue;
+      const d = new Date(a.scheduleddate);
+      if (Number.isNaN(d.getTime())) continue;
+      const prev = map.get(accId);
+      if (!prev || d > prev) map.set(accId, d);
+    }
+    return map;
+  }, [activities]);
+
   // Enrich accounts with contact status
   const enrichedAccounts = useMemo(() => {
     return accounts.map((account: Account) => {
-      const daysSince = getDaysSinceContact(account.lastcontactedon || account.lastinteractiondate);
+      const lastContact = lastCompletedByAccount.get(account.id);
+      const daysSince = getDaysSinceContact(lastContact?.toISOString());
       const contactStatus = getContactStatus(daysSince);
       const accountContacts = getContactsByAccountId(account.id);
       return { ...account, daysSince, contactStatus, contactCount: accountContacts.length };
     });
-  }, [accounts, contacts]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accounts, contacts, lastCompletedByAccount]);
 
   // Apply filters
   const filteredAccounts = useMemo(() => {
@@ -115,8 +137,7 @@ export default function ClientsPage() {
         const matchesIndustry = account.industry?.toLowerCase().includes(query);
         if (!matchesName && !matchesIndustry) return false;
       }
-      // Tier filter
-      if (tierFilter !== 'all' && String(account.tierKey) !== tierFilter) return false;
+      // Tier filter removed — tier field no longer exists
       // At risk filter
       if (showAtRiskOnly && !account.contactStatus.isAtRisk) return false;
       return true;
@@ -127,6 +148,63 @@ export default function ClientsPage() {
   const totalClients = accounts.length;
   const atRiskCount = enrichedAccounts.filter((a) => a.contactStatus.isAtRisk).length;
   const contactedThisWeek = enrichedAccounts.filter((a) => a.daysSince <= 7).length;
+
+  // ─── AI Summary ───
+  interface AISummarySlide { title: string; content: string }
+  const AI_CACHE_KEY = 'client-coverage-ai-summary';
+  const AI_TTL = 30 * 60 * 1000;
+  const [aiSlides, setAiSlides] = useState<AISummarySlide[]>([]);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [currentSlide, setCurrentSlide] = useState(0);
+  const carouselRef = useRef<HTMLDivElement>(null);
+
+  const generateAISummary = useCallback(async () => {
+    if (enrichedAccounts.length === 0) return;
+    setAiLoading(true);
+    try {
+      const clientData = enrichedAccounts.map((a) => ({
+        name: a.name1, industry: a.industry,
+        daysSinceContact: a.daysSince, status: a.contactStatus.label,
+        contactCount: a.contactCount,
+      }));
+
+      const { executeFunction } = await import('@/lib/function-executor');
+      const result = await executeFunction('summarizeEntities', {
+        data: JSON.stringify(clientData),
+        entityType: 'account',
+      }, { locale });
+
+      if (result.success && result.data) {
+        const parsed = result.data as AISummarySlide[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setAiSlides(parsed);
+          setCurrentSlide(0);
+          localStorage.setItem(AI_CACHE_KEY, JSON.stringify({ ts: Date.now(), slides: parsed }));
+        } else {
+          console.warn('[ClientCoverage] AI summary: unexpected data shape');
+        }
+      }
+    } catch (e) { console.error('[ClientCoverage] AI summary error:', e); }
+    finally { setAiLoading(false); }
+  }, [enrichedAccounts, locale]);
+
+  useEffect(() => {
+    if (enrichedAccounts.length === 0) return;
+    try {
+      const cached = localStorage.getItem(AI_CACHE_KEY);
+      if (cached) {
+        const { ts, slides } = JSON.parse(cached);
+        if (Date.now() - ts < AI_TTL && slides?.length > 0) { setAiSlides(slides); return; }
+      }
+    } catch { /* ignore */ }
+    generateAISummary();
+  }, [enrichedAccounts.length > 0]);
+
+  const handleCarouselScroll = () => {
+    if (!carouselRef.current) return;
+    const el = carouselRef.current;
+    setCurrentSlide(Math.round(el.scrollLeft / el.offsetWidth));
+  };
 
   // Set page context for Copilot agent awareness
   useEffect(() => {
@@ -186,6 +264,61 @@ export default function ClientsPage() {
             </div>
           </motion.div>
 
+          {/* AI Summary Carousel */}
+          <motion.div variants={itemVariants}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-primary" />
+                <span className="text-[11px] font-medium text-foreground">
+                  {locale === 'zh-Hans' ? 'AI 客户洞察' : 'AI Client Insights'}
+                </span>
+              </div>
+              <button
+                onClick={generateAISummary}
+                disabled={aiLoading}
+                className="flex items-center gap-1 text-[11px] text-primary hover:text-primary/80 disabled:opacity-50"
+              >
+                {aiLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                {locale === 'zh-Hans' ? '刷新' : 'Refresh'}
+              </button>
+            </div>
+            {aiLoading && aiSlides.length === 0 ? (
+              <div className="glass-card p-6 flex items-center justify-center gap-2" style={{ borderRadius: 16 }}>
+                <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                <span className="text-[11px] text-muted-foreground">
+                  {locale === 'zh-Hans' ? '正在分析客户数据...' : 'Analyzing client data...'}
+                </span>
+              </div>
+            ) : aiSlides.length > 0 ? (
+              <>
+                <div
+                  ref={carouselRef}
+                  onScroll={handleCarouselScroll}
+                  className="flex overflow-x-auto snap-x snap-mandatory scrollbar-hide gap-3"
+                  style={{ scrollbarWidth: 'none' }}
+                >
+                  {aiSlides.map((slide, idx) => (
+                    <div
+                      key={idx}
+                      className="glass-card p-3.5 snap-center shrink-0"
+                      style={{ width: 'calc(100vw - 48px)', maxWidth: '400px', borderRadius: 16 }}
+                    >
+                      <p className="text-sm font-semibold text-primary mb-1">{slide.title}</p>
+                      <p className="text-[11px] text-foreground leading-relaxed">{slide.content}</p>
+                    </div>
+                  ))}
+                </div>
+                {aiSlides.length > 1 && (
+                  <div className="flex justify-center gap-1.5 mt-2">
+                    {aiSlides.map((_, idx) => (
+                      <span key={idx} className={cn('w-1.5 h-1.5 rounded-full transition-colors', idx === currentSlide ? 'bg-primary' : 'bg-muted-foreground/30')} />
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : null}
+          </motion.div>
+
           {/* Search & Filters */}
           <motion.div variants={itemVariants} className="space-y-2">
             <div className="relative">
@@ -204,8 +337,8 @@ export default function ClientsPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Tiers</SelectItem>
-                  {Object.entries(AccountTierKeyToLabel).map(([key, label]) => (
-                    <SelectItem key={key} value={key}>{label}</SelectItem>
+                  {['S', 'A', 'B', 'C'].map((label) => (
+                    <SelectItem key={label} value={label}>{label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -259,15 +392,9 @@ export default function ClientsPage() {
                         <h3 className="text-sm font-medium text-foreground truncate flex-1">
                           {account.name1}
                         </h3>
-                        {account.tierKey && (
-                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">
-                            {AccountTierKeyToLabel[account.tierKey as AccountTierKey]}
-                          </Badge>
-                        )}
                       </div>
                       <p className="text-xs text-muted-foreground mb-1.5">
                         {account.industry || 'Uncategorized'}
-                        {account.regionKey && ` • ${getRegionEnglish(AccountRegionKeyToLabel[account.regionKey as AccountRegionKey])}`}
                       </p>
                       <div className="flex items-center gap-3 text-xs">
                         <span className={cn('px-1.5 py-0.5 rounded-md text-[10px] font-medium', account.contactStatus.color)}>

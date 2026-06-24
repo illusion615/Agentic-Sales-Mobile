@@ -16,6 +16,11 @@ import {
   clearShadowLog,
   type ShadowLogEntry,
 } from '@/lib/frame-shadow';
+import {
+  readBenchmarkLog,
+  type ShadowBenchmarkEntry,
+} from '@/lib/shadow-agent';
+import { isDagPlan } from '@/lib/dag-schema';
 import type { Locale } from '@/lib/i18n';
 
 interface FrameShadowViewerProps {
@@ -26,51 +31,71 @@ interface FrameShadowViewerProps {
 
 export function FrameShadowViewer({ open, onClose, locale }: FrameShadowViewerProps) {
   const [entries, setEntries] = useState<ShadowLogEntry[]>([]);
+  const [benchmarks, setBenchmarks] = useState<ShadowBenchmarkEntry[]>([]);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
     if (!open) return;
     setEntries(readShadowLog());
+    setBenchmarks(readBenchmarkLog());
   }, [open, tick]);
 
   const stats = useMemo(() => {
     if (entries.length === 0) {
-      return { total: 0, frameOk: 0, objectMatch: 0, taskMatch: 0, avgLatency: 0 };
+      return {
+        total: 0, frameOk: 0,
+        // Speed
+        legacyAvgMs: 0, shadowAvgMs: 0, speedDelta: 0,
+        // Accuracy
+        funcMatch: 0, funcComparable: 0,
+        avgArgOverlap: 0,
+      };
     }
     let frameOk = 0;
-    let objMatch = 0;
-    let objComparable = 0;
-    let taskMatch = 0;
-    let taskComparable = 0;
-    let latencySum = 0;
-    let latencyN = 0;
     for (const e of entries) {
       if (e.frame.success) frameOk += 1;
-      if (e.frame.latencyMs) {
-        latencySum += e.frame.latencyMs;
-        latencyN += 1;
+    }
+    // Orchestrator benchmark stats
+    let funcMatch = 0;
+    let funcComparable = 0;
+    let argOverlapSum = 0;
+    let argOverlapN = 0;
+    let legacyLatencySum = 0;
+    let legacyLatencyN = 0;
+    let shadowLatencySum = 0;
+    let shadowLatencyN = 0;
+    for (const b of benchmarks) {
+      if (b.agreement.functionMatch !== null && b.agreement.functionMatch !== undefined) {
+        funcComparable += 1;
+        if (b.agreement.functionMatch) funcMatch += 1;
       }
-      if (e.agreement) {
-        if (e.agreement.objectMatch !== null && e.agreement.objectMatch !== undefined) {
-          objComparable += 1;
-          if (e.agreement.objectMatch) objMatch += 1;
-        }
-        if (e.agreement.taskMatch !== null && e.agreement.taskMatch !== undefined) {
-          taskComparable += 1;
-          if (e.agreement.taskMatch) taskMatch += 1;
-        }
+      if (b.agreement.argumentOverlap !== null && b.agreement.argumentOverlap !== undefined) {
+        argOverlapSum += b.agreement.argumentOverlap;
+        argOverlapN += 1;
+      }
+      if (b.legacy?.latencyMs) {
+        legacyLatencySum += b.legacy.latencyMs;
+        legacyLatencyN += 1;
+      }
+      if (b.shadow.totalLatencyMs) {
+        shadowLatencySum += b.shadow.totalLatencyMs;
+        shadowLatencyN += 1;
       }
     }
+    const legacyAvgMs = legacyLatencyN ? Math.round(legacyLatencySum / legacyLatencyN) : 0;
+    const shadowAvgMs = shadowLatencyN ? Math.round(shadowLatencySum / shadowLatencyN) : 0;
+    const speedDelta = legacyAvgMs && shadowAvgMs ? Math.round(((legacyAvgMs - shadowAvgMs) / legacyAvgMs) * 100) : 0;
     return {
       total: entries.length,
       frameOk,
-      objectMatch: objComparable ? Math.round((objMatch / objComparable) * 100) : 0,
-      taskMatch: taskComparable ? Math.round((taskMatch / taskComparable) * 100) : 0,
-      objComparable,
-      taskComparable,
-      avgLatency: latencyN ? Math.round(latencySum / latencyN) : 0,
+      legacyAvgMs,
+      shadowAvgMs,
+      speedDelta,
+      funcMatch: funcComparable ? Math.round((funcMatch / funcComparable) * 100) : 0,
+      funcComparable,
+      avgArgOverlap: argOverlapN ? Math.round((argOverlapSum / argOverlapN) * 100) : 0,
     };
-  }, [entries]);
+  }, [entries, benchmarks]);
 
   return (
     <AnimatePresence>
@@ -100,8 +125,8 @@ export function FrameShadowViewer({ open, onClose, locale }: FrameShadowViewerPr
                   </div>
                   <div className="text-xs text-stone-500">
                     {locale === 'zh-Hans'
-                      ? `近 ${stats.total} 轮 · Frame 成功 ${stats.frameOk}/${stats.total} · 平均 ${stats.avgLatency}ms`
-                      : `Last ${stats.total} runs · Frame success ${stats.frameOk}/${stats.total} · Avg ${stats.avgLatency}ms`}
+                      ? `近 ${stats.total} 轮 · Legacy ${stats.legacyAvgMs}ms vs Shadow ${stats.shadowAvgMs}ms`
+                      : `Last ${stats.total} runs · Legacy ${stats.legacyAvgMs}ms vs Shadow ${stats.shadowAvgMs}ms`}
                   </div>
                 </div>
               </div>
@@ -133,22 +158,47 @@ export function FrameShadowViewer({ open, onClose, locale }: FrameShadowViewerPr
               </div>
             </div>
 
-            {/* Agreement summary */}
-            <div className="grid grid-cols-3 gap-2 border-b border-stone-200 bg-stone-50/60 px-4 py-3 text-xs">
-              <Tile
-                label={locale === 'zh-Hans' ? '销售对象一致率' : 'Object Match Rate'}
-                value={`${stats.objectMatch}%`}
-                hint={locale === 'zh-Hans' ? `可对比 ${stats.objComparable ?? 0} 条` : `Comparable ${stats.objComparable ?? 0}`}
-              />
-              <Tile
-                label={locale === 'zh-Hans' ? '认知任务一致率' : 'Task Match Rate'}
-                value={`${stats.taskMatch}%`}
-                hint={locale === 'zh-Hans' ? `可对比 ${stats.taskComparable ?? 0} 条` : `Comparable ${stats.taskComparable ?? 0}`}
-              />
-              <Tile
-                label={locale === 'zh-Hans' ? 'Frame 解析成功率' : 'Frame Parse Success'}
-                value={`${stats.total ? Math.round((stats.frameOk / stats.total) * 100) : 0}%`}
-              />
+            {/* KPI Dashboard: Speed + Accuracy */}
+            <div className="border-b border-stone-200 bg-stone-50/60 px-4 py-3 text-xs">
+              {/* Speed comparison */}
+              <div className="mb-2 text-[10px] uppercase tracking-wide text-stone-400">
+                {locale === 'zh-Hans' ? '⚡ 速度（平均延迟）' : '⚡ Speed (avg latency)'}
+              </div>
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                <Tile
+                  label="Legacy"
+                  value={stats.legacyAvgMs ? `${stats.legacyAvgMs}ms` : '—'}
+                />
+                <Tile
+                  label="Shadow"
+                  value={stats.shadowAvgMs ? `${stats.shadowAvgMs}ms` : '—'}
+                />
+                <Tile
+                  label={locale === 'zh-Hans' ? '差值' : 'Delta'}
+                  value={stats.speedDelta ? `${stats.speedDelta > 0 ? '+' : ''}${stats.speedDelta}%` : '—'}
+                  hint={stats.speedDelta > 0 ? (locale === 'zh-Hans' ? 'Shadow 更快' : 'Shadow faster') : stats.speedDelta < 0 ? (locale === 'zh-Hans' ? 'Legacy 更快' : 'Legacy faster') : undefined}
+                />
+              </div>
+              {/* Accuracy comparison */}
+              <div className="mb-2 text-[10px] uppercase tracking-wide text-stone-400">
+                {locale === 'zh-Hans' ? '🎯 精度（Shadow vs Legacy 一致性）' : '🎯 Accuracy (Shadow vs Legacy agreement)'}
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <Tile
+                  label={locale === 'zh-Hans' ? '函数匹配' : 'Function Match'}
+                  value={`${stats.funcMatch}%`}
+                  hint={`${stats.funcComparable} ${locale === 'zh-Hans' ? '条可比' : 'comparable'}`}
+                />
+                <Tile
+                  label={locale === 'zh-Hans' ? '参数重叠' : 'Arg Overlap'}
+                  value={`${stats.avgArgOverlap}%`}
+                />
+                <Tile
+                  label={locale === 'zh-Hans' ? '样本量' : 'Samples'}
+                  value={`${stats.total}`}
+                  hint={`${stats.frameOk} ${locale === 'zh-Hans' ? '成功' : 'ok'}`}
+                />
+              </div>
             </div>
 
             {/* Entry list */}
@@ -159,9 +209,13 @@ export function FrameShadowViewer({ open, onClose, locale }: FrameShadowViewerPr
                 </div>
               ) : (
                 <ul className="space-y-3">
-                  {entries.map((e, idx) => (
-                    <EntryRow key={`${e.ts}-${idx}`} entry={e} locale={locale} />
-                  ))}
+                  {entries.map((e, idx) => {
+                    // Find matching benchmark entry by timestamp proximity
+                    const bench = benchmarks.find(b => Math.abs(b.ts - e.ts) < 5000 && b.userMessage === e.userMessage);
+                    return (
+                      <EntryRow key={`${e.ts}-${idx}`} entry={e} benchmark={bench} locale={locale} />
+                    );
+                  })}
                 </ul>
               )}
             </div>
@@ -182,13 +236,12 @@ function Tile({ label, value, hint }: { label: string; value: string; hint?: str
   );
 }
 
-function EntryRow({ entry, locale }: { entry: ShadowLogEntry; locale: Locale }) {
+function EntryRow({ entry, benchmark, locale }: { entry: ShadowLogEntry; benchmark?: ShadowBenchmarkEntry; locale: Locale }) {
   const [expanded, setExpanded] = useState(false);
   const f = entry.frame.result;
   const ok = entry.frame.success;
   const time = new Date(entry.ts).toLocaleTimeString();
-  const objBadge = badge(entry.agreement?.objectMatch, locale);
-  const taskBadge = badge(entry.agreement?.taskMatch, locale);
+  const funcBadge = benchmark ? badge(benchmark.agreement.functionMatch, locale) : null;
 
   return (
     <li className="rounded-lg border border-stone-200 bg-white">
@@ -203,42 +256,57 @@ function EntryRow({ entry, locale }: { entry: ShadowLogEntry; locale: Locale }) 
             {entry.page ? ` · ${entry.page}` : ''}
           </span>
           <span className="flex items-center gap-1">
-            {objBadge}
-            {taskBadge}
+            {funcBadge}
           </span>
         </div>
         <div className="line-clamp-2 text-sm text-stone-900">{entry.userMessage}</div>
         <div className="flex flex-wrap items-center gap-2 text-[11px] text-stone-600">
-          {ok && f ? (
+          {/* Speed per request */}
+          {benchmark && (
             <>
-              <Chip>Frame: {f.salesObject}</Chip>
-              <Chip>{f.cognitiveTask}</Chip>
-              {f.temporal !== 'none' && <Chip muted>{f.temporal}</Chip>}
-              <Chip muted>conf {f.confidence}</Chip>
+              <Chip muted>L: {benchmark.legacy?.latencyMs ?? '?'}ms</Chip>
+              <Chip muted>S: {benchmark.shadow.totalLatencyMs}ms</Chip>
+              {benchmark.legacy?.latencyMs && benchmark.shadow.totalLatencyMs ? (
+                <Chip>{benchmark.shadow.totalLatencyMs < benchmark.legacy.latencyMs ? '🟢' : '🔴'} {Math.abs(benchmark.shadow.totalLatencyMs - benchmark.legacy.latencyMs)}ms</Chip>
+              ) : null}
             </>
-          ) : (
-            <Chip danger>{locale === 'zh-Hans' ? 'Frame 解析失败' : 'Frame parse failed'}</Chip>
           )}
-          <span className="text-stone-400">↔</span>
-          <Chip outlined>Legacy: {entry.legacy?.functionName ?? 'null'}</Chip>
-          {entry.legacy?.resolutionsCount ? <Chip muted>resolutions ×{entry.legacy.resolutionsCount}</Chip> : null}
-          {entry.legacy?.additionalActionsCount ? (
-            <Chip muted>additional ×{entry.legacy.additionalActionsCount}</Chip>
-          ) : null}
+          <span className="text-stone-400">|</span>
+          {/* Function routing */}
+          <Chip outlined>L: {entry.legacy?.functionName ?? 'null'}</Chip>
+          <span className="text-stone-400">→</span>
+          {benchmark?.shadow.plan ? (
+            <Chip>{isDagPlan(benchmark.shadow.plan) ? `DAG ×${benchmark.shadow.plan.steps.length}` : (benchmark.shadow.plan as { function: string }).function}</Chip>
+          ) : (
+            <Chip danger>—</Chip>
+          )}
         </div>
       </button>
       {expanded && (
         <div className="border-t border-stone-100 bg-stone-50/60 px-3 py-2 text-xs">
           {ok && f ? (
             <>
+              <div className="mb-1 text-stone-500">
+                {locale === 'zh-Hans' ? `识别到 ${f.intents.length} 个意图：` : `${f.intents.length} intent(s) detected:`}
+              </div>
+              <ol className="mb-2 list-decimal space-y-1 pl-4 text-stone-700">
+                {f.intents.map((it, i) => (
+                  <li key={i}>
+                    <span className="rounded bg-stone-200 px-1.5 py-0.5 text-[10px] font-medium text-stone-700">
+                      {it.salesObject}_{it.cognitiveTask}
+                    </span>
+                    <span className="ml-1 text-[10px] text-stone-500">[{it.temporal}]</span>
+                    {it.relatesTo.length > 0 && (
+                      <span className="ml-1 text-[10px] text-indigo-600">
+                        →{it.relatesTo.map((r) => `#${r}`).join(',')}
+                      </span>
+                    )}
+                    <div className="text-[11px] text-stone-700">{it.summary}</div>
+                  </li>
+                ))}
+              </ol>
               <div className="mb-1 text-stone-500">{locale === 'zh-Hans' ? '销售教练推理：' : 'Sales-coach reasoning:'}</div>
               <div className="mb-2 italic text-stone-700">{f.reasoning}</div>
-              {f.ambiguity && (
-                <div className="mb-2 rounded-md bg-amber-50 px-2 py-1 text-amber-700">
-                  {locale === 'zh-Hans' ? '不确定：' : 'Ambiguity: '}
-                  {f.ambiguity}
-                </div>
-              )}
               {f.explicitNames && f.explicitNames.length > 0 && (
                 <div className="mb-2">
                   <span className="text-stone-500">{locale === 'zh-Hans' ? '点名实体：' : 'Explicit entities:'}</span>
@@ -268,6 +336,28 @@ function EntryRow({ entry, locale }: { entry: ShadowLogEntry; locale: Locale }) 
                 {entry.legacy.raw}
               </pre>
             </details>
+          )}
+          {benchmark && (
+            <div className="mt-2 border-t border-stone-200 pt-2">
+              <div className="mb-1 flex items-center gap-2 text-stone-500">
+                <span>{locale === 'zh-Hans' ? '🤖 Orchestrator 输出：' : '🤖 Orchestrator output:'}</span>
+                {benchmark.shadow.plan ? (
+                  <Chip>{isDagPlan(benchmark.shadow.plan) ? `DAG ${benchmark.shadow.plan.steps.length} steps` : benchmark.shadow.plan.function ?? 'null'}</Chip>
+                ) : (
+                  <Chip danger>{benchmark.shadow.error?.slice(0, 60) ?? 'Failed'}</Chip>
+                )}
+                <Chip muted>{benchmark.shadow.skillsCount} skills</Chip>
+                <Chip muted>{benchmark.shadow.planLatencyMs}ms</Chip>
+              </div>
+              {benchmark.shadow.planRaw && (
+                <details>
+                  <summary className="cursor-pointer text-stone-500">{locale === 'zh-Hans' ? 'Orchestrator raw' : 'Orchestrator raw'}</summary>
+                  <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-indigo-900/90 p-2 text-[10px] text-indigo-100">
+                    {benchmark.shadow.planRaw}
+                  </pre>
+                </details>
+              )}
+            </div>
           )}
         </div>
       )}

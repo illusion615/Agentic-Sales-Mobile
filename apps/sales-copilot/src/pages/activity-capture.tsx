@@ -24,9 +24,8 @@ import { useOpportunityList, useCreateOpportunity, useUpdateOpportunity } from '
 import { useContactList } from '@/generated/hooks/use-contact';
 import { useWithAISummaryTrigger } from '@/hooks/use-ai-summary-trigger';
 import { touchAccountLastContacted } from '@/lib/account-touch';
-import { getLocale, t, type Locale, getLLMConfig, getAgentFramework } from '@/lib/i18n';
-import { invokeFlowForLLM } from '@/services/power-automate-service';
-import { getCopilotConfig } from '@/services/copilot-service';
+import { getLocale, t, type Locale } from '@/lib/i18n';
+import { isFlowAvailable } from '@/services/power-automate-service';
 import { useCopilot } from '@/contexts/copilot-context';
 import {
   Select,
@@ -36,24 +35,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 
-// Check if AI assistant is configured based on selected agent framework
-function isAIAssistantConfigured(): boolean {
-  try {
-    const agentFramework = getAgentFramework();
-    
-    if (agentFramework === 'local-agent') {
-      // Check BYOM configuration
-      const llmConfig = getLLMConfig();
-      return !!llmConfig?.enabled && !!llmConfig?.endpoint;
-    } else {
-      // Check Copilot Studio configuration
-      const copilotConfig = getCopilotConfig();
-      return !!copilotConfig?.tokenEndpoint;
-    }
-  } catch {
-    return false;
-  }
-}
+
 
 export default function ActivityCapturePage() {
   const navigate = useNavigate();
@@ -77,7 +59,7 @@ export default function ActivityCapturePage() {
   }, []);
   const { data: user } = useUser();
   const locale: Locale = getLocale();
-  const copilotEnabled = isAIAssistantConfigured();
+  const copilotEnabled = isFlowAvailable();
   const copilot = useCopilot();
 
   // Data - use useActivity(id) for single record lookup instead of useActivityList().find()
@@ -265,106 +247,34 @@ export default function ActivityCapturePage() {
     expectedCloseDate?: string;
     matchingOpportunityId?: string;
   } | null> => {
-    const llmConfig = getLLMConfig();
-    if (!llmConfig?.enabled || !llmConfig?.endpoint) {
-      return null;
-    }
-
     try {
-      // Build context about existing opportunities for deduplication
       const existingOppsContext = opportunities
         .filter((opp) => opp.account?.id === accountId || opp.account?.name1 === activityData.accountName)
-        .map((opp) => ({
-          id: opp.id,
-          name: opp.name1,
-          amount: opp.totalamount,
-          stage: opp.stageKey,
-        }));
+        .map((opp) => ({ id: opp.id, name: opp.name1, amount: opp.totalamount, stage: opp.stage }));
 
-      const systemPrompt = locale === 'zh-Hans'
-        ? `你是销售助手，分析拜访记录判断是否存在潜在商机。
-严格输出 JSON，不要任何解释、markdown、代码块标记。
-JSON schema: {
-  "hasOpportunity": boolean,
-  "opportunityName": string (商机名称，如果有),
-  "totalAmount": number (预估金额，如果能推断),
-  "stage": "prospecting" | "qualification" | "proposal" | "negotiation" | "won" | "lost" (销售阶段),
-  "confidence": number (0-100 成交信心),
-  "expectedCloseDate": string (预计成交日期 YYYY-MM-DD，如果能推断),
-  "matchingOpportunityId": string (如果与现有商机重复，填入现有商机ID)
-}
+      const visitData = locale === 'zh-Hans'
+        ? `客户：${activityData.accountName}\n联系人：${activityData.contactName}\n拜访结果：${activityData.result}\n下一步：${activityData.nextStep}\n商机意向：${activityData.opportunityIntent}`
+        : `Account: ${activityData.accountName}\nContact: ${activityData.contactName}\nResult: ${activityData.result}\nNext step: ${activityData.nextStep}\nOpportunity intent: ${activityData.opportunityIntent}`;
 
-现有商机列表（用于去重）：
-${JSON.stringify(existingOppsContext)}
+      const { executeFunction } = await import('@/lib/function-executor');
+      const result = await executeFunction('analyzeOpportunity', {
+        visitData,
+        existingOpportunities: JSON.stringify(existingOppsContext),
+      }, { locale });
 
-判断规则：
-- 如果拜访记录中提到具体项目、预算、采购意向、签约等，视为有潜在商机
-- 如果商机名称/内容与现有商机高度相似，返回 matchingOpportunityId
-- 如果只是普通拜访、维护关系、没有明确商业机会，hasOpportunity 为 false`
-        : `You are a sales assistant analyzing visit records to identify potential opportunities.
-Output strictly in JSON, no explanations, markdown, or code blocks.
-JSON schema: {
-  "hasOpportunity": boolean,
-  "opportunityName": string (opportunity name if exists),
-  "totalAmount": number (estimated amount if inferrable),
-  "stage": "prospecting" | "qualification" | "proposal" | "negotiation" | "won" | "lost",
-  "confidence": number (0-100 win confidence),
-  "expectedCloseDate": string (expected close date YYYY-MM-DD if inferrable),
-  "matchingOpportunityId": string (if duplicate with existing opportunity, fill in existing ID)
-}
-
-Existing opportunities (for deduplication):
-${JSON.stringify(existingOppsContext)}
-
-Rules:
-- If visit mentions specific project, budget, purchase intent, contract, consider it a potential opportunity
-- If opportunity name/content is highly similar to existing, return matchingOpportunityId
-- If just regular visit, relationship maintenance, no clear business opportunity, hasOpportunity is false`;
-
-      const userMessage = locale === 'zh-Hans'
-        ? `拜访记录：
-客户：${activityData.accountName}
-联系人：${activityData.contactName}
-拜访结果：${activityData.result}
-下一步：${activityData.nextStep}
-商机意向：${activityData.opportunityIntent}`
-        : `Visit record:
-Account: ${activityData.accountName}
-Contact: ${activityData.contactName}
-Result: ${activityData.result}
-Next step: ${activityData.nextStep}
-Opportunity intent: ${activityData.opportunityIntent}`;
-
-      const response = await invokeFlowForLLM(llmConfig.endpoint, {
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userMessage },
-        ],
-
-        model: llmConfig.model,
-        deploymentName: llmConfig.deploymentName,
-      });
-
-      if (!response.success || !response.content) {
-        console.error('[ActivityCapture] AI analysis failed:', response.error);
+      if (!result.success || !result.data) {
+        console.error('[ActivityCapture] AI analysis failed:', result.error);
         return null;
       }
-
-      // Parse response
-      let parsed;
-      try {
-        parsed = JSON.parse(response.content);
-      } catch {
-        // Try to extract JSON from response
-        const jsonMatch = response.content.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          parsed = JSON.parse(jsonMatch[0]);
-        } else {
-          return null;
-        }
-      }
-
-      return parsed;
+      return result.data as {
+        hasOpportunity: boolean;
+        opportunityName?: string;
+        totalAmount?: number;
+        stage?: string;
+        confidence?: number;
+        expectedCloseDate?: string;
+        matchingOpportunityId?: string;
+      };
     } catch (error) {
       console.error('[ActivityCapture] AI opportunity analysis error:', error);
       return null;
@@ -429,8 +339,8 @@ Opportunity intent: ${activityData.opportunityIntent}`;
         // Create new activity
         await createActivity.mutateAsync({
           title,
-          typeKey: 'TypeKey0', // visit
-          draftstatusKey: 'DraftstatusKey1', // confirmed
+          type: 'visit', // visit
+          status: 'open',
           ownerid: user?.objectId || '',
           scheduleddate: new Date(formData.visitDate).toISOString(),
           notes,
@@ -455,12 +365,12 @@ Opportunity intent: ${activityData.opportunityIntent}`;
         
         if (oppAnalysis?.hasOpportunity) {
           const stageKeyMap: Record<string, string> = {
-            prospecting: 'StageKey0',
-            qualification: 'StageKey1',
-            proposal: 'StageKey2',
-            negotiation: 'StageKey3',
-            won: 'StageKey4',
-            lost: 'StageKey5',
+            prospecting: 'prospecting',
+            qualification: 'qualification',
+            proposal: 'proposal',
+            negotiation: 'negotiation',
+            won: 'won',
+            lost: 'lost',
           };
 
           if (oppAnalysis.matchingOpportunityId) {
@@ -472,7 +382,7 @@ Opportunity intent: ${activityData.opportunityIntent}`;
                 changedFields: {
                   lastaction: formData.result,
                   confidence: oppAnalysis.confidence,
-                  ...(oppAnalysis.stage && { stageKey: stageKeyMap[oppAnalysis.stage] as 'StageKey0' | 'StageKey1' | 'StageKey2' | 'StageKey3' | 'StageKey4' | 'StageKey5' }),
+                  ...(oppAnalysis.stage && { stage: stageKeyMap[oppAnalysis.stage] as 'prospecting' | 'qualification' | 'proposal' | 'negotiation' | 'won' | 'lost' }),
                   ...(oppAnalysis.expectedCloseDate && { expectedclosedate: oppAnalysis.expectedCloseDate }),
                 },
               });
@@ -493,7 +403,7 @@ Opportunity intent: ${activityData.opportunityIntent}`;
                 // Set account lookup - required field
                 account: { id: targetAccount.id, name1: targetAccount.name1 },
                 totalamount: oppAnalysis.totalAmount || 0,
-                stageKey: (stageKeyMap[oppAnalysis.stage || 'prospecting'] || 'StageKey0') as 'StageKey0' | 'StageKey1' | 'StageKey2' | 'StageKey3' | 'StageKey4' | 'StageKey5',
+                stage: (stageKeyMap[oppAnalysis.stage || 'prospecting'] || 'prospecting') as 'prospecting' | 'qualification' | 'proposal' | 'negotiation' | 'won' | 'lost',
                 confidence: oppAnalysis.confidence || 50,
                 ownerid: user?.objectId || '',
                 lastaction: formData.result,
@@ -513,7 +423,8 @@ Opportunity intent: ${activityData.opportunityIntent}`;
       // Navigate back - use the canonical activity ID
       navigate(isEditMode && activityId ? `/activities/${activityId}` : '/home');
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'Failed to save activity');
+      // Toast is shown by the global MutationCache.onError handler.
+      console.error('Failed to save activity:', error);
     } finally {
       setIsProcessing(false);
     }
@@ -533,7 +444,7 @@ Opportunity intent: ${activityData.opportunityIntent}`;
   if (isEditMode && isLoadingActivity) {
     return (
       <div className="h-screen flex flex-col bg-background overflow-hidden">
-        <header className="fixed top-0 left-0 right-0 z-40 glass-surface border-b border-border/50 safe-area-top">
+        <header className="fixed top-0 left-0 right-0 z-40 bg-background/80 backdrop-blur-md border-b border-border/50 safe-area-top">
           <div className="flex items-center justify-between h-14 px-4">
             <button
               onClick={() => navigate('/')}
@@ -557,7 +468,7 @@ Opportunity intent: ${activityData.opportunityIntent}`;
   if (isEditMode && !isLoadingActivity && !existingActivity) {
     return (
       <div className="h-screen flex flex-col bg-background overflow-hidden">
-        <header className="fixed top-0 left-0 right-0 z-40 glass-surface border-b border-border/50 safe-area-top">
+        <header className="fixed top-0 left-0 right-0 z-40 bg-background/80 backdrop-blur-md border-b border-border/50 safe-area-top">
           <div className="flex items-center justify-between h-14 px-4">
             <button
               onClick={() => navigate('/')}
@@ -595,7 +506,7 @@ Opportunity intent: ${activityData.opportunityIntent}`;
       )}
 
       {/* Header */}
-      <header className="fixed top-0 left-0 right-0 z-40 glass-surface border-b border-border/50 safe-area-top">
+      <header className="fixed top-0 left-0 right-0 z-40 bg-background/80 backdrop-blur-md border-b border-border/50 safe-area-top">
         <div className="flex items-center justify-between h-14 px-4">
           <button
             onClick={() => navigate('/')}

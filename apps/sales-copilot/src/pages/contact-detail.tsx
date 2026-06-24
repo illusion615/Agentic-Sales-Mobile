@@ -17,6 +17,7 @@ import {
   MapPin,
   Calendar,
   CheckSquare,
+  Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MobileLayout } from '@/components/mobile-layout';
@@ -45,18 +46,12 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import { FloatingQuickActions } from '@/components/floating-quick-actions';
 import { useContact, useUpdateContact, useDeleteContact } from '@/generated/hooks/use-contact';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAccountList } from '@/generated/hooks/use-account';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useActivityList } from '@/generated/hooks/use-activity';
-import { OpportunityStageKeyToLabel } from '@/generated/models/opportunity-model';
-import type { Opportunity, OpportunityStageKey } from '@/generated/models/opportunity-model';
-import { ActivityTypeKeyToLabel, ActivityDraftstatusKeyToLabel } from '@/generated/models/activity-model';
-import type { Activity, ActivityTypeKey, ActivityDraftstatusKey } from '@/generated/models/activity-model';
-import type { Account } from '@/generated/models/account-model';
-import { toast } from 'sonner';
+import type { Opportunity } from '@/generated/models/opportunity-model';import type { Activity } from '@/generated/models/activity-model';import type { Account } from '@/generated/models/account-model';import { toast } from 'sonner';
 import { getLocale } from '@/lib/i18n';
 import { useCopilot } from '@/contexts/copilot-context';
 import { PullToRefresh } from '@/components/pull-to-refresh';
@@ -76,12 +71,12 @@ function formatDate(dateStr?: string): string {
   return new Date(dateStr).toLocaleDateString();
 }
 
-function getActivityTypeIcon(typeKey: ActivityTypeKey | null | undefined): React.ComponentType<{ className?: string }> {
-  switch (typeKey) {
-    case 'TypeKey0': return MapPin; // visit
-    case 'TypeKey1': return Phone; // call
-    case 'TypeKey2': return Calendar; // meeting
-    case 'TypeKey3': return Mail; // email
+function getActivityTypeIcon(type: string | null | undefined): React.ComponentType<{ className?: string }> {
+  switch (type) {
+    case 'visit': return Calendar; // visit
+    case 'call': return Phone; // call
+    case 'meeting': return Calendar; // meeting
+    case 'email': return Mail; // email
     default: return CheckSquare;
   }
 }
@@ -109,6 +104,11 @@ export default function ContactDetailPage() {
   const { data: accounts = [] } = useAccountList();
   const { data: allOpportunities = [] } = useOpportunityList();
   const { data: allActivities = [] } = useActivityList();
+
+  // Prefetch related entity detail chunks (account, opportunity, activity)
+  useEffect(() => {
+    import('@/lib/prefetch').then(({ prefetchRelated }) => prefetchRelated('contact'));
+  }, []);
   const updateContact = useUpdateContact();
   const deleteContact = useDeleteContact();
   const queryClient = useQueryClient();
@@ -183,9 +183,10 @@ export default function ContactDetailPage() {
 
   const handleDelete = async () => {
     if (!contact) return;
+    if (deleteContact.isPending) return; // guard against double-tap
     try {
       await deleteContact.mutateAsync(contact.id);
-      toast.success('Contact deleted');
+      // Returning to the list (item now gone) is the feedback; no toast.
       navigate('/contacts');
     } catch (err: unknown) {
       toast.error('Failed to delete contact');
@@ -194,6 +195,7 @@ export default function ContactDetailPage() {
 
   const handleSave = async () => {
     if (!contact) return;
+    if (updateContact.isPending) return; // guard against double-tap
     try {
       const selectedAccount = accounts.find((a: Account) => a.id === editForm.accountId);
       await updateContact.mutateAsync({
@@ -206,7 +208,7 @@ export default function ContactDetailPage() {
           account: selectedAccount ? { id: selectedAccount.id, name1: selectedAccount.name1 } : contact.account,
         },
       });
-      toast.success('Contact updated');
+      // Exiting edit mode reveals the updated fields inline; no toast.
       setIsEditMode(false);
     } catch (err: unknown) {
       toast.error('Failed to update contact');
@@ -228,9 +230,24 @@ export default function ContactDetailPage() {
 
   if (isLoadingContact) {
     return (
-      <MobileLayout title="Contact">
-        <div className="flex items-center justify-center h-64">
-          <div className="text-muted-foreground">Loading...</div>
+      <MobileLayout title={locale === 'zh-Hans' ? '联系人详情' : 'Contact Details'}>
+        <div className="px-4 pb-40 space-y-4 mt-4">
+          <div className="glass-card p-4 animate-pulse" style={{ borderRadius: 20 }}>
+            <div className="flex items-center gap-4">
+              <div className="w-16 h-16 rounded-full bg-muted/50" />
+              <div className="flex-1 space-y-2">
+                <div className="h-6 w-2/3 rounded bg-muted/50" />
+                <div className="h-4 w-1/2 rounded bg-muted/40" />
+              </div>
+            </div>
+          </div>
+          <div className="glass-card p-4 animate-pulse space-y-3" style={{ borderRadius: 20 }}>
+            {[0,1,2,3].map(i => <div key={i} className="flex justify-between"><div className="h-4 w-20 rounded bg-muted/40" /><div className="h-4 w-32 rounded bg-muted/50" /></div>)}
+          </div>
+          <div className="glass-card p-4 animate-pulse space-y-3" style={{ borderRadius: 20 }}>
+            <div className="h-5 w-28 rounded bg-muted/50" />
+            {[0,1].map(i => <div key={i} className="h-12 rounded-lg bg-muted/30" />)}
+          </div>
         </div>
       </MobileLayout>
     );
@@ -274,13 +291,35 @@ export default function ContactDetailPage() {
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction
             onClick={handleDelete}
+            disabled={deleteContact.isPending}
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
-            Delete
+            {deleteContact.isPending ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Deleting...
+              </>
+            ) : (
+              'Delete'
+            )}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  );
+
+  // View-mode header actions: Edit (primary entry, was a hidden dock chip) + Delete.
+  const viewHeaderActions = (
+    <div className="flex items-center gap-1">
+      <button
+        onClick={() => setIsEditMode(true)}
+        className="p-2 rounded-full hover:bg-muted/50 transition-colors"
+        aria-label={locale === 'zh-Hans' ? '编辑' : 'Edit contact'}
+      >
+        <Edit className="w-5 h-5 text-foreground" />
+      </button>
+      {deleteButton}
+    </div>
   );
 
   // Edit Mode UI
@@ -372,8 +411,17 @@ export default function ContactDetailPage() {
               onClick={handleSave}
               disabled={!editForm.fullname || updateContact.isPending}
             >
-              <Save className="w-4 h-4" />
-              Save
+              {updateContact.isPending ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4" />
+                  Save
+                </>
+              )}
             </Button>
           </div>
         </motion.div>
@@ -383,7 +431,7 @@ export default function ContactDetailPage() {
 
   // View Mode UI
   return (
-    <MobileLayout title="Contact Details" hideVoiceButton headerRight={deleteButton}>
+    <MobileLayout title="Contact Details" hideVoiceButton headerRight={viewHeaderActions}>
       <PullToRefresh onRefresh={handleRefresh} className="flex-1 overflow-y-auto">
         <motion.div
           className="py-4 space-y-4 pb-48"
@@ -525,7 +573,7 @@ export default function ContactDetailPage() {
                   </div>
                   <div className="flex items-center gap-2 text-xs">
                     <Badge variant="outline" className="text-[10px]">
-                      {OpportunityStageKeyToLabel[opp.stageKey as OpportunityStageKey]}
+                      {opp.stage}
                     </Badge>
                     {opp.confidence && (
                       <span className="text-muted-foreground">
@@ -559,7 +607,7 @@ export default function ContactDetailPage() {
                 >
                   <div className="flex gap-3">
                     {(() => {
-                      const Icon = getActivityTypeIcon(activity.typeKey);
+                      const Icon = getActivityTypeIcon(activity.type);
                       return (
                         <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
                           <Icon className="w-4 h-4 text-primary" />
@@ -571,21 +619,21 @@ export default function ContactDetailPage() {
                         <h4 className="text-sm font-medium text-foreground truncate">
                           {activity.title}
                         </h4>
-                        {activity.draftstatusKey && (
+                        {activity.status && (
                           <Badge
                             variant="outline"
                             className={cn(
                               'text-[10px]',
-                              activity.draftstatusKey === 'DraftstatusKey2' && 'text-emerald-600 border-emerald-200'
+                              activity.status === 'completed' && 'text-emerald-600 border-emerald-200'
                             )}
                           >
-                            {ActivityDraftstatusKeyToLabel[activity.draftstatusKey as ActivityDraftstatusKey]}
+                            {activity.status}
                           </Badge>
                         )}
                       </div>
                       <p className="text-xs text-muted-foreground">
                         {formatDate(activity.scheduleddate)}
-                        {activity.typeKey && ` • ${ActivityTypeKeyToLabel[activity.typeKey as ActivityTypeKey]}`}
+                        {activity.type && ` • ${activity.type}`}
                       </p>
                     </div>
                   </div>
@@ -597,16 +645,6 @@ export default function ContactDetailPage() {
       </motion.div>
       </PullToRefresh>
 
-      <FloatingQuickActions
-        actions={[
-          {
-            id: 'edit',
-            icon: Edit,
-            label: locale === 'zh-Hans' ? '编辑' : 'Edit',
-            onClick: () => setIsEditMode(true),
-          },
-        ]}
-      />
     </MobileLayout>
   );
 }

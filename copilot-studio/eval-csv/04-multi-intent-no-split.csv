@@ -1,0 +1,5 @@
+"conversationNumber","question","response"
+"1","I visited Dr. Lisa at the cardiology department in Royal London Hospital yesterday to discuss the BeneVision N22 demo.","Must NOT split. This is ONE intent — multiple modifiers describe the same event. type=appointment, single record."
+"2","Show me my quarterly pipeline breakdown by stage, including win rate and total amount.","Must NOT split. Multi-section report request is structure, not separate intents. ONE intent."
+"3","给我看看这周的拜访记录，包括客户名称、产品和状态。","Must NOT split. List request with multiple columns is not multiple intents. ONE intent."
+"4","Schedule a follow-up call with Royal London to discuss pricing — include details about the N22 quote and mention Dr. Lisa's feedback.","Must NOT split. Follow-up + detail = same planned call. ONE intent."

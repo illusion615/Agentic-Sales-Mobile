@@ -77,21 +77,20 @@ export default function BriefMePage() {
   const chapterRunIdRef = useRef<number>(0);
   const pauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
-  // Get today's briefing
+  // Get today's briefing. The briefings list is already security-trimmed by
+  // Dataverse to what this user can read, so we only need to pick by date —
+  // no client-side owner filter (that would be neither security nor correct).
   const briefing = useMemo(() => {
-    const userId = user?.objectId;
-    if (!userId) return undefined;
-    
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    
-    // Find today's briefing for current user
+
+    // Find today's briefing
     let todayBriefing = briefings.find((b) => {
       const genDate = new Date(b.generatedon);
       genDate.setHours(0, 0, 0, 0);
-      return b.ownerid === userId && genDate.getTime() === today.getTime();
+      return genDate.getTime() === today.getTime();
     });
-    
+
     // Offline fallback: use yesterday's
     if (!todayBriefing && isOffline) {
       const yesterday = new Date(today);
@@ -99,17 +98,17 @@ export default function BriefMePage() {
       todayBriefing = briefings.find((b) => {
         const genDate = new Date(b.generatedon);
         genDate.setHours(0, 0, 0, 0);
-        return b.ownerid === userId && genDate.getTime() === yesterday.getTime();
+        return genDate.getTime() === yesterday.getTime();
       });
     }
-    
-    // Fallback to any briefing for user
+
+    // Fallback to any available briefing
     if (!todayBriefing && briefings.length > 0) {
-      todayBriefing = briefings.find((b) => b.ownerid === userId) || briefings[0];
+      todayBriefing = briefings[0];
     }
-    
+
     return todayBriefing;
-  }, [briefings, user, isOffline]);
+  }, [briefings, isOffline]);
   
   // Parse payload
   const payload: BriefingPayload | null = useMemo(() => {
@@ -128,6 +127,10 @@ export default function BriefMePage() {
   
   // Load system TTS voices
   useEffect(() => {
+    if (!('speechSynthesis' in window)) {
+      setVoicesReady(false);
+      return;
+    }
     const loadVoices = () => {
       const voices = window.speechSynthesis.getVoices();
       if (voices.length > 0) {
@@ -509,7 +512,7 @@ export default function BriefMePage() {
       </AnimatePresence>
       
       {/* Header */}
-      <header className="fixed top-0 left-0 right-0 z-40 glass-surface border-b border-border" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+      <header className="fixed top-0 left-0 right-0 z-40 bg-background/80 backdrop-blur-md border-b border-border" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
         <div className="flex items-center justify-between h-14 px-4">
           <button
             onClick={() => navigate('/')}

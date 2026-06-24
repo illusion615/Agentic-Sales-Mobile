@@ -17,15 +17,18 @@ export const ResolutionItemSchema = z.object({
   // Optional dependency: this resolution should be scoped by the named already-resolved entity.
   // e.g. contact resolution `scopeBy: 'account'` means filter contacts within the resolved account.
   scopeBy: z.enum(['account', 'opportunity']).optional(),
+  // Phase B: which intent (0-based head, 1+ for additionalActions) this resolution belongs to.
+  // Carried through so the Context-side cascade can emit per-task announces on boundary change.
+  intentIndex: z.number().int().nonnegative().optional(),
 });
 export type ResolutionItem = z.infer<typeof ResolutionItemSchema>;
 
 // I-8 Slice A: TemporalMode — semantic tense extracted from user's wording.
 // Carried inside draftActivity `arguments.temporalMode` (not top-level) so the
-// form-card can derive draftstatusKey and the visibility of result/nextStep
-// fields without coupling to language-specific tense markers.
-//   planned     → activity is in the future or about to happen → status=Confirmed, hide result/nextStep
-//   completed   → activity has already happened → status=Completed, show result/nextStep, LLM prefills
+// form-card can derive draftstatusKey and the visibility of the result field
+// from temporalMode alone — no need to couple to language-specific tense markers.
+//   planned     → activity is in the future or about to happen → status=Confirmed, hide result
+//   completed   → activity has already happened → status=Completed, show result, LLM prefills
 //   unspecified → no clear tense signal → keep current behavior (Draft, fields shown unfilled)
 export const TemporalModeSchema = z.enum(['planned', 'completed', 'unspecified']);
 export type TemporalMode = z.infer<typeof TemporalModeSchema>;
@@ -211,7 +214,7 @@ export function intentRequiresConfirmation(intent: SingleIntent): boolean {
   if (intent.confidence < 0.7) return true;
   
   // Draft functions need confirmation (they show a form)
-  const draftFunctions = ['draftActivity', 'draftOpportunity', 'draftAccount', 'draftContact', 'batchDraft'];
+  const draftFunctions = ['draftActivity', 'draftOpportunity', 'draftAccount', 'draftContact'];
   if (draftFunctions.includes(intent.function)) return true;
   
   // Intents with missing fields need confirmation
@@ -298,6 +301,8 @@ export function parseAndValidateIntent(text: string): ValidatedIntentResult | nu
 
 // ========== Circuit Breaker Pattern ==========
 
+export type CircuitBreakerChannel = 'llm' | 'dataverse';
+
 export interface CircuitBreakerState {
   failures: number;
   lastFailure: number;
@@ -305,16 +310,20 @@ export interface CircuitBreakerState {
   openedAt: number;
 }
 
-const CIRCUIT_BREAKER_KEY = 'copilot-circuit-breaker';
+const CIRCUIT_BREAKER_PREFIX = 'copilot-circuit-breaker';
 const MAX_FAILURES = 3;
 const RECOVERY_TIME_MS = 30000; // 30 seconds
 
+function cbKey(channel: CircuitBreakerChannel = 'llm'): string {
+  return `${CIRCUIT_BREAKER_PREFIX}-${channel}`;
+}
+
 /**
- * Get current circuit breaker state
+ * Get current circuit breaker state for a channel
  */
-export function getCircuitBreakerState(): CircuitBreakerState {
+export function getCircuitBreakerState(channel: CircuitBreakerChannel = 'llm'): CircuitBreakerState {
   try {
-    const stored = sessionStorage.getItem(CIRCUIT_BREAKER_KEY);
+    const stored = sessionStorage.getItem(cbKey(channel));
     if (stored) {
       const state = JSON.parse(stored) as CircuitBreakerState;
       
@@ -332,10 +341,10 @@ export function getCircuitBreakerState(): CircuitBreakerState {
 }
 
 /**
- * Record a failure in the circuit breaker
+ * Record a failure in the circuit breaker for a channel
  */
-export function recordCircuitBreakerFailure(): void {
-  const state = getCircuitBreakerState();
+export function recordCircuitBreakerFailure(channel: CircuitBreakerChannel = 'llm'): void {
+  const state = getCircuitBreakerState(channel);
   const now = Date.now();
   
   // Reset failures if last failure was more than 60 seconds ago
@@ -349,32 +358,32 @@ export function recordCircuitBreakerFailure(): void {
   };
   
   try {
-    sessionStorage.setItem(CIRCUIT_BREAKER_KEY, JSON.stringify(newState));
+    sessionStorage.setItem(cbKey(channel), JSON.stringify(newState));
   } catch {
     // Ignore storage errors
   }
   
   if (newState.isOpen) {
-    console.warn('[CircuitBreaker] OPEN - LLM calls disabled for', RECOVERY_TIME_MS / 1000, 'seconds');
+    console.warn(`[CircuitBreaker:${channel}] OPEN - calls disabled for`, RECOVERY_TIME_MS / 1000, 'seconds');
   }
 }
 
 /**
- * Record a success in the circuit breaker (reset state)
+ * Record a success in the circuit breaker (reset state) for a channel
  */
-export function recordCircuitBreakerSuccess(): void {
+export function recordCircuitBreakerSuccess(channel: CircuitBreakerChannel = 'llm'): void {
   try {
-    sessionStorage.removeItem(CIRCUIT_BREAKER_KEY);
+    sessionStorage.removeItem(cbKey(channel));
   } catch {
     // Ignore storage errors
   }
 }
 
 /**
- * Check if circuit breaker is open (blocking calls)
+ * Check if circuit breaker is open (blocking calls) for a channel
  */
-export function isCircuitBreakerOpen(): boolean {
-  return getCircuitBreakerState().isOpen;
+export function isCircuitBreakerOpen(channel: CircuitBreakerChannel = 'llm'): boolean {
+  return getCircuitBreakerState(channel).isOpen;
 }
 
 // ========== Levenshtein Distance for Fuzzy Matching ==========
@@ -424,12 +433,14 @@ export function levenshteinSimilarity(a: string, b: string): number {
 // ========== Match Configuration ==========
 
 export interface MatchThresholds {
+  autoSelect: number; // Score >= this → auto-inject without user confirmation
   high: number;    // Score >= this is high confidence
   medium: number;  // Score >= this is medium confidence
   low: number;     // Score >= this is low confidence (below is none)
 }
 
 const DEFAULT_THRESHOLDS: MatchThresholds = {
+  autoSelect: 90,
   high: 70,
   medium: 50,
   low: 25,
@@ -729,12 +740,23 @@ export const PendingResolutionSchema = z.object({
 });
 export type PendingResolution = z.infer<typeof PendingResolutionSchema>;
 
+// G-1: AdditionalAction shape carried alongside the primary intent so that
+// chain-create / cascade flows can resume the inferred multi-intent siblings
+// after the blocking clarification is cleared.
+export const AdditionalActionSchema = z.object({
+  function: z.string(),
+  arguments: z.record(z.string(), z.unknown()),
+  reason: z.string().optional(),
+});
+export type AdditionalAction = z.infer<typeof AdditionalActionSchema>;
+
 export const AwaitingClarificationSchema = z.object({
   kind: z.literal('awaiting-clarification'),
   pendingResolutions: z.array(PendingResolutionSchema).min(1),
   originalIntent: z.object({
     function: z.string(),
     arguments: z.record(z.string(), z.unknown()),
+    additionalActions: z.array(AdditionalActionSchema).optional(),
   }),
   // I-3 Slice 1: carry the remaining resolution queue (entities still to resolve after this blocker is cleared)
   // and the IDs of entities already resolved earlier in the chain (so the next step can scope by them).
@@ -742,4 +764,60 @@ export const AwaitingClarificationSchema = z.object({
   resolvedSoFar: z.record(z.string(), z.string()).optional(),
 });
 export type AwaitingClarification = z.infer<typeof AwaitingClarificationSchema>;
+
+// ========== Phase 2: Unified page-entity context ==========
+// Single source of truth for turning a page's `pageData` into the two shapes
+// the agent pipeline needs:
+//   1. boundEntities  → fed to the Frame so the Orchestrator knows the IDs of
+//      the account / opportunity / contact the user is currently viewing
+//      (previously this link was broken — pipelineCtx never set boundEntities,
+//      so the Orchestrator only ever saw a free-text page summary, not IDs).
+//   2. resolvedContext seed → merged into the IntentQueue so every drafted/
+//      updated record auto-links to what the user is viewing.
+// Both derive from the SAME canonical key names below, so page → frame → queue
+// can no longer diverge on naming.
+
+/** The flat entity keys every detail page writes into setPageContext.pageData. */
+export const PAGE_ENTITY_KEYS = [
+  'accountId', 'accountName',
+  'contactId', 'contactName',
+  'opportunityId', 'opportunityName',
+] as const;
+
+export interface BoundEntities {
+  account?: { id?: string; name?: string };
+  opportunity?: { id?: string; name?: string };
+  contact?: { id?: string; name?: string };
+}
+
+function str(v: unknown): string | undefined {
+  return typeof v === 'string' && v.trim() ? v : undefined;
+}
+
+/** Build Frame boundEntities ({account,opportunity,contact}) from page pageData. */
+export function extractBoundEntities(pageData: unknown): BoundEntities | undefined {
+  if (!pageData || typeof pageData !== 'object') return undefined;
+  const pd = pageData as Record<string, unknown>;
+  const out: BoundEntities = {};
+  const acc = { id: str(pd.accountId), name: str(pd.accountName) };
+  const opp = { id: str(pd.opportunityId), name: str(pd.opportunityName) };
+  const con = { id: str(pd.contactId), name: str(pd.contactName) };
+  if (acc.id || acc.name) out.account = acc;
+  if (opp.id || opp.name) out.opportunity = opp;
+  if (con.id || con.name) out.contact = con;
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** Build a queue resolvedContext seed (flat string map) from page pageData. */
+export function extractEntitySeed(pageData: unknown): Record<string, string> {
+  const seed: Record<string, string> = {};
+  if (!pageData || typeof pageData !== 'object') return seed;
+  const pd = pageData as Record<string, unknown>;
+  for (const key of PAGE_ENTITY_KEYS) {
+    const v = str(pd[key]);
+    if (v) seed[key] = v;
+  }
+  return seed;
+}
+
 

@@ -1,16 +1,16 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence, type PanInfo } from 'motion/react';
-import { ChevronRight, ChevronLeft, ChevronDown, Calendar, Target, Phone, MapPin, FileText, CheckCircle2, Clock, X, Lightbulb, AlertTriangle, TrendingUp, Sparkles, Mail, CheckSquare } from 'lucide-react';
+import { ChevronRight, ChevronLeft, ChevronDown, Calendar, Target, Phone, MapPin, FileText, CheckCircle2, Clock, X, Lightbulb, AlertTriangle, TrendingUp, Sparkles, Mail, CheckSquare, RefreshCw, Play, Pause, Square, SkipBack, SkipForward, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatCurrencyCompact } from '@/lib/format-currency';
-import { getLocale } from '@/lib/i18n';
+import { getLocale, getWeekStartDay, type Locale } from '@/lib/i18n';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { Calendar as CalendarPicker } from '@/components/ui/calendar';
 import type { BusinessInsight } from '@/generated/models/business-insight-model';
-import type { Activity, ActivityTypeKey } from '@/generated/models/activity-model';
-import { ActivityTypeKeyToLabel } from '@/generated/models/activity-model';
+import type { Activity } from '@/generated/models/activity-model';
+import { ACTIVITY_TYPE_COLORS } from '@/lib/activity-colors';
 
 // Animation variants
 const itemVariants = {
@@ -38,6 +38,8 @@ export interface HotOpportunity {
 export interface AtRiskClient {
   id: string;
   name: string;
+  /** Days since last contact; null = never contacted. Drives the "why at-risk" reason. */
+  lastContactDays?: number | null;
 }
 
 export interface ActivityInsight {
@@ -46,6 +48,25 @@ export interface ActivityInsight {
   summary: string;
   rationale: string;
   type: 'info' | 'warning' | 'success';
+  generatedon?: string;
+}
+
+/** Compact "generated X ago" label so users can judge an insight's freshness. */
+function formatGeneratedAt(iso: string | undefined, locale: Locale): string | null {
+  if (!iso) return null;
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return null;
+  const isZh = locale === 'zh-Hans';
+  const diffMs = Date.now() - then;
+  const mins = Math.floor(diffMs / 60000);
+  const prefix = isZh ? '生成于 ' : 'Generated ';
+  if (mins < 1) return isZh ? '生成于 刚刚' : 'Generated just now';
+  if (mins < 60) return prefix + (isZh ? `${mins} 分钟前` : `${mins}m ago`);
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return prefix + (isZh ? `${hours} 小时前` : `${hours}h ago`);
+  const days = Math.floor(hours / 24);
+  if (days < 30) return prefix + (isZh ? `${days} 天前` : `${days}d ago`);
+  return prefix + new Date(then).toLocaleDateString();
 }
 
 export interface KPIData {
@@ -79,9 +100,10 @@ export interface KPIData {
 
 interface KPICardsProps {
   data: KPIData;
+  isLoading?: boolean;
   onNavigate: (path: string) => void;
-  onMarkDone?: (itemId: string) => void;
-  onReschedule?: (itemId: string, newDate: Date) => void;
+  onMarkDone?: (itemId: string) => void | Promise<void>;
+  onReschedule?: (itemId: string, newDate: Date) => void | Promise<void>;
   // Activity-related business insights to display in agenda card
   activityInsights?: BusinessInsight[];
   // All activities for calendar month view
@@ -95,21 +117,36 @@ interface KPICardsProps {
   // override the internal state; otherwise the component manages it itself.
   insightsSheetOpen?: boolean;
   onInsightsSheetOpenChange?: (open: boolean) => void;
+  onRefreshInsights?: () => void;
+  isRefreshingInsights?: boolean;
+  insightRefreshStatus?: string;
+  onPlayInsights?: () => void;
+  onStopInsights?: () => void;
+  onPauseInsights?: () => void;
+  onSpeedToggle?: () => void;
+  playbackSpeed?: number;
+  onPrevInsight?: () => void;
+  onNextInsight?: () => void;
+  canPrevInsight?: boolean;
+  canNextInsight?: boolean;
+  activeInsightIndex?: number;
+  onInsightViewed?: (insightId: string) => void;
+  isInsightPlaybackActive?: boolean;
+  insightPlaybackElapsed?: string;
+  insightPlaybackTotal?: string;
+  insightPlaybackParagraphLabel?: string;
+  insightPlaybackParagraphIndex?: number;
+  insightPlaybackParagraphCount?: number;
 }
 
 
-// Activity type colors for calendar view
-const activityTypeColors: Record<string, { bg: string; text: string; dot: string }> = {
-  'visit': { bg: 'bg-blue-500/20', text: 'text-blue-600 dark:text-blue-400', dot: 'bg-blue-500' },
-  'call': { bg: 'bg-emerald-500/20', text: 'text-emerald-600 dark:text-emerald-400', dot: 'bg-emerald-500' },
-  'meeting': { bg: 'bg-purple-500/20', text: 'text-purple-600 dark:text-purple-400', dot: 'bg-purple-500' },
-  'email': { bg: 'bg-orange-500/20', text: 'text-orange-600 dark:text-orange-400', dot: 'bg-orange-500' },
-  'other': { bg: 'bg-gray-500/20', text: 'text-gray-600 dark:text-gray-400', dot: 'bg-gray-500' },
-};
+// Activity type colors — single source of truth shared across Home, the
+// Activities calendar view, and activity-detail (see lib/activity-colors).
+const activityTypeColors = ACTIVITY_TYPE_COLORS;
 
 // Icons for each activity type - matching activities.tsx exactly
 const typeIcons: Record<string, React.ComponentType<{ className?: string }>> = {
-  'visit': MapPin,
+  'visit': Calendar,
   'call': Phone,
   'meeting': Calendar,
   'email': Mail,
@@ -176,7 +213,39 @@ function ProgressRingWithValue({
   );
 }
 
-export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityInsights = [], allActivities = [], onCalendarDayClick, onProcessOverdue, insightsSheetOpen: insightsSheetOpenProp, onInsightsSheetOpenChange }: KPICardsProps) {
+export function KPICards({
+  data,
+  isLoading = false,
+  onNavigate,
+  onMarkDone,
+  onReschedule,
+  activityInsights = [],
+  allActivities = [],
+  onCalendarDayClick,
+  onProcessOverdue,
+  insightsSheetOpen: insightsSheetOpenProp,
+  onInsightsSheetOpenChange,
+  onRefreshInsights,
+  isRefreshingInsights = false,
+  insightRefreshStatus = '',
+  onPlayInsights,
+  onStopInsights,
+  onPauseInsights,
+  onSpeedToggle,
+  playbackSpeed = 1,
+  onPrevInsight,
+  onNextInsight,
+  canPrevInsight = false,
+  canNextInsight = false,
+  activeInsightIndex,
+  onInsightViewed,
+  isInsightPlaybackActive = false,
+  insightPlaybackElapsed,
+  insightPlaybackTotal,
+  insightPlaybackParagraphLabel,
+  insightPlaybackParagraphIndex,
+  insightPlaybackParagraphCount,
+}: KPICardsProps) {
   const locale = getLocale();
 
   const [rescheduleSheetOpen, setRescheduleSheetOpen] = useState(false);
@@ -186,9 +255,12 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
   // Remove insightCurrentIndex as it's no longer needed for swipe between calendar and insights
   const [overdueSheetOpen, setOverdueSheetOpen] = useState(false);
   const [overdueCurrentIndex, setOverdueCurrentIndex] = useState(0);
+  const [overdueProcessing, setOverdueProcessing] = useState<string | null>(null); // tracks which action is in-flight
   const [showCelebration, setShowCelebration] = useState(false);
   const [prevOverdueCount, setPrevOverdueCount] = useState<number | null>(null);
-  const [agendaExpanded, setAgendaExpanded] = useState(false);
+  const [agendaExpanded, setAgendaExpanded] = useState(() => {
+    try { return localStorage.getItem('agendaDefaultExpanded') !== 'false'; } catch { return true; }
+  });
   const [insightsSheetOpenInternal, setInsightsSheetOpenInternal] = useState(false);
   const insightsSheetOpen = insightsSheetOpenProp ?? insightsSheetOpenInternal;
   const setInsightsSheetOpen = (open: boolean) => {
@@ -236,9 +308,27 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
         summary: summaryText.length > 120 ? summaryText.substring(0, 120) + '...' : summaryText,
         rationale: rationaleText,
         type: insightType,
+        generatedon: insight.generatedon,
       };
     });
   }, [activityInsights, locale]);
+
+  // Follow the voice: while playback is active, page the sheet to the insight
+  // card currently being read aloud (activeInsightIndex is the playing index).
+  useEffect(() => {
+    if (!isInsightPlaybackActive || typeof activeInsightIndex !== 'number') return;
+    const max = Math.max(0, parsedActivityInsights.length - 1);
+    setInsightsSheetIndex(Math.min(Math.max(0, activeInsightIndex), max));
+  }, [isInsightPlaybackActive, activeInsightIndex, parsedActivityInsights.length]);
+
+  // Mark an insight as read once its card is shown in the open sheet. This covers
+  // both manual viewing/swiping and the voice-followed paging above, so the bell
+  // badge (unread count) decrements as the user sees or hears each insight.
+  useEffect(() => {
+    if (!insightsSheetOpen) return;
+    const current = parsedActivityInsights[insightsSheetIndex];
+    if (current?.id) onInsightViewed?.(current.id);
+  }, [insightsSheetOpen, insightsSheetIndex, parsedActivityInsights, onInsightViewed]);
 
   // Calendar month view data - group activities by date for the current month
   const calendarMonthData = useMemo(() => {
@@ -264,7 +354,7 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
       if (!activitiesByDate[dateStr]) {
         activitiesByDate[dateStr] = [];
       }
-      const typeLabel = ActivityTypeKeyToLabel[activity.typeKey] || 'other';
+      const typeLabel = activity.type || 'other';
       // Check if this type already exists for the date
       const existingType = activitiesByDate[dateStr].find((t: { type: string; count: number }) => t.type === typeLabel);
       if (existingType) {
@@ -278,7 +368,7 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
     const totalActivities = monthActivities.length;
     const typeCounts: Record<string, number> = {};
     monthActivities.forEach((activity: Activity) => {
-      const typeLabel = ActivityTypeKeyToLabel[activity.typeKey] || 'other';
+      const typeLabel = activity.type || 'other';
       typeCounts[typeLabel] = (typeCounts[typeLabel] || 0) + 1;
     });
     
@@ -524,6 +614,22 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
       <div className="space-y-3">
       {/* Top Row - 3 KPI Cards */}
       <div className="grid grid-cols-3 gap-3">
+        {isLoading ? (
+          <>
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="glass-card p-3 animate-pulse" style={{ borderRadius: 20 }}>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="w-10 h-10 rounded-full bg-muted/50" />
+                  <div className="w-12 h-5 rounded-full bg-muted/50" />
+                </div>
+                <div className="w-20 h-3 rounded bg-muted/50 mb-1.5" />
+                <div className="w-14 h-5 rounded bg-muted/50 mb-1" />
+                <div className="w-24 h-2.5 rounded bg-muted/30" />
+              </div>
+            ))}
+          </>
+        ) : (
+        <>
         {/* Quarterly Performance (季度业绩完成率) */}
         <motion.div
           variants={itemVariants}
@@ -715,9 +821,55 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
             </div>
           </div>
         </motion.div>
+        </>
+        )}
       </div>
 
       {/* Today's Agenda - Full Width Row */}
+      {isLoading ? (
+        <div className="glass-card p-4 animate-pulse" style={{ borderRadius: 20 }}>
+          {/* Calendar skeleton — matches real calendar layout */}
+          <div className="mb-4">
+            {/* Header: icon + month name */}
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-8 h-8 rounded-full bg-muted/50" />
+              <div className="space-y-1">
+                <div className="h-3 w-24 rounded bg-muted/40" />
+                <div className="h-4 w-20 rounded bg-muted/50" />
+              </div>
+            </div>
+            {/* Weekday headers + 6 rows of 7 days (matches real h-8 cells) */}
+            <div className="grid grid-cols-7 gap-0.5 mb-1">
+              {[...Array(7)].map((_, i) => <div key={`wh${i}`} className="h-4 flex items-center justify-center"><div className="w-3 h-2.5 rounded bg-muted/30" /></div>)}
+            </div>
+            <div className="grid grid-cols-7 gap-0.5">
+              {[...Array(42)].map((_, i) => <div key={i} className="h-8 rounded bg-muted/20" />)}
+            </div>
+            {/* Legend row */}
+            <div className="flex gap-3 mt-2 pt-2 border-t border-border/30">
+              {[16, 12, 14, 12].map((w, i) => (
+                <div key={i} className="flex items-center gap-1">
+                  <div className="w-2 h-2 rounded-full bg-muted/30" />
+                  <div className={`h-2.5 rounded bg-muted/30`} style={{ width: w * 4 }} />
+                </div>
+              ))}
+            </div>
+          </div>
+          {/* Agenda skeleton */}
+          <div className="rounded-lg border border-muted/30 p-3 space-y-2">
+            <div className="h-4 w-24 rounded bg-muted/50" />
+            {[0, 1, 2].map(i => (
+              <div key={i} className="flex items-center gap-3">
+                <div className="w-1 h-8 rounded bg-muted/40" />
+                <div className="flex-1 space-y-1">
+                  <div className="h-3 w-3/4 rounded bg-muted/40" />
+                  <div className="h-2.5 w-1/2 rounded bg-muted/30" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
       <motion.div
         variants={itemVariants}
         className="glass-card p-4 cursor-pointer hover:bg-muted/50 transition-colors"
@@ -770,15 +922,21 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
               <div className="mt-2">
                 {/* Weekday headers */}
                 <div className="grid grid-cols-7 gap-0.5 mb-1">
-                  {(locale === 'zh-Hans' ? ['日', '一', '二', '三', '四', '五', '六'] : ['S', 'M', 'T', 'W', 'T', 'F', 'S']).map((day: string, i: number) => (
-                    <div key={i} className="text-center text-[11px] text-muted-foreground font-medium">{day}</div>
-                  ))}
+                  {(() => {
+                    const wso = getWeekStartDay();
+                    const zhHeaders = wso === 'monday' ? ['一', '二', '三', '四', '五', '六', '日'] : ['日', '一', '二', '三', '四', '五', '六'];
+                    const enHeaders = wso === 'monday' ? ['M', 'T', 'W', 'T', 'F', 'S', 'S'] : ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+                    return (locale === 'zh-Hans' ? zhHeaders : enHeaders).map((day: string, i: number) => (
+                      <div key={i} className="text-center text-[11px] text-muted-foreground font-medium">{day}</div>
+                    ));
+                  })()}
                 </div>
                 {/* Calendar days */}
                 <div className="grid grid-cols-7 gap-0.5">
                   {(() => {
                     const days: React.ReactNode[] = [];
-                    const firstDayOfWeek = calendarMonthData.firstDayOfMonth.getDay();
+                    const wsoNum = getWeekStartDay() === 'monday' ? 1 : 0;
+                    const firstDayOfWeek = (calendarMonthData.firstDayOfMonth.getDay() - wsoNum + 7) % 7;
                     const daysInMonth = calendarMonthData.lastDayOfMonth.getDate();
                     const today = new Date();
                     
@@ -964,6 +1122,7 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
 
 
       </motion.div>
+      )}
       
       {/* Overdue Tasks Sheet with Swipe */}
       <Sheet open={overdueSheetOpen} onOpenChange={setOverdueSheetOpen}>
@@ -1072,6 +1231,8 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
                                 e.stopPropagation();
                                 setOverdueCurrentIndex(idx);
                               }}
+                              aria-label={locale === 'zh-Hans' ? `跳转到第 ${idx + 1} 条逾期事项` : `Jump to overdue item ${idx + 1}`}
+                              title={locale === 'zh-Hans' ? `跳转到第 ${idx + 1} 条逾期事项` : `Jump to overdue item ${idx + 1}`}
                               className={cn(
                                 "w-2 h-2 rounded-full transition-all",
                                 idx === overdueCurrentIndex
@@ -1097,7 +1258,8 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
                 <Button
                   variant="outline"
                   className="h-12 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700 hover:bg-emerald-100 dark:hover:bg-emerald-800/50"
-                  onClick={() => {
+                  disabled={overdueProcessing !== null}
+                  onClick={async () => {
                     const sortedOverdue = data.overdueItems?.slice().sort((a: AgendaItem, b: AgendaItem) => {
                       const dateA = a.scheduledDate?.getTime() ?? 0;
                       const dateB = b.scheduledDate?.getTime() ?? 0;
@@ -1105,7 +1267,12 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
                     }) ?? [];
                     const currentItem = sortedOverdue[overdueCurrentIndex];
                     if (onMarkDone && currentItem) {
-                      onMarkDone(currentItem.id);
+                      setOverdueProcessing('done');
+                      try {
+                        await onMarkDone(currentItem.id);
+                      } finally {
+                        setOverdueProcessing(null);
+                      }
                       if (overdueCurrentIndex >= overdueCount - 1) {
                         setOverdueCurrentIndex(Math.max(0, overdueCount - 2));
                       }
@@ -1115,13 +1282,15 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
                     }
                   }}
                 >
-                  <CheckCircle2 className="w-4 h-4 mr-2" />
-                  {locale === 'zh-Hans' ? '标记完成' : 'Mark Done'}
+                  {overdueProcessing === 'done'
+                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{locale === 'zh-Hans' ? '处理中...' : 'Processing...'}</>
+                    : <><CheckCircle2 className="w-4 h-4 mr-2" />{locale === 'zh-Hans' ? '标记完成' : 'Mark Done'}</>}
                 </Button>
                 <Button
                   variant="outline"
                   className="h-12 bg-destructive/10 text-destructive border-destructive/40 hover:bg-destructive/20"
-                  onClick={() => {
+                  disabled={overdueProcessing !== null}
+                  onClick={async () => {
                     const sortedOverdue = data.overdueItems?.slice().sort((a: AgendaItem, b: AgendaItem) => {
                       const dateA = a.scheduledDate?.getTime() ?? 0;
                       const dateB = b.scheduledDate?.getTime() ?? 0;
@@ -1129,7 +1298,12 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
                     }) ?? [];
                     const currentItem = sortedOverdue[overdueCurrentIndex];
                     if (onMarkDone && currentItem) {
-                      onMarkDone(currentItem.id);
+                      setOverdueProcessing('cancel');
+                      try {
+                        await onMarkDone(currentItem.id);
+                      } finally {
+                        setOverdueProcessing(null);
+                      }
                       if (overdueCurrentIndex >= overdueCount - 1) {
                         setOverdueCurrentIndex(Math.max(0, overdueCount - 2));
                       }
@@ -1139,8 +1313,9 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
                     }
                   }}
                 >
-                  <X className="w-4 h-4 mr-2" />
-                  {locale === 'zh-Hans' ? '取消任务' : 'Cancel Task'}
+                  {overdueProcessing === 'cancel'
+                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{locale === 'zh-Hans' ? '处理中...' : 'Processing...'}</>
+                    : <><X className="w-4 h-4 mr-2" />{locale === 'zh-Hans' ? '取消任务' : 'Cancel Task'}</>}
                 </Button>
               </div>
               
@@ -1161,7 +1336,8 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
                 <Button
                   variant="outline"
                   className="h-12"
-                  onClick={() => {
+                  disabled={overdueProcessing !== null}
+                  onClick={async () => {
                     const sortedOverdue = data.overdueItems?.slice().sort((a: AgendaItem, b: AgendaItem) => {
                       const dateA = a.scheduledDate?.getTime() ?? 0;
                       const dateB = b.scheduledDate?.getTime() ?? 0;
@@ -1169,7 +1345,12 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
                     }) ?? [];
                     const currentItem = sortedOverdue[overdueCurrentIndex];
                     if (currentItem && onReschedule) {
-                      onReschedule(currentItem.id, quickDates.today);
+                      setOverdueProcessing('today');
+                      try {
+                        await onReschedule(currentItem.id, quickDates.today);
+                      } finally {
+                        setOverdueProcessing(null);
+                      }
                       if (overdueCurrentIndex >= overdueCount - 1) {
                         setOverdueCurrentIndex(Math.max(0, overdueCount - 2));
                       }
@@ -1179,12 +1360,15 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
                     }
                   }}
                 >
-                  {locale === 'zh-Hans' ? '今天' : 'Today'}
+                  {overdueProcessing === 'today'
+                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{locale === 'zh-Hans' ? '处理中...' : 'Processing...'}</>
+                    : locale === 'zh-Hans' ? '今天' : 'Today'}
                 </Button>
                 <Button
                   variant="outline"
                   className="h-12"
-                  onClick={() => {
+                  disabled={overdueProcessing !== null}
+                  onClick={async () => {
                     const sortedOverdue = data.overdueItems?.slice().sort((a: AgendaItem, b: AgendaItem) => {
                       const dateA = a.scheduledDate?.getTime() ?? 0;
                       const dateB = b.scheduledDate?.getTime() ?? 0;
@@ -1192,7 +1376,12 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
                     }) ?? [];
                     const currentItem = sortedOverdue[overdueCurrentIndex];
                     if (currentItem && onReschedule) {
-                      onReschedule(currentItem.id, quickDates.tomorrow);
+                      setOverdueProcessing('tomorrow');
+                      try {
+                        await onReschedule(currentItem.id, quickDates.tomorrow);
+                      } finally {
+                        setOverdueProcessing(null);
+                      }
                       if (overdueCurrentIndex >= overdueCount - 1) {
                         setOverdueCurrentIndex(Math.max(0, overdueCount - 2));
                       }
@@ -1202,12 +1391,15 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
                     }
                   }}
                 >
-                  {locale === 'zh-Hans' ? '明天' : 'Tomorrow'}
+                  {overdueProcessing === 'tomorrow'
+                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{locale === 'zh-Hans' ? '处理中...' : 'Processing...'}</>
+                    : locale === 'zh-Hans' ? '明天' : 'Tomorrow'}
                 </Button>
                 <Button
                   variant="outline"
                   className="h-12"
-                  onClick={() => {
+                  disabled={overdueProcessing !== null}
+                  onClick={async () => {
                     const sortedOverdue = data.overdueItems?.slice().sort((a: AgendaItem, b: AgendaItem) => {
                       const dateA = a.scheduledDate?.getTime() ?? 0;
                       const dateB = b.scheduledDate?.getTime() ?? 0;
@@ -1215,7 +1407,12 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
                     }) ?? [];
                     const currentItem = sortedOverdue[overdueCurrentIndex];
                     if (currentItem && onReschedule) {
-                      onReschedule(currentItem.id, quickDates.dayAfter);
+                      setOverdueProcessing('dayafter');
+                      try {
+                        await onReschedule(currentItem.id, quickDates.dayAfter);
+                      } finally {
+                        setOverdueProcessing(null);
+                      }
                       if (overdueCurrentIndex >= overdueCount - 1) {
                         setOverdueCurrentIndex(Math.max(0, overdueCount - 2));
                       }
@@ -1225,11 +1422,14 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
                     }
                   }}
                 >
-                  {locale === 'zh-Hans' ? '后天' : 'Day after'}
+                  {overdueProcessing === 'dayafter'
+                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{locale === 'zh-Hans' ? '处理中...' : 'Processing...'}</>
+                    : locale === 'zh-Hans' ? '后天' : 'Day after'}
                 </Button>
                 <Button
                   variant="outline"
                   className="h-12"
+                  disabled={overdueProcessing !== null}
                   onClick={() => {
                     const sortedOverdue = data.overdueItems?.slice().sort((a: AgendaItem, b: AgendaItem) => {
                       const dateA = a.scheduledDate?.getTime() ?? 0;
@@ -1302,16 +1502,87 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
       <Sheet open={insightsSheetOpen} onOpenChange={setInsightsSheetOpen}>
         <SheetContent side="bottom" className="rounded-t-2xl px-6 pb-8">
           <SheetHeader className="pb-2">
-            <SheetTitle className="flex items-center justify-between">
-              <span className="flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-primary" />
-                {locale === 'zh-Hans' ? '洞察' : 'Insights'}
-              </span>
-              {parsedActivityInsights.length > 1 && (
-                <span className="text-sm font-normal text-muted-foreground">
-                  {insightsSheetIndex + 1} / {parsedActivityInsights.length}
+            <SheetTitle className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <span className="flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-primary" />
+                  {locale === 'zh-Hans' ? '洞察' : 'Insights'}
                 </span>
-              )}
+                {(isRefreshingInsights || isInsightPlaybackActive) && (
+                  <div className="mt-2 space-y-1">
+                    {isRefreshingInsights && insightRefreshStatus && (
+                      <p className="text-xs font-normal text-muted-foreground">{insightRefreshStatus}</p>
+                    )}
+                    {isInsightPlaybackActive && (
+                      <div className="min-w-0 text-xs font-normal text-muted-foreground">
+                        <p className="truncate">
+                          {insightPlaybackElapsed ?? '0:00'}
+                          {insightPlaybackTotal ? ` / ${insightPlaybackTotal}` : ''}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => onRefreshInsights?.()}
+                  disabled={isRefreshingInsights || !onRefreshInsights}
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-muted/60 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                  aria-label={locale === 'zh-Hans' ? '重新生成洞察' : 'Regenerate insights'}
+                  title={locale === 'zh-Hans' ? '重新生成洞察' : 'Regenerate insights'}
+                >
+                  <RefreshCw className={cn('h-4 w-4', isRefreshingInsights && 'animate-spin')} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSpeedToggle?.()}
+                  disabled={!onSpeedToggle}
+                  className="flex h-9 min-w-9 items-center justify-center rounded-full bg-muted/60 px-2 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                  aria-label={locale === 'zh-Hans' ? '播放速度' : 'Playback speed'}
+                  title={locale === 'zh-Hans' ? '播放速度' : 'Playback speed'}
+                >
+                  {playbackSpeed}x
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onPrevInsight?.()}
+                  disabled={!onPrevInsight || !canPrevInsight}
+                  className="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30"
+                  aria-label={locale === 'zh-Hans' ? '上一条' : 'Previous'}
+                  title={locale === 'zh-Hans' ? '上一条' : 'Previous'}
+                >
+                  <SkipBack className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isInsightPlaybackActive) onPauseInsights?.();
+                    else onPlayInsights?.();
+                  }}
+                  disabled={isInsightPlaybackActive ? !onPauseInsights : !onPlayInsights}
+                  className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                  aria-label={isInsightPlaybackActive
+                    ? (locale === 'zh-Hans' ? '暂停' : 'Pause')
+                    : (locale === 'zh-Hans' ? '播放洞察' : 'Play insights')}
+                  title={isInsightPlaybackActive
+                    ? (locale === 'zh-Hans' ? '暂停' : 'Pause')
+                    : (locale === 'zh-Hans' ? '播放洞察' : 'Play insights')}
+                >
+                  {isInsightPlaybackActive ? <Pause className="h-4 w-4" /> : <Play className="ml-0.5 h-4 w-4" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onNextInsight?.()}
+                  disabled={!onNextInsight || !canNextInsight}
+                  className="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30"
+                  aria-label={locale === 'zh-Hans' ? '下一条' : 'Next'}
+                  title={locale === 'zh-Hans' ? '下一条' : 'Next'}
+                >
+                  <SkipForward className="h-4 w-4" />
+                </button>
+              </div>
             </SheetTitle>
           </SheetHeader>
           
@@ -1358,6 +1629,12 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
                         <div className="flex-1 min-w-0">
                           <p className="text-xs font-medium text-muted-foreground mb-0.5">{currentInsight.title}</p>
                           <p className="text-base font-semibold text-foreground leading-snug">{currentInsight.summary}</p>
+                          {formatGeneratedAt(currentInsight.generatedon, locale) && (
+                            <p className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground/80">
+                              <Clock className="h-3 w-3" />
+                              {formatGeneratedAt(currentInsight.generatedon, locale)}
+                            </p>
+                          )}
                         </div>
                       </div>
                       
@@ -1378,6 +1655,8 @@ export function KPICards({ data, onNavigate, onMarkDone, onReschedule, activityI
                                 e.stopPropagation();
                                 setInsightsSheetIndex(idx);
                               }}
+                              aria-label={locale === 'zh-Hans' ? `跳转到第 ${idx + 1} 条洞察` : `Jump to insight ${idx + 1}`}
+                              title={locale === 'zh-Hans' ? `跳转到第 ${idx + 1} 条洞察` : `Jump to insight ${idx + 1}`}
                               className={cn(
                                 "w-2 h-2 rounded-full transition-all",
                                 idx === insightsSheetIndex

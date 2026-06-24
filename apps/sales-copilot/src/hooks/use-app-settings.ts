@@ -5,14 +5,14 @@ import type { Setting } from '@/generated/models/setting-model';
 // Well-known setting keys
 export const SETTING_KEYS = {
   POWER_AUTOMATE_FLOW_URL: 'power_automate_flow_url',
-  COPILOT_STUDIO_TOKEN_ENDPOINT: 'copilot_studio_token_endpoint',
+  COPILOT_STUDIO_AGENT_NAME: 'copilot_studio_agent_name',
 } as const;
 
 export type SettingKey = typeof SETTING_KEYS[keyof typeof SETTING_KEYS];
 
 export interface AppSettings {
   powerAutomateFlowUrl: string | null;
-  copilotStudioTokenEndpoint: string | null;
+  copilotStudioAgentName: string | null;
 }
 
 /**
@@ -35,7 +35,7 @@ export function useAppSettings() {
 
   const appSettings: AppSettings = {
     powerAutomateFlowUrl: getSettingValue(SETTING_KEYS.POWER_AUTOMATE_FLOW_URL),
-    copilotStudioTokenEndpoint: getSettingValue(SETTING_KEYS.COPILOT_STUDIO_TOKEN_ENDPOINT),
+    copilotStudioAgentName: getSettingValue(SETTING_KEYS.COPILOT_STUDIO_AGENT_NAME),
   };
 
   return {

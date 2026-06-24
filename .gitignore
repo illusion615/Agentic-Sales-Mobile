@@ -1,5 +1,9 @@
 node_modules/
 dist/
+build/
+# TypeScript incremental build cache — build artifact, must NOT be committed.
+# (Kept on disk locally; deleting the physical file forces a 50–90 min cold rebuild.)
+*.tsbuildinfo
 .DS_Store
 *.log
 .env

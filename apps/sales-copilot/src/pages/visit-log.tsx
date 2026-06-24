@@ -18,13 +18,14 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { format } from 'date-fns';
+import { format } from 'date-fns/format';
 import { cn } from '@/lib/utils';
 import { useUser } from '@/hooks/use-user';
 import { useAccountList } from '@/generated/hooks/use-account';
+import type { Account } from '@/generated/models/account-model';
 import { useCreateActivity } from '@/generated/hooks/use-activity';
-import { getCopilotConfig } from '@/services/copilot-service';
-import { getLocale, getLLMConfig, generateVoiceSummary, type Locale } from '@/lib/i18n';
+import { isCopilotStudioAvailable } from '@/services/copilot-service';
+import { getLocale, getLLMConfig, type Locale } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -241,8 +242,7 @@ export default function VisitLogPage() {
   const createActivity = useCreateActivity();
 
   // Copilot state
-  const copilotConfig = getCopilotConfig();
-  const isCopilotConfigured = !!copilotConfig?.tokenEndpoint;
+  const isCopilotConfigured = isCopilotStudioAvailable();
   const llmConfig = getLLMConfig();
   const isLLMConfigured = !!llmConfig?.enabled;
 
@@ -312,91 +312,54 @@ export default function VisitLogPage() {
     );
   }, [accounts]);
 
-  // Extract data using BYOM LLM
+  // Extract data using BYOM LLM — delegates to draftActivity skill in extract mode
   const extractWithLLM = useCallback(async (text: string): Promise<ExtractedVisitData | null> => {
-    const systemPrompt = locale === 'zh-Hans'
-      ? `你是一个销售拜访信息提取助手。从用户的自然语言描述中提取以下字段：
-- accountName: 客户/公司名称
-- contactName: 联系人姓名
-- visitDate: 拜访日期 (如果提到"今天"返回today，"昨天"返回yesterday，具体日期返回YYYY-MM-DD格式)
-- visitType: 拜访类型 (in-person/phone/video/email)
-- summary: 拜访摘要
-- outcome: 拜访结果
-- nextSteps: 后续计划
-- opportunitySignal: 商机信号/意向
-- confidence: 你对提取结果的置信度 (0-100)
-
-仅返回JSON格式，不要其他文字。如果某字段无法从文本中提取，设为null。`
-      : `You are a sales visit information extraction assistant. Extract the following fields from the user's natural language description:
-- accountName: Customer/company name
-- contactName: Contact person name
-- visitDate: Visit date (if "today" return "today", "yesterday" return "yesterday", specific dates return YYYY-MM-DD format)
-- visitType: Visit type (in-person/phone/video/email)
-- summary: Visit summary
-- outcome: Visit outcome
-- nextSteps: Next steps
-- opportunitySignal: Opportunity signal/intent
-- confidence: Your confidence in the extraction (0-100)
-
-Return ONLY JSON format, no other text. If a field cannot be extracted from the text, set it to null.`;
-
-    const result = await generateVoiceSummary(text, locale, systemPrompt);
-    
-    if (!result.success || !result.summary) {
-      return null;
-    }
-
     try {
-      // Try to parse the JSON response
-      let jsonStr = result.summary;
-      // Handle markdown code blocks
-      if (jsonStr.includes('```json')) {
-        jsonStr = jsonStr.replace(/```json\s*/g, '').replace(/```\s*/g, '');
-      } else if (jsonStr.includes('```')) {
-        jsonStr = jsonStr.replace(/```\s*/g, '');
-      }
-      
-      const parsed = JSON.parse(jsonStr.trim());
-      
-      // Parse visit date
+      const { executeFunction } = await import('@/lib/function-executor');
+      // Use draftActivity with the text — the skill will extract structured fields
+      const result = await executeFunction('draftActivity', {
+        title: text,
+        type: 'visit',
+      }, { locale });
+
+      if (!result.success || !result.data) return null;
+
+      const draft = result.data as Record<string, unknown>;
+      // Parse visit date from draft
       let visitDate: Date | undefined;
-      if (parsed.visitDate === 'today') {
-        visitDate = new Date();
-      } else if (parsed.visitDate === 'yesterday') {
-        visitDate = new Date();
-        visitDate.setDate(visitDate.getDate() - 1);
-      } else if (parsed.visitDate) {
-        visitDate = new Date(parsed.visitDate);
+      const dateStr = draft.scheduledDate as string;
+      if (dateStr) {
+        if (dateStr === 'today') visitDate = new Date();
+        else if (dateStr === 'yesterday') { visitDate = new Date(); visitDate.setDate(visitDate.getDate() - 1); }
+        else visitDate = new Date(dateStr);
       }
 
-      // Find matching account
-      const matchedAccount = parsed.accountName ? findAccountByName(parsed.accountName) : undefined;
+      const matchedAccount = draft.accountName ? findAccountByName(draft.accountName as string) : undefined;
 
       return {
-        accountId: matchedAccount?.id,
-        accountName: parsed.accountName || undefined,
-        contactName: parsed.contactName || undefined,
+        accountId: matchedAccount?.id || draft.accountId as string | undefined,
+        accountName: draft.accountName as string | undefined,
+        contactName: draft.contactName as string | undefined,
         visitDate,
-        visitType: parsed.visitType || undefined,
-        summary: parsed.summary || undefined,
-        outcome: parsed.outcome || undefined,
-        nextSteps: parsed.nextSteps || undefined,
-        opportunitySignal: parsed.opportunitySignal || undefined,
-        confidence: parsed.confidence || 70,
+        visitType: (draft.type as string | undefined) as 'in-person' | 'phone' | 'video' | 'email' | undefined,
+        summary: draft.result as string || draft.notes as string || undefined,
+        outcome: draft.result as string | undefined,
+        nextSteps: draft.notes as string | undefined,
+        confidence: 70,
       };
     } catch {
-      console.error('Failed to parse LLM response');
+      console.error('Failed to extract visit data via skill');
       return null;
     }
   }, [locale, findAccountByName]);
 
-  // Extract data using Copilot Studio - delegates to context for Direct Line session management
+  // Extract data using Copilot Studio - delegates to context for centralized connector execution
   const extractWithCopilot = useCallback(async (text: string): Promise<ExtractedVisitData | null> => {
-    if (!copilotConfig) return null;
+    if (!isCopilotConfigured) return null;
 
-    // Delegate Direct Line orchestration to the centralized context
+    // Delegate Copilot Studio execution to the centralized context
     return copilot.extractVisitData(text, findAccountByName);
-  }, [copilotConfig, copilot, findAccountByName]);
+  }, [isCopilotConfigured, copilot, findAccountByName]);
 
   // Process natural language input
   const processInput = useCallback(async () => {
@@ -463,8 +426,8 @@ Return ONLY JSON format, no other text. If a field cannot be extracted from the 
       
       await createActivity.mutateAsync({
         title: `${t('title', locale)} - ${selectedAccount?.name1 || formData.contactName || 'Visit'}`,
-        typeKey: 'TypeKey0', // visit type
-        draftstatusKey: 'DraftstatusKey1', // confirmed
+        type: 'visit', // visit type
+        status: 'open',
         ownerid: user?.objectId || '',
         scheduleddate: formData.visitDate.toISOString(),
         notes: [
@@ -526,7 +489,7 @@ Return ONLY JSON format, no other text. If a field cannot be extracted from the 
   return (
     <div className="min-h-screen flex flex-col bg-background">
       {/* Header */}
-      <header className="fixed top-0 left-0 right-0 z-40 glass-surface border-b border-border/50 safe-area-top">
+      <header className="fixed top-0 left-0 right-0 z-40 bg-background/80 backdrop-blur-md border-b border-border/50 safe-area-top">
         <div className="flex items-center justify-between h-14 px-4">
           <button
             onClick={() => navigate(-1)}
@@ -622,7 +585,7 @@ Return ONLY JSON format, no other text. If a field cannot be extracted from the 
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">{t('selectAccount', locale)}</SelectItem>
-                    {accounts.filter((a) => a.id).map((account) => (
+                    {accounts.filter((a: Account) => a.id).map((account: Account) => (
                       <SelectItem key={account.id} value={account.id}>
                         {account.name1}
                       </SelectItem>
@@ -775,7 +738,7 @@ Return ONLY JSON format, no other text. If a field cannot be extracted from the 
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">{t('selectAccount', locale)}</SelectItem>
-                        {accounts.filter((a) => a.id).map((account) => (
+                        {accounts.filter((a: Account) => a.id).map((account: Account) => (
                           <SelectItem key={account.id} value={account.id}>
                             {account.name1}
                           </SelectItem>

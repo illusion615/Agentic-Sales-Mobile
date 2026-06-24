@@ -5,8 +5,7 @@ import { cn } from '@/lib/utils';
 import { getLocale, t, getThinkingDotStyle, type Locale, type ThinkingDotStyle } from '@/lib/i18n';
 import { useNavigate } from 'react-router-dom';
 import { useBusinessInsightList } from '@/generated/hooks/use-business-insight';
-import { BusinessInsightTypeKeyToLabel } from '@/generated/models/business-insight-model';
-import type { BusinessInsight as DataverseBusinessInsight, BusinessInsightTypeKey } from '@/generated/models/business-insight-model';
+import type { BusinessInsight as DataverseBusinessInsight } from '@/generated/models/business-insight-model';
 
 // Helper to check if an insight is activity-related (exported for use in home.tsx)
 export function isActivityRelatedInsightUtil(insight: DataverseBusinessInsight): boolean {
@@ -31,7 +30,7 @@ interface ReferenceRecord {
 interface InsightCard {
   id: string;
   title: string;
-  summary: string; // Truncated insight text
+  summary: string; // Full insight text (CSS line-clamp handles overflow)
   rationale: string; // AI explanation - displayed in details section
   icon: React.ReactNode;
   type: 'info' | 'warning' | 'success';
@@ -239,7 +238,7 @@ export function InsightCarousel({
         return {
           id: `custom-${idx}`,
           title: categoryInfo.title,
-          summary: text.length > 80 ? text.substring(0, 80) + '...' : text,
+          summary: text,
           rationale: categoryInfo.rationale,
           icon: categoryInfo.icon,
           type: categoryInfo.type,
@@ -261,9 +260,8 @@ export function InsightCarousel({
       }
 
       // Determine the icon based on type
-      const typeLabel = BusinessInsightTypeKeyToLabel[insight.typeKey as BusinessInsightTypeKey];
       const getIcon = () => {
-        switch (typeLabel) {
+        switch (insight.type) {
           case 'warning': return <AlertTriangle className="w-4 h-4" />;
           case 'success': return <TrendingUp className="w-4 h-4" />;
           default: return <Users className="w-4 h-4" />;
@@ -271,10 +269,10 @@ export function InsightCarousel({
       };
 
       // Map type to InsightCard type
-      const cardType: 'info' | 'warning' | 'success' = typeLabel === 'warning' ? 'warning' : typeLabel === 'success' ? 'success' : 'info';
+      const cardType: 'info' | 'warning' | 'success' = insight.type === 'warning' ? 'warning' : insight.type === 'success' ? 'success' : 'info';
 
       // Build references from IDs
-      const isClientRef = insight.referencetypeKey === 'ReferencetypeKey0';
+      const isClientRef = insight.referenceType === 'client';
       const references: ReferenceRecord[] = referenceIds.map((id: string) => ({
         id,
         name: id, // In real usage, you'd resolve this to a name
@@ -288,7 +286,7 @@ export function InsightCarousel({
       return {
         id: insight.id,
         title: insight.title,
-        summary: insight.summary || (details.length > 0 ? (details[0].length > 80 ? details[0].substring(0, 80) + '...' : details[0]) : ''),
+        summary: insight.summary || (details.length > 0 ? details[0] : ''),
         rationale: insight.rationale && insight.rationale.trim() ? insight.rationale : fallbackRationale,
         icon: getIcon(),
         type: cardType,
@@ -478,9 +476,9 @@ export function InsightCarousel({
           </div>
           <div className="flex-1 min-w-0">
             {/* Category Title */}
-            <h4 className={cn('text-sm font-semibold', typeTextColors[card.type])}>{card.title}</h4>
-            {/* Summary - Truncated insight text */}
-            <p className="text-sm text-foreground mt-0.5 leading-relaxed">{card.summary}</p>
+            <h4 className={cn('text-base font-semibold', typeTextColors[card.type])}>{card.title}</h4>
+            {/* Summary — full text, CSS line-clamp limits visible lines */}
+            <p className="text-sm text-foreground mt-0.5 leading-relaxed line-clamp-2">{card.summary}</p>
           </div>
         </div>
 

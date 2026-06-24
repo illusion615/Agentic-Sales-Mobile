@@ -20,11 +20,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useActivityList } from '@/generated/hooks/use-activity';
 import { useAccountList } from '@/generated/hooks/use-account';
-import { OpportunityStageKeyToLabel } from '@/generated/models/opportunity-model';
-import type { Opportunity, OpportunityStageKey } from '@/generated/models/opportunity-model';
-import type { Activity } from '@/generated/models/activity-model';
-import type { Account } from '@/generated/models/account-model';
-import { getLocale } from '@/lib/i18n';
+import type { Opportunity } from '@/generated/models/opportunity-model';import type { Activity } from '@/generated/models/activity-model';import type { Account } from '@/generated/models/account-model';import { getLocale } from '@/lib/i18n';
 import { useFirstMount } from '@/hooks/use-first-mount';
 
 const containerVariants = {
@@ -105,13 +101,13 @@ export default function PerformanceReportPage() {
 
   // Calculate performance metrics
   const wonDeals = opportunities.filter(
-    (opp: Opportunity) => OpportunityStageKeyToLabel[opp.stageKey] === 'won'
+    (opp: Opportunity) => opp.stage === 'won'
   );
   const lostDeals = opportunities.filter(
-    (opp: Opportunity) => OpportunityStageKeyToLabel[opp.stageKey] === 'lost'
+    (opp: Opportunity) => opp.stage === 'lost'
   );
   const activeDeals = opportunities.filter(
-    (opp: Opportunity) => !['won', 'lost'].includes(OpportunityStageKeyToLabel[opp.stageKey])
+    (opp: Opportunity) => !['won', 'lost'].includes(opp.stage)
   );
 
   const totalWonValue = wonDeals.reduce((sum: number, opp: Opportunity) => sum + (opp.totalamount || 0), 0);
@@ -129,7 +125,7 @@ export default function PerformanceReportPage() {
   // Activity breakdown
   const activityByType: Record<string, number> = {};
   activities.forEach((act: Activity) => {
-    const type = act.typeKey || 'other';
+    const type = act.type || 'other';
     activityByType[type] = (activityByType[type] || 0) + 1;
   });
 
@@ -367,7 +363,7 @@ export default function PerformanceReportPage() {
                                 {opp.name1}
                               </span>
                               <span className="text-xs text-muted-foreground">
-                                {OpportunityStageKeyToLabel[opp.stageKey]} • {opp.confidence || 0}%
+                                {opp.stage} • {opp.confidence || 0}%
                               </span>
                             </div>
                             <span className="text-sm font-semibold text-foreground ml-2">

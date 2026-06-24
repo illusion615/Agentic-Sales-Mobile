@@ -1,1 +1,132 @@
-{"appDisplayName":"Sales Copilot Mobile_202605010614","description":"\u9762\u5411\u9500\u552E\u4EBA\u5458\u7684\u79FB\u52A8\u7AEFCRM\u667A\u80FD\u4F53\u5E94\u7528\uFF0C\u91C7\u7528\u73BB\u7483\u62DF\u6001\u8BBE\u8BA1\u98CE\u683C\uFF0C\u901A\u8FC7\u8BED\u97F3\u4EA4\u4E92\u7BA1\u7406\u5BA2\u6237\u3001\u5546\u673A\u548C\u6D3B\u52A8","buildPath":"./dist","buildEntryPoint":"index.html","logoPath":"Default","localAppUrl":"http://localhost:5173/","appId":"55de8c13-3966-46e7-a545-e0fd4c534ffc","tags":{"planId":"","projectId":"e3bc3760-89b8-4f31-87a6-6fbf8e983eff"},"connectionReferences":{},"databaseReferences":{"default.cds":{"databaseDetails":{"environmentName":"default.cds","referenceType":"Environmental","linkedEnvironmentMetadata":{"resourceId":"0e600a79-f977-f011-8589-6045bd099a39","friendlyName":"Wells Dev","uniqueName":"unq0e600a79f977f01185896045bd099","domainName":"org1cd97ca4","version":"9.2.26051.134","instanceUrl":"https://org1cd97ca4.crm.dynamics.com/","instanceApiUrl":"https://org1cd97ca4.api.crm.dynamics.com","baseLanguage":1033,"instanceState":"Ready","createdTime":"2025-08-13T07:26:37.88Z","platformSku":"Standard"}},"dataSources":{"crf5c_contact":{"entitySetName":"crf5c_contacts","logicalName":"crf5c_contact","isHidden":false},"crf5c_account1":{"entitySetName":"crf5c_account1s","logicalName":"crf5c_account1","isHidden":false},"crf5c_briefing":{"entitySetName":"crf5c_briefings","logicalName":"crf5c_briefing","isHidden":false},"crf5c_activity1":{"entitySetName":"crf5c_activity1s","logicalName":"crf5c_activity1","isHidden":false},"crf5c_opportunity1":{"entitySetName":"crf5c_opportunity1s","logicalName":"crf5c_opportunity1","isHidden":false},"crf5c_businessinsight":{"entitySetName":"crf5c_businessinsights","logicalName":"crf5c_businessinsight","isHidden":false},"crf5c_copilotconversation":{"entitySetName":"crf5c_copilotconversations","logicalName":"crf5c_copilotconversation","isHidden":false},"crf5c_product":{"entitySetName":"crf5c_products","logicalName":"crf5c_product","isHidden":false},"crf5c_setting":{"entitySetName":"crf5c_settings","logicalName":"crf5c_setting","isHidden":false},"crf5c_aisummary":{"entitySetName":"crf5c_aisummaries","logicalName":"crf5c_aisummary","isHidden":false},"crf5c_agentlog":{"entitySetName":"crf5c_agentlogs","logicalName":"crf5c_agentlog","isHidden":false}}}}}
+{
+  "appDisplayName": "Sales Copilot Mobile v2",
+  "description": "面向销售人员的移动端CRM智能体应用，采用玻璃拟态设计风格，通过语音交互管理客户、商机和活动",
+  "buildPath": "./dist",
+  "buildEntryPoint": "index.html",
+  "logoPath": "Default",
+  "localAppUrl": "http://localhost:5173/",
+  "tags": {
+    "planId": "",
+    "projectId": "e3bc3760-89b8-4f31-87a6-6fbf8e983eff"
+  },
+  "connectionReferences": {
+    "db0d28da-2c3b-4cb4-b7d1-bfa6e32e41cf": {
+      "id": "/providers/Microsoft.PowerApps/apis/shared_microsoftcopilotstudio",
+      "displayName": "Microsoft Copilot Studio",
+      "dataSources": [
+        "microsoftcopilotstudio"
+      ],
+      "authenticationType": "oauthDefault",
+      "dataSets": {}
+    }
+  },
+  "databaseReferences": {
+    "default.cds": {
+      "state": "Configured",
+      "instanceUrl": "https://org1cd97ca4.crm.dynamics.com/",
+      "webApiVersion": "v9.0",
+      "dataSources": {
+        "contacts": {
+          "entitySetName": "contacts",
+          "logicalName": "contact",
+          "isHidden": false
+        },
+        "accounts": {
+          "entitySetName": "accounts",
+          "logicalName": "account",
+          "isHidden": false
+        },
+        "briefings": {
+          "entitySetName": "crf5c_briefings",
+          "logicalName": "crf5c_briefing",
+          "isHidden": false
+        },
+        "appointments": {
+          "entitySetName": "appointments",
+          "logicalName": "appointment",
+          "isHidden": false
+        },
+        "phonecalls": {
+          "entitySetName": "phonecalls",
+          "logicalName": "phonecall",
+          "isHidden": false
+        },
+        "emails": {
+          "entitySetName": "emails",
+          "logicalName": "email",
+          "isHidden": false
+        },
+        "opportunities": {
+          "entitySetName": "crf5c_opportunity1s",
+          "logicalName": "crf5c_opportunity1",
+          "isHidden": false
+        },
+        "businessinsights": {
+          "entitySetName": "crf5c_businessinsights",
+          "logicalName": "crf5c_businessinsight",
+          "isHidden": false
+        },
+        "copilotconversations": {
+          "entitySetName": "crf5c_copilotconversations",
+          "logicalName": "crf5c_copilotconversation",
+          "isHidden": false
+        },
+        "products": {
+          "entitySetName": "crf5c_products",
+          "logicalName": "crf5c_product",
+          "isHidden": false
+        },
+        "settings": {
+          "entitySetName": "crf5c_settings",
+          "logicalName": "crf5c_setting",
+          "isHidden": false
+        },
+        "aisummaries": {
+          "entitySetName": "crf5c_aisummaries",
+          "logicalName": "crf5c_aisummary",
+          "isHidden": false
+        },
+        "agentlogs": {
+          "entitySetName": "crf5c_agentlogs",
+          "logicalName": "crf5c_agentlog",
+          "isHidden": false
+        },
+        "users": {
+          "entitySetName": "systemusers",
+          "logicalName": "systemuser",
+          "isHidden": false
+        },
+        "environment_39a902ba": {
+          "entitySetName": "Environment",
+          "logicalName": "environment_39a902ba",
+          "isHidden": false
+        },
+        "notes": {
+          "entitySetName": "annotations",
+          "logicalName": "annotation",
+          "isHidden": false
+        },
+        "attachments": {
+          "entitySetName": "activitymimeattachments",
+          "logicalName": "activitymimeattachment",
+          "isHidden": false
+        },
+        "activityparties": {
+          "entitySetName": "activityparties",
+          "logicalName": "activityparty",
+          "isHidden": false
+        },
+        "aimodels": {
+          "entitySetName": "msdyn_aimodels",
+          "logicalName": "msdyn_aimodel",
+          "isHidden": false
+        }
+      },
+      "version": "v9.0",
+      "environmentVariableName": ""
+    }
+  },
+  "environmentId": "efcd2d46-3d9e-e31a-a9d8-5481ddae951c",
+  "appId": "a14aea12-c452-440c-8f45-ab854177c084",
+  "version": "1.0"
+}

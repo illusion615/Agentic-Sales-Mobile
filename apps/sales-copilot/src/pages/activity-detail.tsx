@@ -1,6 +1,6 @@
-import { useMemo, useState, useCallback, useEffect } from 'react';
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   Phone,
   Calendar,
@@ -18,6 +18,7 @@ import {
   CheckCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ACTIVITY_TYPE_COLORS } from '@/lib/activity-colors';
 import { MobileLayout } from '@/components/mobile-layout';
 import { GlassCard } from '@/components/glass-card';
 import { AISummaryCard } from '@/components/ai-summary-card';
@@ -29,14 +30,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useContactList } from '@/generated/hooks/use-contact';
 import { useAccountList } from '@/generated/hooks/use-account';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
-import type { Contact } from '@/generated/models/contact-model';
-import type { Account } from '@/generated/models/account-model';
-import type { Opportunity, OpportunityStageKeyToLabel as OpportunityStageKeyToLabelType } from '@/generated/models/opportunity-model';
-import { OpportunityStageKeyToLabel } from '@/generated/models/opportunity-model';
-import { useEntityAISummary, useWithAISummaryTrigger } from '@/hooks/use-ai-summary-trigger';
-import { ActivityTypeKeyToLabel, ActivityDraftstatusKeyToLabel, ActivityOutcomeKeyToLabel } from '@/generated/models/activity-model';
-import type { Activity as DataverseActivity, ActivityDraftstatusKey } from '@/generated/models/activity-model';
-import { toast } from 'sonner';
+import type { Contact } from '@/generated/models/contact-model';import type { Account } from '@/generated/models/account-model';import type { Opportunity, OpportunityStageKeyToLabel as OpportunityStageKeyToLabelType } from '@/generated/models/opportunity-model';import { useEntityAISummary, useWithAISummaryTrigger } from '@/hooks/use-ai-summary-trigger';
+import type { Activity as DataverseActivity } from '@/generated/models/activity-model';import { toast } from 'sonner';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -55,20 +50,18 @@ import { useCopilot } from '@/contexts/copilot-context';
 import { PullToRefresh } from '@/components/pull-to-refresh';
 
 const activityIcons: Record<string, typeof Phone> = {
-  visit: MapPin,
+  visit: Calendar,
   call: Phone,
   meeting: Calendar,
   email: Mail,
   other: CheckSquare,
 };
 
-const activityColors: Record<string, string> = {
-  visit: 'bg-primary',
-  call: 'bg-[#0D8F8C]',
-  meeting: 'bg-[#6366F1]',
-  email: 'bg-[#10B981]',
-  other: 'bg-muted-foreground',
-};
+// Activity type colors come from the shared single source of truth so the
+// detail header icon matches Home and the Activities list (D10).
+const activityColors: Record<string, string> = Object.fromEntries(
+  Object.entries(ACTIVITY_TYPE_COLORS).map(([type, c]) => [type, c.solid]),
+);
 
 function formatDateTime(dateStr: string | undefined): string {
   if (!dateStr) return 'N/A';
@@ -109,6 +102,23 @@ export default function ActivityDetailPage() {
   const { data: contacts = [] } = useContactList();
   const { data: accounts = [] } = useAccountList();
   const { data: allOpportunities = [] } = useOpportunityList();
+
+  // Saved file attachments (Dataverse Notes) bound to this activity.
+  const [savedAttachments, setSavedAttachments] = useState<import('@/lib/attachments').SavedAttachment[]>([]);
+  const [lightboxAttachment, setLightboxAttachment] = useState<string | null>(null);
+  useEffect(() => {
+    if (!id) { setSavedAttachments([]); return; }
+    let cancelled = false;
+    import('@/lib/attachments').then(({ fetchActivityAttachments }) =>
+      fetchActivityAttachments(id).then((atts) => { if (!cancelled) setSavedAttachments(atts); })
+    );
+    return () => { cancelled = true; };
+  }, [id]);
+
+  // Prefetch related entity detail chunks (account, opportunity, contact)
+  useEffect(() => {
+    import('@/lib/prefetch').then(({ prefetchRelated }) => prefetchRelated('activity'));
+  }, []);
   const updateActivity = useUpdateActivity();
   const deleteActivity = useDeleteActivity();
   const queryClient = useQueryClient();
@@ -129,6 +139,13 @@ export default function ActivityDetailPage() {
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [profileSheetOpen, setProfileSheetOpen] = useState(false);
+  // Detail sections are presented as left-right switchable tabs (D20) instead of
+  // a long vertical scroll. Default tab is Details so the user sees the core
+  // activity info at a glance.
+  type DetailTab = 'details' | 'insights' | 'related';
+  const [activeTab, setActiveTab] = useState<DetailTab>('details');
+  const [tabDir, setTabDir] = useState(0);
+  const tabDragStartX = useRef(0);
   const locale = getLocale();
 
   // Find contacts related to this activity's account
@@ -156,9 +173,8 @@ export default function ActivityDetailPage() {
   useEffect(() => {
     if (!activity) return;
     
-    const typeLabel = ActivityTypeKeyToLabel[activity.typeKey];
-    const statusLabel = ActivityDraftstatusKeyToLabel[activity.draftstatusKey];
-    const outcomeLabel = activity.outcomeKey ? ActivityOutcomeKeyToLabel[activity.outcomeKey] : undefined;
+    const typeLabel = activity.type;
+    const statusLabel = activity.status;
     
     copilot.setPageContext({
       currentPage: locale === 'zh-Hans' ? '活动详情' : 'Activity Detail',
@@ -170,7 +186,6 @@ export default function ActivityDetailPage() {
         activityTitle: activity.title,
         type: typeLabel,
         status: statusLabel,
-        outcome: outcomeLabel,
         scheduledDate: activity.scheduleddate,
         notes: activity.notes,
         accountId: activity.account?.id,
@@ -204,24 +219,27 @@ export default function ActivityDetailPage() {
 
   const handleMarkComplete = async () => {
     if (!activity) return;
+    // Guard against double-taps: the dock chip stays interactive until the dock
+    // re-renders, so re-entry is possible. updateActivity.isPending also drives
+    // the chip's busy state, but guard here too so a fast second tap is a no-op.
+    if (updateActivity.isPending) return;
     try {
       await updateActivity.mutateAsync({
         id: activity.id,
         changedFields: {
-          draftstatusKey: 'DraftstatusKey2' as ActivityDraftstatusKey,
+          status: 'completed',
         },
       });
       
       // Trigger AI summary generation after completing
       triggerForEntity('activity', activity.id, {
         ...activity,
-        draftstatusKey: 'DraftstatusKey2',
+        status: 'completed',
       } as Record<string, unknown>, {
         account: activity.account ? { id: activity.account.id, name: activity.account.name1 } : undefined,
         opportunity: activity.opportunity ? { id: activity.opportunity.id, name: activity.opportunity.name1 } : undefined,
       } as Record<string, unknown>);
-      
-      toast.success('Activity marked as completed');
+      // Status badge updates inline via query invalidation; no toast.
     } catch (error: unknown) {
       toast.error('Failed to update activity');
     }
@@ -231,7 +249,7 @@ export default function ActivityDetailPage() {
     if (!activity) return;
     try {
       await deleteActivity.mutateAsync(activity.id);
-      toast.success('Activity deleted');
+      // Returning to the list (item now gone) is the feedback; no toast.
       navigate('/activities');
     } catch (error: unknown) {
       toast.error('Failed to delete activity');
@@ -240,9 +258,25 @@ export default function ActivityDetailPage() {
 
   if (isLoading) {
     return (
-      <MobileLayout title="Activity">
-        <div className="flex items-center justify-center h-64">
-          <div className="text-muted-foreground">Loading...</div>
+      <MobileLayout title={locale === 'zh-Hans' ? '活动详情' : 'Activity Details'}>
+        <div className="px-4 pb-40 space-y-4 mt-4">
+          <div className="glass-card p-4 animate-pulse" style={{ borderRadius: 20 }}>
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-muted/50" />
+              <div className="flex-1 space-y-2">
+                <div className="h-5 w-3/4 rounded bg-muted/50" />
+                <div className="h-4 w-1/2 rounded bg-muted/40" />
+                <div className="h-4 w-1/3 rounded bg-muted/40" />
+              </div>
+            </div>
+          </div>
+          <div className="glass-card p-4 animate-pulse space-y-3" style={{ borderRadius: 20 }}>
+            {[0,1,2,3].map(i => <div key={i} className="flex justify-between"><div className="h-4 w-20 rounded bg-muted/40" /><div className="h-4 w-32 rounded bg-muted/50" /></div>)}
+          </div>
+          <div className="glass-card p-4 animate-pulse space-y-2" style={{ borderRadius: 20 }}>
+            <div className="h-5 w-20 rounded bg-muted/50" />
+            <div className="h-16 rounded bg-muted/30" />
+          </div>
         </div>
       </MobileLayout>
     );
@@ -265,12 +299,34 @@ export default function ActivityDetailPage() {
     );
   }
 
-  const typeLabel = ActivityTypeKeyToLabel[activity.typeKey];
+  const typeLabel = activity.type;
   const Icon = activityIcons[typeLabel] || CheckSquare;
   const color = activityColors[typeLabel] || 'bg-muted';
-  const statusLabel = ActivityDraftstatusKeyToLabel[activity.draftstatusKey];
+  const statusLabel = activity.status;
   const isCompleted = statusLabel === 'completed';
-  const outcomeLabel = activity.outcomeKey ? ActivityOutcomeKeyToLabel[activity.outcomeKey] : undefined;
+
+  // Left-right switchable detail sections (D20). Order: Details | AI Insights | Related Context.
+  const detailTabs: { key: DetailTab; label: string }[] = [
+    { key: 'details', label: locale === 'zh-Hans' ? '详情' : 'Details' },
+    { key: 'insights', label: locale === 'zh-Hans' ? 'AI 洞察' : 'AI Insights' },
+    { key: 'related', label: locale === 'zh-Hans' ? '关联' : 'Related' },
+  ];
+  const activeTabIndex = detailTabs.findIndex((t) => t.key === activeTab);
+  const switchTab = (key: DetailTab) => {
+    const nextIndex = detailTabs.findIndex((t) => t.key === key);
+    setTabDir(nextIndex > activeTabIndex ? 1 : nextIndex < activeTabIndex ? -1 : 0);
+    setActiveTab(key);
+  };
+  const stepTab = (delta: number) => {
+    const next = activeTabIndex + delta;
+    if (next < 0 || next >= detailTabs.length) return;
+    switchTab(detailTabs[next].key);
+  };
+  const handleTabDragStart = (e: React.PointerEvent) => { tabDragStartX.current = e.clientX; };
+  const handleTabDragEnd = (e: React.PointerEvent) => {
+    const diff = tabDragStartX.current - e.clientX;
+    if (Math.abs(diff) > 50) stepTab(diff > 0 ? 1 : -1);
+  };
 
   const deleteButton = (
     <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
@@ -302,8 +358,22 @@ export default function ActivityDetailPage() {
     </AlertDialog>
   );
 
+  // Header actions: Edit (primary entry, was a hidden dock chip) + Delete.
+  const headerActions = (
+    <div className="flex items-center gap-1">
+      <button
+        onClick={() => navigate(`/activity/${activity.account?.id || 'new'}?edit=${activity.id}`)}
+        className="p-2 rounded-full hover:bg-muted/50 transition-colors"
+        aria-label={locale === 'zh-Hans' ? '编辑' : 'Edit activity'}
+      >
+        <Edit className="w-5 h-5 text-foreground" />
+      </button>
+      {deleteButton}
+    </div>
+  );
+
   return (
-    <MobileLayout title="Activity Details" hideVoiceButton headerRight={deleteButton}>
+    <MobileLayout title="Activity Details" hideVoiceButton headerRight={headerActions}>
       <PullToRefresh onRefresh={handleRefresh} className="flex-1 overflow-y-auto">
         {/* Main scrollable content - add padding bottom for fixed action bar */}
         <motion.div
@@ -352,7 +422,45 @@ export default function ActivityDetailPage() {
           </div>
         </GlassCard>
 
+        {/* Switchable detail sections (D20): Details | AI Insights | Related.
+            Left-right swipe + segmented control instead of a long scroll. */}
+        <div
+          className="touch-pan-y select-none"
+          onPointerDown={handleTabDragStart}
+          onPointerUp={handleTabDragEnd}
+        >
+          {/* Segmented control */}
+          <div className="flex gap-1 p-1 rounded-xl bg-muted/40 mb-3">
+            {detailTabs.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => switchTab(tab.key)}
+                className={cn(
+                  'flex-1 py-1.5 text-xs font-medium rounded-lg transition-colors',
+                  activeTab === tab.key
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <AnimatePresence mode="wait" custom={tabDir} initial={false}>
+            <motion.div
+              key={activeTab}
+              custom={tabDir}
+              initial={{ opacity: 0, x: tabDir >= 0 ? 40 : -40 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: tabDir >= 0 ? -40 : 40 }}
+              transition={{ duration: 0.2, ease: 'easeOut' as const }}
+              className="space-y-4"
+            >
+
         {/* AI Insights Card */}
+        {activeTab === 'insights' && (
         <AISummaryCard
           summary={aiSummary}
           isLoading={isLoadingAISummary}
@@ -362,9 +470,11 @@ export default function ActivityDetailPage() {
           isRefreshing={isRefreshingAI || isTriggering}
           onRefresh={handleRefreshAISummary}
         />
+        )}
 
         {/* Unified Related Context Card - Account, Contact, Opportunity */}
-        {(activity.account || activity.opportunity || relatedContacts.length > 0) && (
+        {activeTab === 'related' && (
+          (activity.account || activity.contact || activity.opportunity) ? (
           <GlassCard className="space-y-3">
             <h2 className="text-sm font-semibold text-foreground uppercase tracking-wide">
               {locale === 'zh-Hans' ? '关联上下文' : 'Related Context'}
@@ -410,55 +520,63 @@ export default function ActivityDetailPage() {
               )}
 
               {/* Divider */}
-              {activity.account && (relatedContacts.length > 0 || activity.opportunity) && (
+              {activity.account && (activity.contact || (activity.contacts && activity.contacts.length > 0) || activity.opportunity) && (
                 <div className="border-t border-border/50 my-3" />
               )}
 
-              {/* Contacts Row */}
-              {relatedContacts.length > 0 && (
+              {/* Attendees Section — multiple participants (visit/meeting) */}
+              {activity.contacts && activity.contacts.length > 0 ? (
                 <div className="space-y-2">
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                    {locale === 'zh-Hans' ? '联系人' : 'Contacts'} ({relatedContacts.length})
+                  <p className="text-xs font-medium text-muted-foreground">
+                    {locale === 'zh-Hans' ? `参会人 (${activity.contacts.length})` : `Attendees (${activity.contacts.length})`}
                   </p>
-                  <div className="flex flex-wrap gap-2">
-                    {relatedContacts.slice(0, 3).map((contact: Contact) => (
-                      <div
-                        key={contact.id}
-                        className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-accent/10 border border-accent/20"
-                      >
-                        <div className="w-6 h-6 rounded-full bg-accent/20 flex items-center justify-center">
-                          <User className="w-3.5 h-3.5 text-accent-foreground" />
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-xs font-medium text-foreground truncate max-w-[100px]">
-                            {contact.fullname}
+                  {activity.contacts.map((att) => (
+                    <div
+                      key={att.id}
+                      className="flex items-start gap-3 cursor-pointer hover:bg-muted/30 -m-2 p-2 rounded-lg transition-colors"
+                      onClick={() => navigate(`/contacts/${att.id}`)}
+                    >
+                      <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center flex-shrink-0">
+                        <User className="w-5 h-5 text-accent-foreground" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-semibold text-foreground truncate">
+                            {att.fullname}
                           </p>
-                          {contact.title && (
-                            <p className="text-[10px] text-muted-foreground truncate max-w-[100px]">{contact.title}</p>
-                          )}
+                          <ArrowRight className="w-3.5 h-3.5 text-accent-foreground flex-shrink-0" />
                         </div>
-                        {contact.phone && (
-                          <a
-                            href={`tel:${contact.phone}`}
-                            className="p-1 rounded-full hover:bg-primary/10 transition-colors"
-                            onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                          >
-                            <Phone className="w-3 h-3 text-primary" />
-                          </a>
-                        )}
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {att.email || (locale === 'zh-Hans' ? '联系人' : 'Contact')}
+                        </p>
                       </div>
-                    ))}
-                    {relatedContacts.length > 3 && (
-                      <div className="flex items-center px-3 py-1.5 rounded-full bg-muted/50 text-xs text-muted-foreground">
-                        +{relatedContacts.length - 3} {locale === 'zh-Hans' ? '更多' : 'more'}
-                      </div>
-                    )}
+                    </div>
+                  ))}
+                </div>
+              ) : activity.contact && (
+                <div
+                  className="flex items-start gap-3 cursor-pointer hover:bg-muted/30 -m-2 p-2 rounded-lg transition-colors"
+                  onClick={() => navigate(`/contacts/${activity.contact?.id}`)}
+                >
+                  <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center flex-shrink-0">
+                    <User className="w-5 h-5 text-accent-foreground" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold text-foreground truncate">
+                        {activity.contact.fullname}
+                      </p>
+                      <ArrowRight className="w-3.5 h-3.5 text-accent-foreground flex-shrink-0" />
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {locale === 'zh-Hans' ? '联系人' : 'Contact'}
+                    </p>
                   </div>
                 </div>
               )}
 
               {/* Divider */}
-              {relatedContacts.length > 0 && activity.opportunity && (
+              {(activity.contact || (activity.contacts && activity.contacts.length > 0)) && activity.opportunity && (
                 <div className="border-t border-border/50 my-3" />
               )}
 
@@ -482,7 +600,7 @@ export default function ActivityDetailPage() {
                       {fullOpportunity && (
                         <>
                           <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 capitalize">
-                            {OpportunityStageKeyToLabel[fullOpportunity.stageKey]}
+                            {fullOpportunity.stage}
                           </Badge>
                           <span className="font-medium text-foreground">
                             ${(fullOpportunity.totalamount || 0).toLocaleString()}
@@ -514,27 +632,22 @@ export default function ActivityDetailPage() {
               )}
             </div>
           </GlassCard>
+          ) : (
+            <GlassCard className="py-10 text-center text-sm text-muted-foreground">
+              {locale === 'zh-Hans' ? '暂无关联的客户、联系人或商机' : 'No related account, contact, or opportunity'}
+            </GlassCard>
+          )
         )}
 
-        {/* Details Card - Outcome and Notes */}
-        {(outcomeLabel || activity.notes) && (
+        {/* Details tab: Notes + Attachments */}
+        {activeTab === 'details' && (
+          <>
+        {/* Details Card - Notes */}
+        {activity.notes && (
           <GlassCard className="space-y-4">
             <h2 className="text-sm font-semibold text-foreground uppercase tracking-wide">
               {locale === 'zh-Hans' ? '详情' : 'Details'}
             </h2>
-
-            {/* Outcome */}
-            {outcomeLabel && (
-              <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/30">
-                <CheckCircle className="w-5 h-5 text-muted-foreground" />
-                <div className="flex-1">
-                  <p className="text-xs text-muted-foreground">{locale === 'zh-Hans' ? '结果' : 'Outcome'}</p>
-                  <p className="text-sm font-medium text-foreground">
-                    {outcomeLabel}
-                  </p>
-                </div>
-              </div>
-            )}
 
             {/* Notes */}
             {activity.notes && (
@@ -543,13 +656,82 @@ export default function ActivityDetailPage() {
                   <FileText className="w-4 h-4 text-muted-foreground" />
                   <p className="text-xs text-muted-foreground">{locale === 'zh-Hans' ? '备注' : 'Notes'}</p>
                 </div>
-                <p className="text-sm text-foreground leading-relaxed pl-6">
-                  {activity.notes}
-                </p>
+                {/<html[\s>]/i.test(activity.notes) ? (
+                  <iframe
+                    srcDoc={activity.notes}
+                    sandbox="allow-same-origin"
+                    scrolling="no"
+                    className="w-full border-0 pl-6"
+                    style={{ minHeight: 120, overflow: 'hidden' }}
+                    onLoad={(e) => {
+                      const iframe = e.target as HTMLIFrameElement;
+                      try {
+                        const h = iframe.contentDocument?.documentElement?.scrollHeight;
+                        if (h) iframe.style.height = `${h}px`;
+                      } catch { /* cross-origin fallback */ }
+                    }}
+                  />
+                ) : (
+                  <p className="text-sm text-foreground leading-relaxed pl-6">
+                    {activity.notes}
+                  </p>
+                )}
               </div>
             )}
           </GlassCard>
         )}
+
+        {/* Attachments Card - saved file Notes bound to this activity */}
+        {savedAttachments.length > 0 && (
+          <GlassCard className="space-y-3">
+            <h2 className="text-sm font-semibold text-foreground uppercase tracking-wide">
+              {locale === 'zh-Hans' ? `附件 (${savedAttachments.length})` : `Attachments (${savedAttachments.length})`}
+            </h2>
+            <div className="flex gap-2 flex-wrap">
+              {savedAttachments.map((att) => (
+                <button
+                  key={att.id}
+                  type="button"
+                  onClick={() => {
+                    if (att.type === 'image') {
+                      setLightboxAttachment(att.dataUrl);
+                    } else {
+                      const w = window.open();
+                      if (w) w.document.write(`<iframe src="${att.dataUrl}" style="border:0;width:100vw;height:100vh"></iframe>`);
+                    }
+                  }}
+                  className="relative w-20 h-20 rounded-lg overflow-hidden border border-border/50 bg-muted/40 focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  title={att.name}
+                  aria-label={att.name}
+                >
+                  {att.type === 'image' ? (
+                    <img src={att.dataUrl} alt={att.name} className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center px-1">
+                      <FileText className="w-5 h-5 text-muted-foreground" />
+                      <span className="text-[8px] text-muted-foreground mt-1 truncate max-w-full">
+                        {att.name.length > 10 ? att.name.slice(0, 10) + '…' : att.name}
+                      </span>
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
+          </GlassCard>
+        )}
+
+        {/* Empty details fallback */}
+        {!activity.notes && savedAttachments.length === 0 && (
+          <GlassCard className="py-10 text-center text-sm text-muted-foreground">
+            {locale === 'zh-Hans' ? '暂无详情备注或附件' : 'No notes or attachments'}
+          </GlassCard>
+        )}
+          </>
+        )}
+
+            </motion.div>
+          </AnimatePresence>
+        </div>
 
         {/* Metadata */}
         {activity.createdon && (
@@ -574,17 +756,32 @@ export default function ActivityDetailPage() {
           ...(!isCompleted ? [{
             id: 'complete',
             icon: CheckCircle,
-            label: locale === 'zh-Hans' ? '完成' : 'Complete',
+            label: updateActivity.isPending
+              ? (locale === 'zh-Hans' ? '完成中…' : 'Completing…')
+              : (locale === 'zh-Hans' ? '完成' : 'Complete'),
             onClick: handleMarkComplete,
+            disabled: updateActivity.isPending,
+            busy: updateActivity.isPending,
           }] : []) as QuickAction[],
-          {
-            id: 'edit',
-            icon: Edit,
-            label: locale === 'zh-Hans' ? '编辑' : 'Edit',
-            onClick: () => navigate(`/activity/${activity.account?.id || 'new'}?edit=${activity.id}`),
-          },
         ]}
       />
+
+      {/* Attachment lightbox */}
+      {lightboxAttachment && (
+        <div
+          className="fixed inset-0 z-[200] bg-black/85 flex items-center justify-center p-4"
+          onClick={() => setLightboxAttachment(null)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <img
+            src={lightboxAttachment}
+            alt=""
+            className="max-w-full max-h-full object-contain rounded-lg"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </MobileLayout>
   );
 }

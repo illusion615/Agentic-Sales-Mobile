@@ -1,30 +1,23 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCreateAISummary, useUpdateAISummary, useAISummaryList } from '@/generated/hooks/use-aisummary';
-import type { AISummary, AISummaryEntityTypeKey, AISummaryStatusKey } from '@/generated/models/ai-summary-model';
+import type { AISummary } from '@/generated/models/ai-summary-model';
 import { useAppSettings } from './use-app-settings';
 import { useUser } from './use-user';
-import { invokeFlowForLLM } from '@/services/power-automate-service';
-import { AccountTierKeyToLabel, AccountRegionKeyToLabel, AccountCreditstatusKeyToLabel } from '@/generated/models/account-model';
-import type { AccountTierKey, AccountRegionKey, AccountCreditstatusKey } from '@/generated/models/account-model';
-import { OpportunityStageKeyToLabel, OpportunityConfidencetrendKeyToLabel } from '@/generated/models/opportunity-model';
-import type { OpportunityStageKey, OpportunityConfidencetrendKey } from '@/generated/models/opportunity-model';
-import { ActivityTypeKeyToLabel, ActivityDraftstatusKeyToLabel, ActivityOutcomeKeyToLabel } from '@/generated/models/activity-model';
-import type { ActivityTypeKey, ActivityDraftstatusKey, ActivityOutcomeKey } from '@/generated/models/activity-model';
 
-// Entity type mapping
-export const ENTITY_TYPE_KEYS: Record<string, AISummaryEntityTypeKey> = {
-  account: 'EntityTypeKey0',
-  opportunity: 'EntityTypeKey1',
-  contact: 'EntityTypeKey2',
-  activity: 'EntityTypeKey3',
+// Entity type labels (DV FormattedValue)
+export const ENTITY_TYPES = {
+  account: 'account',
+  opportunity: 'opportunity',
+  contact: 'contact',
+  activity: 'activity',
 } as const;
 
-// Status mapping
-export const STATUS_KEYS: Record<string, AISummaryStatusKey> = {
-  pending: 'StatusKey0',
-  generating: 'StatusKey1',
-  completed: 'StatusKey2',
-  failed: 'StatusKey3',
+// Status labels (DV FormattedValue)
+export const STATUSES = {
+  pending: 'pending',
+  generating: 'generating',
+  completed: 'completed',
+  failed: 'failed',
 } as const;
 
 export type EntityType = 'account' | 'opportunity' | 'contact' | 'activity';
@@ -36,7 +29,6 @@ interface TriggerSummaryParams {
   relatedData?: Record<string, unknown>;
 }
 
-// Removed FlowRequestPayload - now using invokeFlowForLLM directly
 /**
  * Extract entity name from data
  */
@@ -72,21 +64,10 @@ function buildAIPrompt(
       const activities = relatedData?.activities as Array<Record<string, unknown>> | undefined;
       const contacts = relatedData?.contacts as Array<Record<string, unknown>> | undefined;
       
-      // Convert key values to labels
-      const tierKey = entityData.tierKey as AccountTierKey | undefined;
-      const tierLabel = tierKey ? AccountTierKeyToLabel[tierKey] : 'Not specified';
-      const regionKey = entityData.regionKey as AccountRegionKey | undefined;
-      const regionLabel = regionKey ? AccountRegionKeyToLabel[regionKey] : 'Not specified';
-      const creditStatusKey = entityData.creditstatusKey as AccountCreditstatusKey | undefined;
-      const creditStatusLabel = creditStatusKey ? AccountCreditstatusKeyToLabel[creditStatusKey] : 'Not specified';
-      
       return `Analyze this sales account and provide actionable insights.
 
 ACCOUNT: ${entityName}
 - Industry: ${entityData.industry || 'Not specified'}
-- Tier: ${tierLabel}
-- Region: ${regionLabel}
-- Credit Status: ${creditStatusLabel}
 - Revenue: ${entityData.annualrevenue ? `$${Number(entityData.annualrevenue).toLocaleString()}` : 'Not specified'}
 
 RELATED DATA
@@ -108,11 +89,8 @@ Focus on actionable insights that help close deals and grow the relationship.`;
     }
     
     case 'opportunity': {
-      // Convert key values to labels
-      const stageKey = entityData.stageKey as OpportunityStageKey | undefined;
-      const stageLabel = stageKey ? OpportunityStageKeyToLabel[stageKey] : 'Not specified';
-      const trendKey = entityData.confidencetrendKey as OpportunityConfidencetrendKey | undefined;
-      const trendLabel = trendKey ? OpportunityConfidencetrendKeyToLabel[trendKey] : 'Not specified';
+      const stageLabel = (entityData.stage as string) || 'Not specified';
+      const trendLabel = (entityData.confidenceTrend as string) || 'Not specified';
       
       return `Analyze this sales opportunity and provide actionable insights.
 
@@ -156,13 +134,9 @@ Focus on relationship building and influence mapping.`;
     }
     
     case 'activity': {
-      // Convert key values to labels
-      const typeKey = entityData.typeKey as ActivityTypeKey | undefined;
-      const typeLabel = typeKey ? ActivityTypeKeyToLabel[typeKey] : 'Not specified';
-      const statusKey = entityData.draftstatusKey as ActivityDraftstatusKey | undefined;
-      const statusLabel = statusKey ? ActivityDraftstatusKeyToLabel[statusKey] : 'Not specified';
-      const outcomeKey = entityData.outcomeKey as ActivityOutcomeKey | undefined;
-      const outcomeLabel = outcomeKey ? ActivityOutcomeKeyToLabel[outcomeKey] : 'Not specified';
+      const typeLabel = (entityData.type as string) || 'Not specified';
+      const statusLabel = (entityData.draftStatus as string) || 'Not specified';
+      const outcomeLabel = (entityData.outcome as string) || 'Not specified';
       
       return `Analyze this sales activity and provide follow-up insights.
 
@@ -191,118 +165,64 @@ Focus on momentum and next steps.`;
 }
 
 /**
- * Extract summary from various Power Automate response formats
- */
-function extractSummaryFromResponse(result: Record<string, unknown>): { summary: string; actionItems: string } | null {
-  // Direct format: { summary: '...', actionItems: '...' }
-  if (typeof result.summary === 'string') {
-    return {
-      summary: result.summary,
-      actionItems: typeof result.actionItems === 'string' ? result.actionItems : '',
-    };
-  }
-  
-  // Nested format: { body: { summary: '...', actionItems: '...' } }
-  if (result.body && typeof result.body === 'object') {
-    const body = result.body as Record<string, unknown>;
-    if (typeof body.summary === 'string') {
-      return {
-        summary: body.summary,
-        actionItems: typeof body.actionItems === 'string' ? body.actionItems : '',
-      };
-    }
-  }
-  
-  // Copilot Studio format: { text: '...' } or { message: '...' }
-  if (typeof result.text === 'string') {
-    return {
-      summary: result.text,
-      actionItems: '',
-    };
-  }
-  
-  if (typeof result.message === 'string' && !result.error) {
-    return {
-      summary: result.message,
-      actionItems: '',
-    };
-  }
-  
-  // Response format: { response: '...' }
-  if (typeof result.response === 'string') {
-    return {
-      summary: result.response,
-      actionItems: '',
-    };
-  }
-  
-  return null;
-}
-
-/**
- * Fire the Power Automate flow in the background using the standard invokeFlowForLLM
+ * Fire the AI summary skill in the background
  */
 async function triggerFlowInBackground(
-  flowUrl: string,
   userPrompt: string,
+  entityType: EntityType,
   summaryId: string,
   updateSummary: (params: { id: string; changedFields: Partial<Omit<AISummary, 'id'>> }) => Promise<unknown>
 ) {
   try {
-    // Use the standard invokeFlowForLLM function which handles all the formatting
-    const result = await invokeFlowForLLM(flowUrl, {
-      messages: [
-        { role: 'user', content: userPrompt }
-      ],
-    });
+    const { executeFunction } = await import('@/lib/function-executor');
+    const result = await executeFunction('generateEntitySummary', {
+      data: userPrompt,
+      entityType,
+    }, {});
     
     if (!result.success) {
-      throw new Error(result.error || 'Flow request failed');
+      throw new Error(result.error || 'Skill execution failed');
     }
-    
-    // Parse the response content
-    let summaryContent: { summary: string; actionItems: string } | null = null;
-    
-    if (result.content) {
-      try {
-        const parsed = JSON.parse(result.content) as Record<string, unknown>;
-        summaryContent = extractSummaryFromResponse(parsed);
-      } catch {
-        // Response might be plain text
-        summaryContent = { summary: result.content, actionItems: '' };
-      }
-    }
-    
+
+    // generateEntitySummary declares a `text` contract (z.string().min(1)), so the
+    // executor guarantees a validated markdown string here — no shape-guessing needed.
+    const summaryContent = typeof result.data === 'string'
+      ? { summary: result.data, actionItems: '' }
+      : null;
+
     if (summaryContent) {
       await updateSummary({
         id: summaryId,
         changedFields: {
-          statusKey: STATUS_KEYS.completed,
+          status: STATUSES.completed,
           summary: summaryContent.summary,
           actionItems: summaryContent.actionItems,
           expiresOn: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
         },
       });
     } else {
-      // Flow succeeded but no summary returned - mark as completed with note
       await updateSummary({
         id: summaryId,
         changedFields: {
-          statusKey: STATUS_KEYS.completed,
-          summary: 'AI analysis request sent successfully. The flow will update this summary when processing completes.',
+          status: STATUSES.completed,
+          summary: 'AI analysis completed.',
           expiresOn: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
         },
       });
     }
   } catch (error: unknown) {
     // Mark as failed if the flow call fails
-    await updateSummary({
-      id: summaryId,
-      changedFields: {
-        statusKey: STATUS_KEYS.failed,
-        summary: `Failed to generate summary: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      },
-    });
+    try {
+      await updateSummary({
+        id: summaryId,
+        changedFields: {
+          status: STATUSES.failed,
+          summary: `Failed to generate summary: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        },
+      });
+    } catch (updateErr) {
+      console.error('[AISummary] Failed to update status to failed:', updateErr);
+    }
   }
 }
 
@@ -317,11 +237,9 @@ function generatePlaceholderSummary(
   switch (entityType) {
     case 'account': {
       const name = entityData.name1 || entityData.name || 'This account';
-      const tierKey = entityData.tierKey as AccountTierKey | undefined;
-      const tierLabel = tierKey ? AccountTierKeyToLabel[tierKey] : '';
       const industry = entityData.industry || '';
       return {
-        summary: `### Account Overview\n\n${name} is ${industry ? `in the **${industry}** industry` : 'an account'}. ${tierLabel ? `Tier: **${tierLabel}**` : ''}\n\nReview recent activities and opportunities to identify growth potential and address any outstanding issues.`,
+        summary: `### Account Overview\n\n${name} is ${industry ? `in the **${industry}** industry` : 'an account'}.\n\nReview recent activities and opportunities to identify growth potential and address any outstanding issues.`,
         actionItems: '### Recommended Actions\n\n- Review recent interaction history\n- Check open opportunities status\n- Verify contact information is current\n- Schedule follow-up if needed',
       };
     }
@@ -329,8 +247,7 @@ function generatePlaceholderSummary(
     case 'opportunity': {
       const name = entityData.name1 || entityData.name || 'This opportunity';
       const amount = entityData.totalamount || entityData.totalAmount || 0;
-      const stageKey = entityData.stageKey as OpportunityStageKey | undefined;
-      const stageLabel = stageKey ? OpportunityStageKeyToLabel[stageKey] : '';
+      const stageLabel = (entityData.stage as string) || '';
       return {
         summary: `### Opportunity Overview\n\n**${name}** with potential value of **$${Number(amount).toLocaleString()}**. Currently in *${stageLabel || 'unknown'}* stage.\n\nMonitor progress and address any blockers to advance the deal.`,
         actionItems: '### Recommended Actions\n\n- Review deal progress against timeline\n- Address any identified blockers\n- Prepare for next stage requirements\n- Update stakeholder on status',
@@ -348,8 +265,7 @@ function generatePlaceholderSummary(
     
     case 'activity': {
       const title = entityData.title || 'This activity';
-      const typeKey = entityData.typeKey as ActivityTypeKey | undefined;
-      const typeLabel = typeKey ? ActivityTypeKeyToLabel[typeKey] : '';
+      const typeLabel = (entityData.type as string) || '';
       return {
         summary: `### Activity Overview\n\n**${title}** *(${typeLabel || 'activity'})*\n\nReview the outcome and plan appropriate follow-up actions to maintain engagement momentum.`,
         actionItems: '### Recommended Actions\n\n- Document key discussion points\n- Identify follow-up actions\n- Update related opportunity status\n- Schedule next engagement',
@@ -370,11 +286,11 @@ function generatePlaceholderSummary(
 export function useEntityAISummary(entityType: EntityType, entityId: string) {
   const { data: allSummaries = [], isLoading, refetch } = useAISummaryList();
   
-  const entityTypeKey = ENTITY_TYPE_KEYS[entityType];
+  const entityTypeLabel = ENTITY_TYPES[entityType];
   
   // Find the latest summary for this entity
   const summary = allSummaries
-    .filter((s: AISummary) => s.entityTypeKey === entityTypeKey && s.entityID === entityId)
+    .filter((s: AISummary) => s.entityType === entityTypeLabel && s.entityID === entityId)
     .sort((a: AISummary, b: AISummary) => {
       const dateA = a.generatedOn ? new Date(a.generatedOn).getTime() : 0;
       const dateB = b.generatedOn ? new Date(b.generatedOn).getTime() : 0;
@@ -382,9 +298,15 @@ export function useEntityAISummary(entityType: EntityType, entityId: string) {
     })[0] ?? null;
   
   const isExpired = summary?.expiresOn ? new Date(summary.expiresOn) < new Date() : false;
-  const isGenerating = summary?.statusKey === STATUS_KEYS.generating || summary?.statusKey === STATUS_KEYS.pending;
-  const isCompleted = summary?.statusKey === STATUS_KEYS.completed;
-  const isFailed = summary?.statusKey === STATUS_KEYS.failed;
+  // Timeout guard: if generating/pending for > 60s, treat as failed
+  const generatingTooLong = !!(
+    (summary?.status === STATUSES.generating || summary?.status === STATUSES.pending)
+    && summary?.generatedOn
+    && (Date.now() - new Date(summary.generatedOn).getTime()) > 60_000
+  );
+  const isGenerating = (summary?.status === STATUSES.generating || summary?.status === STATUSES.pending) && !generatingTooLong;
+  const isCompleted = summary?.status === STATUSES.completed;
+  const isFailed = summary?.status === STATUSES.failed || generatingTooLong;
   
   return {
     summary,
@@ -408,28 +330,30 @@ export function useAISummaryTrigger() {
   const { data: user } = useUser();
   
   const triggerSummary = useMutation({
+    // Orchestration mutation: its mutationFn invokes createAISummary / updateAISummary
+    // mutations, which already surface their own error toasts via the global
+    // MutationCache handler. Suppress this layer to avoid duplicate toasts.
+    meta: { suppressGlobalToast: true },
     mutationFn: async (params: TriggerSummaryParams) => {
       const { entityType, entityId, entityData, relatedData } = params;
-      const entityTypeKey = ENTITY_TYPE_KEYS[entityType];
+      const entityTypeLabel = ENTITY_TYPES[entityType];
       
       // Create a pending summary record first
       const summaryRecord = await createAISummary.mutateAsync({
         entityID: entityId,
-        entityTypeKey,
-        statusKey: STATUS_KEYS.pending,
+        entityType: entityTypeLabel,
+        status: STATUSES.pending,
         summary: 'Generating AI summary...',
         generatedOn: new Date().toISOString(),
       });
       
       // If we have a Power Automate flow URL configured, trigger it
-      const flowUrl = settings.powerAutomateFlowUrl;
-      
-      if (flowUrl && user?.userPrincipalName) {
+      if (user?.userPrincipalName) {
         // Update status to generating
         await updateAISummary.mutateAsync({
           id: summaryRecord.id,
           changedFields: {
-            statusKey: STATUS_KEYS.generating,
+            status: STATUSES.generating,
           },
         });
         
@@ -437,8 +361,7 @@ export function useAISummaryTrigger() {
         const userPrompt = buildAIPrompt(entityType, entityData, relatedData);
         
         // Fire and forget - don't wait for the flow to complete
-        // Pass userPrompt directly since invokeFlowForLLM handles the email internally
-        triggerFlowInBackground(flowUrl, userPrompt, summaryRecord.id, updateAISummary.mutateAsync);
+        triggerFlowInBackground(userPrompt, entityType, summaryRecord.id, updateAISummary.mutateAsync);
       } else {
         // No flow configured or no user - generate a placeholder summary
         const placeholderSummary = generatePlaceholderSummary(entityType, entityData);
@@ -446,7 +369,7 @@ export function useAISummaryTrigger() {
         await updateAISummary.mutateAsync({
           id: summaryRecord.id,
           changedFields: {
-            statusKey: STATUS_KEYS.completed,
+            status: STATUSES.completed,
             summary: placeholderSummary.summary,
             actionItems: placeholderSummary.actionItems,
             expiresOn: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days

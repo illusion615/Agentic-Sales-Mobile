@@ -1,39 +1,63 @@
-import { getClient } from '../../../app-gen-sdk/data';
+import { Crf5c_briefingsService } from './Crf5c_briefingsService';
+import type { Crf5c_briefings } from '../models/Crf5c_briefingsModel';
+import type { IGetAllOptions } from '../models/CommonModels';
 import type { Briefing } from '../models/briefing-model';
-import type { IOperationOptions } from '../../../app-gen-sdk/data/common/types';
+import { dvNum, numToDv, createWithReadback, requireId } from './_adapter-utils';
 
-const DATA_SOURCE_NAME = 'Briefing';
+function fromDv(dv: Crf5c_briefings): Briefing {
+  return {
+    id: dv.crf5c_briefingid,
+    ownerid: (dv as unknown as Record<string, unknown>)._ownerid_value as string ?? '',
+    audiourl: dv.crf5c_audiourl,
+    generatedon: dv.crf5c_generatedon,
+    lastposition: dv.crf5c_lastposition,
+    payloadjson: dv.crf5c_payloadjson,
+  };
+}
+
+function toDv(r: Partial<Omit<Briefing, 'id'>>): Record<string, unknown> {
+  const dv: Record<string, unknown> = {};
+  if (r.audiourl !== undefined) dv.crf5c_audiourl = r.audiourl;
+  if (r.generatedon !== undefined) dv.crf5c_generatedon = r.generatedon;
+  if (r.lastposition !== undefined) dv.crf5c_lastposition = numToDv(r.lastposition);
+  if (r.payloadjson !== undefined) dv.crf5c_payloadjson = r.payloadjson;
+  return dv;
+}
 
 export class BriefingService {
   static async create(record: Omit<Briefing, 'id'>): Promise<Briefing> {
-    const result = await getClient().createRecordAsync(DATA_SOURCE_NAME, record);
-    if (!result.success) throw result.error;
-    return result.data as Briefing;
+    const dvPayload = toDv(record);
+    return createWithReadback(
+      (p) => Crf5c_briefingsService.create(p as any),
+      (o) => Crf5c_briefingsService.getAll(o),
+      dvPayload, 'crf5c_briefingid', 'Briefing',
+      `crf5c_generatedon eq '${record.generatedon}'`,
+      fromDv,
+    );
   }
 
-  static async update(
-    id: string,
-    changedFields: Partial<Omit<Briefing, 'id'>>
-  ): Promise<Briefing> {
-    const result = await getClient().updateRecordAsync(DATA_SOURCE_NAME, id, changedFields);
+  static async update(id: string, changedFields: Partial<Omit<Briefing, 'id'>>): Promise<Briefing> {
+    requireId(id, 'update', 'Briefing');
+    const result = await Crf5c_briefingsService.update(id, toDv(changedFields) as any);
     if (!result.success) throw result.error;
-    return result.data as Briefing;
+    return fromDv(result.data!);
   }
 
   static async delete(id: string): Promise<void> {
-    const result = await getClient().deleteRecordAsync(DATA_SOURCE_NAME, id);
-    if (!result.success) throw result.error;
+    requireId(id, 'delete', 'Briefing');
+    await Crf5c_briefingsService.delete(id);
   }
 
   static async get(id: string): Promise<Briefing> {
-    const result = await getClient().retrieveRecordAsync(DATA_SOURCE_NAME, id);
+    requireId(id, 'get', 'Briefing');
+    const result = await Crf5c_briefingsService.get(id);
     if (!result.success) throw result.error;
-    return result.data as Briefing;
+    return fromDv(result.data!);
   }
 
-  static async getAll(options?: IOperationOptions): Promise<Briefing[]> {
-    const result = await getClient().retrieveMultipleRecordsAsync(DATA_SOURCE_NAME, options);
+  static async getAll(options?: IGetAllOptions): Promise<Briefing[]> {
+    const result = await Crf5c_briefingsService.getAll(options);
     if (!result.success) throw result.error;
-    return result.data as Briefing[];
+    return (result.data ?? []).map(fromDv);
   }
 }

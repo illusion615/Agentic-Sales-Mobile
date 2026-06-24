@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { OpportunityService } from "../services/opportunity-service";
 import type { Opportunity } from "../models/opportunity-model";
-import type { IOperationOptions } from '../../../app-gen-sdk/data/common/types';
+import type { IOperationOptions } from '@microsoft/power-apps/data';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -15,6 +15,7 @@ export function useOpportunityList(options?: IOperationOptions) {
   return useQuery({
     queryKey: ["opportunity-list", options],
     queryFn: () => OpportunityService.getAll(options),
+    staleTime: 60_000,
   });
 }
 
@@ -23,10 +24,16 @@ export function useOpportunityList(options?: IOperationOptions) {
  * @param id The id of the record (must be a valid UUID)
  */
 export function useOpportunity(id: string) {
+  const client = useQueryClient();
   return useQuery({
     queryKey: ["opportunity", id],
     queryFn: () => OpportunityService.get(id),
     enabled: !!id && UUID_REGEX.test(id),
+    placeholderData: () => {
+      const list = client.getQueryData<Opportunity[]>(["opportunity-list"]);
+      return list?.find((o) => o.id === id);
+    },
+    staleTime: 30_000,
   });
 }
 

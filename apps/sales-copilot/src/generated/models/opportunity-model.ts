@@ -5,7 +5,6 @@ export const OpportunityConfidencetrendKeyToLabel = {
   'ConfidencetrendKey1': 'down',
   'ConfidencetrendKey2': 'flat'
 } as const;
-export type OpportunityConfidencetrendKey = keyof typeof OpportunityConfidencetrendKeyToLabel;
 
 export const OpportunityStageKeyToLabel = {
   'StageKey0': 'prospecting',
@@ -15,7 +14,6 @@ export const OpportunityStageKeyToLabel = {
   'StageKey4': 'won',
   'StageKey5': 'lost'
 } as const;
-export type OpportunityStageKey = keyof typeof OpportunityStageKeyToLabel;
 
 export interface Opportunity {
   /**
@@ -50,7 +48,7 @@ export interface Opportunity {
   /**
    * @displayName Confidence Trend
    */
-  confidencetrendKey?: OpportunityConfidencetrendKey;
+  confidenceTrend?: string;
   /**
    * @displayName Created On
    */
@@ -72,7 +70,7 @@ export interface Opportunity {
    * @displayName Stage
    * @validationRule Required for create/update operations
    */
-  stageKey: OpportunityStageKey;
+  stage: string;
   /**
    * @displayName Total Amount
    * @validationRule Required for create/update operations

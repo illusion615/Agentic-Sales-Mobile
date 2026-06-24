@@ -1,39 +1,82 @@
-import { getClient } from '../../../app-gen-sdk/data';
+import { Crf5c_productsService } from './Crf5c_productsService';
+import type { Crf5c_products } from '../models/Crf5c_productsModel';
+import type { IGetAllOptions } from '../models/CommonModels';
 import type { Product } from '../models/product-model';
-import type { IOperationOptions } from '../../../app-gen-sdk/data/common/types';
+import { dvNum, numToDv, mapOptions, createWithReadback, requireId } from './_adapter-utils';
 
-const DATA_SOURCE_NAME = 'Product';
+const FIELD_MAP: Record<string, string> = {
+  id: 'crf5c_productid',
+  productName: 'crf5c_productname',
+  category: 'crf5c_category',
+  featureHighlight: 'crf5c_featurehighlight',
+  imageURL: 'crf5c_imageurl',
+  productURL: 'crf5c_producturl',
+  sortOrder: 'crf5c_sortorder',
+  specification: 'crf5c_specification',
+  summary: 'crf5c_summary',
+};
+
+function fromDv(dv: Crf5c_products): Product {
+  return {
+    id: dv.crf5c_productid,
+    productName: dv.crf5c_productname,
+    category: dv.crf5c_category,
+    featureHighlight: dv.crf5c_featurehighlight,
+    imageURL: dv.crf5c_imageurl,
+    productURL: dv.crf5c_producturl,
+    sortOrder: dv.crf5c_sortorder ?? 0,
+    specification: dv.crf5c_specification,
+    summary: dv.crf5c_summary,
+  };
+}
+
+function toDv(r: Partial<Omit<Product, 'id'>>): Record<string, unknown> {
+  const dv: Record<string, unknown> = {};
+  if (r.productName !== undefined) dv.crf5c_productname = r.productName;
+  if (r.category !== undefined) dv.crf5c_category = r.category;
+  if (r.featureHighlight !== undefined) dv.crf5c_featurehighlight = r.featureHighlight;
+  if (r.imageURL !== undefined) dv.crf5c_imageurl = r.imageURL;
+  if (r.productURL !== undefined) dv.crf5c_producturl = r.productURL;
+  if (r.sortOrder !== undefined) dv.crf5c_sortorder = numToDv(r.sortOrder);
+  if (r.specification !== undefined) dv.crf5c_specification = r.specification;
+  if (r.summary !== undefined) dv.crf5c_summary = r.summary;
+  return dv;
+}
 
 export class ProductService {
   static async create(record: Omit<Product, 'id'>): Promise<Product> {
-    const result = await getClient().createRecordAsync(DATA_SOURCE_NAME, record);
-    if (!result.success) throw result.error;
-    return result.data as Product;
+    const dvPayload = toDv(record);
+    return createWithReadback(
+      (p) => Crf5c_productsService.create(p as any),
+      (o) => Crf5c_productsService.getAll(o),
+      dvPayload, 'crf5c_productid', 'Product',
+      `crf5c_productname eq '${record.productName}'`,
+      fromDv,
+    );
   }
 
-  static async update(
-    id: string,
-    changedFields: Partial<Omit<Product, 'id'>>
-  ): Promise<Product> {
-    const result = await getClient().updateRecordAsync(DATA_SOURCE_NAME, id, changedFields);
+  static async update(id: string, changedFields: Partial<Omit<Product, 'id'>>): Promise<Product> {
+    requireId(id, 'update', 'Product');
+    const result = await Crf5c_productsService.update(id, toDv(changedFields) as any);
     if (!result.success) throw result.error;
-    return result.data as Product;
+    return fromDv(result.data!);
   }
 
   static async delete(id: string): Promise<void> {
-    const result = await getClient().deleteRecordAsync(DATA_SOURCE_NAME, id);
-    if (!result.success) throw result.error;
+    requireId(id, 'delete', 'Product');
+    await Crf5c_productsService.delete(id);
   }
 
   static async get(id: string): Promise<Product> {
-    const result = await getClient().retrieveRecordAsync(DATA_SOURCE_NAME, id);
+    requireId(id, 'get', 'Product');
+    const result = await Crf5c_productsService.get(id);
     if (!result.success) throw result.error;
-    return result.data as Product;
+    return fromDv(result.data!);
   }
 
-  static async getAll(options?: IOperationOptions): Promise<Product[]> {
-    const result = await getClient().retrieveMultipleRecordsAsync(DATA_SOURCE_NAME, options);
+  static async getAll(options?: IGetAllOptions): Promise<Product[]> {
+    const result = await Crf5c_productsService.getAll(mapOptions(options, FIELD_MAP) as any);
     if (!result.success) throw result.error;
-    return result.data as Product[];
+    return (result.data ?? []).map(fromDv);
   }
 }

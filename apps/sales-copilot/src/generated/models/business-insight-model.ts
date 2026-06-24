@@ -2,14 +2,12 @@ export const BusinessInsightReferencetypeKeyToLabel = {
   'ReferencetypeKey0': 'client',
   'ReferencetypeKey1': 'opportunity'
 } as const;
-export type BusinessInsightReferencetypeKey = keyof typeof BusinessInsightReferencetypeKeyToLabel;
 
 export const BusinessInsightTypeKeyToLabel = {
   'TypeKey0': 'warning',
   'TypeKey1': 'info',
   'TypeKey2': 'success'
 } as const;
-export type BusinessInsightTypeKey = keyof typeof BusinessInsightTypeKeyToLabel;
 
 export interface BusinessInsight {
   /**
@@ -63,7 +61,7 @@ export interface BusinessInsight {
    * @displayName Reference Type
    * @validationRule Required for create/update operations
    */
-  referencetypeKey: BusinessInsightReferencetypeKey;
+  referenceType: string;
   /**
    * @displayName Summary
    * @validationRule Required for create/update operations
@@ -73,7 +71,7 @@ export interface BusinessInsight {
    * @displayName Type
    * @validationRule Required for create/update operations
    */
-  typeKey: BusinessInsightTypeKey;
+  type: string;
   /**
    * @displayName Valid Until
    * @validationRule Required for create/update operations

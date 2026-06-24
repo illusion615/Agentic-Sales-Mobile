@@ -19,6 +19,7 @@ import {
   Save,
   X,
   ChevronRight,
+  Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MobileLayout } from '@/components/mobile-layout';
@@ -56,18 +57,9 @@ import { useContactList } from '@/generated/hooks/use-contact';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useActivityList } from '@/generated/hooks/use-activity';
 import { useEntityAISummary, useWithAISummaryTrigger } from '@/hooks/use-ai-summary-trigger';
-import {
-  AccountTierKeyToLabel,
-  AccountRegionKeyToLabel,
-  AccountCreditstatusKeyToLabel,
-} from '@/generated/models/account-model';
-import type { AccountTierKey, AccountRegionKey, AccountCreditstatusKey } from '@/generated/models/account-model';
-import { OpportunityStageKeyToLabel } from '@/generated/models/opportunity-model';
-import type { Opportunity, OpportunityStageKey } from '@/generated/models/opportunity-model';
-import { ActivityTypeKeyToLabel, ActivityDraftstatusKeyToLabel } from '@/generated/models/activity-model';
-import type { Activity, ActivityTypeKey, ActivityDraftstatusKey } from '@/generated/models/activity-model';
+import type { Opportunity } from '@/generated/models/opportunity-model';
+import type { Activity } from '@/generated/models/activity-model';
 import type { Contact } from '@/generated/models/contact-model';
-import { getRegionEnglish } from '@/lib/display-labels';
 import { toast } from 'sonner';
 import { getLocale } from '@/lib/i18n';
 import { useCopilot } from '@/contexts/copilot-context';
@@ -103,12 +95,12 @@ function getDaysSince(dateStr?: string): number {
   return Math.ceil(Math.abs(now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
 }
 
-function getActivityTypeIcon(typeKey: ActivityTypeKey | null | undefined): React.ComponentType<{ className?: string }> {
-  switch (typeKey) {
-    case 'TypeKey0': return MapPin; // visit
-    case 'TypeKey1': return Phone; // call
-    case 'TypeKey2': return Calendar; // meeting
-    case 'TypeKey3': return Mail; // email
+function getActivityTypeIcon(type: string | null | undefined): React.ComponentType<{ className?: string }> {
+  switch (type) {
+    case 'visit': return Calendar;
+    case 'call': return Phone;
+    case 'meeting': return Calendar;
+    case 'email': return Mail;
     default: return CheckSquare;
   }
 }
@@ -130,12 +122,15 @@ export default function ClientDetailPage() {
     email: '',
     address: '',
     notes: '',
-    tierKey: '' as AccountTierKey | '',
-    regionKey: '' as AccountRegionKey | '',
   });
 
   // Fetch data from Dataverse
   const { data: account, isLoading: isLoadingAccount, error } = useAccount(id || '');
+
+  // Prefetch related entity detail chunks (opportunity, activity, contact)
+  useEffect(() => {
+    import('@/lib/prefetch').then(({ prefetchRelated }) => prefetchRelated('account'));
+  }, []);
 
   // Debug logging for account fetch issues
   useEffect(() => {
@@ -187,8 +182,6 @@ export default function ClientDetailPage() {
         email: account.email || '',
         address: account.address || '',
         notes: account.notes || '',
-        tierKey: (account.tierKey as AccountTierKey) || '',
-        regionKey: (account.regionKey as AccountRegionKey) || '',
       });
     }
   }, [account, isEditMode]);
@@ -208,8 +201,8 @@ export default function ClientDetailPage() {
     if (!account) return;
     setIsRefreshingAI(true);
     triggerForEntity('account', account.id, { ...account } as Record<string, unknown>, {
-      opportunities: opportunities.map((o: Opportunity) => ({ id: o.id, name: o.name1, stage: o.stageKey, amount: o.totalamount })),
-      activities: activities.map((a: Activity) => ({ id: a.id, title: a.title, type: a.typeKey, date: a.scheduleddate })),
+      opportunities: opportunities.map((o: Opportunity) => ({ id: o.id, name: o.name1, stage: o.stage, amount: o.totalamount })),
+      activities: activities.map((a: Activity) => ({ id: a.id, title: a.title, type: a.type, date: a.scheduleddate })),
       contacts: contacts.map((c: Contact) => ({ id: c.id, name: c.fullname, title: c.title })),
     });
     setTimeout(() => {
@@ -223,13 +216,13 @@ export default function ClientDetailPage() {
     (sum: number, opp: Opportunity) => sum + (opp.totalamount || 0),
     0
   );
-  const wonStageKey = 'StageKey4';
-  const lostStageKey = 'StageKey5';
+  const wonStage = 'won';
+  const lostStage = 'lost';
   const activeDeals = opportunities.filter(
-    (opp: Opportunity) => opp.stageKey !== wonStageKey && opp.stageKey !== lostStageKey
+    (opp: Opportunity) => opp.stage !== wonStage && opp.stage !== lostStage
   );
 
-  const daysSinceContact = getDaysSince(account?.lastcontactedon || account?.lastinteractiondate);
+  const daysSinceContact = 999; // computed from activities instead
 
   // Copilot context for agent awareness
   const copilot = useCopilot();
@@ -247,8 +240,6 @@ export default function ClientDetailPage() {
         accountId: account.id,
         accountName: account.name1,
         industry: account.industry,
-        tier: account.tierKey,
-        region: account.regionKey,
         phone: account.phone,
         email: account.email,
         address: account.address,
@@ -256,8 +247,6 @@ export default function ClientDetailPage() {
         opportunitiesCount: opportunities.length,
         activitiesCount: activities.length,
         totalPipelineValue,
-        daysSinceLastContact: daysSinceContact,
-        creditStatus: account.creditstatusKey,
         notes: account.notes,
       },
     });
@@ -269,9 +258,10 @@ export default function ClientDetailPage() {
 
   const handleDelete = async () => {
     if (!account) return;
+    if (deleteAccount.isPending) return; // guard against double-tap
     try {
       await deleteAccount.mutateAsync(account.id);
-      toast.success('Client deleted');
+      // Returning to the list (item now gone) is the feedback; no toast.
       navigate('/accounts');
     } catch (error: unknown) {
       toast.error('Failed to delete client');
@@ -280,6 +270,7 @@ export default function ClientDetailPage() {
 
   const handleSave = async () => {
     if (!account) return;
+    if (updateAccount.isPending) return; // guard against double-tap
     try {
       const updatedData = {
         name1: editForm.name1,
@@ -288,8 +279,6 @@ export default function ClientDetailPage() {
         email: editForm.email,
         address: editForm.address,
         notes: editForm.notes,
-        tierKey: editForm.tierKey || undefined,
-        regionKey: editForm.regionKey || undefined,
       };
       
       await updateAccount.mutateAsync({
@@ -302,12 +291,11 @@ export default function ClientDetailPage() {
         ...account,
         ...updatedData,
       } as Record<string, unknown>, {
-        opportunities: opportunities.map((o: Opportunity) => ({ id: o.id, name: o.name1, stage: o.stageKey, amount: o.totalamount })),
-        activities: activities.map((a: Activity) => ({ id: a.id, title: a.title, type: a.typeKey, date: a.scheduleddate })),
+        opportunities: opportunities.map((o: Opportunity) => ({ id: o.id, name: o.name1, stage: o.stage, amount: o.totalamount })),
+        activities: activities.map((a: Activity) => ({ id: a.id, title: a.title, type: a.type, date: a.scheduleddate })),
         contacts: contacts.map((c: Contact) => ({ id: c.id, name: c.fullname, title: c.title })),
       });
-      
-      toast.success('Client updated');
+      // Exiting edit mode reveals the updated fields inline; no toast.
       setIsEditMode(false);
     } catch (error: unknown) {
       toast.error('Failed to update client');
@@ -324,17 +312,34 @@ export default function ClientDetailPage() {
         email: account.email || '',
         address: account.address || '',
         notes: account.notes || '',
-        tierKey: (account.tierKey as AccountTierKey) || '',
-        regionKey: (account.regionKey as AccountRegionKey) || '',
       });
     }
   };
 
   if (isLoadingAccount) {
     return (
-      <MobileLayout title="Client">
-        <div className="flex items-center justify-center h-64">
-          <div className="text-muted-foreground">Loading...</div>
+      <MobileLayout title={locale === 'zh-Hans' ? '客户详情' : 'Account Details'}>
+        <div className="px-4 pb-40 space-y-4 mt-4">
+          {/* Header card skeleton */}
+          <div className="glass-card p-4 animate-pulse" style={{ borderRadius: 20 }}>
+            <div className="flex items-start gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-muted/50" />
+              <div className="flex-1 space-y-2">
+                <div className="h-6 w-3/4 rounded bg-muted/50" />
+                <div className="h-4 w-1/2 rounded bg-muted/40" />
+                <div className="flex gap-2"><div className="h-5 w-20 rounded-full bg-muted/40" /><div className="h-5 w-16 rounded-full bg-muted/40" /></div>
+              </div>
+            </div>
+          </div>
+          {/* Info rows skeleton */}
+          <div className="glass-card p-4 animate-pulse space-y-3" style={{ borderRadius: 20 }}>
+            {[0,1,2,3].map(i => <div key={i} className="flex justify-between"><div className="h-4 w-20 rounded bg-muted/40" /><div className="h-4 w-36 rounded bg-muted/50" /></div>)}
+          </div>
+          {/* List skeleton */}
+          <div className="glass-card p-4 animate-pulse space-y-3" style={{ borderRadius: 20 }}>
+            <div className="h-5 w-24 rounded bg-muted/50" />
+            {[0,1,2].map(i => <div key={i} className="h-12 rounded-lg bg-muted/30" />)}
+          </div>
         </div>
       </MobileLayout>
     );
@@ -390,13 +395,35 @@ export default function ClientDetailPage() {
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction
             onClick={handleDelete}
+            disabled={deleteAccount.isPending}
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
-            Delete
+            {deleteAccount.isPending ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Deleting...
+              </>
+            ) : (
+              'Delete'
+            )}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  );
+
+  // View-mode header actions: Edit (primary entry, was a hidden dock chip) + Delete.
+  const viewHeaderActions = (
+    <div className="flex items-center gap-1">
+      <button
+        onClick={() => setIsEditMode(true)}
+        className="p-2 rounded-full hover:bg-muted/50 transition-colors"
+        aria-label={locale === 'zh-Hans' ? '编辑' : 'Edit client'}
+      >
+        <Edit className="w-5 h-5 text-foreground" />
+      </button>
+      {deleteButton}
+    </div>
   );
 
   // Edit Mode UI
@@ -429,44 +456,6 @@ export default function ClientDetailPage() {
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditForm({ ...editForm, industry: e.target.value })}
                   placeholder="e.g., Technology, Healthcare"
                 />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label htmlFor="tier">Tier</Label>
-                  <Select
-                    value={editForm.tierKey || 'none'}
-                    onValueChange={(val: string) => setEditForm({ ...editForm, tierKey: val === 'none' ? '' : val as AccountTierKey })}
-                  >
-                    <SelectTrigger id="tier">
-                      <SelectValue placeholder="Select tier" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      {Object.entries(AccountTierKeyToLabel).map(([key, label]) => (
-                        <SelectItem key={key} value={key}>{label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <Label htmlFor="region">Region</Label>
-                  <Select
-                    value={editForm.regionKey || 'none'}
-                    onValueChange={(val: string) => setEditForm({ ...editForm, regionKey: val === 'none' ? '' : val as AccountRegionKey })}
-                  >
-                    <SelectTrigger id="region">
-                      <SelectValue placeholder="Select region" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      {Object.entries(AccountRegionKeyToLabel).map(([key, label]) => (
-                        <SelectItem key={key} value={key}>{getRegionEnglish(label)}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
               </div>
 
               <div>
@@ -529,8 +518,17 @@ export default function ClientDetailPage() {
               onClick={handleSave}
               disabled={!editForm.name1 || updateAccount.isPending}
             >
-              <Save className="w-4 h-4" />
-              Save
+              {updateAccount.isPending ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4" />
+                  Save
+                </>
+              )}
             </Button>
           </div>
         </motion.div>
@@ -540,7 +538,7 @@ export default function ClientDetailPage() {
 
   // View Mode UI
   return (
-    <MobileLayout title="Client Details" hideVoiceButton headerRight={deleteButton}>
+    <MobileLayout title="Client Details" hideVoiceButton headerRight={viewHeaderActions}>
       <PullToRefresh onRefresh={handleRefresh} className="flex-1 overflow-y-auto">
         <motion.div
           className="py-4 space-y-4 pb-48"
@@ -557,15 +555,9 @@ export default function ClientDetailPage() {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1">
                 <h1 className="text-xl font-bold text-foreground truncate">{account.name1}</h1>
-                {account.tierKey && (
-                  <Badge variant="secondary" className="flex-shrink-0">
-                    {AccountTierKeyToLabel[account.tierKey as AccountTierKey]}
-                  </Badge>
-                )}
               </div>
               <p className="text-sm text-muted-foreground mb-2">
                 {account.industry || 'Uncategorized'}
-                {account.regionKey && ` • ${getRegionEnglish(AccountRegionKeyToLabel[account.regionKey as AccountRegionKey])}`}
               </p>
               <div className="flex flex-wrap gap-2">
                 {daysSinceContact <= 14 ? (
@@ -579,11 +571,6 @@ export default function ClientDetailPage() {
                     At Risk
                   </Badge>
                 ) : null}
-                {account.creditstatusKey && account.creditstatusKey !== 'CreditstatusKey0' && (
-                  <Badge variant="outline" className="gap-1 text-amber-600 border-amber-200 dark:border-amber-900">
-                    {AccountCreditstatusKeyToLabel[account.creditstatusKey as AccountCreditstatusKey]}
-                  </Badge>
-                )}
               </div>
             </div>
           </div>
@@ -651,24 +638,6 @@ export default function ClientDetailPage() {
                     <span className="text-foreground">{account.address}</span>
                   </div>
                 )}
-              </div>
-            </GlassCard>
-
-            {/* Last Interaction */}
-            <GlassCard>
-              <h3 className="text-sm font-medium text-foreground mb-3">Last Interaction</h3>
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                  <Calendar className="w-5 h-5 text-primary" />
-                </div>
-                <div>
-                  <p className="text-sm text-foreground">
-                    {formatDate(account.lastcontactedon || account.lastinteractiondate)}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {daysSinceContact} days ago
-                  </p>
-                </div>
               </div>
             </GlassCard>
 
@@ -776,7 +745,7 @@ export default function ClientDetailPage() {
                   </div>
                   <div className="flex items-center gap-2 text-xs">
                     <Badge variant="outline" className="text-[10px]">
-                      {OpportunityStageKeyToLabel[opp.stageKey as OpportunityStageKey]}
+                      {opp.stage}
                     </Badge>
                     {opp.confidence && (
                       <span className="text-muted-foreground">
@@ -815,7 +784,7 @@ export default function ClientDetailPage() {
                 >
                   <div className="flex gap-3">
                     {(() => {
-                      const Icon = getActivityTypeIcon(activity.typeKey);
+                      const Icon = getActivityTypeIcon(activity.type);
                       return (
                         <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
                           <Icon className="w-4 h-4 text-primary" />
@@ -827,21 +796,21 @@ export default function ClientDetailPage() {
                         <h4 className="text-sm font-medium text-foreground truncate">
                           {activity.title}
                         </h4>
-                        {activity.draftstatusKey && (
+                        {activity.status && (
                           <Badge
                             variant="outline"
                             className={cn(
                               'text-[10px]',
-                              activity.draftstatusKey === 'DraftstatusKey2' && 'text-emerald-600 border-emerald-200'
+                              activity.status === 'completed' && 'text-emerald-600 border-emerald-200'
                             )}
                           >
-                            {ActivityDraftstatusKeyToLabel[activity.draftstatusKey as ActivityDraftstatusKey]}
+                            {activity.status}
                           </Badge>
                         )}
                       </div>
                       <p className="text-xs text-muted-foreground mb-1">
                         {formatDate(activity.scheduleddate)}
-                        {activity.typeKey && ` • ${ActivityTypeKeyToLabel[activity.typeKey as ActivityTypeKey]}`}
+                        {activity.type && ` • ${activity.type}`}
                       </p>
                       {activity.notes && (
                         <p className="text-xs text-muted-foreground line-clamp-2">
@@ -865,12 +834,6 @@ export default function ClientDetailPage() {
             icon: Plus,
             label: locale === 'zh-Hans' ? '新建活动' : 'New Activity',
             onClick: () => navigate(`/activity/${id}`),
-          },
-          {
-            id: 'edit',
-            icon: Edit,
-            label: locale === 'zh-Hans' ? '编辑' : 'Edit',
-            onClick: () => setIsEditMode(true),
           },
         ]}
       />

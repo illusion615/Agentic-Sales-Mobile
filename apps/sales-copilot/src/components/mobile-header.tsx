@@ -1,4 +1,4 @@
-import { ArrowLeft, MoreHorizontal } from 'lucide-react';
+import { ArrowLeft, Home, MoreHorizontal } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { ReactNode } from 'react';
@@ -25,15 +25,16 @@ export function MobileHeader({
   
   const isHomePage = location.pathname === '/';
   const shouldShowBack = showBack && !isHomePage;
+  // Show Home shortcut when navigation depth > 1 (user would need multiple backs)
+  const historyIdx = window.history.state?.idx ?? 0;
+  const showHomeShortcut = shouldShowBack && historyIdx > 1;
 
   const handleBack = () => {
     if (onBack) {
       onBack();
     } else if (window.history.state && window.history.state.idx > 0) {
-      // Has navigation history, go back
       navigate(-1);
     } else {
-      // No history, go to home
       navigate('/');
     }
   };
@@ -43,12 +44,12 @@ export function MobileHeader({
       className={cn(
         'fixed top-0 left-0 right-0 z-50 safe-area-top',
         'h-14 px-4 flex items-center justify-between',
-        'glass-surface border-b border-border/50',
+        'bg-background/80 backdrop-blur-md border-b border-border/50',
         className
       )}
     >
-      {/* Left: Back button */}
-      <div className="w-10 flex items-center justify-start">
+      {/* Left: Back + Home buttons */}
+      <div className="flex items-center justify-start">
         {shouldShowBack && (
           <button
             type="button"
@@ -59,6 +60,16 @@ export function MobileHeader({
             <ArrowLeft className="w-5 h-5 text-foreground" />
           </button>
         )}
+        {showHomeShortcut && (
+          <button
+            type="button"
+            onClick={() => navigate('/')}
+            className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-muted/50 active:bg-muted transition-colors"
+            aria-label="Home"
+          >
+            <Home className="w-4 h-4 text-muted-foreground" />
+          </button>
+        )}
       </div>
 
       {/* Center: Title */}
@@ -67,7 +78,7 @@ export function MobileHeader({
       </h1>
 
       {/* Right: Custom header right or More button */}
-      <div className="w-10 flex items-center justify-end">
+      <div className="min-w-10 flex items-center justify-end">
         {headerRight ? (
           headerRight
         ) : (

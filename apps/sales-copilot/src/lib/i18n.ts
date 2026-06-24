@@ -23,6 +23,11 @@ export interface FetchModelsResult {
 }
 
 export async function fetchAvailableModels(config: LLMConfig): Promise<FetchModelsResult> {
+  // Power Automate uses SDK connector — model selection is handled in the flow
+  if (config.provider === 'power-automate') {
+    return { success: true, models: ['Power Automate Flow'] };
+  }
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort('timeout'), 5000); // 5 second timeout
   
@@ -666,16 +671,6 @@ export function setAutoPlayAgentResponse(enabled: boolean): void {
   window.dispatchEvent(new CustomEvent('autoplay-changed', { detail: enabled }));
 }
 
-// Information structure settings
-export function getOrganizeInStructureCard(): boolean {
-  return localStorage.getItem('organizeInStructureCard') !== 'false'; // default true
-}
-
-export function setOrganizeInStructureCard(enabled: boolean): void {
-  localStorage.setItem('organizeInStructureCard', String(enabled));
-  window.dispatchEvent(new CustomEvent('structurecard-changed', { detail: enabled }));
-}
-
 // BYOM (Bring Your Own Model) settings
 export function getLLMConfig(): LLMConfig | null {
   const saved = localStorage.getItem('llmConfig');
@@ -704,9 +699,9 @@ export function getAgentFramework(): AgentFramework {
   if (saved && ['copilot-studio', 'local-agent'].includes(saved)) {
     return saved as AgentFramework;
   }
-  // Default to local-agent if BYOM is configured, otherwise copilot-studio
+  // Default to local-agent if LLM is configured (flow via SDK connector), otherwise copilot-studio
   const llmConfig = getLLMConfig();
-  if (llmConfig?.enabled && llmConfig?.endpoint) {
+  if (llmConfig?.enabled) {
     return 'local-agent';
   }
   return 'copilot-studio';
@@ -754,6 +749,18 @@ export async function testBYOMConnection(config: LLMConfig): Promise<BYOMTestRes
   const timeoutId = setTimeout(() => controller.abort('timeout'), 8000); // 8 second timeout
   
   try {
+    // Power Automate uses SDK connector — no endpoint needed
+    if (config.provider === 'power-automate') {
+      console.log('[BYOM Test] Power Automate Flow via SDK connector');
+      clearTimeout(timeoutId);
+      const result = await testFlowConnection();
+      if (result.success) {
+        return { success: true, latencyMs: result.latencyMs, modelInfo: 'Power Automate Flow' };
+      } else {
+        return { success: false, error: result.error || 'Flow test failed', latencyMs: result.latencyMs };
+      }
+    }
+
     if (!config.endpoint) {
       return { success: false, error: 'Endpoint is required' };
     }
@@ -832,25 +839,6 @@ export async function testBYOMConnection(config: LLMConfig): Promise<BYOMTestRes
       }
       
       return { success: true, latencyMs: Date.now() - startTime, modelInfo: config.deploymentName };
-    } else if (config.provider === 'power-automate') {
-      // Power Automate Flow: invoke the flow directly
-      console.log('[BYOM Test] Power Automate Flow URL:', config.endpoint);
-      
-      const result = await testFlowConnection(config.endpoint);
-      
-      if (result.success) {
-        return { 
-          success: true, 
-          latencyMs: result.latencyMs, 
-          modelInfo: 'Power Automate Flow' 
-        };
-      } else {
-        return { 
-          success: false, 
-          error: result.error || 'Flow test failed', 
-          latencyMs: result.latencyMs 
-        };
-      }
     } else if (config.provider === 'openai') {
       // OpenAI Compatible: /v1/chat/completions or /chat/completions
       if (!config.apiKey) return { success: false, error: 'API Key is required' };
@@ -957,8 +945,8 @@ export async function generateVoiceSummary(
   locale: Locale, 
   customSystemPrompt?: string,
   llmConfigOverride?: LLMConfig,
-
-  timeoutMs?: number
+  timeoutMs?: number,
+  responseFormat?: 'text' | 'json'
 ): Promise<VoiceSummaryResult> {
   const config = llmConfigOverride || getLLMConfig();
   
@@ -966,20 +954,45 @@ export async function generateVoiceSummary(
     return { success: false, error: 'LLM not configured or disabled' };
   }
   
+  const systemPrompt = customSystemPrompt || (locale === 'zh-Hans'
+    ? '你是一个助手，负责将内容总结为简短的语音播报。请用简洁自然的中文口语风格，概括主要信息，不超过3句话。'
+    : 'You are an assistant that summarizes content into brief voice announcements. Use concise, natural spoken language, summarizing key information in no more than 3 sentences.');
+  
+  // When a custom system prompt is provided, pass content directly as user message
+  // (don't wrap in "voice announcement" framing which conflicts with JSON/analysis prompts)
+  const userPrompt = customSystemPrompt
+    ? content
+    : (locale === 'zh-Hans'
+      ? `请将以下内容总结为简短的语音播报：\n\n${content}`
+      : `Please summarize the following content into a brief voice announcement:\n\n${content}`);
+
+  // Power Automate uses SDK connector — no endpoint needed
+  if (config.provider === 'power-automate') {
+    console.log('[Voice Summary] Using Power Automate Flow');
+    
+    const result = await invokeFlowForLLM({
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      responseFormat: responseFormat,
+    });
+    
+    if (result.success && result.content) {
+      console.log('[Voice Summary] Generated via Power Automate:', result.content.trim());
+      return { success: true, summary: result.content.trim() };
+    } else {
+      return { success: false, error: result.error || 'No content in flow response' };
+    }
+  }
+
+  // Non-power-automate providers need an endpoint
   if (!config.endpoint) {
     return { success: false, error: 'Endpoint not configured' };
   }
   
   // Normalize endpoint - remove trailing slash
   const baseEndpoint = config.endpoint.replace(/\/+$/, '');
-  
-  const systemPrompt = customSystemPrompt || (locale === 'zh-Hans'
-    ? '你是一个助手，负责将内容总结为简短的语音播报。请用简洁自然的中文口语风格，概括主要信息，不超过3句话。'
-    : 'You are an assistant that summarizes content into brief voice announcements. Use concise, natural spoken language, summarizing key information in no more than 3 sentences.');
-  
-  const userPrompt = locale === 'zh-Hans'
-    ? `请将以下内容总结为简短的语音播报：\n\n${content}`
-    : `Please summarize the following content into a brief voice announcement:\n\n${content}`;
   
   try {
     const headers: Record<string, string> = {
@@ -1033,25 +1046,6 @@ export async function generateVoiceSummary(
           { role: 'user', content: userPrompt }
         ]
       });
-    } else if (config.provider === 'power-automate') {
-      // Power Automate Flow: invoke the flow directly
-      console.log('[Voice Summary] Using Power Automate Flow');
-      
-      const result = await invokeFlowForLLM(config.endpoint, {
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-        model: config.model,
-        deploymentName: config.deploymentName,
-      });
-      
-      if (result.success && result.content) {
-        console.log('[Voice Summary] Generated via Power Automate:', result.content.trim());
-        return { success: true, summary: result.content.trim() };
-      } else {
-        return { success: false, error: result.error || 'No content in flow response' };
-      }
     } else {
       // OpenAI compatible
       if (!config.apiKey) {
@@ -1178,6 +1172,82 @@ export function setCopilotInAllScreens(enabled: boolean): void {
   window.dispatchEvent(new CustomEvent('copilotinallscreens-changed', { detail: enabled }));
 }
 
+// Copilot record list display settings
+export type CopilotListDefaultView = 'expanded' | 'collapsed';
+
+export function getCopilotListDefaultView(): CopilotListDefaultView {
+  return localStorage.getItem('copilotListDefaultView') === 'collapsed' ? 'collapsed' : 'expanded';
+}
+
+export function setCopilotListDefaultView(view: CopilotListDefaultView): void {
+  localStorage.setItem('copilotListDefaultView', view);
+  window.dispatchEvent(new CustomEvent('copilot-list-default-view-changed', { detail: view }));
+}
+
+export function getCopilotListTopN(): number {
+  const raw = localStorage.getItem('copilotListTopN');
+  const parsed = Number.parseInt(raw ?? '', 10);
+  if (Number.isFinite(parsed) && parsed >= 1 && parsed <= 50) {
+    return parsed;
+  }
+  return 3;
+}
+
+export function setCopilotListTopN(topN: number): void {
+  const normalized = Math.min(50, Math.max(1, Math.floor(topN)));
+  localStorage.setItem('copilotListTopN', String(normalized));
+  window.dispatchEvent(new CustomEvent('copilot-list-top-n-changed', { detail: normalized }));
+}
+
+// Copilot dock layout setting (widescreen only)
+export type CopilotDockLayout = 'float' | 'right' | 'left';
+export const copilotDockLayoutLabels: Record<CopilotDockLayout, { zh: string; en: string }> = {
+  float: { zh: '浮动', en: 'Float' },
+  right: { zh: '右侧', en: 'Right' },
+  left:  { zh: '左侧', en: 'Left' },
+};
+
+export function getCopilotDockLayout(): CopilotDockLayout {
+  const v = localStorage.getItem('copilotDockLayout');
+  if (v === 'right' || v === 'left') return v;
+  return 'float';
+}
+
+export function setCopilotDockLayout(layout: CopilotDockLayout): void {
+  localStorage.setItem('copilotDockLayout', layout);
+  window.dispatchEvent(new CustomEvent('copilot-dock-layout-changed', { detail: layout }));
+}
+
+// Week start day setting
+export type WeekStartDay = 'sunday' | 'monday';
+
+export function getWeekStartDay(): WeekStartDay {
+  return localStorage.getItem('weekStartDay') === 'monday' ? 'monday' : 'sunday';
+}
+
+export function setWeekStartDay(day: WeekStartDay): void {
+  localStorage.setItem('weekStartDay', day);
+  window.dispatchEvent(new CustomEvent('weekstartday-changed', { detail: day }));
+}
+
+// Copilot fullscreen by default (mobile)
+export function getCopilotFullscreenDefault(): boolean {
+  return localStorage.getItem('copilotFullscreenDefault') === 'true';
+}
+
+export function setCopilotFullscreenDefault(enabled: boolean): void {
+  localStorage.setItem('copilotFullscreenDefault', String(enabled));
+}
+
+// Agenda default expanded on home page
+export function getAgendaDefaultExpanded(): boolean {
+  return localStorage.getItem('agendaDefaultExpanded') !== 'false'; // default true
+}
+
+export function setAgendaDefaultExpanded(enabled: boolean): void {
+  localStorage.setItem('agendaDefaultExpanded', String(enabled));
+}
+
 // Simulate streaming response setting
 export function getSimulateStreaming(): boolean {
   return localStorage.getItem('simulateStreaming') !== 'false'; // default true
@@ -1186,6 +1256,36 @@ export function getSimulateStreaming(): boolean {
 export function setSimulateStreaming(enabled: boolean): void {
   localStorage.setItem('simulateStreaming', String(enabled));
   window.dispatchEvent(new CustomEvent('simulatestreaming-changed', { detail: enabled }));
+}
+
+// Debug mode setting — gates developer-only UI (e.g. the Frame shadow log icon
+// on the Copilot panel). Default off so end users never see debug affordances.
+export function getDebugMode(): boolean {
+  return localStorage.getItem('debugMode') === 'true'; // default false
+}
+
+export function setDebugMode(enabled: boolean): void {
+  localStorage.setItem('debugMode', String(enabled));
+  window.dispatchEvent(new CustomEvent('debugmode-changed', { detail: enabled }));
+}
+
+// Intent detection mode. As of the cutover, production always runs 'frame'
+// (Frame + Orchestrator pipeline). The 'legacy' single-LLM branch in
+// copilot-agent.ts is kept as in-source reference during the stabilization
+// window — it is unreachable from the UI. To re-enable for debugging only,
+// set `localStorage.intentMode = 'legacy'` from the devtools console.
+export type IntentMode = 'legacy' | 'frame';
+
+export function getIntentMode(): IntentMode {
+  if (typeof localStorage !== 'undefined' && localStorage.getItem('intentMode') === 'legacy') {
+    return 'legacy';
+  }
+  return 'frame';
+}
+
+export function setIntentMode(mode: IntentMode): void {
+  localStorage.setItem('intentMode', mode);
+  window.dispatchEvent(new CustomEvent('intentmode-changed', { detail: mode }));
 }
 
 // Home header widget display setting
@@ -1331,8 +1431,6 @@ export const translations = {
     selectModel: '选择模型',
 
     // Information structure settings
-    infoStructure: '信息结构',
-    organizeInStructureCard: '以卡片方式呈现数据',
     voiceSummary: '用语音播报摘要',
 
     // Font size settings
@@ -1468,8 +1566,6 @@ export const translations = {
     selectModel: 'Select model',
 
     // Information structure settings
-    infoStructure: 'Information Structure',
-    organizeInStructureCard: 'Organize Data in Cards',
     voiceSummary: 'Voice Summary for Response',
     activityConfirmed: 'Activity confirmed',
     pollTimeout: 'AI processing timed out, please retry',

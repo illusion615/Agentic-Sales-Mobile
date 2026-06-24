@@ -1,14 +1,26 @@
 /**
- * Power Automate Flow Service
- * Invokes Power Automate flows via HTTP trigger with sig= URL authentication
+ * AI Builder Direct Service
+ * Invokes AI Builder custom prompts directly via Dataverse Custom API,
+ * bypassing Power Automate Flow entirely.
+ *
+ * This eliminates:
+ * - shared_logicflows connectionReference (which causes launch 500)
+ * - Flow run quota consumption
+ * - UTF-8 multibyte corruption (microsoft/PowerAppsCodeApps#359)
+ * - ~1-3s Flow middleware latency
+ *
+ * Uses generated service classes from `power-apps add-dataverse-api`.
  */
 
-import { getContext } from '@microsoft/power-apps/app';
-
-export interface FlowLLMRequest {
-  userEmail: string;
-  userPrompt: string;
-}
+import { getLLMConfig } from '@/lib/i18n';
+import { jsonrepair } from 'jsonrepair';
+import { getClient } from '@microsoft/power-apps/data';
+import { dataSourcesInfo } from '../../.power/schemas/appschemas/dataSourcesInfo';
+import { getTextPromptOpName } from './prompt-resolver';
+import { Msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75cService as TextPromptService } from '@/generated/services/Msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75cService';
+import { Msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323Service as JsonPromptService } from '@/generated/services/Msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323Service';
+import { Msdyn_aibdptcustomprompt228202435537pmbd0d86826d054e2ba9efc694a371f6fbService as DagPromptService } from '@/generated/services/Msdyn_aibdptcustomprompt228202435537pmbd0d86826d054e2ba9efc694a371f6fbService';
+import { Msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7Service as JsonGenericPromptService } from '@/generated/services/Msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7Service';
 
 export interface FlowLLMResponse {
   success: boolean;
@@ -17,102 +29,188 @@ export interface FlowLLMResponse {
   latencyMs?: number;
 }
 
+type ResponseFormat = 'text' | 'json' | 'dag' | 'json-generic';
+
+/** Telemetry counters */
+const b64Stats = { total: 0, b64: 0, raw: 0, decodeFailed: 0 };
+export function getB64Stats() { return { ...b64Stats }; }
+
 /**
- * Get current user's email, with fallback
+ * Decode flow payload — kept for backward compatibility.
+ * Direct AI Builder calls return plain UTF-8, so B64 prefix is unlikely.
  */
-async function getUserEmail(fallbackEmail?: string): Promise<string> {
+const B64_PREFIX = 'B64:';
+function decodeFlowPayload(raw: string): string {
+  b64Stats.total += 1;
+  if (!raw.startsWith(B64_PREFIX)) {
+    b64Stats.raw += 1;
+    return raw;
+  }
+  b64Stats.b64 += 1;
+  const b64 = raw.slice(B64_PREFIX.length).trim();
   try {
-    const context = await getContext();
-    return context.user.userPrincipalName || fallbackEmail || 'unknown';
-  } catch {
-    return fallbackEmail || 'unknown';
+    const binary = atob(b64);
+    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+    return new TextDecoder('utf-8').decode(bytes);
+  } catch (err) {
+    b64Stats.decodeFailed += 1;
+    console.warn('[AI Tool] base64 decode failed, using raw:', err);
+    return raw;
   }
 }
 
 /**
- * Invoke a Power Automate flow with HTTP trigger (sig= URL authentication)
- * The flow endpoint should be configured as "Anyone with the link" with sig parameter
+ * Whether the LLM is available for use.
+ */
+export function isFlowAvailable(): boolean {
+  const config = getLLMConfig();
+  if (config && config.enabled === false) return false;
+  return true;
+}
+
+/**
+ * Invoke a custom prompt by its (possibly runtime-resolved) Custom API operation
+ * name. Mirrors the generated TextPromptService call but with a dynamic name so
+ * it keeps working when the AI model GUID differs across environments.
+ */
+async function invokeTextPromptByOpName(
+  opName: string,
+  text: string,
+): Promise<{ success: boolean; data?: Record<string, unknown> | null; error?: { message?: string } }> {
+  const client = getClient(dataSourcesInfo);
+  return client.executeAsync<{ prompt_20text: string }, Record<string, unknown>>({
+    dataverseRequest: {
+      action: 'customapi',
+      parameters: {
+        operationName: opName,
+        tableName: opName,
+        body: { prompt_20text: text },
+      },
+    },
+  });
+}
+
+/**
+ * Invoke AI Builder custom prompt directly via Dataverse Custom API.
  */
 export async function invokeFlowForLLM(
-  flowEndpoint: string,
-  request: { messages: Array<{ role: string; content: string }>; model?: string; deploymentName?: string },
-  userEmailOverride?: string
+  request: {
+    messages: Array<{ role: string; content: string }>;
+    responseFormat?: 'text' | 'json' | 'dag' | 'json-generic';
+  },
 ): Promise<FlowLLMResponse> {
   const startTime = Date.now();
-  
-  try {
-    const userEmail = await getUserEmail(userEmailOverride);
-    
-    // Build userPrompt from messages array
-    const userPrompt = request.messages
-      .map((m: { role: string; content: string }) => `${m.role}: ${m.content}`)
-      .join('\n');
-    
-    console.log('[Power Automate] Invoking flow for user:', userEmail);
-    console.log('[Power Automate] Flow endpoint:', flowEndpoint);
-    
-    const response = await fetch(flowEndpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ userEmail, userPrompt }),
-    });
-    
-    const latencyMs = Date.now() - startTime;
-    const responseText = await response.text();
-    
-    if (!response.ok) {
-      console.error('[Power Automate] Flow error:', response.status, responseText);
-      return {
-        success: false,
-        error: `Flow request failed: HTTP ${response.status} - ${responseText.slice(0, 500)}`,
-        latencyMs,
-      };
-    }
-    
-    console.log('[Power Automate] Flow response:', responseText.slice(0, 200));
-    
-    return {
-      success: true,
-      content: responseText,
-      latencyMs,
-    };
-  } catch (error: unknown) {
-    const latencyMs = Date.now() - startTime;
-    console.error('[Power Automate] Error:', error);
-    
-    if (error instanceof TypeError && error.message === 'Failed to fetch') {
-      return {
-        success: false,
-        error: 'Network error: Unable to reach Power Automate flow. Check the endpoint URL and your network connection.',
-        latencyMs,
-      };
-    }
-    
+
+  if (!isFlowAvailable()) {
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error invoking flow',
+      error: 'AI assistant is not enabled',
+      latencyMs: Date.now() - startTime,
+    };
+  }
+
+  try {
+    const text = request.messages
+      .map((m) => `${m.role}: ${m.content}`)
+      .join('\n');
+
+    const responseFormat: ResponseFormat = request.responseFormat ?? 'text';
+
+    console.log('[AI Tool] Invoking prompt via generated service, format:', responseFormat, 'prompt length:', text.length);
+
+    // Call via generated Dataverse operation services (from `power-apps add-dataverse-api`)
+    let result: { success: boolean; data?: Record<string, unknown> | null; error?: { message?: string } };
+    switch (responseFormat) {
+      case 'json':
+        result = await JsonPromptService.msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323(text);
+        break;
+      case 'dag':
+        result = await DagPromptService.msdyn_aibdptcustomprompt228202435537pmbd0d86826d054e2ba9efc694a371f6fb(text);
+        break;
+      case 'json-generic':
+        result = await JsonGenericPromptService.msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7('', text);
+        break;
+      default: { // 'text' — main path, uses the runtime-resolved operation name
+        const opName = getTextPromptOpName();
+        result = await invokeTextPromptByOpName(opName, text);
+        // If a resolved (non build-time) name fails, fall back to the generated
+        // service so we are never worse off than before the dynamic resolver.
+        if (!result.success) {
+          console.warn('[AI Tool] dynamic prompt op failed, retrying with build-time service:', opName);
+          result = await TextPromptService.msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75c(text);
+        }
+        break;
+      }
+    }
+
+    const latencyMs = Date.now() - startTime;
+
+    if (!result.success) {
+      console.error('[AI Tool] Custom API error:', JSON.stringify(result.error, null, 2));
+      console.error('[AI Tool] Full result:', JSON.stringify(result, null, 2));
+      return {
+        success: false,
+        error: result.error?.message ?? 'AI Builder predict failed',
+        latencyMs,
+      };
+    }
+
+    // Extract prediction output text
+    const data = result.data as Record<string, unknown>;
+    let rawContent = '';
+
+    // Response shape: { ResponsePayload: "{ predictionOutput: { text: '...' } }" }
+    const payload = data?.ResponsePayload ?? data?.responsev2 ?? data;
+    if (typeof payload === 'string') {
+      try {
+        const parsed = JSON.parse(payload);
+        rawContent = parsed?.predictionOutput?.text ?? parsed?.text ?? payload;
+      } catch {
+        rawContent = payload;
+      }
+    } else if (typeof payload === 'object' && payload !== null) {
+      const p = payload as Record<string, unknown>;
+      rawContent = (p.predictionOutput as Record<string, string>)?.text
+        ?? (p as Record<string, string>).text
+        ?? JSON.stringify(payload);
+    }
+
+    // Decode in case of B64 prefix (backward compat)
+    rawContent = decodeFlowPayload(rawContent);
+    console.log('[AI Tool] Response length:', rawContent.length);
+
+    // JSON repair for structured formats
+    let content = rawContent;
+    if (responseFormat !== 'text') {
+      try {
+        content = jsonrepair(rawContent);
+      } catch {
+        content = rawContent;
+      }
+    }
+
+    return { success: true, content, latencyMs };
+  } catch (error: unknown) {
+    const latencyMs = Date.now() - startTime;
+    console.error('[AI Tool] Error:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error invoking AI Builder',
       latencyMs,
     };
   }
 }
 
 /**
- * Test connection to a Power Automate flow
+ * Quick connectivity test
  */
-export async function testFlowConnection(flowEndpoint: string): Promise<{
+export async function testFlowConnection(): Promise<{
   success: boolean;
   error?: string;
   latencyMs?: number;
 }> {
-  const result = await invokeFlowForLLM(flowEndpoint, {
+  const result = await invokeFlowForLLM({
     messages: [{ role: 'user', content: 'Hello' }],
   });
-  
-  return {
-    success: result.success,
-    error: result.error,
-    latencyMs: result.latencyMs,
-  };
+  return { success: result.success, error: result.error, latencyMs: result.latencyMs };
 }

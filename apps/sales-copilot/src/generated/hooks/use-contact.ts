@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ContactService } from "../services/contact-service";
 import type { Contact } from "../models/contact-model";
-import type { IOperationOptions } from '../../../app-gen-sdk/data/common/types';
+import type { IOperationOptions } from '@microsoft/power-apps/data';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -15,6 +15,7 @@ export function useContactList(options?: IOperationOptions) {
   return useQuery({
     queryKey: ["contact-list", options],
     queryFn: () => ContactService.getAll(options),
+    staleTime: 60_000,
   });
 }
 
@@ -23,10 +24,16 @@ export function useContactList(options?: IOperationOptions) {
  * @param id The id of the record (must be a valid UUID)
  */
 export function useContact(id: string) {
+  const client = useQueryClient();
   return useQuery({
     queryKey: ["contact", id],
     queryFn: () => ContactService.get(id),
     enabled: !!id && UUID_REGEX.test(id),
+    placeholderData: () => {
+      const list = client.getQueryData<Contact[]>(["contact-list"]);
+      return list?.find((c) => c.id === id);
+    },
+    staleTime: 30_000,
   });
 }
 

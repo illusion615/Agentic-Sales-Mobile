@@ -1,14 +1,17 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { ArrowLeft, Moon, Sun, Globe, HelpCircle, LogOut, Volume2, Play, Loader2, CheckCircle2, XCircle, Type, Palette, CircleDot, LayoutGrid, Speech, X, Zap, Bot, MessageSquare, Gauge, LayoutDashboard, Database, Bug, FileCode, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Moon, Sun, Globe, HelpCircle, LogOut, Volume2, Play, Type, Palette, CircleDot, LayoutGrid, Speech, X, Zap, MessageSquare, LayoutDashboard, Database, Bug, FileCode, ChevronRight, Monitor, Calendar, Maximize, Bot, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
+import { ThinkingIndicator } from '@/components/thinking-indicator';
 import { Button } from '@/components/ui/button';
 
 import { useUser } from '@/hooks/use-user';
 import { useAppSettings } from '@/hooks/use-app-settings';
-import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, setSelectedVoice, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getOrganizeInStructureCard, setOrganizeInStructureCard, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, setLLMConfig, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, type Locale, type VoiceOption, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type LLMConfig, type HomeHeaderWidget } from '@/lib/i18n';
-import { saveCopilotConfig } from '@/services/copilot-service';
+import { useCopilotConfigured } from '@/hooks/use-copilot-configured';
+import { getCopilotConfig } from '@/services/copilot-service';
+import { getPromptResolutionStatus, PROMPT_RESOLUTION_EVENT } from '@/services/prompt-resolver';
+import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, setSelectedVoice, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getDebugMode, setDebugMode, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, getCopilotDockLayout, setCopilotDockLayout, copilotDockLayoutLabels, getWeekStartDay, setWeekStartDay, getCopilotFullscreenDefault, setCopilotFullscreenDefault, getAgendaDefaultExpanded, setAgendaDefaultExpanded, getCopilotListDefaultView, setCopilotListDefaultView, getCopilotListTopN, setCopilotListTopN, type Locale, type VoiceOption, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget, type CopilotDockLayout, type WeekStartDay, type CopilotListDefaultView } from '@/lib/i18n';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
@@ -69,10 +72,25 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   
   // Load settings from database
   const { settings: appSettings, isLoading: isLoadingSettings, isFetched: isSettingsFetched } = useAppSettings();
+  // Copilot connection status (reactive): the agent the app will actually call,
+  // and whether configuration has resolved. The agent name comes ONLY from the
+  // Setting table (authoritative) → cache. There is no hardcoded fallback: when
+  // it's missing the UI must tell the user to contact an administrator.
+  const isCopilotConfigured = useCopilotConfigured();
+  const resolvedAgentName = appSettings.copilotStudioAgentName || getCopilotConfig().agentName;
+  const agentFromSettingTable = !!appSettings.copilotStudioAgentName;
+  const hasAgent = !!resolvedAgentName;
+  // AI prompt resolution status (reactive): which AI model GUID the app resolved
+  // for this environment, and whether it's ready or still on the build-time fallback.
+  const [promptStatus, setPromptStatus] = useState(getPromptResolutionStatus);
+  useEffect(() => {
+    const update = () => setPromptStatus(getPromptResolutionStatus());
+    window.addEventListener(PROMPT_RESOLUTION_EVENT, update);
+    return () => window.removeEventListener(PROMPT_RESOLUTION_EVENT, update);
+  }, []);
   const [locale, setLocaleState] = useState<Locale>(getLocale);
   const [isDark, setIsDark] = useState(true);
   const [selectedVoice, setSelectedVoiceState] = useState(getSelectedVoice);
-  const voicesForLocale = getVoicesForLocale(locale);
   const [isPlaying, setIsPlaying] = useState(false);
   const [systemVoicesLoaded, setSystemVoicesLoaded] = useState(false);
   const [systemVoices, setSystemVoices] = useState<SpeechSynthesisVoice[]>([]);
@@ -84,11 +102,17 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const [autoPlayResponse, setAutoPlayResponseState] = useState(getAutoPlayAgentResponse);
   const [colorTheme, setColorThemeState] = useState<ColorTheme>(() => getColorTheme());
   const [thinkingDotStyle, setThinkingDotStyleState] = useState<ThinkingDotStyle>(() => getThinkingDotStyle());
-  const [organizeInStructureCard, setOrganizeInStructureCardState] = useState(() => getOrganizeInStructureCard());
   const [voiceSummaryEnabled, setVoiceSummaryEnabledState] = useState(() => getVoiceSummaryEnabled());
   const [copilotInAllScreens, setCopilotInAllScreensState] = useState(() => getCopilotInAllScreens());
+  const [copilotDockLayout, setCopilotDockLayoutState] = useState<CopilotDockLayout>(() => getCopilotDockLayout());
   const [simulateStreaming, setSimulateStreamingState] = useState(() => getSimulateStreaming());
+  const [debugMode, setDebugModeState] = useState(() => getDebugMode());
+  const [copilotFullscreenDefault, setCopilotFullscreenDefaultState] = useState(() => getCopilotFullscreenDefault());
+  const [agendaDefaultExpanded, setAgendaDefaultExpandedState] = useState(() => getAgendaDefaultExpanded());
+  const [copilotListDefaultView, setCopilotListDefaultViewState] = useState<CopilotListDefaultView>(() => getCopilotListDefaultView());
+  const [copilotListTopN, setCopilotListTopNState] = useState<number>(() => getCopilotListTopN());
   const [homeHeaderWidget, setHomeHeaderWidgetState] = useState<HomeHeaderWidget>(() => getHomeHeaderWidget());
+  const [weekStartDay, setWeekStartDayState] = useState<WeekStartDay>(() => getWeekStartDay());
 
   // Track if database settings have been loaded
   const [dbSettingsLoaded, setDbSettingsLoaded] = useState(false);
@@ -97,37 +121,14 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   useEffect(() => {
     // Only run when query has completed and we haven't loaded yet
     if (!isSettingsFetched || dbSettingsLoaded) return;
-    
-    // Initialize Power Automate Flow URL from database if available
-    if (appSettings.powerAutomateFlowUrl) {
-      // Save to localStorage for Copilot components to use
-      const config: LLMConfig = {
-        provider: 'power-automate',
-        endpoint: appSettings.powerAutomateFlowUrl,
-        enabled: true,
-      };
-      setLLMConfig(config);
-    }
-    
-    // Initialize Copilot Studio Token Endpoint from database if available
-    if (appSettings.copilotStudioTokenEndpoint) {
-      // Save to copilot-studio-config for copilot panel to use
-      const copilotStudioConfig = {
-        enabled: true,
-        endpoint: appSettings.copilotStudioTokenEndpoint,
-      };
-      localStorage.setItem('copilot-studio-config', JSON.stringify(copilotStudioConfig));
-      // Also save to copilot-service config
-      saveCopilotConfig({ tokenEndpoint: appSettings.copilotStudioTokenEndpoint });
-    }
-    
     setDbSettingsLoaded(true);
-  }, [isSettingsFetched, dbSettingsLoaded, appSettings]);
+  }, [isSettingsFetched, dbSettingsLoaded]);
 
 
 
   // Load system voices
   useEffect(() => {
+    if (!('speechSynthesis' in window)) return;
     const loadVoices = () => {
       const voices = window.speechSynthesis.getVoices();
       if (voices.length > 0) {
@@ -209,11 +210,6 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
     setAutoPlayAgentResponse(enabled);
   };
 
-  const handleOrganizeInStructureCardChange = (enabled: boolean) => {
-    setOrganizeInStructureCardState(enabled);
-    setOrganizeInStructureCard(enabled);
-  };
-
   const handleVoiceSummaryEnabledChange = (enabled: boolean) => {
     setVoiceSummaryEnabledState(enabled);
     setVoiceSummaryEnabled(enabled);
@@ -224,15 +220,55 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
     setCopilotInAllScreens(enabled);
   };
 
+  const handleCopilotDockLayoutChange = (layout: string) => {
+    const l = layout as CopilotDockLayout;
+    setCopilotDockLayoutState(l);
+    setCopilotDockLayout(l);
+  };
+
   const handleSimulateStreamingChange = (enabled: boolean) => {
     setSimulateStreamingState(enabled);
     setSimulateStreaming(enabled);
+  };
+
+  const handleDebugModeChange = (enabled: boolean) => {
+    setDebugModeState(enabled);
+    setDebugMode(enabled);
+  };
+
+  const handleCopilotFullscreenDefaultChange = (enabled: boolean) => {
+    setCopilotFullscreenDefaultState(enabled);
+    setCopilotFullscreenDefault(enabled);
+  };
+
+  const handleAgendaDefaultExpandedChange = (enabled: boolean) => {
+    setAgendaDefaultExpandedState(enabled);
+    setAgendaDefaultExpanded(enabled);
+  };
+
+  const handleCopilotListDefaultViewChange = (view: string) => {
+    const next = view as CopilotListDefaultView;
+    setCopilotListDefaultViewState(next);
+    setCopilotListDefaultView(next);
+  };
+
+  const handleCopilotListTopNChange = (value: string) => {
+    const next = Number.parseInt(value, 10);
+    if (!Number.isFinite(next)) return;
+    setCopilotListTopNState(next);
+    setCopilotListTopN(next);
   };
 
   const handleHomeHeaderWidgetChange = (widget: string) => {
     const newWidget = widget as HomeHeaderWidget;
     setHomeHeaderWidgetState(newWidget);
     setHomeHeaderWidget(newWidget);
+  };
+
+  const handleWeekStartDayChange = (day: string) => {
+    const d = day as WeekStartDay;
+    setWeekStartDayState(d);
+    setWeekStartDay(d);
   };
 
 
@@ -357,7 +393,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   return (
     <div className="flex flex-col h-full overflow-hidden" style={{ background: 'linear-gradient(180deg, var(--scm-gradient-start) 0%, var(--scm-gradient-end) 100%)' }}>
       {/* Header */}
-      <header className="sticky top-0 z-40 glass-surface border-b border-border/50 safe-area-top">
+      <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-md border-b border-border/50 safe-area-top">
         <div className="flex items-center justify-between h-14 px-4">
           <button
             onClick={onClose}
@@ -399,7 +435,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
               {locale === 'zh-Hans' ? '通用' : 'General'}
             </h3>
-            <div className="space-y-2">
+            <div className="glass-card p-4 space-y-2">
               <SettingsItem
                 icon={Globe}
                 label={locale === 'zh-Hans' ? '语言' : 'Language'}
@@ -432,6 +468,41 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                   </Select>
                 }
               />
+              <SettingsItem
+                icon={Calendar}
+                label={locale === 'zh-Hans' ? '每周第一天' : 'Week Starts On'}
+                rightElement={
+                  <div className="flex rounded-lg overflow-hidden border border-border/60">
+                    {(['sunday', 'monday'] as WeekStartDay[]).map((d) => (
+                      <button
+                        key={d}
+                        onClick={() => handleWeekStartDayChange(d)}
+                        className={cn(
+                          'px-3 py-1 text-xs font-medium transition-colors',
+                          weekStartDay === d
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-background hover:bg-muted text-muted-foreground'
+                        )}
+                      >
+                        {d === 'sunday'
+                          ? (locale === 'zh-Hans' ? '周日' : 'Sun')
+                          : (locale === 'zh-Hans' ? '周一' : 'Mon')}
+                      </button>
+                    ))}
+                  </div>
+                }
+              />
+              <SettingsItem
+                icon={Calendar}
+                label={locale === 'zh-Hans' ? '默认展开今日待办' : "Expand Today's Agenda by Default"}
+                rightElement={
+                  <Switch
+                    checked={agendaDefaultExpanded}
+                    onCheckedChange={handleAgendaDefaultExpandedChange}
+                    className="data-[state=checked]:bg-primary"
+                  />
+                }
+              />
             </div>
           </motion.div>
 
@@ -440,7 +511,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
               {locale === 'zh-Hans' ? '风格' : 'Style'}
             </h3>
-            <div className="space-y-2">
+            <div className="glass-card p-4 space-y-2">
               <SettingsItem
                 icon={isDark ? Moon : Sun}
                 label={locale === 'zh-Hans' ? '深色模式' : 'Dark Mode'}
@@ -523,7 +594,10 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                     <SelectContent>
                       {(Object.keys(thinkingDotStyleLabels) as ThinkingDotStyle[]).map((style: ThinkingDotStyle) => (
                         <SelectItem key={style} value={style}>
-                          {locale === 'zh-Hans' ? thinkingDotStyleLabels[style].zh : thinkingDotStyleLabels[style].en}
+                          <span className="flex items-center gap-2">
+                            <ThinkingIndicator style={style} />
+                            <span>{locale === 'zh-Hans' ? thinkingDotStyleLabels[style].zh : thinkingDotStyleLabels[style].en}</span>
+                          </span>
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -539,109 +613,56 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
               {locale === 'zh-Hans' ? 'AI 助手配置' : 'AI Assistant Configuration'}
             </h3>
             <div className="glass-card p-4 space-y-3">
-              {/* Connection Status from Dataverse */}
+              {/* ── List display ── */}
+              <p className="text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wide">
+                {locale === 'zh-Hans' ? '列表显示' : 'List Display'}
+              </p>
+              {/* Record list display behavior */}
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Zap className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-sm font-medium">
-                      {locale === 'zh-Hans' ? 'Power Automate Flow' : 'Power Automate Flow'}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {isLoadingSettings ? (
-                      <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
-                    ) : appSettings.powerAutomateFlowUrl ? (
-                      <>
-                        <CheckCircle2 className="w-4 h-4 text-green-500" />
-                        <span className="text-xs text-green-500">{locale === 'zh-Hans' ? '已连接' : 'Connected'}</span>
-                      </>
-                    ) : (
-                      <>
-                        <XCircle className="w-4 h-4 text-muted-foreground" />
-                        <span className="text-xs text-muted-foreground">{locale === 'zh-Hans' ? '未连接' : 'Not connected'}</span>
-                      </>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Bot className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-sm font-medium">
-                      {locale === 'zh-Hans' ? 'Copilot Studio' : 'Copilot Studio'}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {isLoadingSettings ? (
-                      <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
-                    ) : appSettings.copilotStudioTokenEndpoint ? (
-                      <>
-                        <CheckCircle2 className="w-4 h-4 text-green-500" />
-                        <span className="text-xs text-green-500">{locale === 'zh-Hans' ? '已连接' : 'Connected'}</span>
-                      </>
-                    ) : (
-                      <>
-                        <XCircle className="w-4 h-4 text-muted-foreground" />
-                        <span className="text-xs text-muted-foreground">{locale === 'zh-Hans' ? '未连接' : 'Not connected'}</span>
-                      </>
-                    )}
-                  </div>
-                </div>
-                <p className="text-xs text-muted-foreground">
+                <SettingsItem
+                  icon={LayoutGrid}
+                  label={locale === 'zh-Hans' ? 'Copilot 列表默认状态' : 'Copilot List Default State'}
+                  rightElement={
+                    <Select value={copilotListDefaultView} onValueChange={handleCopilotListDefaultViewChange}>
+                      <SelectTrigger className="w-28 h-8 text-sm bg-transparent border-border/50">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="expanded">{locale === 'zh-Hans' ? '展开' : 'Expanded'}</SelectItem>
+                        <SelectItem value="collapsed">{locale === 'zh-Hans' ? '收起' : 'Collapsed'}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  }
+                />
+                <SettingsItem
+                  icon={LayoutGrid}
+                  label={locale === 'zh-Hans' ? '列表默认显示条数 (Top N)' : 'Default List Size (Top N)'}
+                  rightElement={
+                    <Select value={String(copilotListTopN)} onValueChange={handleCopilotListTopNChange}>
+                      <SelectTrigger className="w-24 h-8 text-sm bg-transparent border-border/50">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[3, 5, 10, 20].map((n) => (
+                          <SelectItem key={n} value={String(n)}>{n}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  }
+                />
+                <p className="text-xs text-muted-foreground mt-1 pl-8">
                   {locale === 'zh-Hans'
-                    ? '如需变更配置，请联系管理员'
-                    : 'Contact your administrator to change the connection.'}
+                    ? '当结果超过 Top N 时，先显示前 N 条，并在底部显示剩余条数，可点击展开全部。'
+                    : 'When results exceed Top N, Copilot shows the first N records and a remaining count that can expand all.'}
                 </p>
-
-              </div>
-
-              {/* Information Structure toggles */}
-              <div className="pt-3 border-t border-border/30 space-y-2">
-                <div className={cn(
-                  'transition-opacity',
-                  !appSettings.powerAutomateFlowUrl && 'opacity-50'
-                )}>
-                  <SettingsItem
-                    icon={LayoutGrid}
-                    label={t('organizeInStructureCard', locale)}
-                    rightElement={
-                      <Switch
-                        checked={organizeInStructureCard}
-                        onCheckedChange={handleOrganizeInStructureCardChange}
-                        disabled={!appSettings.powerAutomateFlowUrl}
-                        className="data-[state=checked]:bg-primary"
-                      />
-                    }
-                  />
-                </div>
-                <div className={cn(
-                  'transition-opacity',
-                  !appSettings.powerAutomateFlowUrl && 'opacity-50'
-                )}>
-                  <SettingsItem
-                    icon={Speech}
-                    label={t('voiceSummary', locale)}
-                    rightElement={
-                      <Switch
-                        checked={voiceSummaryEnabled}
-                        onCheckedChange={handleVoiceSummaryEnabledChange}
-                        disabled={!appSettings.powerAutomateFlowUrl}
-                        className="data-[state=checked]:bg-primary"
-                      />
-                    }
-                  />
-                </div>
-                {!appSettings.powerAutomateFlowUrl && (
-                  <p className="text-xs text-muted-foreground/70 px-1 pt-1">
-                    {locale === 'zh-Hans'
-                      ? '需要配置 Power Automate Flow'
-                      : 'Requires Power Automate Flow configuration'}
-                  </p>
-                )}
               </div>
 
               {/* Display copilot in all screens toggle */}
               <div className="pt-3 border-t border-border/30">
+                {/* ── Copilot panel ── */}
+                <p className="text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wide mb-2">
+                  {locale === 'zh-Hans' ? 'Copilot 面板' : 'Copilot Panel'}
+                </p>
                 <SettingsItem
                   icon={LayoutGrid}
                   label={locale === 'zh-Hans' ? '在所有页面显示 Copilot' : 'Display Copilot in all screens'}
@@ -659,24 +680,57 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                 </p>
               </div>
 
-              {/* Simulate streaming toggle */}
+              {/* Copilot dock layout (widescreen) */}
               <div className="pt-3 border-t border-border/30">
                 <SettingsItem
-                  icon={Zap}
-                  label={locale === 'zh-Hans' ? '模拟流式输出' : 'Simulate Streaming'}
+                  icon={Monitor}
+                  label={locale === 'zh-Hans' ? '宽屏模式 Copilot 布局' : 'Widescreen Copilot Layout'}
+                  rightElement={
+                    <div className="flex rounded-lg overflow-hidden border border-border/60">
+                      {(['float', 'left', 'right'] as CopilotDockLayout[]).map((opt) => (
+                        <button
+                          key={opt}
+                          onClick={() => handleCopilotDockLayoutChange(opt)}
+                          className={cn(
+                            'px-3 py-1 text-xs font-medium transition-colors',
+                            copilotDockLayout === opt
+                              ? 'bg-primary text-primary-foreground'
+                              : 'bg-background hover:bg-muted text-muted-foreground'
+                          )}
+                        >
+                          {locale === 'zh-Hans' ? copilotDockLayoutLabels[opt].zh : copilotDockLayoutLabels[opt].en}
+                        </button>
+                      ))}
+                    </div>
+                  }
+                />
+                <p className="text-xs text-muted-foreground mt-1 pl-8">
+                  {locale === 'zh-Hans'
+                    ? '在宽屏幕设备上将 Copilot 面板固定到左侧或右侧，或保持浮动弹出'
+                    : 'Dock the Copilot panel to the left or right side on wide screens, or keep it floating'}
+                </p>
+              </div>
+
+              {/* Copilot fullscreen by default toggle */}
+              <div className="pt-3 border-t border-border/30">
+                <SettingsItem
+                  icon={Maximize}
+                  label={locale === 'zh-Hans' ? '全屏展开 Copilot' : 'Fullscreen Copilot by Default'}
                   rightElement={
                     <Switch
-                      checked={simulateStreaming}
-                      onCheckedChange={handleSimulateStreamingChange}
+                      checked={copilotFullscreenDefault}
+                      onCheckedChange={handleCopilotFullscreenDefaultChange}
                     />
                   }
                 />
                 <p className="text-xs text-muted-foreground mt-1 pl-8">
                   {locale === 'zh-Hans'
-                    ? '启用后，AI 回复将逐字显示，模拟打字效果'
-                    : 'When enabled, AI responses will appear word by word with typing effect'}
+                    ? '启用后，点击对话框将以全屏模式展开 Copilot（仅移动端）'
+                    : 'When enabled, tapping the input opens Copilot in fullscreen mode (mobile only)'}
                 </p>
               </div>
+
+              {/* New bottom dock (ActionDock) toggle */}
             </div>
           </motion.div>
 
@@ -687,7 +741,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
               {locale === 'zh-Hans' ? '语音' : 'Voice'}
             </h3>
-            <div className="space-y-2">
+            <div className="glass-card p-4 space-y-2">
               <SettingsItem
                 icon={Volume2}
                 label={t('voiceSetting', locale)}
@@ -710,30 +764,29 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                             {/* Group voices by language */}
                             {(() => {
                               const langCode = locale === 'zh-Hans' ? 'zh' : 'en';
-                              // Get premium and natural tier voice names from voiceOptions
-                              const premiumNaturalVoiceNames = voicesForLocale
-                                .filter((v: VoiceOption) => v.tier === 'premium' || v.tier === 'natural')
-                                .map((v: VoiceOption) => extractVoiceName(v.id).toLowerCase());
-                              
-                              // Filter system voices to only those matching premium/natural tiers
-                              const filteredVoices = systemVoices.filter((v: SpeechSynthesisVoice) => {
-                                const voiceNameLower = v.name.toLowerCase();
-                                const matchesLang = v.lang.startsWith(langCode);
-                                const matchesTier = premiumNaturalVoiceNames.some((name: string) => voiceNameLower.includes(name));
-                                return matchesLang && matchesTier;
-                              });
-                              
-                              // Fallback: if no premium/natural voices found, show all voices for the language
-                              const voicesToShow = filteredVoices.length > 0 
-                                ? filteredVoices 
-                                : systemVoices.filter((v: SpeechSynthesisVoice) => v.lang.startsWith(langCode));
+                              const forLang = systemVoices.filter((v: SpeechSynthesisVoice) => v.lang.startsWith(langCode));
+                              // D11: only show HIGH-QUALITY voices. Browser system voices carry no
+                              // tier metadata, but the high-quality ones reliably signal themselves
+                              // via name keywords (Natural / Neural / Online / Premium / Enhanced /
+                              // Eloquence) or by being cloud-backed (localService === false). Filter
+                              // on those real signals rather than the Azure voiceOptions names, which
+                              // rarely match the browser's own voice names.
+                              const QUALITY_RE = /natural|neural|online|premium|enhanced|eloquence|wavenet|studio/i;
+                              const hq = forLang.filter((v: SpeechSynthesisVoice) =>
+                                QUALITY_RE.test(v.name) || v.localService === false
+                              );
+                              // Fallback: if the platform exposes no obviously-premium voice, show all
+                              // for the language so the picker is never empty.
+                              const voicesToShow = hq.length > 0 ? hq : forLang;
                               
                               return (
                                 <>
                                   {voicesToShow.length > 0 && (
                                     <>
                                       <div className="px-2 py-1.5 text-xs text-muted-foreground font-medium">
-                                        {locale === 'zh-Hans' ? 'Premium & Natural' : 'Premium & Natural'}
+                                        {hq.length > 0
+                                          ? (locale === 'zh-Hans' ? '高质量语音' : 'High-quality voices')
+                                          : (locale === 'zh-Hans' ? '可用语音' : 'Available voices')}
                                       </div>
                                       {voicesToShow.map((voice: SpeechSynthesisVoice) => (
                                         <SelectItem key={voice.name} value={voice.name}>
@@ -771,6 +824,17 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                   <Switch
                     checked={autoPlayResponse}
                     onCheckedChange={handleAutoPlayChange}
+                    className="data-[state=checked]:bg-primary"
+                  />
+                }
+              />
+              <SettingsItem
+                icon={Speech}
+                label={t('voiceSummary', locale)}
+                rightElement={
+                  <Switch
+                    checked={voiceSummaryEnabled}
+                    onCheckedChange={handleVoiceSummaryEnabledChange}
                     className="data-[state=checked]:bg-primary"
                   />
                 }
@@ -824,6 +888,128 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                 </div>
                 <ChevronRight className="w-5 h-5 text-muted-foreground" />
               </button>
+              {/* Debug mode toggle — gates developer-only UI like the Frame log icon */}
+              <div className="border-t border-border/30 pt-2">
+                <SettingsItem
+                  icon={Bug}
+                  label={locale === 'zh-Hans' ? '调试模式' : 'Debug Mode'}
+                  rightElement={
+                    <Switch
+                      checked={debugMode}
+                      onCheckedChange={handleDebugModeChange}
+                      className="data-[state=checked]:bg-primary"
+                    />
+                  }
+                />
+                <p className="text-xs text-muted-foreground px-2 -mt-1">
+                  {locale === 'zh-Hans'
+                    ? '开启后在 Copilot 面板显示 Frame 思考记录图标'
+                    : 'Shows the Frame reasoning-log icon on the Copilot panel when enabled'}
+                </p>
+              </div>
+              {/* Copilot connection status (moved here from a standalone section) */}
+              <div className="border-t border-border/30 pt-2">
+                <SettingsItem
+                  icon={Bot}
+                  label={locale === 'zh-Hans' ? 'Copilot 连接状态' : 'Copilot Connection'}
+                  rightElement={
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          'w-2.5 h-2.5 rounded-full',
+                          !isSettingsFetched
+                            ? 'bg-muted-foreground/40'
+                            : (isCopilotConfigured && hasAgent)
+                              ? 'bg-green-500'
+                              : 'bg-amber-500'
+                        )}
+                      />
+                      <span className="text-sm text-muted-foreground">
+                        {!isSettingsFetched
+                          ? (locale === 'zh-Hans' ? '检查中…' : 'Checking…')
+                          : (isCopilotConfigured && hasAgent)
+                            ? (locale === 'zh-Hans' ? '已连接' : 'Connected')
+                            : (locale === 'zh-Hans' ? '未配置' : 'Not configured')}
+                      </span>
+                    </div>
+                  }
+                />
+                <SettingsItem
+                  icon={MessageSquare}
+                  label={locale === 'zh-Hans' ? '当前 Agent' : 'Current Agent'}
+                  rightElement={
+                    hasAgent ? (
+                      <div className="flex flex-col items-end max-w-[60%]">
+                        <span className="text-sm text-foreground font-mono truncate max-w-full">
+                          {resolvedAgentName}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">
+                          {agentFromSettingTable
+                            ? (locale === 'zh-Hans' ? '来自 Setting 表' : 'From Setting table')
+                            : (locale === 'zh-Hans' ? '已缓存' : 'Cached')}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-sm text-amber-600 dark:text-amber-500 text-right max-w-[65%]">
+                        {locale === 'zh-Hans' ? '未配置' : 'Not configured'}
+                      </span>
+                    )
+                  }
+                />
+                {isSettingsFetched && !hasAgent && (
+                  <p className="text-xs text-muted-foreground px-2 pt-1 leading-relaxed">
+                    {locale === 'zh-Hans'
+                      ? '尚未配置知识库 Agent。请联系管理员在 Setting 表中设置 copilot_studio_agent_name。'
+                      : 'No knowledge-base agent is configured. Please contact your administrator to set copilot_studio_agent_name in the Setting table.'}
+                  </p>
+                )}
+              </div>
+              {/* AI prompt resolution status */}
+              <div className="border-t border-border/30 pt-2">
+                <SettingsItem
+                  icon={Sparkles}
+                  label={locale === 'zh-Hans' ? 'AI Prompt 状态' : 'AI Prompt Status'}
+                  rightElement={
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          'w-2.5 h-2.5 rounded-full',
+                          promptStatus.state === 'checking'
+                            ? 'bg-muted-foreground/40 animate-pulse'
+                            : promptStatus.state === 'fallback'
+                              ? 'bg-amber-500'
+                              : 'bg-green-500'
+                        )}
+                      />
+                      <span className="text-sm text-muted-foreground">
+                        {promptStatus.state === 'checking'
+                          ? (locale === 'zh-Hans' ? '解析中…' : 'Resolving…')
+                          : promptStatus.state === 'resolved'
+                            ? (locale === 'zh-Hans' ? '已就绪' : 'Ready')
+                            : promptStatus.state === 'cached'
+                              ? (locale === 'zh-Hans' ? '已就绪（缓存）' : 'Ready (cached)')
+                              : (locale === 'zh-Hans' ? '默认配置' : 'Default')}
+                      </span>
+                    </div>
+                  }
+                />
+                <SettingsItem
+                  icon={FileCode}
+                  label={locale === 'zh-Hans' ? '模型名称' : 'Model Name'}
+                  rightElement={
+                    <span className="text-sm text-foreground font-mono truncate max-w-[60%] text-right">
+                      {promptStatus.modelName}
+                    </span>
+                  }
+                />
+                {promptStatus.state === 'fallback' && (
+                  <p className="text-xs text-muted-foreground px-2 pt-1 leading-relaxed">
+                    {locale === 'zh-Hans'
+                      ? '正在使用内置默认 Prompt 配置。若 AI 回复异常，请确认当前环境已导入并发布名为 SalesCopilotCorePrompt 的 AI 模型，且账号具有读取权限。'
+                      : 'Using the built-in default prompt configuration. If AI replies fail, confirm the AI model named SalesCopilotCorePrompt is imported and published in this environment and that your account has read access.'}
+                  </p>
+                )}
+              </div>
               <div className="border-t border-border/30 pt-2">
                 <p className="text-xs text-muted-foreground px-2">
                   {locale === 'zh-Hans'
@@ -840,7 +1026,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
           </div>
 
           <motion.p variants={itemVariants} className="text-center text-helper text-muted-foreground pt-4">
-            Sales Copilot Mobile v1.0.0
+            Sales Copilot Mobile · build {__BUILD_TIMESTAMP__}
           </motion.p>
         </motion.div>
       </main>

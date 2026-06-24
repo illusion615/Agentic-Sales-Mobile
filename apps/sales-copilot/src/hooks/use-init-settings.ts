@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useAppSettings } from '@/hooks/use-app-settings';
 import { setLLMConfig, type LLMConfig } from '@/lib/i18n';
-import { saveCopilotConfig } from '@/services/copilot-service';
+import { saveCopilotConfig, getCopilotConfig } from '@/services/copilot-service';
 
 export type SettingsInitStatus = 'loading' | 'not-configured' | 'configured' | 'error';
 
@@ -50,41 +50,34 @@ export function useInitSettings(): InitSettingsResult {
 
     console.log('[InitSettings] Initializing settings from Dataverse...');
 
-    // Check if any settings exist in Dataverse
-    const hasPowerAutomateConfig = !!appSettings.powerAutomateFlowUrl;
-    const hasCopilotConfig = !!appSettings.copilotStudioTokenEndpoint;
+    // Power Automate Flow is always available via SDK connector (no URL needed)
+    const hasPowerAutomateConfig = true;
+    const hasCopilotConfig = !!appSettings.copilotStudioAgentName;
     
     hasPowerAutomateRef.current = hasPowerAutomateConfig;
     hasCopilotRef.current = hasCopilotConfig;
 
-    if (!hasPowerAutomateConfig && !hasCopilotConfig) {
-      console.log('[InitSettings] No AI settings configured in Dataverse. User needs to configure in Settings.');
-      statusRef.current = 'not-configured';
-      return;
-    }
+    // Always enable LLM config — flow is baked in via SDK connector
+    console.log('[InitSettings] Power Automate Flow integrated via SDK connector');
+    const config: LLMConfig = {
+      provider: 'power-automate',
+      enabled: true,
+    };
+    setLLMConfig(config);
 
-    // Initialize Power Automate Flow URL (save to localStorage only, no connection test)
-    if (hasPowerAutomateConfig && appSettings.powerAutomateFlowUrl) {
-      console.log('[InitSettings] Found Power Automate Flow URL in Dataverse');
-      const config: LLMConfig = {
-        provider: 'power-automate',
-        endpoint: appSettings.powerAutomateFlowUrl,
-        enabled: true,
-      };
-      setLLMConfig(config);
-    }
-
-    // Initialize Copilot Studio Token Endpoint (save to localStorage only, no connection test)
-    if (hasCopilotConfig && appSettings.copilotStudioTokenEndpoint) {
-      console.log('[InitSettings] Found Copilot Studio Token Endpoint in Dataverse');
-      // Save to localStorage for copilot-service to use when user opens panel
-      saveCopilotConfig({ tokenEndpoint: appSettings.copilotStudioTokenEndpoint });
-      // Also save to copilot-studio-config for settings panel display
-      const copilotStudioConfig = {
-        enabled: true,
-        endpoint: appSettings.copilotStudioTokenEndpoint,
-      };
-      localStorage.setItem('copilot-studio-config', JSON.stringify(copilotStudioConfig));
+    // Initialize Copilot Studio agent name (single config source via copilot-service).
+    // The Setting table is the AUTHORITATIVE source: when its agent name differs
+    // from what's cached in localStorage (e.g. after deploying to a new environment
+    // where the agent schema name changed), overwrite the cache so the app connects
+    // to the right agent. Preserve any in-flight conversationId.
+    if (hasCopilotConfig && appSettings.copilotStudioAgentName) {
+      const current = getCopilotConfig();
+      if (current.agentName !== appSettings.copilotStudioAgentName) {
+        console.log('[InitSettings] Copilot agent from Setting table differs from cache — syncing:', appSettings.copilotStudioAgentName);
+        saveCopilotConfig({ agentName: appSettings.copilotStudioAgentName, conversationId: current.conversationId });
+      } else {
+        console.log('[InitSettings] Copilot agent name already in sync with Setting table');
+      }
     }
 
     statusRef.current = 'configured';

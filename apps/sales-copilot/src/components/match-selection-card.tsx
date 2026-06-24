@@ -16,7 +16,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { Search, Check, Building2, User, TrendingUp, AlertCircle, Plus, SkipForward, ChevronDown, ChevronUp } from 'lucide-react';
+import { Search, Check, Building2, User, TrendingUp, AlertCircle, Plus, SkipForward, ChevronDown, ChevronUp, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
@@ -34,6 +34,65 @@ type MatchRecord = {
   stage?: string;
 };
 
+/**
+ * Build the "why are we asking this?" sentence shown above the card. Exported
+ * so [`copilot-panel`](./copilot-panel.tsx) can render it in the chat flow
+ * instead of having it nested inside the card itself (keeps the card focused
+ * on the matches + actions and surfaces the explanation as a regular
+ * assistant message).
+ */
+export function buildMatchReasonText(args: {
+  entityType: 'account' | 'contact' | 'opportunity' | 'activity';
+  query: string;
+  pendingFn?: string;
+  locale: Locale;
+}): string {
+  const { entityType, locale } = args;
+  const q = (args.query ?? '').trim();
+  const fn = args.pendingFn ?? '';
+  const draftKindLabels: Record<string, { zh: string; en: string }> = {
+    draftActivity: { zh: '记录这次活动', en: 'log this activity' },
+    draftOpportunity: { zh: '创建这个商机', en: 'create this opportunity' },
+    draftContact: { zh: '新建这个联系人', en: 'add this contact' },
+    draftAccount: { zh: '新建这个客户', en: 'create this account' },
+  };
+  const action = draftKindLabels[fn]
+    ?? (fn.startsWith('update') ? { zh: '完成更新', en: 'complete the update' } : { zh: '继续操作', en: 'continue' });
+
+  if (locale === 'zh-Hans') {
+    const tail = q ? `你提到的“${q}”在系统里有以下匹配：` : '系统里找到以下候选：';
+    switch (entityType) {
+      case 'account':
+        return `要${action.zh}，得先确认涉及的客户。${tail}`;
+      case 'contact':
+        return `要${action.zh}，得先确认对接的联系人。${tail}`;
+      case 'opportunity':
+        return `要${action.zh}，得先关联到正确的商机。${tail}`;
+      case 'activity':
+        return q
+          ? `先检查一下系统里是否已经有同名活动，避免重复记录。“${q}”的相近候选：`
+          : `先检查一下系统里是否已经有相似活动，避免重复记录。`;
+      default:
+        return '';
+    }
+  }
+  const enTail = q ? `Here's what I found for “${q}”:` : `Here's what I found:`;
+  switch (entityType) {
+    case 'account':
+      return `To ${action.en}, I need to know which account this is about. ${enTail}`;
+    case 'contact':
+      return `To ${action.en}, I need to confirm the contact. ${enTail}`;
+    case 'opportunity':
+      return `To ${action.en}, I need to attach it to the right opportunity. ${q ? `Matches for “${q}”:` : 'Candidates:'}`;
+    case 'activity':
+      return q
+        ? `Checking for existing activities so we don't duplicate. Candidates similar to “${q}”:`
+        : `Checking for existing activities so we don't duplicate.`;
+    default:
+      return '';
+  }
+}
+
 interface MatchSelectionCardProps {
   messageId: string;
   matchSelection: {
@@ -46,13 +105,16 @@ interface MatchSelectionCardProps {
     pendingIntent?: {
       function: string;
       arguments: Record<string, unknown>;
+      // G-1: optional inferred siblings forwarded so chain-create resume can replay them
+      additionalActions?: Array<{ function: string; arguments: Record<string, unknown>; reason?: string }>;
     };
   };
   resolved?: boolean;
+  resolutionResult?: string;
   onSelect?: (record: { id: string; name: string; accountId?: string; accountName?: string }) => void;
-  onContinueWithSelection?: (record: { id: string; name: string; accountId?: string; accountName?: string }, pendingIntent: { function: string; arguments: Record<string, unknown> }) => void;
-  onCreateEntity?: (pendingIntent: { function: string; arguments: Record<string, unknown> }, entityKind: 'contact' | 'account' | 'opportunity', queryName: string) => void;
-  onSkip?: (pendingIntent: { function: string; arguments: Record<string, unknown> }, entityKind: 'contact' | 'account' | 'opportunity') => void;
+  onContinueWithSelection?: (record: { id: string; name: string; accountId?: string; accountName?: string }, pendingIntent: { function: string; arguments: Record<string, unknown>; additionalActions?: Array<{ function: string; arguments: Record<string, unknown>; reason?: string }> }) => void;
+  onCreateEntity?: (pendingIntent: { function: string; arguments: Record<string, unknown>; additionalActions?: Array<{ function: string; arguments: Record<string, unknown>; reason?: string }> }, entityKind: 'contact' | 'account' | 'opportunity' | 'activity', queryName: string) => void;
+  onSkip?: (pendingIntent: { function: string; arguments: Record<string, unknown> }, entityKind: 'contact' | 'account' | 'opportunity' | 'activity') => void;
   onSearchOther?: (newQuery: string, entityType: 'account' | 'contact' | 'opportunity' | 'activity', pendingIntent: { function: string; arguments: Record<string, unknown> }) => void;
 }
 
@@ -60,6 +122,7 @@ export function MatchSelectionCard({
   messageId: _messageId,
   matchSelection,
   resolved = false,
+  resolutionResult,
   onSelect,
   onContinueWithSelection,
   onCreateEntity,
@@ -86,16 +149,21 @@ export function MatchSelectionCard({
   const hasDraftIntent = !!pendingIntent && pendingIntent.function.startsWith('draft');
 
   // Map entityType → entityKind for create/skip actions.
-  // activity self-dup detection has no chain-create / skip semantic.
-  const entityKind: 'contact' | 'account' | 'opportunity' | null =
+  // For 'activity' the semantic differs from the dependency entities:
+  //   - clicking a row    = "use this existing activity, don't draft a duplicate"
+  //   - "create new"      = "draft a new activity anyway, ignore the matches"
+  //   - "skip"            = "cancel this activity draft entirely"
+  const entityKind: 'contact' | 'account' | 'opportunity' | 'activity' | null =
     matchSelection.entityType === 'contact' ? 'contact'
     : matchSelection.entityType === 'account' ? 'account'
     : matchSelection.entityType === 'opportunity' ? 'opportunity'
+    : matchSelection.entityType === 'activity' ? 'activity'
     : null;
 
-  // Skip is hidden for entityKind === 'account' (account is mandatory for draftActivity / draftOpportunity)
-  // and for entityType === 'activity' (skipping a duplicate activity match has no clean semantic).
-  const skipAllowed = entityKind !== null && entityKind !== 'account' && matchSelection.entityType !== 'activity';
+  // Skip is hidden for entityKind === 'account' (account is mandatory for
+  // draftActivity / draftOpportunity — the user must either pick or create one).
+  // For everything else (contact, opportunity, activity) skip is meaningful.
+  const skipAllowed = entityKind !== null && entityKind !== 'account';
 
   const getEntityIcon = () => {
     switch (matchSelection.entityType) {
@@ -123,6 +191,9 @@ export function MatchSelectionCard({
       ? labels[matchSelection.entityType]?.zh || matchSelection.entityType
       : labels[matchSelection.entityType]?.en || matchSelection.entityType;
   };
+
+  // (Reason text lives in `buildMatchReasonText` and is rendered above the
+  // card by `copilot-panel.tsx`. No in-card copy remains.)
 
   const getMatchTypeLabel = (matchType: 'exact' | 'contains' | 'fuzzy') => {
     const labels: Record<string, { zh: string; en: string }> = {
@@ -198,6 +269,29 @@ export function MatchSelectionCard({
 
   const EntityIcon = getEntityIcon();
 
+  // Compact resolved state: a single-line pill instead of a full glass card.
+  // Keeps the user's focus on the next pending step in the multi-intent chain
+  // and de-clutters the conversation as steps complete.
+  if (resolved) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.2 }}
+        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/5 border border-primary/15 max-w-full"
+      >
+        <CheckCircle2 className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+        <EntityIcon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+        <span className="text-xs text-foreground truncate">
+          {resolutionResult || (locale === 'zh-Hans' ? '已处理' : 'Resolved')}
+        </span>
+        <span className="text-[10px] text-muted-foreground flex-shrink-0">
+          · {getEntityLabel()}
+        </span>
+      </motion.div>
+    );
+  }
+
   const renderMatchRow = (match: MatchRecord, index: number, isLowConf = false) => (
     <motion.button
       key={match.id}
@@ -251,7 +345,7 @@ export function MatchSelectionCard({
       transition={{ duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] as const }}
       className={cn(
         'glass-card p-4 rounded-xl',
-        isResolved && 'opacity-60 pointer-events-none',
+        isProcessing && 'opacity-60 pointer-events-none',
       )}
     >
       {/* Header */}
@@ -296,15 +390,18 @@ export function MatchSelectionCard({
         </div>
       </div>
 
+      {/* Reason text moved out of the card: see `buildMatchReasonText` rendered
+          by `copilot-panel.tsx` above the card. */}
+
       {/* High-confidence match list */}
-      {hasHighMatches && (
+      {!resolved && hasHighMatches && (
         <div className="space-y-2">
           {highMatches.map((m, i) => renderMatchRow(m, i, false))}
         </div>
       )}
 
       {/* Empty state (no matches at all) */}
-      {!hasAnyMatches && (
+      {!resolved && !hasAnyMatches && (
         <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/30 mb-1">
           <AlertCircle className="w-4 h-4 text-muted-foreground flex-shrink-0" />
           <p className="text-xs text-muted-foreground">
@@ -316,7 +413,7 @@ export function MatchSelectionCard({
       )}
 
       {/* Low-confidence collapsible */}
-      {lowMatches.length > 0 && (
+      {!resolved && lowMatches.length > 0 && (
         <div className={cn('mt-2', hasHighMatches && 'pt-2')}>
           <button
             type="button"
@@ -339,7 +436,7 @@ export function MatchSelectionCard({
       )}
 
       {/* Action area: Create / Search other / Skip */}
-      {hasDraftIntent && entityKind && (
+      {!resolved && hasDraftIntent && entityKind && (
         <div className={cn(
           'mt-4 pt-3 border-t border-border/50 space-y-2',
         )}>
@@ -400,7 +497,9 @@ export function MatchSelectionCard({
               disabled={isResolved || !onSkip}
             >
               <SkipForward className="w-4 h-4" />
-              {locale === 'zh-Hans' ? '跳过' : 'Skip'}
+              {entityKind === 'activity'
+                ? (locale === 'zh-Hans' ? '取消草稿' : 'Cancel draft')
+                : (locale === 'zh-Hans' ? '跳过' : 'Skip')}
             </Button>
           )}
         </div>
@@ -410,11 +509,6 @@ export function MatchSelectionCard({
       {isProcessing && (
         <p className="text-xs text-primary mt-3 text-center animate-pulse">
           {locale === 'zh-Hans' ? '正在处理...' : 'Processing...'}
-        </p>
-      )}
-      {resolved && !isProcessing && (
-        <p className="text-xs text-muted-foreground mt-3 text-center italic">
-          {locale === 'zh-Hans' ? '已处理' : 'Resolved'}
         </p>
       )}
     </motion.div>

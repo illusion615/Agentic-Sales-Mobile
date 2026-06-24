@@ -1,42 +1,42 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence, useDragControls, type PanInfo } from 'motion/react';
-import { Sparkles, ArrowUp, SquarePen, X, ChevronDown, Copy, Volume2, VolumeX, Loader2, Square, Play, Pause, Paperclip, RotateCcw } from 'lucide-react';
+import { Sparkles, ArrowUp, SquarePen, X, ChevronDown, Copy, Volume2, VolumeX, Loader2, Square, Play, Pause, Paperclip, RotateCcw, Mic, ScrollText } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useCopilot, type ChatMessage } from '@/contexts/copilot-context';
-import { getLocale, getChatFontClass, getThinkingDotStyle, getSelectedVoice, findMatchingSystemVoice, getLLMConfig, getVoiceSummaryEnabled, generateVoiceSummary, type Locale, type ThinkingDotStyle } from '@/lib/i18n';
+import { useCopilot, type ChatMessage, isUnresolvedBlockingCard } from '@/contexts/copilot-context';
+import { getLocale, getChatFontClass, getSelectedVoice, findMatchingSystemVoice, getLLMConfig, getVoiceSummaryEnabled, getCopilotDockLayout, getCopilotFullscreenDefault, getCopilotInAllScreens, getDebugMode, type CopilotDockLayout, type Locale } from '@/lib/i18n';
+import { ThinkingIndicator } from '@/components/thinking-indicator';
 import { DynamicDataRenderer, tryParseJson } from '@/components/dynamic-data-renderer';
 import { FormCard } from '@/components/form-card';
 import { BatchFormCard } from '@/components/batch-form-card';
-import { MatchSelectionCard } from '@/components/match-selection-card';
+import { MatchSelectionCard, buildMatchReasonText } from '@/components/match-selection-card';
 import { MarkdownContent } from '@/components/markdown-content';
 import { RecordListCard } from '@/components/record-list-card';
 import { AdditionalIntentsCard } from '@/components/additional-intents-card';
-import { FrameShadowViewer } from '@/components/frame-shadow-viewer';
+import { PipelineViewer } from '@/components/frame-viewer';
+import { TaskAnnounceBubble } from '@/components/task-announce-bubble';
+import { MessageAttachments } from '@/components/message-attachments';
 import { toast } from 'sonner';
+import { useActionDock } from '@/contexts/action-dock-context';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { newAttachmentId, type CopilotAttachment } from '@/lib/attachments';
+import { useDynamicSuggestions } from '@/hooks/use-dynamic-suggestions';
 
 
 
-interface CopilotPanelProps {
-  mode: 'overlay' | 'embedded';
-  onClose?: () => void;
-}
-
-export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
+export function CopilotPanel() {
   const navigate = useNavigate();
   const {
     isOpen,
     isFullScreen,
-    isExpanded,
-    setIsExpanded,
     openPanel,
     closePanel,
-    toggleFullScreen,
     isConnected,
     isConnecting,
     messages,
     isSending,
     sendMessage,
+    cancelSend,
     inputValue,
     setInputValue,
 
@@ -50,22 +50,139 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
     clarificationSuggestions,
     executeClarificationAction,
     rollbackToMessage,
+    toggleTaskGroupCollapsed,
   } = useCopilot();
 
-  // Render counter for loop diagnostics
-  const renderCountRef = useRef(0);
-  renderCountRef.current++;
+  const { chips: dockChips, slot: dockSlot } = useActionDock();
+  const isMobile = useIsMobile();
+
+  // Dock layout: float (default bottom sheet) | left | right (side panel on widescreen)
+  const [dockLayout, setDockLayout] = useState<CopilotDockLayout>(() => getCopilotDockLayout());
   useEffect(() => {
-    if (renderCountRef.current > 500) {
-      console.warn('[LOOP WARNING] CopilotPanel render count:', renderCountRef.current);
+    const handler = (e: Event) => setDockLayout((e as CustomEvent<CopilotDockLayout>).detail);
+    window.addEventListener('copilot-dock-layout-changed', handler);
+    return () => window.removeEventListener('copilot-dock-layout-changed', handler);
+  }, []);
+  // On mobile always fall back to float regardless of setting.
+  const effectiveLayout: CopilotDockLayout = isMobile ? 'float' : dockLayout;
+  const isSideDocked = effectiveLayout === 'left' || effectiveLayout === 'right';
+
+  // "Display Copilot in all screens" — reactive so binary-mode recomputes live.
+  const [copilotInAllScreens, setCopilotInAllScreens] = useState(() => getCopilotInAllScreens());
+  useEffect(() => {
+    const handler = (e: Event) => setCopilotInAllScreens((e as CustomEvent<boolean>).detail);
+    window.addEventListener('copilotinallscreens-changed', handler);
+    return () => window.removeEventListener('copilotinallscreens-changed', handler);
+  }, []);
+
+  // Debug mode — reactive; gates the Frame shadow-log icon so end users don't see it.
+  const [debugMode, setDebugModeState] = useState(() => getDebugMode());
+  useEffect(() => {
+    const handler = (e: Event) => setDebugModeState((e as CustomEvent<boolean>).detail);
+    window.addEventListener('debugmode-changed', handler);
+    return () => window.removeEventListener('debugmode-changed', handler);
+  }, []);
+
+  // Binary mode: no 78vh mid state — collapsed dock ⇄ fullscreen only.
+  // Active when copilot is shown in all screens AND the panel floats (bottom sheet),
+  // or when the mobile fullscreen-by-default toggle is on.
+  const binaryMode =
+    (isMobile && getCopilotFullscreenDefault()) ||
+    (copilotInAllScreens && effectiveLayout === 'float');
+
+  // Side-docked mode: always keep the panel open (no collapse).
+  useEffect(() => {
+    if (isSideDocked && !isOpen) openPanel(false);
+  }, [isSideDocked, isOpen, openPanel]);
+
+  // Binary mode: if the panel ever opens to the mid state, snap it to fullscreen
+  // so no intermediate height is ever shown (covers every open entry path).
+  useEffect(() => {
+    if (binaryMode && isOpen && !isFullScreen) openPanel(true);
+  }, [binaryMode, isOpen, isFullScreen, openPanel]);
+
+  // Render counter — only warn on very rapid renders (>100 in 2 seconds)
+  const renderCountRef = useRef(0);
+  const renderWindowRef = useRef(Date.now());
+  renderCountRef.current++;
+  if (Date.now() - renderWindowRef.current > 2000) {
+    renderCountRef.current = 0;
+    renderWindowRef.current = Date.now();
+  }
+  useEffect(() => {
+    if (renderCountRef.current > 100) {
+      console.warn('[LOOP WARNING] CopilotPanel rapid renders in 2s window:', renderCountRef.current);
     }
   });
 
   const locale: Locale = getLocale();
-  const thinkingDotStyle: ThinkingDotStyle = getThinkingDotStyle();
   
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // §8: lock the composer (text + mic + attachments) while any blocking card
+  // (draft / batch / match-selection / awaiting-clarification) is unresolved, so
+  // the card is the only input entry and there is no "follow-up vs new command"
+  // ambiguity. Query-result lists do NOT lock. Derived from the live messages.
+  const inputLocked = messages.some(isUnresolvedBlockingCard);
+  // When the user taps the disabled composer, pulse the oldest unresolved
+  // blocking card to guide them to it.
+  const [pulseCardId, setPulseCardId] = useState<string | null>(null);
+  const guideToBlockingCard = useCallback(() => {
+    const target = messages.find(isUnresolvedBlockingCard);
+    if (!target) return;
+    setPulseCardId(target.id);
+    const el = document.getElementById(`message-${target.id}`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    window.setTimeout(() => setPulseCardId((id) => (id === target.id ? null : id)), 1200);
+  }, [messages]);
+
+  
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+
+  // Smart auto-scroll: only scroll to bottom after the user sends a message
+  // or while a streaming response is arriving. Preserve scroll position when
+  // the user navigates away (clicks a record card) and comes back.
+  const shouldAutoScrollRef = useRef(true);
+  const prevMessagesLenRef = useRef(0);
+  
+  // TTS per-message playback
+  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
+  const playedMessageIdsRef = useRef<Set<string>>(new Set());
+
+  const stopSpeaking = useCallback(() => {
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    setSpeakingMessageId(null);
+  }, []);
+
+  const speakMessage = useCallback((messageId: string, text: string) => {
+    // Toggle off if already playing this message
+    if (speakingMessageId === messageId) {
+      stopSpeaking();
+      return;
+    }
+    stopSpeaking();
+    const plain = text
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/\*([^*]+)\*/g, '$1')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/#{1,6}\s+/g, '')
+      .replace(/`[^`]+`/g, '')
+      .replace(/```[\s\S]*?```/g, '')
+      .trim();
+    if (!plain || !('speechSynthesis' in window)) return;
+    const utt = new SpeechSynthesisUtterance(plain);
+    utt.lang = locale === 'zh-Hans' ? 'zh-CN' : 'en-US';
+    const voice = findMatchingSystemVoice(getSelectedVoice(), locale);
+    if (voice) utt.voice = voice;
+    utt.rate = 1.0;
+    utt.pitch = 1.0;
+    utt.onend = () => setSpeakingMessageId(null);
+    utt.onerror = () => setSpeakingMessageId(null);
+    setSpeakingMessageId(messageId);
+    playedMessageIdsRef.current.add(messageId);
+    window.speechSynthesis.speak(utt);
+  }, [speakingMessageId, locale, stopSpeaking]);
 
   const panelRef = useRef<HTMLDivElement>(null);
   const dragControls = useDragControls();
@@ -104,23 +221,15 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
     if (!files || files.length === 0) return;
 
     Array.from(files).forEach((file: File) => {
-      if (file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          setAttachments((prev) => [...prev, {
-            file,
-            preview: event.target?.result as string,
-            type: 'image' as const
-          }]);
-        };
-        reader.readAsDataURL(file);
-      } else {
+      const reader = new FileReader();
+      reader.onload = (event) => {
         setAttachments((prev) => [...prev, {
           file,
-          preview: '',
-          type: 'file' as const
+          preview: event.target?.result as string,
+          type: file.type.startsWith('image/') ? 'image' as const : 'file' as const,
         }]);
-      }
+      };
+      reader.readAsDataURL(file);
     });
 
     if (fileInputRef.current) {
@@ -133,10 +242,20 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
     setAttachments((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
-  // Handle camera/attachment button click
-  const handleAttachmentClick = useCallback(() => {
-    fileInputRef.current?.click();
-  }, []);
+  // Send the current input together with any composer attachments, then clear both.
+  const handleSend = useCallback((text: string) => {
+    if (!text.trim()) return;
+    const atts: CopilotAttachment[] = attachments.map((a) => ({
+      id: newAttachmentId(),
+      name: a.file.name,
+      mimeType: a.file.type || 'application/octet-stream',
+      dataUrl: a.preview,
+      type: a.type,
+    }));
+    shouldAutoScrollRef.current = true;
+    sendMessage(text, atts.length ? atts : undefined);
+    setAttachments([]);
+  }, [attachments, sendMessage]);
   
   // Check if context should be shown
   const shouldShowContext = pageContext && 
@@ -144,29 +263,96 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
     !dismissedContexts.has(pageContext.currentPage) &&
     pageContext.currentPage !== 'Home';
 
-  // Scroll to bottom when messages change
+  // Scroll to bottom when messages change — but only when auto-scroll is active.
+  // Auto-scroll is enabled when the user sends a message or a quick-action, and
+  // disabled when the user manually scrolls up away from the bottom.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    // A new user message just appeared → re-enable auto-scroll
+    if (messages.length > prevMessagesLenRef.current) {
+      const latest = messages[messages.length - 1];
+      if (latest?.role === 'user') {
+        shouldAutoScrollRef.current = true;
+      }
+    }
+    prevMessagesLenRef.current = messages.length;
 
-  // Focus input when panel opens
+    if (!shouldAutoScrollRef.current) return;
+    requestAnimationFrame(() => {
+      const container = messagesContainerRef.current;
+      if (container) container.scrollTop = container.scrollHeight;
+    });
+  }, [messages.length, messages]);
+
+  // While the assistant is streaming, keep scrolling to bottom (if auto-scroll is on).
   useEffect(() => {
-    if (mode === 'overlay' && isOpen) {
+    if (!isSending || !shouldAutoScrollRef.current) return;
+    requestAnimationFrame(() => {
+      const container = messagesContainerRef.current;
+      if (container) container.scrollTop = container.scrollHeight;
+    });
+  });
+
+  // Detect manual scroll: if user scrolls up away from the bottom, pause auto-scroll.
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    const handleScroll = () => {
+      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+      // If user scrolled more than 80px from bottom, they're browsing history
+      if (distanceFromBottom > 80) {
+        shouldAutoScrollRef.current = false;
+      } else {
+        shouldAutoScrollRef.current = true;
+      }
+    };
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // Focus input and scroll to bottom when panel opens
+  useEffect(() => {
+    if (isOpen) {
       setTimeout(() => {
         inputRef.current?.focus();
+        // Only auto-scroll to bottom on open if we're not preserving position
+        if (shouldAutoScrollRef.current) {
+          const container = messagesContainerRef.current;
+          if (container) container.scrollTop = container.scrollHeight;
+        }
       }, 300);
     }
-  }, [mode, isOpen]);
+  }, [isOpen]);
+
+  // Auto-grow the input textarea up to 4 lines, then scroll inside.
+  const autoResizeInput = useCallback(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    // Reset height to measure the true scroll height, then clamp to maxHeight.
+    el.style.height = 'auto';
+    const cs = window.getComputedStyle(el);
+    const lineHeight = parseFloat(cs.lineHeight) || 20;
+    const padTop = parseFloat(cs.paddingTop) || 0;
+    const padBottom = parseFloat(cs.paddingBottom) || 0;
+    const maxHeight = lineHeight * 4 + padTop + padBottom;
+    const next = Math.min(el.scrollHeight, maxHeight);
+    el.style.height = `${next}px`;
+    el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  }, []);
+
+  // Re-measure whenever the value changes (typing, dictation, programmatic set).
+  useEffect(() => {
+    autoResizeInput();
+  }, [inputValue, autoResizeInput]);
 
   // Handle enter key - IME-safe (skip Enter during IME composition)
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // Native IME composition signal (isComposing) or keyCode 229 (IME processing)
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     // Component-level flag (set via onCompositionStart/End for browsers that don't set isComposing reliably)
     if (isComposingRef.current) return;
     if (e.key === 'Enter' && !e.shiftKey && inputValue.trim()) {
       e.preventDefault();
-      sendMessage(inputValue);
+      handleSend(inputValue);
     }
   };
 
@@ -180,52 +366,188 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
   };
 
   // Handle input focus
+  // When fullscreen-by-default / binary mode is on: only fullscreen ↔ collapsed, no mid state.
+  // Otherwise: open to 78vh, then fullscreen on second tap.
   const handleInputFocus = () => {
-    if (mode === 'overlay' && !isExpanded) {
-      setIsExpanded(true);
+    const fullscreenDefault = (isMobile && getCopilotFullscreenDefault()) || binaryMode;
+    if (!isOpen) {
+      openPanel(fullscreenDefault);
+    } else if (fullscreenDefault && !isFullScreen) {
+      // Mid state shouldn't exist; jump to fullscreen
+      openPanel(true);
+    } else if (isMobile && !isFullScreen) {
+      openPanel(true);
     }
   };
 
-  // Handle full screen toggle
-  const handleFullScreen = () => {
-    toggleFullScreen();
-  };
-
-  // Handle close
+  // Handle close (collapse panel completely back to dock)
   const handleClose = () => {
-    if (mode === 'overlay') {
-      closePanel();
-      onClose?.();
-    } else {
-      setIsExpanded(false);
-    }
+    closePanel();
   };
+
+  // ─── Press-to-talk voice input (Web Speech API) ───────────────────────────
+  // Hold the mic to dictate (release to stop); a quick tap toggles a hands-free
+  // continuous listen mode (tap again to stop). Also the iframe-mic-permission probe.
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+  const baseTextRef = useRef('');
+  // Mic gesture state machine: idle | hold (press-and-hold) | toggle (tap-to-toggle)
+  const listenModeRef = useRef<'idle' | 'hold' | 'toggle'>('idle');
+  const pressStartRef = useRef(0);
+  const suppressNextUpRef = useRef(false);
+  const speechSupported =
+    typeof window !== 'undefined' &&
+    ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+
+  const stopListening = useCallback(() => {
+    try {
+      recognitionRef.current?.stop();
+    } catch {
+      /* noop */
+    }
+  }, []);
+
+  const startListening = useCallback(() => {
+    if (isListening) return;
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      toast.error(
+        locale === 'zh-Hans'
+          ? '当前浏览器不支持语音识别'
+          : 'Speech recognition not supported in this browser'
+      );
+      return;
+    }
+
+    const recognition = new SR();
+    recognition.lang = locale === 'zh-Hans' ? 'zh-CN' : 'en-US';
+    recognition.continuous = true;
+    recognition.interimResults = true;
+
+    baseTextRef.current = inputValue ? inputValue.trimEnd() + ' ' : '';
+
+    recognition.onstart = () => {
+      setIsListening(true);
+    };
+
+    recognition.onresult = (event: any) => {
+      let transcript = '';
+      for (let i = 0; i < event.results.length; i++) {
+        transcript += event.results[i][0].transcript;
+      }
+      setInputValue(baseTextRef.current + transcript);
+    };
+
+    recognition.onerror = (event: any) => {
+      setIsListening(false);
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        toast.error(
+          locale === 'zh-Hans'
+            ? '麦克风权限被拒绝（可能是平台 iframe 未授权）'
+            : 'Microphone permission denied (host iframe may not allow it)'
+        );
+      } else if (event.error === 'no-speech') {
+        // silent — user simply didn't say anything
+      } else {
+        toast.error(
+          locale === 'zh-Hans'
+            ? `语音识别出错：${event.error}`
+            : `Speech recognition error: ${event.error}`
+        );
+      }
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+      listenModeRef.current = 'idle';
+      recognitionRef.current = null;
+    };
+
+    recognitionRef.current = recognition;
+    try {
+      recognition.start();
+    } catch (err) {
+      setIsListening(false);
+      toast.error(
+        locale === 'zh-Hans'
+          ? '无法启动语音识别'
+          : 'Failed to start speech recognition'
+      );
+    }
+  }, [isListening, inputValue, locale, setInputValue]);
+
+  // Stop recognition if the component unmounts mid-recording.
+  useEffect(() => {
+    return () => {
+      try {
+        recognitionRef.current?.abort();
+      } catch {
+        /* noop */
+      }
+    };
+  }, []);
+
+  // Mic gesture handlers: distinguish press-and-hold from tap-to-toggle by duration.
+  const TAP_THRESHOLD_MS = 300;
+  const handleMicPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault();
+      // If already in hands-free toggle mode, a tap stops it.
+      if (listenModeRef.current === 'toggle') {
+        stopListening();
+        listenModeRef.current = 'idle';
+        suppressNextUpRef.current = true;
+        return;
+      }
+      pressStartRef.current = Date.now();
+      listenModeRef.current = 'hold';
+      startListening();
+    },
+    [startListening, stopListening]
+  );
+
+  const handleMicPointerUp = useCallback(() => {
+    if (suppressNextUpRef.current) {
+      suppressNextUpRef.current = false;
+      return;
+    }
+    if (listenModeRef.current !== 'hold') return;
+    const duration = Date.now() - pressStartRef.current;
+    if (duration < TAP_THRESHOLD_MS) {
+      // Quick tap → switch to hands-free continuous listening (keep recording).
+      listenModeRef.current = 'toggle';
+    } else {
+      // Held → press-to-talk release stops dictation.
+      stopListening();
+      listenModeRef.current = 'idle';
+    }
+  }, [stopListening]);
+
+  const handleMicPointerLeave = useCallback(() => {
+    // Only the press-and-hold gesture cancels on leave; toggle mode persists.
+    if (listenModeRef.current === 'hold') {
+      stopListening();
+      listenModeRef.current = 'idle';
+    }
+  }, [stopListening]);
 
 
 
   // Get quick actions based on conversation or clarification suggestions
-  const getQuickActions = useCallback(() => {
-    // If there are clarification suggestions, show them as priority
-    if (clarificationSuggestions.length > 0) {
-      return clarificationSuggestions;
-    }
-    
-    if (messages.length === 0) {
-      return [
-        { text: locale === 'zh-Hans' ? '今日待办' : "Today's tasks", query: locale === 'zh-Hans' ? '今天有哪些待办事项？' : 'What are my tasks for today?' },
-        { text: locale === 'zh-Hans' ? '商机状态' : 'Pipeline status', query: locale === 'zh-Hans' ? '我的商机状态如何？' : 'What is my pipeline status?' },
-        { text: locale === 'zh-Hans' ? '客户跟进' : 'Follow-ups', query: locale === 'zh-Hans' ? '哪些客户需要跟进？' : 'Which customers need follow-up?' },
-      ];
-    }
-    return [
-      { text: locale === 'zh-Hans' ? '更多详情' : 'More details', query: locale === 'zh-Hans' ? '告诉我更多详情' : 'Tell me more details' },
-      { text: locale === 'zh-Hans' ? '今日待办' : "Today's tasks", query: locale === 'zh-Hans' ? '今天有哪些待办事项？' : 'What are my tasks for today?' },
-      { text: locale === 'zh-Hans' ? '帮助' : 'Help', query: locale === 'zh-Hans' ? '你能帮我做什么？' : 'What can you help me with?' },
-    ];
-  }, [messages, locale, clarificationSuggestions]);
-
-  const quickActions = getQuickActions();
   const hasClarificationSuggestions = clarificationSuggestions.length > 0;
+
+  // Dynamic, LLM-generated follow-up pills. Generated in the background after
+  // each reply (while the user reads), with hidden→generating→ready states so
+  // the panel can fade pills out on send and show a skeleton while generating.
+  // Disabled while clarification/blocking pills must take priority.
+  const { status: suggestionStatus, pills: dynamicPills } = useDynamicSuggestions({
+    messages,
+    isSending,
+    locale,
+    enabled: !hasClarificationSuggestions && !inputLocked,
+  });
+
+  const quickActions = hasClarificationSuggestions ? clarificationSuggestions : dynamicPills;
 
   // For overlay mode, the AnimatePresence handles the open/close animation,
   // so we don't return null here - it's handled in the overlay render section below
@@ -233,7 +555,7 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
   const renderMessages = () => {
 
     return (
-    <div className="flex-1 overflow-y-auto scrollbar-hide px-3 py-3">
+    <div ref={messagesContainerRef} className="flex-1 overflow-y-auto scrollbar-hide px-3 py-3 min-h-0">
       {messages.length === 0 ? (
         <div className="flex flex-col h-full justify-center px-4">
           <p className="text-sm font-medium text-foreground mb-4">
@@ -245,7 +567,7 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
                 <span className="text-xs text-primary font-medium">1</span>
               </span>
               <span className="text-sm text-muted-foreground">
-                {locale === 'zh-Hans' ? '查询客户信息和商机状态' : 'Query customer info and opportunity status'}
+                {locale === 'zh-Hans' ? '查询和管理客户、商机、联系人、拜访' : 'Query & manage accounts, opportunities, contacts, activities'}
               </span>
             </li>
             <li className="flex items-center gap-3">
@@ -253,7 +575,7 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
                 <span className="text-xs text-primary font-medium">2</span>
               </span>
               <span className="text-sm text-muted-foreground">
-                {locale === 'zh-Hans' ? '获取今日日程和待办事项' : 'Get today\'s schedule and to-do items'}
+                {locale === 'zh-Hans' ? '一句话新建拜访、商机、客户（支持多意图）' : 'Create visits, opportunities & accounts from one sentence'}
               </span>
             </li>
             <li className="flex items-center gap-3">
@@ -261,7 +583,15 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
                 <span className="text-xs text-primary font-medium">3</span>
               </span>
               <span className="text-sm text-muted-foreground">
-                {locale === 'zh-Hans' ? '分析销售趋势和业绩数据' : 'Analyze sales trends and performance data'}
+                {locale === 'zh-Hans' ? '分析商机、生成洞察、语音播报简报' : 'Analyze pipeline, generate insights & voice briefings'}
+              </span>
+            </li>
+            <li className="flex items-center gap-3">
+              <span className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
+                <span className="text-xs text-primary font-medium">4</span>
+              </span>
+              <span className="text-sm text-muted-foreground">
+                {locale === 'zh-Hans' ? '产品知识问答（连接企业知识库）' : 'Product knowledge Q&A (connected to enterprise KB)'}
               </span>
             </li>
           </ul>
@@ -272,23 +602,76 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
       ) : (
         <>
 
-          {messages.map((message: ChatMessage) => (
+          {messages.map((message: ChatMessage, msgIndex: number) => {
+            // Phase D: hide substep messages when their owning task group is collapsed.
+            if (message.taskRole === 'substep' && message.collapsed) return null;
+
+            // Determine if a queue step announce is completed: check the
+            // announceStatus field patched by the runtime after execution.
+            const announceStatus = message.announceStatus;
+            const announceDetail = message.announceDetail;
+            const isAnnounceCompleted = message.taskRole === 'announce' && (
+              announceStatus === 'completed' || announceStatus === 'failed'
+              || (message.queueIntentId && messages.slice(msgIndex + 1).some((m) => m.queueIntentId === message.queueIntentId && m.taskRole !== 'announce'))
+            );
+            const isAnnounceFailed = announceStatus === 'failed';
+
+            // Messages inside a queue step (not announce/summary/overview) are "substeps".
+            const isQueueSubstep = !!message.queueId && message.taskRole !== 'announce' && message.taskRole !== 'summary' && message.taskRole !== 'overview';
+            return (
             <div key={message.id} id={`message-${message.id}`} className={cn(
-              'mb-3',
-              message.type === 'user' ? 'flex justify-end' : ''
+              message.taskRole === 'announce' ? 'mb-1' : 'mb-3',
+              message.type === 'user' ? 'flex justify-end' : '',
+              // Indent sub-content under a task header for visual hierarchy.
+              message.queueId && message.taskRole !== 'announce' && message.taskRole !== 'summary' && 'pl-3 border-l-2 border-primary/10',
             )}>
+              {/* Phase B: Task overview — "识别到 N 个意图：A、B、C" (plain text, no bubble) */}
+              {message.taskRole === 'overview' && message.taskOverview && (
+                <div className="text-sm text-muted-foreground px-1">
+                  {message.content}
+                </div>
+              )}
+
+              {/* Phase B: Per-task announce — uses thinking-step style */}
+              {message.taskRole === 'announce' && message.taskAnnounce && (
+                <div className="flex items-center gap-2 text-xs py-1">
+                  {isAnnounceFailed ? (
+                    <span className="text-destructive">✗</span>
+                  ) : isAnnounceCompleted || message.collapsed ? (
+                    <span className="text-primary">✓</span>
+                  ) : (
+                    <ThinkingIndicator />
+                  )}
+                  <span className={cn(
+                    isAnnounceFailed ? 'text-destructive' :
+                    isAnnounceCompleted || message.collapsed ? 'text-muted-foreground' : 'text-foreground font-medium'
+                  )}>
+                    {locale === 'zh-Hans'
+                      ? `第 ${message.taskAnnounce.index}/${message.taskAnnounce.total} 步 · ${message.taskAnnounce.label}`
+                      : `Step ${message.taskAnnounce.index}/${message.taskAnnounce.total} · ${message.taskAnnounce.label}`}
+                  </span>
+                  {announceDetail && (
+                    <span className={cn(
+                      'text-[10px]',
+                      isAnnounceFailed ? 'text-destructive/70' : 'text-muted-foreground/70'
+                    )}>
+                      — {announceDetail}
+                    </span>
+                  )}
+                </div>
+              )}
+
               {/* User Message */}
               {message.type === 'user' && (
                 <div className="max-w-[85%] group">
                   <div
-                    className={cn('px-3 py-2 rounded-2xl rounded-br-md', getChatFontClass())}
-                    style={{
-                      background: 'rgba(255, 122, 0, 0.08)',
-                      border: '2px solid rgba(255, 122, 0, 0.4)',
-                    }}
+                    className={cn('px-3 py-2 rounded-2xl rounded-br-md bg-[rgba(255,122,0,0.08)] border-2 border-[rgba(255,122,0,0.4)]', getChatFontClass())}
                   >
                     {message.content}
                   </div>
+                  {message.attachments && message.attachments.length > 0 && (
+                    <MessageAttachments attachments={message.attachments} />
+                  )}
                   <div className="flex items-center justify-end gap-1.5 mt-1">
                     <button
                       onClick={() => {
@@ -299,7 +682,7 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
                         // Focus input
                         inputRef.current?.focus();
                       }}
-                      className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-primary/10 hover:text-primary transition-all"
+                      className="p-1 rounded hover:bg-primary/10 hover:text-primary transition-all"
                       aria-label={locale === 'zh-Hans' ? '重试' : 'Retry'}
                     >
                       <RotateCcw className="w-3 h-3 text-muted-foreground hover:text-primary" />
@@ -312,73 +695,68 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
               )}
               
               {/* Batch Form Card Message */}
-              {message.type === 'batch-form-card' && message.batchFormCards && (
+              {message.type === 'batch-form-card' && message.batchFormCards && !message.isStreaming && (
                 <div className="max-w-full">
                   {/* Show thinking steps if present */}
                   {message.thinkingSteps && message.thinkingSteps.length > 0 && (
-                    <details className="mb-2 text-xs" open>
-                      <summary className="cursor-pointer text-muted-foreground hover:text-foreground flex items-center gap-1">
-                        <span>🧠</span>
-                        <span>{locale === 'zh-Hans' ? '思考过程' : 'Thinking process'}</span>
-                      </summary>
-                      <div className="mt-1.5 pl-4 space-y-1 text-muted-foreground">
-                        {message.thinkingSteps.map((step, idx) => (
-                          <div key={idx} className="flex items-center gap-2">
-                            <span className="text-primary">✓</span>
-                            <span>{step.label}</span>
-                            {step.detail && <span>· {step.detail}</span>}
-                          </div>
-                        ))}
-                      </div>
-                    </details>
+                    <div className="mb-2 text-xs space-y-1 text-muted-foreground">
+                      {message.thinkingSteps.map((step, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <span className="text-primary">✓</span>
+                          <span>{step.label}</span>
+                          {step.detail && <span>· {step.detail}</span>}
+                        </div>
+                      ))}
+                    </div>
                   )}
                   {message.content && (
                     <p className="text-sm text-foreground mb-2">{message.content}</p>
                   )}
-                  <BatchFormCard 
-                    messageId={message.id} 
-                    batchFormCards={message.batchFormCards}
-                  />
+                  <div className={cn('rounded-2xl', pulseCardId === message.id && 'ring-2 ring-primary ring-offset-2 ring-offset-background animate-pulse')}>
+                    <BatchFormCard 
+                      messageId={message.id} 
+                      batchFormCards={message.batchFormCards}
+                    />
+                  </div>
                 </div>
               )}
 
               {/* Match Selection Card Message */}
               {message.type === 'match-selection' && message.matchSelection && (
                 <div className="max-w-full">
-                  {/* Show thinking steps if present */}
-                  {message.thinkingSteps && message.thinkingSteps.length > 0 && (
-                    <details className="mb-2 text-xs" open>
-                      <summary className="cursor-pointer text-muted-foreground hover:text-foreground flex items-center gap-1">
-                        <span>🧠</span>
-                        <span>{locale === 'zh-Hans' ? '思考过程' : 'Thinking process'}</span>
-                      </summary>
-                      <div className="mt-1.5 pl-4 space-y-1 text-muted-foreground">
-                        {message.thinkingSteps.map((step, idx) => (
-                          <div key={idx} className="flex items-center gap-2">
-                            <span className="text-primary">✓</span>
-                            <span>{step.label}</span>
-                            {step.detail && <span>· {step.detail}</span>}
-                          </div>
-                        ))}
-                      </div>
-                    </details>
-                  )}
+                  {/* Reason text — hidden once resolved to keep the conversation compact. */}
+                  {message.resolutionState !== 'resolved' && (() => {
+                    const reason = buildMatchReasonText({
+                      entityType: message.matchSelection.entityType,
+                      query: message.matchSelection.query,
+                      pendingFn: message.matchSelection.pendingIntent?.function,
+                      locale: locale === 'zh-Hans' ? 'zh-Hans' : 'en-US',
+                    });
+                    if (!reason) return null;
+                    return (
+                      <p className={cn('text-foreground mb-2 leading-relaxed', getChatFontClass())}>
+                        {reason}
+                      </p>
+                    );
+                  })()}
                   {message.content && (
-                    <p className="text-sm text-foreground mb-2">{message.content}</p>
+                    <p className="sr-only">{message.content}</p>
                   )}
+                  <div className={cn('rounded-2xl', pulseCardId === message.id && 'ring-2 ring-primary ring-offset-2 ring-offset-background animate-pulse')}>
                   <MatchSelectionCard
                     messageId={message.id}
                     matchSelection={message.matchSelection}
-                    onSelect={(record) => {
-                      toast.success(locale === 'zh-Hans' 
-                        ? `已选择: ${record.name}` 
-                        : `Selected: ${record.name}`);
-                    }}
+                    resolved={message.resolutionState === 'resolved'}
+                    resolutionResult={message.resolutionResult}
+                    // No toast on select: the card locks to a "Selected: X · Account"
+                    // pill inline and a completion message follows, so a toast would
+                    // be a third, redundant confirmation (D14).
                     onContinueWithSelection={(record, pendingIntent) => {
                       continuePendingAction(
                         record,
                         pendingIntent,
-                        message.matchSelection?.entityType || 'account'
+                        message.matchSelection?.entityType || 'account',
+                        message.id
                       );
                     }}
                     onCreateEntity={(pendingIntent, entityKind, queryName) => {
@@ -391,6 +769,7 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
                       refreshResolution(message.id, newQuery, entityType, pendingIntent);
                     }}
                   />
+                  </div>
                 </div>
               )}
 
@@ -416,33 +795,37 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
                   pendingIntent: {
                     function: message.awaitingClarification.originalIntent.function,
                     arguments: message.awaitingClarification.originalIntent.arguments,
+                    // G-1: forward inferred siblings so the chain-create resume can replay them
+                    additionalActions: message.awaitingClarification.originalIntent.additionalActions,
                   },
                 };
                 return (
                   <div className="max-w-full">
-                    {message.thinkingSteps && message.thinkingSteps.length > 0 && (
-                      <details className="mb-2 text-xs" open>
-                        <summary className="cursor-pointer text-muted-foreground hover:text-foreground flex items-center gap-1">
-                          <span>🧠</span>
-                          <span>{locale === 'zh-Hans' ? '思考过程' : 'Thinking process'}</span>
-                        </summary>
-                        <div className="mt-1.5 pl-4 space-y-1 text-muted-foreground">
-                          {message.thinkingSteps.map((step, idx) => (
-                            <div key={idx} className="flex items-center gap-2">
-                              <span className="text-primary">✓</span>
-                              <span>{step.label}</span>
-                              {step.detail && <span>· {step.detail}</span>}
-                            </div>
-                          ))}
-                        </div>
-                      </details>
-                    )}
+                    {/* Reason text \u2014 moved out of the card. Falls back to the
+                        agent's own content (e.g. clarification question) when
+                        the entity/function info isn't enough to derive one. */}
+                    {(() => {
+                      const reason = buildMatchReasonText({
+                        entityType,
+                        query: pr.query,
+                        pendingFn: message.awaitingClarification?.originalIntent.function,
+                        locale: locale === 'zh-Hans' ? 'zh-Hans' : 'en-US',
+                      }) || message.content;
+                      if (!reason) return null;
+                      return (
+                        <p className={cn('text-foreground mb-2 leading-relaxed', getChatFontClass())}>
+                          {reason}
+                        </p>
+                      );
+                    })()}
+                    <div className={cn('rounded-2xl', pulseCardId === message.id && 'ring-2 ring-primary ring-offset-2 ring-offset-background animate-pulse')}>
                     <MatchSelectionCard
                       messageId={message.id}
                       matchSelection={adapted}
                       resolved={message.resolutionState === 'resolved'}
+                      resolutionResult={message.resolutionResult}
                       onContinueWithSelection={(record, pendingIntent) => {
-                        continuePendingAction(record, pendingIntent, entityType);
+                        continuePendingAction(record, pendingIntent, entityType, message.id);
                       }}
                       onCreateEntity={(pendingIntent, entityKind, queryName) => {
                         createEntityForResolution(pendingIntent, entityKind, queryName, message.id);
@@ -454,58 +837,17 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
                         refreshResolution(message.id, newQuery, et, pendingIntent);
                       }}
                     />
+                    </div>
                   </div>
                 );
               })()}
 
               {/* Agent Message (also renders awaiting-clarification thinking/streaming as generic text) */}
-              {(message.type === 'agent' || (message.type === 'awaiting-clarification' && (message.isThinking || message.isStreaming || !message.awaitingClarification))) && (() => {
+              {(message.type === 'agent' || (message.type === 'awaiting-clarification' && (message.isThinking || message.isStreaming || !message.awaitingClarification))) && message.taskRole !== 'overview' && message.taskRole !== 'announce' && (() => {
                 // Thinking state - show progress steps
                 if (message.isThinking && message.thinkingSteps) {
                   return (
                     <div className="flex flex-col gap-2 max-w-[85%] py-2">
-                      {/* Thinking Dots */}
-                      <div className="flex items-center gap-2">
-                        {thinkingDotStyle === 'bounce' && (
-                          <div className="flex items-center gap-1">
-                            <motion.span className="w-1.5 h-1.5 bg-primary rounded-full" animate={{ y: [0, -4, 0] }} transition={{ duration: 0.5, repeat: Infinity, delay: 0 }} />
-                            <motion.span className="w-1.5 h-1.5 bg-primary rounded-full" animate={{ y: [0, -4, 0] }} transition={{ duration: 0.5, repeat: Infinity, delay: 0.1 }} />
-                            <motion.span className="w-1.5 h-1.5 bg-primary rounded-full" animate={{ y: [0, -4, 0] }} transition={{ duration: 0.5, repeat: Infinity, delay: 0.2 }} />
-                          </div>
-                        )}
-                        {thinkingDotStyle === 'pulse' && (
-                          <div className="flex items-center gap-1">
-                            <motion.span className="w-1.5 h-1.5 bg-primary rounded-full" animate={{ scale: [1, 1.4, 1], opacity: [1, 0.5, 1] }} transition={{ duration: 0.8, repeat: Infinity, delay: 0 }} />
-                            <motion.span className="w-1.5 h-1.5 bg-primary rounded-full" animate={{ scale: [1, 1.4, 1], opacity: [1, 0.5, 1] }} transition={{ duration: 0.8, repeat: Infinity, delay: 0.15 }} />
-                            <motion.span className="w-1.5 h-1.5 bg-primary rounded-full" animate={{ scale: [1, 1.4, 1], opacity: [1, 0.5, 1] }} transition={{ duration: 0.8, repeat: Infinity, delay: 0.3 }} />
-                          </div>
-                        )}
-                        {thinkingDotStyle === 'wave' && (
-                          <div className="flex items-center gap-1">
-                            <motion.span className="w-1.5 h-1.5 bg-primary rounded-full" animate={{ y: [0, -3, 0, 3, 0] }} transition={{ duration: 1, repeat: Infinity, delay: 0, ease: 'easeInOut' as const }} />
-                            <motion.span className="w-1.5 h-1.5 bg-primary rounded-full" animate={{ y: [0, -3, 0, 3, 0] }} transition={{ duration: 1, repeat: Infinity, delay: 0.15, ease: 'easeInOut' as const }} />
-                            <motion.span className="w-1.5 h-1.5 bg-primary rounded-full" animate={{ y: [0, -3, 0, 3, 0] }} transition={{ duration: 1, repeat: Infinity, delay: 0.3, ease: 'easeInOut' as const }} />
-                          </div>
-                        )}
-                        {thinkingDotStyle === 'fade' && (
-                          <div className="flex items-center gap-1">
-                            <motion.span className="w-1.5 h-1.5 bg-primary rounded-full" animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1.2, repeat: Infinity, delay: 0 }} />
-                            <motion.span className="w-1.5 h-1.5 bg-primary rounded-full" animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1.2, repeat: Infinity, delay: 0.2 }} />
-                            <motion.span className="w-1.5 h-1.5 bg-primary rounded-full" animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1.2, repeat: Infinity, delay: 0.4 }} />
-                          </div>
-                        )}
-                        {thinkingDotStyle === 'orbit' && (
-                          <div className="relative w-5 h-5 flex items-center justify-center">
-                            <span className="absolute w-1.5 h-1.5 bg-primary/30 rounded-full" />
-                            <motion.span
-                              className="absolute w-1.5 h-1.5 bg-primary rounded-full"
-                              animate={{ rotate: 360 }}
-                              transition={{ duration: 1, repeat: Infinity, ease: 'linear' as const }}
-                              style={{ transformOrigin: 'center', x: 5 }}
-                            />
-                          </div>
-                        )}
-                      </div>
                       {/* Thinking Steps */}
                       <div className="space-y-1">
                         {message.thinkingSteps.filter((step) => step.status !== 'pending').map((step, idx) => (
@@ -513,7 +855,7 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
                             {step.status === 'completed' ? (
                               <span className="text-primary">✓</span>
                             ) : step.status === 'active' ? (
-                              <span className="w-3 h-3 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+                              <ThinkingIndicator />
                             ) : null}
                             <span className={cn(
                               step.status === 'completed' && 'text-muted-foreground',
@@ -537,21 +879,15 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
                     <div>
                       {/* Show completed thinking steps in collapsed form */}
                       {message.thinkingSteps && message.thinkingSteps.length > 0 && (
-                        <details className="mb-2 text-xs" open>
-                          <summary className="cursor-pointer text-muted-foreground hover:text-foreground flex items-center gap-1">
-                            <span>🧠</span>
-                            <span>{locale === 'zh-Hans' ? '思考过程' : 'Thinking process'}</span>
-                          </summary>
-                          <div className="mt-1.5 pl-4 space-y-1 text-muted-foreground">
-                            {message.thinkingSteps.map((step, idx) => (
-                              <div key={idx} className="flex items-center gap-2">
-                                <span className="text-primary">✓</span>
-                                <span>{step.label}</span>
-                                {step.detail && <span>· {step.detail}</span>}
-                              </div>
-                            ))}
-                          </div>
-                        </details>
+                        <div className="mb-2 text-xs space-y-1 text-muted-foreground">
+                          {message.thinkingSteps.map((step, idx) => (
+                            <div key={idx} className="flex items-center gap-2">
+                              <span className="text-primary">✓</span>
+                              <span>{step.label}</span>
+                              {step.detail && <span>· {step.detail}</span>}
+                            </div>
+                          ))}
+                        </div>
                       )}
                       <div className={cn('text-foreground', getChatFontClass())}>
                         <MarkdownContent content={message.content || ''} />
@@ -567,21 +903,15 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
                   <div>
                     {/* Show completed thinking steps in collapsed form */}
                     {message.thinkingSteps && message.thinkingSteps.length > 0 && (
-                      <details className="mb-2 text-xs" open>
-                        <summary className="cursor-pointer text-muted-foreground hover:text-foreground flex items-center gap-1">
-                          <span>🧠</span>
-                          <span>{locale === 'zh-Hans' ? '思考过程' : 'Thinking process'}</span>
-                        </summary>
-                        <div className="mt-1.5 pl-4 space-y-1 text-muted-foreground">
-                          {message.thinkingSteps.map((step, idx) => (
-                            <div key={idx} className="flex items-center gap-2">
-                              <span className="text-primary">✓</span>
-                              <span>{step.label}</span>
-                              {step.detail && <span>· {step.detail}</span>}
-                            </div>
-                          ))}
-                        </div>
-                      </details>
+                      <div className="mb-2 text-xs space-y-1 text-muted-foreground">
+                        {message.thinkingSteps.map((step, idx) => (
+                          <div key={idx} className="flex items-center gap-2">
+                            <span className="text-primary">✓</span>
+                            <span>{step.label}</span>
+                            {step.detail && <span>· {step.detail}</span>}
+                          </div>
+                        ))}
+                      </div>
                     )}
                     
                     {isJson && isEmpty ? (
@@ -595,7 +925,7 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
                     ) : isJson ? (
                       <DynamicDataRenderer content={message.content} />
                     ) : (
-                      <div className={cn('text-foreground mb-3', getChatFontClass())}>
+                      <div className={cn('text-foreground mb-1', getChatFontClass())}>
                         <MarkdownContent content={message.content} />
                       </div>
                     )}
@@ -607,43 +937,76 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
                         additionalIntents={message.additionalIntents}
                       />
                     )}
+                    {/* Action bar: timestamp + copy + play — hidden for queue substeps */}
+                    {message.content && !isJson && !message.isThinking && !message.isStreaming && !isQueueSubstep && (
+                      <div className="flex items-center justify-between mt-0.5">
+                        <p className="text-[9px] text-muted-foreground">
+                          {new Date(message.timestamp).toLocaleTimeString(locale === 'zh-Hans' ? 'zh-CN' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                        <div className="flex items-center gap-0.5">
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(message.content);
+                            }}
+                            className="p-1 rounded hover:bg-muted/50 transition-colors text-muted-foreground hover:text-foreground"
+                            aria-label="Copy"
+                          >
+                            <Copy className="w-3 h-3" />
+                          </button>
+                          <button
+                            onClick={() => speakMessage(message.id, message.content)}
+                            className="p-1 rounded hover:bg-muted/50 transition-colors inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                            aria-label={speakingMessageId === message.id ? 'Stop' : 'Play'}
+                          >
+                            {speakingMessageId === message.id ? (
+                              <>
+                                <span className="flex items-end gap-0.5 h-3">
+                                  <span className="w-0.5 bg-primary rounded-full animate-pulse h-[60%]" />
+                                  <span className="w-0.5 bg-primary rounded-full animate-pulse h-full [animation-delay:0.15s]" />
+                                  <span className="w-0.5 bg-primary rounded-full animate-pulse h-[40%] [animation-delay:0.3s]" />
+                                </span>
+                                <span className="text-[10px] text-primary">Stop</span>
+                              </>
+                            ) : (
+                              <Volume2 className="w-3 h-3" />
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })()}
               
               {/* Form Card Message */}
-              {message.type === 'form-card' && message.formCard && (
+              {message.type === 'form-card' && message.formCard && !message.isStreaming && (
                 <div className="max-w-full">
                   {/* Show thinking steps if present */}
                   {message.thinkingSteps && message.thinkingSteps.length > 0 && (
-                    <details className="mb-2 text-xs" open>
-                      <summary className="cursor-pointer text-muted-foreground hover:text-foreground flex items-center gap-1">
-                        <span>🧠</span>
-                        <span>{locale === 'zh-Hans' ? '思考过程' : 'Thinking process'}</span>
-                      </summary>
-                      <div className="mt-1.5 pl-4 space-y-1 text-muted-foreground">
-                        {message.thinkingSteps.map((step, idx) => (
-                          <div key={idx} className="flex items-center gap-2">
-                            <span className="text-primary">✓</span>
-                            <span>{step.label}</span>
-                            {step.detail && <span>· {step.detail}</span>}
-                          </div>
-                        ))}
-                      </div>
-                    </details>
+                    <div className="mb-2 text-xs space-y-1 text-muted-foreground">
+                      {message.thinkingSteps.map((step, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <span className="text-primary">✓</span>
+                          <span>{step.label}</span>
+                          {step.detail && <span>· {step.detail}</span>}
+                        </div>
+                      ))}
+                    </div>
                   )}
                   {message.content && (
                     <p className="text-sm text-foreground mb-2">{message.content}</p>
                   )}
-                  <FormCard 
-                    messageId={message.id} 
-                    formCard={message.formCard}
-                  />
+                  <div className={cn('rounded-2xl', pulseCardId === message.id && 'ring-2 ring-primary ring-offset-2 ring-offset-background animate-pulse')}>
+                    <FormCard 
+                      messageId={message.id} 
+                      formCard={message.formCard}
+                    />
+                  </div>
                 </div>
               )}
               
               {/* Record List Card (query results) */}
-              {message.recordList && (
+              {message.recordList && !message.isStreaming && (
                 <div className="max-w-full mt-3">
                   <RecordListCard
                     type={message.recordList.type}
@@ -653,7 +1016,8 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
           {/* Thinking dots removed - now shown inline in thinking message */}
         </>
       )}
@@ -662,8 +1026,9 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
   );
   };
 
-  const renderInputArea = () => (
-    <>
+  // Pills + attachment preview only (no input bar). Used above the bottom-anchored input wrapper.
+  const renderInputExtras = () => (
+    <div className="shrink-0">
       {/* Quick Action Pills - highlighted when showing clarification suggestions */}
       <div className={cn(
         'px-3 pb-2 pt-1 border-t',
@@ -671,41 +1036,85 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
           ? 'border-primary/30 bg-primary/5' 
           : 'border-border/20'
       )}>
-        {hasClarificationSuggestions && (
-          <p className="text-xs text-primary mb-2 font-medium">
-            {locale === 'zh-Hans' ? '请选择一个操作：' : 'Please choose an option:'}
-          </p>
-        )}
-        <div className="flex flex-wrap gap-2">
-          {quickActions.map((action: { text: string; query: string; action?: { function: string; arguments: Record<string, unknown> } }, idx: number) => (
-            <button
-              key={idx}
-              onClick={() => {
-                // If action has function info, execute directly without LLM re-analysis
-                if (action.action) {
-                  executeClarificationAction(
-                    action.action.function,
-                    action.action.arguments,
-                    action.text
-                  );
-                } else {
-                  // Regular query - send as message
-                  sendMessage(action.query);
-                }
-              }}
-              disabled={isSending}
-              className={cn(
-                'px-3 py-1.5 rounded-full text-xs font-medium',
-                'transition-all active:scale-95',
-                'disabled:opacity-50 disabled:cursor-not-allowed',
-                hasClarificationSuggestions
-                  ? 'bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 hover:border-primary/50'
-                  : 'bg-muted/50 hover:bg-muted text-foreground border border-border/50 hover:border-border'
-              )}
-            >
-              {action.text}
-            </button>
-          ))}
+        {/* Center the pills to the same max-width column as the input bar so that
+            on wide screens they cluster near the (centered) composer instead of
+            stretching across the full panel width. */}
+        <div className="mx-auto w-full max-w-md">
+          {hasClarificationSuggestions && (
+            <p className="text-xs text-primary mb-2 font-medium">
+              {locale === 'zh-Hans' ? '请选择一个操作：' : 'Please choose an option:'}
+            </p>
+          )}
+          {/* min-height keeps the bar a constant height so pills fade out → skeleton
+              → pills fade in without a layout jump. */}
+          <div className="relative min-h-[30px] flex items-center">
+            <AnimatePresence mode="wait" initial={false}>
+              {(hasClarificationSuggestions || suggestionStatus === 'ready') ? (
+                <motion.div
+                  key="pills"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.18 }}
+                  className="flex gap-2 overflow-x-auto w-full [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+                >
+                  {quickActions.map((action: { text: string; query: string; action?: { function: string; arguments: Record<string, unknown> } }, idx: number) => (
+                    <button
+                      key={idx}
+                      onClick={() => {
+                        // While a blocking card is unresolved the composer is locked; the
+                        // suggestion pills must be locked too, otherwise tapping one would
+                        // send a new message and bypass the card. Route the tap to the
+                        // card instead (same behaviour as the disabled composer).
+                        if (inputLocked) {
+                          guideToBlockingCard();
+                          return;
+                        }
+                        // If action has function info, execute directly without LLM re-analysis
+                        if (action.action) {
+                          executeClarificationAction(
+                            action.action.function,
+                            action.action.arguments,
+                            action.text
+                          );
+                        } else {
+                          // Regular query - send as message
+                          shouldAutoScrollRef.current = true;
+                          sendMessage(action.query);
+                        }
+                      }}
+                      disabled={isSending}
+                      className={cn(
+                        'shrink-0 whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-medium',
+                        'transition-all active:scale-95',
+                        'disabled:opacity-50 disabled:cursor-not-allowed',
+                        inputLocked && 'opacity-50 cursor-not-allowed',
+                        hasClarificationSuggestions
+                          ? 'bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 hover:border-primary/50'
+                          : 'bg-muted/50 hover:bg-muted text-foreground border border-border/50 hover:border-border'
+                      )}
+                    >
+                      {action.text}
+                    </button>
+                  ))}
+                </motion.div>
+              ) : suggestionStatus === 'generating' ? (
+                <motion.div
+                  key="skeleton"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.18 }}
+                  className="flex gap-2"
+                  aria-label={locale === 'zh-Hans' ? '正在生成建议' : 'Generating suggestions'}
+                >
+                  <div className="h-[26px] w-16 rounded-full bg-muted/60 animate-pulse" />
+                  <div className="h-[26px] w-24 rounded-full bg-muted/60 animate-pulse" />
+                  <div className="h-[26px] w-20 rounded-full bg-muted/60 animate-pulse" />
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+          </div>
         </div>
       </div>
 
@@ -727,12 +1136,14 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
                   <div className="w-16 h-16 rounded-lg border border-border/50 bg-muted/50 flex flex-col items-center justify-center">
                     <Paperclip className="w-5 h-5 text-muted-foreground" />
                     <span className="text-[8px] text-muted-foreground mt-1 px-1 truncate max-w-full">
-                      {attachment.file.name.length > 8 ? attachment.file.name.slice(0, 8) + '...' : attachment.file.name}
+                      {attachment.file.name}
                     </span>
                   </div>
                 )}
                 <button
                   onClick={() => handleRemoveAttachment(index)}
+                  aria-label={locale === 'zh-Hans' ? '移除附件' : 'Remove attachment'}
+                  title={locale === 'zh-Hans' ? '移除附件' : 'Remove attachment'}
                   className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                 >
                   <X className="w-3 h-3" />
@@ -742,117 +1153,226 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
           </div>
         </div>
       )}
+    </div>
+  );
 
-      {/* Input Bar */}
-      <div className="px-3 pb-3 pt-2">
-        <div className="relative p-[2px] rounded-2xl">
-          <div className="absolute inset-0 rounded-2xl neon-glow-blur" />
-          <div className="absolute inset-0 rounded-2xl neon-glow" />
-          
-          <div className="relative flex items-center gap-2 p-2 rounded-[14px] bg-background" style={{ backgroundColor: 'var(--background)' }}>
-            {/* Hidden file input */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
-              multiple
-              onChange={handleFileSelect}
-              className="hidden"
-            />
+  // Bottom-anchored input wrapper. Same wrapper used in collapsed and expanded states
+  // so the input bar's position and width stay locked.
+  const renderInputWrapper = () => (
+    <div className="mx-auto w-full max-w-md px-3 pt-2 pb-3 shrink-0">
+      {renderInputBar()}
+    </div>
+  );
 
-            {/* Camera/Attachment Button */}
-            <button
-              type="button"
-              onClick={handleAttachmentClick}
-              className="w-10 h-10 flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-              aria-label={locale === 'zh-Hans' ? '添加附件' : 'Add attachment'}
-            >
-              <Paperclip className="w-5 h-5" />
-            </button>
-            {/* Input Field */}
-            <input
-              ref={inputRef}
-              type="text"
-              value={inputValue}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setInputValue(e.target.value)}
-              onKeyDown={handleKeyDown}
-              onCompositionStart={handleCompositionStart}
-              onCompositionEnd={handleCompositionEnd}
-              onFocus={handleInputFocus}
-              placeholder={locale === 'zh-Hans' ? '向 Copilot 提问...' : 'Ask Copilot...'}
-              className="flex-1 bg-transparent border-0 outline-none text-sm text-foreground placeholder:text-muted-foreground"
-            />
+  // The neon-glow input pill — must be visually identical in collapsed dock and expanded panel.
+  // Don't inline this anywhere; both states call it so style/size stay locked together.
+  const renderInputBar = () => (
+    <div className="relative p-[2px] rounded-2xl">
+      <div className="absolute inset-0 rounded-2xl neon-glow-blur" />
+      <div className="absolute inset-0 rounded-2xl neon-glow" />
 
-            {/* Send Button */}
-            {isSending ? (
+      <div className="relative flex items-end gap-2 p-2 rounded-[14px] bg-background">
+        {/* Hidden input: file/photo picker. On mobile the native sheet already
+            offers "Take Photo" as an option, so a separate camera shortcut is
+            redundant — a single attachment button covers both. */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+          multiple
+          onChange={handleFileSelect}
+          className="hidden"
+          aria-label={locale === 'zh-Hans' ? '选择照片或文件' : 'Choose photo or file'}
+        />
+
+        {/* Attachment button — opens the native picker directly (no popup menu) */}
+        <button
+          type="button"
+          onClick={() => { if (inputLocked) { guideToBlockingCard(); return; } fileInputRef.current?.click(); }}
+          disabled={inputLocked}
+          className={cn(
+            'w-10 h-10 flex items-center justify-center rounded-full transition-colors shrink-0',
+            inputLocked
+              ? 'text-muted-foreground/40 cursor-not-allowed'
+              : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+          )}
+          aria-label={locale === 'zh-Hans' ? '添加附件' : 'Add attachment'}
+          title={locale === 'zh-Hans' ? '添加附件' : 'Add attachment'}
+        >
+          <Paperclip className="w-5 h-5" />
+        </button>
+        {/* Input Field — auto-grows up to 4 lines, then scrolls internally */}
+        <textarea
+          ref={inputRef}
+          rows={1}
+          value={inputValue}
+          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setInputValue(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onCompositionStart={handleCompositionStart}
+          onCompositionEnd={handleCompositionEnd}
+          onFocus={handleInputFocus}
+          onPointerDown={(e: React.PointerEvent) => { if (inputLocked) { e.preventDefault(); guideToBlockingCard(); } }}
+          disabled={inputLocked}
+          placeholder={inputLocked
+            ? (locale === 'zh-Hans' ? '请先完成上方卡片' : 'Please complete the card above')
+            : (locale === 'zh-Hans' ? '向 Copilot 提问...' : 'Ask Copilot...')}
+          className={cn(
+            'flex-1 bg-transparent border-0 outline-none text-sm text-foreground placeholder:text-muted-foreground resize-none leading-5 py-2 self-end',
+            inputLocked && 'cursor-not-allowed opacity-60'
+          )}
+        />
+
+        {/* Right action — mutually exclusive: Stop / Send / Mic */}
+        {isSending ? (
+          <button
+            onClick={cancelSend}
+            className="w-10 h-10 rounded-full flex items-center justify-center text-red-500 hover:bg-muted/50 transition-colors shrink-0"
+            aria-label={locale === 'zh-Hans' ? '停止' : 'Stop'}
+            title={locale === 'zh-Hans' ? '停止' : 'Stop'}
+          >
+            <Square className="w-4 h-4 fill-current" />
+          </button>
+        ) : inputLocked ? (
+          <button
+            type="button"
+            onClick={guideToBlockingCard}
+            className="w-10 h-10 flex items-center justify-center rounded-full text-muted-foreground/40 cursor-not-allowed shrink-0"
+            aria-label={locale === 'zh-Hans' ? '请先完成上方卡片' : 'Please complete the card above'}
+            title={locale === 'zh-Hans' ? '请先完成上方卡片' : 'Please complete the card above'}
+          >
+            <Mic className="w-5 h-5" />
+          </button>
+        ) : !isListening && inputValue.trim() ? (
+          <button
+            onClick={() => { if (inputValue.trim()) { handleSend(inputValue); } }}
+            className="w-10 h-10 flex items-center justify-center transition-all text-primary hover:brightness-125 shrink-0"
+            aria-label={locale === 'zh-Hans' ? '发送' : 'Send'}
+            title={locale === 'zh-Hans' ? '发送' : 'Send'}
+          >
+            <ArrowUp className="w-5 h-5" />
+          </button>
+        ) : speechSupported ? (
+          <button
+            type="button"
+            onPointerDown={handleMicPointerDown}
+            onPointerUp={handleMicPointerUp}
+            onPointerLeave={handleMicPointerLeave}
+            className={cn(
+              'w-10 h-10 flex items-center justify-center rounded-full transition-colors touch-none select-none shrink-0',
+              isListening
+                ? 'bg-red-500/15 text-red-500 animate-pulse'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+            )}
+            aria-label={
+              isListening
+                ? (locale === 'zh-Hans' ? '点击停止聆听' : 'Tap to stop listening')
+                : (locale === 'zh-Hans' ? '按住说话 · 轻点持续聆听' : 'Hold to talk · tap to keep listening')
+            }
+            title={
+              isListening
+                ? (locale === 'zh-Hans' ? '点击停止聆听' : 'Tap to stop listening')
+                : (locale === 'zh-Hans' ? '按住说话 · 轻点持续聆听' : 'Hold to talk · tap to keep listening')
+            }
+          >
+            <Mic className="w-5 h-5" />
+          </button>
+        ) : (
+          <button
+            onClick={() => {}}
+            disabled
+            className="w-10 h-10 flex items-center justify-center text-muted-foreground cursor-not-allowed shrink-0"
+            aria-label={locale === 'zh-Hans' ? '发送' : 'Send'}
+            title={locale === 'zh-Hans' ? '发送' : 'Send'}
+          >
+            <ArrowUp className="w-5 h-5" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  // Expanded panel overlay mode
+  // ─── Unified ActionDock: single container morphs from collapsed dock to expanded panel ───
+    const panelChrome = (
+      <div className="shrink-0">
+        {/* Drag handle — hidden in full-screen */}
+        {/* Drag handle — hidden in side-docked mode */}
+        {!isFullScreen && !isSideDocked && (
+          <div
+            className="flex justify-center py-2 cursor-grab active:cursor-grabbing touch-none"
+            onPointerDown={(e: React.PointerEvent) => dragControls.start(e)}
+          >
+            <div className="w-10 h-1 rounded-full bg-muted-foreground/30" />
+          </div>
+        )}
+
+        {/* Header */}
+        <div className={cn(
+          'flex items-center justify-between px-4 py-2 border-b border-border/30',
+          isFullScreen && 'safe-area-top pt-3'
+        )}>
+          {/* Collapse button — hidden in side-docked mode (always open).
+              In side-docked mode the title moves into this left slot since
+              there's no collapse button to balance the layout. */}
+          {isSideDocked ? (
+            <div className="flex items-center gap-2">
+              {isFullScreen && <Sparkles className="w-5 h-5 text-primary" />}
+              <span className="text-sm font-medium text-foreground">Sales Copilot</span>
+              {isConnected && <span className="w-2 h-2 bg-green-500 rounded-full" />}
+              {isConnecting && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
+              {debugMode && (
+                <button
+                  type="button"
+                  onClick={() => setFrameViewerOpen(true)}
+                  className="ml-1 w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                  title={locale === 'zh-Hans' ? 'Frame 影子模式 · 销售专家思考记录' : 'Frame shadow mode · sales-coach reasoning log'}
+                  aria-label="Frame shadow log"
+                >
+                  <ScrollText className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          ) : (
+          <button
+            onClick={isFullScreen && !binaryMode ? () => openPanel(false) : handleClose}
+            className="w-8 h-8 flex items-center justify-center rounded-lg transition-all hover:brightness-125 active:brightness-75"
+            aria-label={
+              locale === 'zh-Hans'
+                ? (isFullScreen && !binaryMode ? '返回面板' : '收起')
+                : (isFullScreen && !binaryMode ? 'Back to panel' : 'Collapse')
+            }
+          >
+            <ChevronDown className="w-4 h-4 text-foreground" />
+          </button>
+          )}
+          {/* Centered title — only in non-docked (float/mobile) layout. */}
+          {!isSideDocked && (
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-foreground">Sales Copilot</span>
+            {isConnected && <span className="w-2 h-2 bg-green-500 rounded-full" />}
+            {isConnecting && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
+            {debugMode && (
               <button
-                onClick={() => {}}
-                className="w-10 h-10 rounded-full flex items-center justify-center text-red-500 hover:bg-muted/50 transition-colors"
+                type="button"
+                onClick={() => setFrameViewerOpen(true)}
+                className="ml-1 w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                title={locale === 'zh-Hans' ? 'Frame 影子模式 · 销售专家思考记录' : 'Frame shadow mode · sales-coach reasoning log'}
+                aria-label="Frame shadow log"
               >
-                <Square className="w-4 h-4 fill-current" />
-              </button>
-            ) : (
-              <button
-                onClick={() => inputValue.trim() && sendMessage(inputValue)}
-                disabled={!inputValue.trim()}
-                className={cn(
-                  'w-10 h-10 flex items-center justify-center transition-all',
-                  inputValue.trim()
-                    ? 'text-primary hover:brightness-125'
-                    : 'text-muted-foreground cursor-not-allowed'
-                )}
-                aria-label={locale === 'zh-Hans' ? '发送' : 'Send'}
-              >
-                <ArrowUp className="w-5 h-5" />
+                <ScrollText className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
-        </div>
-      </div>
-    </>
-  );
-
-  // Full screen overlay mode
-  if (mode === 'overlay' && isFullScreen) {
-    return (
-      <>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[60] bg-background flex flex-col"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border/30 safe-area-top">
-          <button
-            onClick={handleClose}
-            className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-muted/50 transition-colors"
-            aria-label={locale === 'zh-Hans' ? '关闭' : 'Close'}
-          >
-            <X className="w-5 h-5 text-foreground" />
-          </button>
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-primary" />
-            <span className="text-sm font-medium text-foreground">Ask Copilot</span>
-            {isConnected && <span className="w-2 h-2 bg-green-500 rounded-full" />}
-            {isConnecting && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
+          )}
+          <div className="flex items-center gap-1">
             <button
-              type="button"
-              onClick={() => setFrameViewerOpen(true)}
-              className="ml-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold text-orange-700 bg-orange-100 hover:bg-orange-200 transition-colors"
-              title={locale === 'zh-Hans' ? 'Frame 影子模式 · 销售专家思考记录' : 'Frame shadow mode · sales-coach reasoning log'}
-              aria-label="Frame shadow log"
+              onClick={() => { shouldAutoScrollRef.current = true; startNewConversation(); }}
+              className="w-8 h-8 flex items-center justify-center rounded-lg transition-all hover:brightness-125 active:brightness-75"
+              aria-label={locale === 'zh-Hans' ? '新会话' : 'New session'}
             >
-              F
+              <SquarePen className="w-4 h-4 text-foreground" />
             </button>
           </div>
-          <button
-            onClick={() => startNewConversation()}
-            className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-muted/50 transition-colors"
-            aria-label={locale === 'zh-Hans' ? '新会话' : 'New session'}
-          >
-            <SquarePen className="w-5 h-5 text-foreground" />
-          </button>
         </div>
 
         {/* Context Chips */}
@@ -897,166 +1417,147 @@ export function CopilotPanel({ mode, onClose }: CopilotPanelProps) {
             </div>
           </div>
         )}
-
-        {/* Messages */}
-        {renderMessages()}
-
-        {/* Input */}
-        <div className="safe-area-bottom">
-          {renderInputArea()}
-        </div>
-      </motion.div>
-      <FrameShadowViewer open={frameViewerOpen} onClose={() => setFrameViewerOpen(false)} locale={locale} />
-      </>
+      </div>
     );
-  }
 
-  // Expanded panel overlay mode
-  if (mode === 'overlay') {
+    // ─── Unified ActionDock: single container morphs from collapsed dock to expanded panel ───
+    // Same input bar JSX renders in both collapsed and expanded states (via renderInputBar),
+    // so style/size stay locked together. Container animates its height.
     return (
-      <AnimatePresence>
-        {isOpen && (
-          <>
-            {/* Backdrop */}
+      <>
+        <AnimatePresence>
+          {isOpen && !isSideDocked && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
               className="fixed inset-0 z-[55] bg-black/30 backdrop-blur-sm"
               onClick={handleClose}
             />
-            
-            {/* Panel */}
-            <motion.div
-              ref={panelRef}
-              drag="y"
-              dragControls={dragControls}
-              dragListener={false}
-              dragConstraints={{ top: 0, bottom: 0 }}
-              dragElastic={{ top: 0.3, bottom: 0.5 }}
-              onDragEnd={(_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
-                if (info.offset.y < -80 || info.velocity.y < -500) {
-                  openPanel(true);
-                } else if (info.offset.y > 80 || info.velocity.y > 500) {
-                  closePanel();
-                }
-              }}
-              initial={{ y: '100%' }}
-              animate={{ y: 0 }}
-              exit={{ y: '100%' }}
-              transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 z-[60] bg-background/98 backdrop-blur-xl flex flex-col safe-area-bottom"
-              style={{ 
-                height: '78vh',
-                borderTopLeftRadius: 20, 
-                borderTopRightRadius: 20,
-                boxShadow: '0 -8px 32px -4px rgba(0, 0, 0, 0.15), 0 -4px 16px -4px rgba(0, 0, 0, 0.1)'
-              }}
-            >
-              {/* Drag handle */}
-              <div 
-                className="flex justify-center py-2 cursor-grab active:cursor-grabbing touch-none"
-                onPointerDown={(e: React.PointerEvent) => dragControls.start(e)}
-              >
-                <div className="w-10 h-1 rounded-full bg-muted-foreground/30" />
-              </div>
+          )}
+        </AnimatePresence>
 
-              {/* Header */}
-              <div className="flex items-center justify-between px-4 py-2 border-b border-border/30">
-                <button
-                  onClick={handleClose}
-                  className="w-8 h-8 flex items-center justify-center rounded-lg transition-all hover:brightness-125 active:brightness-75"
-                  aria-label={locale === 'zh-Hans' ? '收起' : 'Collapse'}
-                >
-                  <ChevronDown className="w-4 h-4 text-foreground" />
-                </button>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-foreground">Ask Copilot</span>
-                  {isConnected && <span className="w-2 h-2 bg-green-500 rounded-full" />}
-                  {isConnecting && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
-                  <button
-                    type="button"
-                    onClick={() => setFrameViewerOpen(true)}
-                    className="ml-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold text-orange-700 bg-orange-100 hover:bg-orange-200 transition-colors"
-                    title={locale === 'zh-Hans' ? 'Frame 影子模式 · 销售专家思考记录' : 'Frame shadow mode · sales-coach reasoning log'}
-                    aria-label="Frame shadow log"
-                  >
-                    F
-                  </button>
-                </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => startNewConversation()}
-                    className="w-8 h-8 flex items-center justify-center rounded-lg transition-all hover:brightness-125 active:brightness-75"
-                    aria-label={locale === 'zh-Hans' ? '新会话' : 'New session'}
-                  >
-                    <SquarePen className="w-4 h-4 text-foreground" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Context Chips */}
-              {shouldShowContext && (
-                <div className="px-4 py-2 border-b border-border/20 bg-muted/30">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs text-muted-foreground">
-                      {locale === 'zh-Hans' ? '当前上下文:' : 'Context:'}
-                    </span>
-                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 border border-primary/20">
-                      <span className="text-xs font-medium text-primary">
-                        {pageContext.currentPage}
-                      </span>
-                      {((pageContext.pageData as Record<string, unknown>)?.accountName as string | undefined) && (
-                        <span className="text-xs text-primary/80">
-                          {' · '}{(pageContext.pageData as Record<string, unknown>).accountName as string}
-                        </span>
-                      )}
-                      {((pageContext.pageData as Record<string, unknown>)?.contactName as string | undefined) && (
-                        <span className="text-xs text-primary/80">
-                          {' · '}{(pageContext.pageData as Record<string, unknown>).contactName as string}
-                        </span>
-                      )}
-                      {((pageContext.pageData as Record<string, unknown>)?.opportunityName as string | undefined) && (
-                        <span className="text-xs text-primary/80">
-                          {' · '}{(pageContext.pageData as Record<string, unknown>).opportunityName as string}
-                        </span>
-                      )}
-                      {((pageContext.pageData as Record<string, unknown>)?.activitySubject as string | undefined) && (
-                        <span className="text-xs text-primary/80">
-                          {' · '}{(pageContext.pageData as Record<string, unknown>).activitySubject as string}
-                        </span>
-                      )}
+        <motion.div
+          ref={panelRef}
+          initial={false}
+          animate={isSideDocked
+            ? undefined
+            : { height: (isFullScreen || (binaryMode && isOpen)) ? '100vh' : isOpen ? '78vh' : 'auto' }
+          }
+          transition={{ type: 'spring', damping: 32, stiffness: 280 }}
+          drag={isOpen && !isSideDocked ? 'y' : false}
+          dragControls={dragControls}
+          dragListener={false}
+          dragConstraints={{ top: 0, bottom: 0 }}
+          dragElastic={{ top: 0.3, bottom: 0.5 }}
+          onDragEnd={(_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+            if (isFullScreen) {
+              // Full-screen: down-swipe collapses. On mobile / binary mode we skip the
+              // 78vh mid state (too little room) and close all the way to the dock.
+              if (info.offset.y > 80 || info.velocity.y > 500) {
+                if (isMobile || binaryMode) closePanel();
+                else openPanel(false);
+              }
+              return;
+            }
+            if (info.offset.y < -80 || info.velocity.y < -500) {
+              openPanel(true);
+            } else if (info.offset.y > 80 || info.velocity.y > 500) {
+              closePanel();
+            }
+          }}
+          className={cn(
+            'flex flex-col overflow-clip safe-area-bottom min-h-0',
+            'bg-background/80 backdrop-blur-md',
+            // Float mode: fixed bottom sheet overlay
+            !isSideDocked && 'fixed bottom-0 left-0 right-0 z-[60] border-t border-border/50',
+            !isSideDocked && isOpen && !isFullScreen && 'rounded-t-[20px]',
+            // Side-docked mode: inline flex child, not fixed/absolute.
+            // flex-1 makes it share space 1:1 with the content area.
+            // pt-14: push content below the fixed page header that spans full width.
+            isSideDocked && 'h-full flex-1 min-w-0 max-w-[50%] border-border/50 pt-14',
+            isSideDocked && effectiveLayout === 'right' && 'border-l',
+            isSideDocked && effectiveLayout === 'left' && 'border-r',
+          )}
+          style={
+            isOpen && !isSideDocked
+              ? { boxShadow: '0 -8px 32px -4px rgba(0, 0, 0, 0.15), 0 -4px 16px -4px rgba(0, 0, 0, 0.1)' }
+              : isSideDocked && isOpen
+                ? { boxShadow: '0 0 24px -4px rgba(0, 0, 0, 0.1)' }
+                : undefined
+          }
+          data-component="copilot-unified-dock"
+        >
+          {isOpen ? (
+            <>
+              {panelChrome}
+              {renderMessages()}
+              {/* Side-docked: show page quick actions above input since collapsed dock is hidden */}
+              {isSideDocked && dockChips.length > 0 && (
+                <div className="px-3 py-2 border-t border-border/20 flex items-center gap-2 flex-wrap shrink-0">
+                  {dockChips.map((c) => {
+                    const Icon = c.busy ? Loader2 : c.icon;
+                    return (
                       <button
-                        onClick={handleDismissContext}
-                        className="ml-0.5 w-4 h-4 flex items-center justify-center rounded-full hover:bg-primary/20 transition-colors"
-                        aria-label={locale === 'zh-Hans' ? '移除上下文' : 'Remove context'}
+                        key={c.id}
+                        onClick={c.disabled ? undefined : c.onClick}
+                        disabled={c.disabled}
+                        className={cn(
+                          'flex items-center gap-1.5 px-3 py-1.5',
+                          'rounded-full bg-muted/50 border border-border/50',
+                          'text-xs font-medium text-foreground',
+                          'transition-all',
+                          c.disabled
+                            ? 'opacity-50 cursor-not-allowed'
+                            : 'hover:bg-muted active:scale-95'
+                        )}
                       >
-                        <X className="w-3 h-3 text-primary" />
+                        <Icon className={cn('w-3.5 h-3.5 text-primary', c.busy && 'animate-spin')} />
+                        <span>{c.label}</span>
                       </button>
-                    </div>
-                  </div>
+                    );
+                  })}
                 </div>
               )}
+              {renderInputExtras()}
+            </>
+          ) : isSideDocked ? null : (
+            <div className="mx-auto w-full max-w-md flex flex-col gap-2 px-3 pt-2 pb-0 overflow-y-auto flex-1">
+              {dockSlot !== null ? (
+                <div className="flex justify-center">{dockSlot}</div>
+              ) : dockChips.length > 0 ? (
+                <div className="flex items-center justify-center gap-2 flex-wrap">
+                  {dockChips.map((c) => {
+                    const Icon = c.busy ? Loader2 : c.icon;
+                    return (
+                      <button
+                        key={c.id}
+                        onClick={c.disabled ? undefined : c.onClick}
+                        disabled={c.disabled}
+                        className={cn(
+                          'flex items-center gap-2 px-4 py-2.5',
+                          'rounded-full bg-background border border-border/60 shadow-sm',
+                          'text-xs font-medium text-foreground',
+                          'transition-transform',
+                          c.disabled ? 'opacity-50 cursor-not-allowed' : 'active:scale-95'
+                        )}
+                      >
+                        <Icon className={cn('w-4 h-4 text-primary', c.busy && 'animate-spin')} />
+                        <span>{c.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
+          )}
+          {/* Input bar — always rendered inside the panel container */}
+          {(!isSideDocked || isOpen) && renderInputWrapper()}
+        </motion.div>
 
-              {/* Messages */}
-              {renderMessages()}
 
-              {/* Input */}
-              {renderInputArea()}
-            </motion.div>
-          </>
-        )}
-        <FrameShadowViewer open={frameViewerOpen} onClose={() => setFrameViewerOpen(false)} locale={locale} />
-      </AnimatePresence>
+        <PipelineViewer open={frameViewerOpen} onClose={() => setFrameViewerOpen(false)} locale={locale} />
+      </>
     );
-  }
-
-  // Embedded mode (for home page) - just renders content, no container
-  return (
-    <div className="flex flex-col h-full">
-      {renderMessages()}
-      {renderInputArea()}
-      <FrameShadowViewer open={frameViewerOpen} onClose={() => setFrameViewerOpen(false)} locale={locale} />
-    </div>
-  );
 }

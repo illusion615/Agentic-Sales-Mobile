@@ -8,20 +8,9 @@ import { formatCurrencyFull } from '@/lib/format-currency';
 import { useCopilot } from '@/contexts/copilot-context';
 // Import Choice field mappings from generated models (not hardcoded)
 import {
-  ActivityDraftstatusKeyToLabel,
-  ActivityOutcomeKeyToLabel,
-  ActivityTypeKeyToLabel,
-} from '@/generated/models/activity-model';
-import {
   OpportunityConfidencetrendKeyToLabel,
   OpportunityStageKeyToLabel,
 } from '@/generated/models/opportunity-model';
-import {
-  AccountCreditstatusKeyToLabel,
-  AccountPaymentstatusKeyToLabel,
-  AccountRegionKeyToLabel,
-  AccountTierKeyToLabel,
-} from '@/generated/models/account-model';
 
 // Simple markdown renderer - handles basic formatting without external dependencies
 function SimpleMarkdown({ content }: { content: string }) {
@@ -257,7 +246,7 @@ type EntityType = 'activity' | 'opportunity' | 'account' | 'contact' | 'product'
 const entityPatterns: Record<EntityType, string[]> = {
   activity: ['activity', 'activities', 'visit', 'visits', 'task', 'tasks', 'meeting', 'meetings', 'call', 'calls', 'scheduleddate', 'scheduledDate', 'draftstatusKey', 'typeKey', 'TypeKey0', 'TypeKey1', 'TypeKey2', 'TypeKey3', 'TypeKey4'],
   opportunity: ['opportunity', 'opportunities', 'deal', 'deals', 'pipeline', 'stageKey', 'totalamount', 'expectedclosedate', 'confidence'],
-  account: ['account', 'accounts', 'customer', 'customers', 'client', 'clients', 'company', 'companies', 'tierKey', 'creditstatusKey', 'regionKey'],
+  account: ['account', 'accounts', 'customer', 'customers', 'client', 'clients', 'company', 'companies'],
   contact: ['contact', 'contacts', 'person', 'people', 'employee', 'employees'],
   product: ['product', 'products', 'item', 'items', 'sku', 'inventory'],
   order: ['order', 'orders', 'invoice', 'invoices', 'purchase'],
@@ -299,9 +288,6 @@ const fieldDisplayNames: Record<string, Record<string, string>> = {
     phone: 'Phone',
     email: 'Email',
     industry: 'Industry',
-    tierKey: 'Tier',
-    regionKey: 'Region',
-    lastcontactedon: 'Last Contacted',
     blocker: 'Blocker',
     lastaction: 'Last Action',
   },
@@ -327,9 +313,6 @@ const fieldDisplayNames: Record<string, Record<string, string>> = {
     phone: '电话',
     email: '邮箱',
     industry: '行业',
-    tierKey: '等级',
-    regionKey: '区域',
-    lastcontactedon: '最后联系',
     blocker: '障碍',
     lastaction: '最近动作',
   },
@@ -355,28 +338,17 @@ const keyLabelMappings: Record<string, Record<string, string>> = {
   // Opportunity stage
   stageKey: createDisplayMapping(OpportunityStageKeyToLabel),
   stage: createDisplayMapping(OpportunityStageKeyToLabel),
-  // Activity draft status
-  draftstatusKey: createDisplayMapping(ActivityDraftstatusKeyToLabel),
-  status: createDisplayMapping(ActivityDraftstatusKeyToLabel),
+  // Activity status
+  status: { open: 'Open', completed: 'Completed', canceled: 'Canceled' },
   // Activity type
-  typeKey: createDisplayMapping(ActivityTypeKeyToLabel),
-  type: createDisplayMapping(ActivityTypeKeyToLabel),
-  // Activity outcome
-  outcomeKey: { ...ActivityOutcomeKeyToLabel },
-  // Account tier
-  tierKey: { ...AccountTierKeyToLabel },
-  // Account region
-  regionKey: { ...AccountRegionKeyToLabel },
+  typeKey: { visit: 'Visit', call: 'Call', meeting: 'Meeting', email: 'Email' },
+  type: { visit: 'Visit', call: 'Call', meeting: 'Meeting', email: 'Email' },
   // Opportunity confidence trend - use arrow symbols for display
   confidencetrendKey: {
     ConfidencetrendKey0: '↑',
     ConfidencetrendKey1: '↓',
     ConfidencetrendKey2: '→',
   },
-  // Account credit status
-  creditstatusKey: { ...AccountCreditstatusKeyToLabel },
-  // Account payment status
-  paymentstatusKey: { ...AccountPaymentstatusKeyToLabel },
 };
 
 // Helper to get label from any key value (case-insensitive)
@@ -385,18 +357,6 @@ function getKeyLabel(value: string | undefined): string | undefined {
   if (!value) return undefined;
   
   // Direct match from imported mappings first (source of truth)
-  // Activity type
-  if (value in ActivityTypeKeyToLabel) {
-    return capitalizeLabel(ActivityTypeKeyToLabel[value as keyof typeof ActivityTypeKeyToLabel]);
-  }
-  // Activity status
-  if (value in ActivityDraftstatusKeyToLabel) {
-    return capitalizeLabel(ActivityDraftstatusKeyToLabel[value as keyof typeof ActivityDraftstatusKeyToLabel]);
-  }
-  // Activity outcome
-  if (value in ActivityOutcomeKeyToLabel) {
-    return ActivityOutcomeKeyToLabel[value as keyof typeof ActivityOutcomeKeyToLabel];
-  }
   // Opportunity stage
   if (value in OpportunityStageKeyToLabel) {
     return capitalizeLabel(OpportunityStageKeyToLabel[value as keyof typeof OpportunityStageKeyToLabel]);
@@ -405,41 +365,12 @@ function getKeyLabel(value: string | undefined): string | undefined {
   if (value in OpportunityConfidencetrendKeyToLabel) {
     return OpportunityConfidencetrendKeyToLabel[value as keyof typeof OpportunityConfidencetrendKeyToLabel];
   }
-  // Account tier
-  if (value in AccountTierKeyToLabel) {
-    return AccountTierKeyToLabel[value as keyof typeof AccountTierKeyToLabel];
-  }
-  // Account region
-  if (value in AccountRegionKeyToLabel) {
-    return AccountRegionKeyToLabel[value as keyof typeof AccountRegionKeyToLabel];
-  }
-  // Account credit status
-  if (value in AccountCreditstatusKeyToLabel) {
-    return capitalizeLabel(AccountCreditstatusKeyToLabel[value as keyof typeof AccountCreditstatusKeyToLabel]);
-  }
-  // Account payment status
-  if (value in AccountPaymentstatusKeyToLabel) {
-    return capitalizeLabel(AccountPaymentstatusKeyToLabel[value as keyof typeof AccountPaymentstatusKeyToLabel]);
-  }
   
-  // Case-insensitive fallback for all mappings
+  // Case-insensitive fallback for opportunity mappings
   const lowerValue = value.toLowerCase();
   
-  // Check each imported mapping with case-insensitive match
-  for (const [key, label] of Object.entries(ActivityTypeKeyToLabel)) {
-    if (key.toLowerCase() === lowerValue) return capitalizeLabel(label);
-  }
-  for (const [key, label] of Object.entries(ActivityDraftstatusKeyToLabel)) {
-    if (key.toLowerCase() === lowerValue) return capitalizeLabel(label);
-  }
   for (const [key, label] of Object.entries(OpportunityStageKeyToLabel)) {
     if (key.toLowerCase() === lowerValue) return capitalizeLabel(label);
-  }
-  for (const [key, label] of Object.entries(AccountTierKeyToLabel)) {
-    if (key.toLowerCase() === lowerValue) return label;
-  }
-  for (const [key, label] of Object.entries(AccountRegionKeyToLabel)) {
-    if (key.toLowerCase() === lowerValue) return label;
   }
   
   return undefined;
@@ -448,19 +379,11 @@ function getKeyLabel(value: string | undefined): string | undefined {
 // Helper to get type label specifically (handles case variations)
 function getTypeLabel(typeValue: string | undefined): string {
   if (!typeValue) return '';
-  // Direct match from imported mapping (the source of truth)
-  const directFromSource = ActivityTypeKeyToLabel[typeValue as keyof typeof ActivityTypeKeyToLabel];
-  if (directFromSource) return capitalizeLabel(directFromSource);
   // Try keyLabelMappings as fallback
   const direct = keyLabelMappings.typeKey?.[typeValue] || keyLabelMappings.type?.[typeValue];
   if (direct) return direct;
-  // Case-insensitive match for ActivityTypeKeyToLabel
-  const lowerValue = typeValue.toLowerCase();
-  for (const [key, label] of Object.entries(ActivityTypeKeyToLabel)) {
-    if (key.toLowerCase() === lowerValue) return capitalizeLabel(label);
-  }
-  // Fallback - return original value
-  return typeValue;
+  // Fallback - capitalize the raw value
+  return capitalizeLabel(typeValue);
 }
 
 // Try to parse JSON from content
@@ -522,9 +445,8 @@ function detectEntityType(data: unknown): EntityType {
     return 'opportunity';
   }
   
-  // Account: has tierKey or regionKey or creditstatusKey (but NOT as nested field)
-  if (fields.includes('tierKey') || fields.includes('regionKey') || 
-      fields.includes('creditstatusKey') || fields.includes('paymentstatusKey')) {
+  // Account: has industry field or name1 without other specific entity markers
+  if (fields.includes('industry') && !fields.includes('stageKey') && !fields.includes('scheduleddate')) {
     return 'account';
   }
   
@@ -602,7 +524,7 @@ function formatCellValue(key: string, value: unknown, locale: Locale): string {
     const obj = value as Record<string, unknown>;
     if ('name1' in obj) return String(obj.name1);
     if ('title' in obj) return String(obj.title);
-    if ('id' in obj) return String(obj.id).slice(0, 8) + '...';
+    if ('id' in obj) return String(obj.id);
     return JSON.stringify(value);
   }
   
@@ -830,14 +752,10 @@ export function DynamicDataRenderer({ content }: DynamicDataRendererProps) {
         </div>
       );
     } else if (resolvedEntityType === 'account') {
-      const tier = (item.tierKey || item.tier) as string | undefined;
-      const region = (item.regionKey || item.region) as string | undefined;
       const industryValue = typeof item.industry === 'string' ? item.industry : null;
       secondaryInfo = (
         <div className="flex items-center gap-2 mt-1">
-          {tier && <span className="text-xs font-medium text-primary">{keyLabelMappings.tierKey?.[tier] || tier}</span>}
-          {region && <span className="text-xs text-muted-foreground">• {keyLabelMappings.regionKey?.[region] || region}</span>}
-          {industryValue && <span className="text-xs text-muted-foreground">• {industryValue}</span>}
+          {industryValue && <span className="text-xs text-muted-foreground">{industryValue}</span>}
         </div>
       );
     } else {

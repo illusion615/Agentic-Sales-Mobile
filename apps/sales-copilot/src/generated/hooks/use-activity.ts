@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ActivityService } from "../services/activity-service";
 import type { Activity } from "../models/activity-model";
-import type { IOperationOptions } from '../../../app-gen-sdk/data/common/types';
+import type { IOperationOptions } from '@microsoft/power-apps/data';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -15,6 +15,7 @@ export function useActivityList(options?: IOperationOptions) {
   return useQuery({
     queryKey: ["activity-list", options],
     queryFn: () => ActivityService.getAll(options),
+    staleTime: 60_000,
   });
 }
 
@@ -23,12 +24,18 @@ export function useActivityList(options?: IOperationOptions) {
  * @param id The id of the record (must be a valid UUID)
  */
 export function useActivity(id: string) {
+  const client = useQueryClient();
   return useQuery({
     queryKey: ["activity", id],
     queryFn: () => ActivityService.get(id),
     enabled: !!id && UUID_REGEX.test(id),
-    retry: false, // Don't retry on "record not found" errors
-    throwOnError: false, // Let component handle errors gracefully
+    retry: false,
+    throwOnError: false,
+    placeholderData: () => {
+      const list = client.getQueryData<Activity[]>(["activity-list"]);
+      return list?.find((a) => a.id === id);
+    },
+    staleTime: 30_000,
   });
 }
 

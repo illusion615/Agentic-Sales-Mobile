@@ -3,38 +3,173 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useUser } from '@/hooks/use-user';
 import { useSettingsReady } from '@/contexts/settings-context';
 import { 
-  getCopilotConfig, 
-  getOrCreateConversation, 
-  sendUserContext, 
-  pollMessages,
-  clearConversation,
-  createWebSocketConnection,
-  type ConversationInfo,
-  type CopilotMessage
+  clearCopilotConversation,
 } from '@/services/copilot-service';
-import { getLocale, getLLMConfig, getSimulateStreaming, type Locale } from '@/lib/i18n';
+import { getLocale, getSimulateStreaming, type Locale } from '@/lib/i18n';
 import { toast } from 'sonner';
-import { processMessage, type ThinkingProgress } from '@/lib/copilot-agent';
-import type { AwaitingClarification, ResolutionItem } from '@/lib/agent-utils';
+import { type ThinkingProgress, type AgentResponse, type IntentResult, type ThinkingStep } from '@/lib/copilot-agent';
+import { emptyState, hydrateConversationState, commitConversationState, buildStateSnapshot, recordConversationState, type ConversationState, type FocusPageContext, type EntityType } from '@/lib/conversation-state';
+import { buildQueueFromIntent, findIntentByMessageId, type IntentQueue } from '@/lib/intent-queue';
+import type * as QR from '@/lib/intent-queue-runtime';
+
+// Lazy-load the queue runtime — it pulls in function-executor.ts which is heavy.
+const loadQR = () => import('@/lib/intent-queue-runtime');
+import { narrateTask, type PriorTaskOutcome } from '@/lib/task-narrator';
+import { extractEntitySeed, type AwaitingClarification, type ResolutionItem } from '@/lib/agent-utils';
 import { extractVisitDataFromText, type ExtractedVisitData } from '@/lib/visit-extraction';
+import { putAttachments, toAttachmentMeta, type CopilotAttachment, type AttachmentMeta } from '@/lib/attachments';
+import { assignAttachmentsToIntent } from '@/lib/attachment-assign';
+import {
+  pickLabel, buildOverviewMessage, buildAnnounceMessage,
+  hasMessageAfterLastUser, collapseEarlierTasks, extractPriorOutcomes,
+  PERSIST_KEY, PERSIST_SCHEMA_VERSION, PERSIST_TTL_MS, type PersistEnvelope,
+} from './copilot-helpers';
 
-// Re-export ExtractedVisitData for consumers that import from context
-export type { ExtractedVisitData } from '@/lib/visit-extraction';
+type IntentsOverview = NonNullable<AgentResponse['intentsOverview']>;
 
-export interface ThinkingStep {
-  stage: 'intent' | 'matching' | 'executing' | 'generating';
-  status: 'pending' | 'active' | 'completed';
-  label: string;
-  detail?: string;
+/**
+ * Invalidate React Query caches after a write, covering BOTH the list key the
+ * handler reports AND the matching single-record family the open detail page
+ * subscribes to.
+ *
+ * Handlers return list keys like `account-list`; a detail page uses
+ * `['account', id]`. Invalidating only the list leaves the page the user is
+ * looking at stale. For every `<entity>-list` we also invalidate `<entity>`
+ * (prefix match → refreshes every open `[entity, id]` query). Bare keys are
+ * invalidated as-is and also get their `-list` sibling refreshed.
+ */
+function invalidateRelatedQueries(
+  queryClient: ReturnType<typeof useQueryClient>,
+  keys: string[],
+): void {
+  const seen = new Set<string>();
+  const invalidateExact = (k: string) => {
+    if (seen.has(k)) return;
+    seen.add(k);
+    queryClient.invalidateQueries({ queryKey: [k] });
+  };
+  for (const key of keys) {
+    invalidateExact(key);
+    if (key.endsWith('-list')) {
+      // e.g. 'activity-list' → also refresh every ['activity', id] detail query.
+      invalidateExact(key.slice(0, -'-list'.length));
+    } else {
+      // e.g. 'activity' → also refresh the ['activity-list'] collection.
+      invalidateExact(`${key}-list`);
+    }
+  }
 }
+
+/**
+ * Build a business-meaningful acknowledgement for a single queued intent.
+ *
+ * Replaces the old generic "Preparing..." with a sentence that states WHAT the
+ * agent is about to do and WHICH record/values are involved, plus the action
+ * the user is expected to take next (review & confirm the card below).
+ * Derived purely from the parsed intent (function + arguments + label).
+ */
+function buildQueueAck(intent: IntentResult, locale: Locale): string {
+  const isZh = locale === 'zh-Hans';
+  const a = intent.arguments ?? {};
+  const title = (a.title ?? a.name ?? a.fullName ?? '') as string;
+  const account = (a.accountName ?? '') as string;
+  const contact = (a.contactName ?? '') as string;
+  const dateRaw = (a.scheduledDate ?? a.expectedCloseDate ?? '') as string;
+  const dateStr = dateRaw
+    ? new Date(dateRaw).toLocaleDateString(isZh ? 'zh-CN' : 'en-US', { month: 'short', day: 'numeric' })
+    : '';
+  const q = (s: string) => (isZh ? `「${s}」` : `"${s}"`);
+  // NOTE (Phase 3b): the ack must NOT promise UI that the runtime may not produce.
+  // A draft can end in a clarification card (no draft card), and an update executes
+  // with no card at all. So we only state what's KNOWN before running — that we're
+  // preparing a draft (the card that follows carries its own Confirm/Cancel, and a
+  // clarification card carries its own question). No "review the card below /
+  // I'll save once you confirm" promises that contradict reality (D3).
+
+  switch (intent.function) {
+    case 'draftActivity': {
+      const who = contact ? (isZh ? `与${contact}` : ` with ${contact}`) : '';
+      const when = dateStr ? `${dateStr} ` : '';
+      const what = title ? q(title) : account ? (isZh ? `对${account}的活动` : `an activity for ${account}`) : (isZh ? '一项活动' : 'an activity');
+      return isZh
+        ? `好的，我来为你准备${when}${who}的活动${what}。`
+        : `Sure — let me prepare ${when}${what}${who}.`;
+    }
+    case 'draftOpportunity':
+      return isZh
+        ? `好的，我来为你准备商机${title ? q(title) : ''}${account ? `（${account}）` : ''}。`
+        : `Sure — let me prepare the opportunity ${title ? q(title) : ''}${account ? ` (${account})` : ''}.`;
+    case 'draftContact':
+      return isZh
+        ? `好的，我来为你准备联系人${title ? q(title) : ''}${account ? `（${account}）` : ''}。`
+        : `Sure — let me prepare the contact ${title ? q(title) : ''}${account ? ` (${account})` : ''}.`;
+    case 'draftAccount':
+      return isZh
+        ? `好的，我来为你准备客户${title ? q(title) : ''}。`
+        : `Sure — let me prepare the account ${title ? q(title) : ''}.`;
+    case 'updateActivity':
+    case 'updateOpportunity':
+    case 'updateContact':
+    case 'updateAccount': {
+      // Update functions execute directly in the queue (no confirmation card).
+      const target = title || contact || account;
+      return isZh
+        ? `好的，正在更新${target ? q(target) : '该记录'}…`
+        : `Got it — updating ${target ? q(target) : 'the record'}…`;
+    }
+    default:
+      if (intent.userFacingLabel) return isZh ? intent.userFacingLabel.zh : intent.userFacingLabel.en;
+      return isZh ? '好的，我来处理。' : "Sure — on it.";
+  }
+}
+
+/**
+ * Build an acknowledgement for a multi-step plan. Truthful + outcome-aware:
+ * steps that EXECUTE immediately (update / query) vs steps that produce a draft
+ * card for confirmation (draft) are knowable before running, so we phrase the
+ * confirmation note only when at least one draft step exists — never the blanket
+ * "confirm each" that misled the user when an update had already executed (D2).
+ */
+function buildMultiStepAck(intent: IntentResult, stepCount: number, locale: Locale): string {
+  const isZh = locale === 'zh-Hans';
+  const labels: string[] = [];
+  if (intent.userFacingLabel) labels.push(isZh ? intent.userFacingLabel.zh : intent.userFacingLabel.en);
+  for (const act of intent.additionalActions ?? []) {
+    if (act.userFacingLabel) labels.push(isZh ? act.userFacingLabel.zh : act.userFacingLabel.en);
+  }
+  // Does the plan include any draft step (which renders a confirmation card)?
+  const fns = [intent.function, ...((intent.additionalActions ?? []).map((x) => x.function))];
+  const hasDraft = fns.some((f) => typeof f === 'string' && f.startsWith('draft'));
+  const confirmNote = hasDraft
+    ? (isZh ? '需要确认的我会以卡片形式呈现。' : "I'll show a card for anything that needs your confirmation.")
+    : '';
+  if (labels.length > 0) {
+    const list = labels.join(isZh ? '、' : ', ');
+    return isZh
+      ? `好的，我来处理这 ${stepCount} 项：${list}。${confirmNote}`
+      : `On it — handling these ${stepCount} tasks: ${list}. ${confirmNote}`.trimEnd();
+  }
+  return isZh
+    ? `好的，我来处理这 ${stepCount} 项任务。${confirmNote}`
+    : `On it — handling ${stepCount} tasks. ${confirmNote}`.trimEnd();
+}
+
+export type { ExtractedVisitData } from '@/lib/visit-extraction';
+export type { ThinkingStep } from '@/lib/copilot-agent';
 
 export interface ChatMessage {
   id: string;
   type: 'user' | 'agent' | 'stage-card' | 'form-card' | 'batch-form-card' | 'match-selection' | 'clarification' | 'awaiting-clarification';
   role?: 'user' | 'assistant';
   content: string;
+  /** IntentQueue id this message belongs to (queue-driven flows). */
+  queueId?: string;
+  /** QueueIntent id this message represents (queue-driven flows). */
+  queueIntentId?: string;
   audioUrl?: string;
   audioDuration?: number;
+  /** Files the user attached in the composer (lightweight meta; blobs live in the attachment store). */
+  attachments?: AttachmentMeta[];
   agentName?: string;
   functionCalled?: string;
   functionDisplayName?: string;
@@ -60,8 +195,10 @@ export interface ChatMessage {
     isNew: boolean;
     existingId?: string;
     data: Record<string, unknown>;
-    status?: 'pending' | 'confirmed' | 'modified';
+    status?: 'pending' | 'confirmed' | 'modified' | 'cancelled';
     createdRecordId?: string;
+    /** Attachment ids (resolved from the attachment store) to upload as Notes after create. */
+    attachmentIds?: string[];
   };
   // Batch form cards for multiple drafts
   batchFormCards?: {
@@ -70,8 +207,10 @@ export interface ChatMessage {
       isNew: boolean;
       data: Record<string, unknown>;
       batchIndex: number;
-      status?: 'pending' | 'confirmed' | 'modified';
+      status?: 'pending' | 'confirmed' | 'modified' | 'cancelled';
       createdRecordId?: string;
+      userFacingLabel?: { zh: string; en: string };
+      intentIndex?: number;
     }>;
     totalCount: number;
   };
@@ -154,26 +293,73 @@ export interface ChatMessage {
   // I-2 Stage 1: awaiting-clarification blocking state
   awaitingClarification?: AwaitingClarification;
   resolutionState?: 'blocked' | 'resolving' | 'resolved';
+  // Short result line shown on the match-selection / awaiting-clarification card
+  // once the user has acted on it. Used to lock the card and surface what was decided.
+  resolutionResult?: string;
+
+  // ===== Multi-intent task narrative (Phase A: fields plumbed; Phase B: emitted) =====
+  /** Groups every message belonging to a single task (announce + sub-steps + done line). */
+  taskGroupId?: string;
+  /** Role of this message inside its task group. Drives renderer choice. */
+  taskRole?: 'overview' | 'announce' | 'substep' | 'summary' | 'done-collapsed';
+  /** Payload for the task-announce bubble (only set when taskRole === 'announce'). */
+  taskAnnounce?: {
+    index: number;      // 1-based
+    total: number;
+    label: string;      // localized human label (e.g. "登记客户拜访")
+  };
+  /** Payload for the upfront overview line ("识别到 N 个意图：A、B、C"). */
+  taskOverview?: {
+    intents: Array<{ index: number; label: string }>;
+  };
+  /** Whether this message should currently render in collapsed form. Toggled by orchestrator. */
+  collapsed?: boolean;
+  /** One-line summary shown when this task group is collapsed. */
+  collapsedSummary?: string;
+  /** Result detail merged into announce (e.g. "5 records", "Updated", "Failed: ..."). Set by runtime. */
+  announceDetail?: string;
+  /** Execution status for announce messages: 'completed' | 'failed'. Set by runtime. */
+  announceStatus?: 'completed' | 'failed';
 }
 
 // Form fill callback type
 export type FormFillCallback = (data: Record<string, unknown>) => void;
 
-// Direct Line session refs for Copilot Studio multi-turn conversations
-export interface DirectLineTokenRef {
-  token: string;
-  expiresAt: number;
+/**
+ * §8: a "blocking card" requires user confirmation before the conversation can
+ * continue (draft form, batch draft, match selection, awaiting clarification).
+ * Query result lists and plain text replies do NOT block. Returns true when the
+ * given message carries an UNRESOLVED blocking card. Pure + exported for reuse
+ * (copilot-panel input-lock) and testing.
+ */
+export function isUnresolvedBlockingCard(m: ChatMessage): boolean {
+  // Draft form card — unresolved unless saved (confirmed) or cancelled.
+  if (m.formCard) {
+    const s = m.formCard.status;
+    return s !== 'confirmed' && s !== 'cancelled';
+  }
+  // Batch draft cards — unresolved while any item is still pending/modified.
+  if (m.batchFormCards) {
+    return m.batchFormCards.items.some((it) => it.status !== 'confirmed' && it.status !== 'cancelled');
+  }
+  // Match selection — unresolved until the user picks/skips (resolutionState).
+  if (m.matchSelection) {
+    return m.resolutionState !== 'resolved';
+  }
+  // Awaiting clarification — unresolved while blocked/resolving.
+  if (m.awaitingClarification) {
+    return m.resolutionState !== 'resolved';
+  }
+  // Clarification question card — unresolved until answered.
+  if (m.clarification) {
+    return m.resolutionState !== 'resolved';
+  }
+  return false;
 }
 
-export interface DirectLineConversationRef {
-  conversationId: string;
-  streamUrl?: string;
-  watermark?: string;
-}
-
-export interface DirectLineSessionRefs {
-  tokenRef: React.MutableRefObject<DirectLineTokenRef | null>;
-  conversationRef: React.MutableRefObject<DirectLineConversationRef | null>;
+/** §8: true when ANY message currently carries an unresolved blocking card. */
+export function hasUnresolvedBlockingCard(messages: ChatMessage[]): boolean {
+  return messages.some(isUnresolvedBlockingCard);
 }
 
 interface CopilotContextValue {
@@ -195,7 +381,8 @@ interface CopilotContextValue {
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
   isSending: boolean;
   setIsSending: (value: boolean) => void;
-  sendMessage: (text: string) => void;
+  sendMessage: (text: string, attachments?: CopilotAttachment[]) => void;
+  cancelSend: () => void;
   inputValue: string;
   setInputValue: (value: string) => void;
   
@@ -221,14 +408,12 @@ interface CopilotContextValue {
   // Extract structured visit data using Copilot Studio
   extractVisitData: (text: string, findAccountByName: (name: string) => { id: string; name1?: string } | undefined) => Promise<ExtractedVisitData | null>;
   
-  // Direct Line session refs for Copilot Studio
-  directLineSessionRefs: DirectLineSessionRefs;
-  
   // Continue pending action after match selection
   continuePendingAction: (
     selectedRecord: { id: string; name: string; accountId?: string; accountName?: string },
     pendingIntent: { function: string; arguments: Record<string, unknown> },
-    entityType: 'account' | 'contact' | 'opportunity' | 'activity'
+    entityType: 'account' | 'contact' | 'opportunity' | 'activity',
+    sourceMessageId?: string
   ) => Promise<void>;
   
   // Create new record from intent (skip match selection)
@@ -236,18 +421,20 @@ interface CopilotContextValue {
     pendingIntent: { function: string; arguments: Record<string, unknown> }
   ) => Promise<void>;
 
-  // Unified resolution: chain-create the missing entity (e.g. open a draftContact form, then resume the parked main intent)
+  // Unified resolution: chain-create the missing entity (e.g. open a draftContact form, then resume the parked main intent).
+  // entityKind === 'activity' means "create new activity anyway, ignore the duplicate matches" — runs the original draftActivity intent.
   createEntityForResolution: (
-    pendingIntent: { function: string; arguments: Record<string, unknown> },
-    entityKind: 'contact' | 'account' | 'opportunity',
+    pendingIntent: { function: string; arguments: Record<string, unknown>; additionalActions?: Array<{ function: string; arguments: Record<string, unknown>; reason?: string }> },
+    entityKind: 'contact' | 'account' | 'opportunity' | 'activity',
     queryName: string,
     blockedMsgId?: string
   ) => Promise<void>;
 
-  // Unified resolution: strip the unresolved entity from the args and open the main draft form so the user can pick in-form
+  // Unified resolution: strip the unresolved entity from the args and open the main draft form so the user can pick in-form.
+  // entityKind === 'activity' means "cancel this draft entirely" — no executeFunction call.
   skipResolutionAndDraft: (
     pendingIntent: { function: string; arguments: Record<string, unknown> },
-    entityKind: 'contact' | 'account' | 'opportunity',
+    entityKind: 'contact' | 'account' | 'opportunity' | 'activity',
     blockedMsgId?: string
   ) => Promise<void>;
 
@@ -274,7 +461,7 @@ interface CopilotContextValue {
   // Update form card status in a message (for persisting confirmed/modified state)
   updateFormCardStatus: (
     messageId: string,
-    status: 'pending' | 'confirmed' | 'modified',
+    status: 'pending' | 'confirmed' | 'modified' | 'cancelled',
     batchIndex?: number,
     createdRecordId?: string
   ) => void;
@@ -282,14 +469,61 @@ interface CopilotContextValue {
   // Rollback conversation to a specific message (removes that message and all after it)
   rollbackToMessage: (messageId: string) => void;
 
+  // Phase D: collapse / expand the substep messages of one task group.
+  toggleTaskGroupCollapsed: (groupId: string) => void;
+
   // I-2 Round 3: resume a parked intent after the user finishes creating a new contact via the inline draft form.
   completeParkedIntentWithNewContact: (contactId: string, contactName: string, accountId?: string, accountName?: string) => Promise<void>;
+  // Stage 5+: resume parked intent after creating a new account or opportunity via the inline draft form.
+  completeParkedIntentWithNewAccount: (accountId: string, accountName: string) => Promise<void>;
+  completeParkedIntentWithNewOpportunity: (opportunityId: string, opportunityName: string, accountId?: string, accountName?: string) => Promise<void>;
+
+  // Unified queue handlers for form-card. When the message belongs to an active IntentQueue
+  // (carries queueIntentId), these dispatch to the queue runtime; otherwise they fall back to
+  // the parked-intent legacy resume path.
+  formCardSaved: (args: {
+    messageId: string;
+    type: 'activity' | 'opportunity' | 'account' | 'contact';
+    recordId: string;
+    recordName?: string;
+    accountId?: string;
+    accountName?: string;
+    contactId?: string;
+    contactName?: string;
+    opportunityId?: string;
+    opportunityName?: string;
+  }) => Promise<void>;
+  formCardCancelled: (messageId: string) => Promise<void>;
 }
 
 export interface PageContext {
   currentPage: string;
   pageData?: unknown;
   summary?: string;
+}
+
+/**
+ * Map a PageContext to the minimal FocusPageContext for the conversation state
+ * layer (§5.2). pageData uses flat keys (accountId/accountName/opportunityId/…)
+ * set per page in src/pages/*-detail.tsx. Priority mirrors regardingobjectid:
+ * opportunity > account > contact.
+ */
+function pageContextToFocus(pc: PageContext | null): FocusPageContext | undefined {
+  const data = pc?.pageData as Record<string, unknown> | undefined;
+  if (!data) return undefined;
+  const pick = (idKey: string, nameKey: string, type: EntityType): FocusPageContext | undefined => {
+    const id = data[idKey];
+    const name = data[nameKey];
+    if (typeof name === 'string' && name) {
+      return { entityType: type, entityId: typeof id === 'string' ? id : undefined, entityName: name };
+    }
+    return undefined;
+  };
+  return (
+    pick('opportunityId', 'opportunityName', 'opportunity') ??
+    pick('accountId', 'accountName', 'account') ??
+    pick('contactId', 'contactName', 'contact')
+  );
 }
 
 const CopilotContext = createContext<CopilotContextValue | null>(null);
@@ -309,11 +543,21 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   
-  // Chat state - persist messages in sessionStorage to survive navigation
+  // Chat state - persist messages in localStorage so they survive Power Apps
+  // player restarts (sessionStorage is wiped when the host tab/iframe closes).
+  // Envelope: { v: schema version, savedAt: epoch ms, messages: [...] }.
+  // Bump PERSIST_SCHEMA_VERSION when ChatMessage shape changes incompatibly.
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     try {
-      const stored = sessionStorage.getItem('copilot-messages');
-      return stored ? JSON.parse(stored) : [];
+      const stored = localStorage.getItem(PERSIST_KEY);
+      if (!stored) return [];
+      const parsed = JSON.parse(stored) as PersistEnvelope | ChatMessage[];
+      // Back-compat: legacy plain-array shape
+      if (Array.isArray(parsed)) return parsed;
+      if (!parsed || typeof parsed !== 'object') return [];
+      if (parsed.v !== PERSIST_SCHEMA_VERSION) return [];
+      if (typeof parsed.savedAt === 'number' && Date.now() - parsed.savedAt > PERSIST_TTL_MS) return [];
+      return Array.isArray(parsed.messages) ? parsed.messages : [];
     } catch {
       return [];
     }
@@ -325,14 +569,81 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
   const messagesRef = useRef<ChatMessage[]>(messages);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
 
+  // Conversation State layer (§4.1): structured cross-turn business context.
+  // Held in a ref — read+written synchronously within a single sendMessage, so a
+  // ref avoids stale-closure reads (same rationale as messagesRef). Reset in
+  // startNewConversation. See src/lib/conversation-state.ts.
+  const conversationStateRef = useRef<ConversationState>(emptyState());
+
   // I-2 Round 3: parked intent — set when user replies 'create' to a contact awaiting-clarification.
   // The parked function is resumed by completeParkedIntentWithNewContact after the new contact is saved.
+  // G-1: also carries any inferred sibling intents (additionalActions) so they can be replayed
+  // as additional form-cards once the primary chain-create resume completes.
   const parkedIntentRef = useRef<{
     function: string;
     arguments: Record<string, unknown>;
     pendingKind: 'contact' | 'account' | 'opportunity';
     blockedMsgId: string;
+    additionalActions?: Array<{ function: string; arguments: Record<string, unknown>; reason?: string }>;
   } | null>(null);
+
+  // ===== IntentQueue: single source of truth for multi-step orchestration =====
+  // Replaces parkedIntentRef + replayAdditionalActions for any flow whose initial
+  // intent triggers queue mode (draft / batch / matching / awaitingClarification).
+  // Each card the queue produces carries queueId + queueIntentId so user actions
+  // (Save / Cancel / Pick / Skip) dispatch back into the queue runtime.
+  const queueRef = useRef<IntentQueue | null>(null);
+  const [, setQueueTick] = useState(0);
+  const bumpQueue = useCallback(() => setQueueTick((t) => t + 1), []);
+  const queryClientRef = useRef(queryClient);
+  useEffect(() => { queryClientRef.current = queryClient; }, [queryClient]);
+
+  const buildRuntimeDeps = useCallback((): QR.RuntimeDeps => ({
+    userId: user?.objectId,
+    userEmail: user?.userPrincipalName,
+    locale: (locale === 'zh-Hans' ? 'zh-Hans' : 'en-US') as 'zh-Hans' | 'en-US',
+    pushMessage: (msg) => {
+      const chatMsg = {
+        ...msg,
+        role: 'assistant' as const,
+        timestamp: typeof msg.timestamp === 'number' ? new Date(msg.timestamp).toISOString() : msg.timestamp,
+      } as unknown as ChatMessage;
+      setMessages((prev) => [...prev, chatMsg]);
+    },
+    patchMessage: (id, patch) => {
+      setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...(patch as Partial<ChatMessage>) } : m)));
+    },
+    invalidate: (keys) => {
+      if (!keys || keys.length === 0) return;
+      // Refresh both the list and the single-record family so the page the
+      // user is on (e.g. an activity detail) updates in place — not just lists.
+      invalidateRelatedQueries(queryClientRef.current, keys);
+    },
+    toast: (kind, msg) => {
+      if (kind === 'success') toast.success(msg);
+      else if (kind === 'error') toast.error(msg);
+      else toast(msg);
+    },
+  }), [user, locale]);
+
+  const runAndStoreQueue = useCallback(async (q: IntentQueue) => {
+    queueRef.current = q;
+    bumpQueue();
+    const after = await (await loadQR()).runQueue(q, buildRuntimeDeps());
+    queueRef.current = after;
+    bumpQueue();
+  }, [buildRuntimeDeps, bumpQueue]);
+
+  // Predicate: does this LLM intent need the queue to orchestrate it?
+  const shouldUseQueue = useCallback((intent: IntentResult | undefined): boolean => {
+    if (!intent || !intent.function) return false;
+    const draftFns = ['draftActivity', 'draftOpportunity', 'draftAccount', 'draftContact'];
+    if (draftFns.includes(intent.function)) return true;
+    if (intent.additionalActions && intent.additionalActions.length > 0) return true;
+    if (intent.requiresMatching) return true;
+    if (intent.resolutions && intent.resolutions.length > 0) return true;
+    return false;
+  }, []);
 
   // Persist messages to sessionStorage - only when all streaming/thinking is complete
   // Use a ref to track the last persisted snapshot and avoid redundant writes
@@ -354,17 +665,24 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       isThinking: undefined,
     }));
 
-    const json = JSON.stringify(persistableMessages);
+    const envelope: PersistEnvelope = {
+      v: PERSIST_SCHEMA_VERSION,
+      savedAt: Date.now(),
+      messages: persistableMessages as ChatMessage[],
+    };
+    const json = JSON.stringify(envelope);
 
-    // Skip if unchanged from last persisted snapshot
-    if (json === lastPersistedRef.current) {
+    // Skip if unchanged from last persisted snapshot (compare messages slice
+    // so the savedAt timestamp doesn't defeat the dedup).
+    const messagesJson = JSON.stringify(persistableMessages);
+    if (messagesJson === lastPersistedRef.current) {
       return;
     }
 
-    lastPersistedRef.current = json;
+    lastPersistedRef.current = messagesJson;
 
     try {
-      sessionStorage.setItem('copilot-messages', json);
+      localStorage.setItem(PERSIST_KEY, json);
     } catch (e) {
       console.warn('Failed to persist copilot messages:', e);
     }
@@ -431,10 +749,107 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // Phase D: toggle the collapsed state of every message in a task group.
+  // The announce bubble itself stays visible — only its sub-rows fold/unfold.
+  const toggleTaskGroupCollapsed = useCallback((groupId: string) => {
+    setMessages((prev) => {
+      const target = prev.find((m) => m.taskGroupId === groupId && m.taskRole === 'announce');
+      const nextCollapsed = !(target?.collapsed);
+      return prev.map((m) => (m.taskGroupId === groupId ? { ...m, collapsed: nextCollapsed } : m));
+    });
+  }, []);
+
+  // Phase C: fire an async LLM narration for a freshly-inserted announce
+  // message. Best-effort — on any failure the sync sentence stays put.
+  const kickOffNarration = useCallback((args: {
+    announceMsgId: string;
+    intentIndex: number;
+    taskIndex: number;
+    total: number;
+    label: string;
+    fnName: string;
+    locale: 'zh-Hans' | 'en';
+  }) => {
+    const { announceMsgId, intentIndex, taskIndex, total, label, fnName, locale: loc } = args;
+    const prior = extractPriorOutcomes(messagesRef.current, intentIndex);
+    // Skip the LLM round-trip for the very first task — sync sentence is fine.
+    if (prior.length === 0) return;
+    narrateTask({ taskIndex, total, label, fnName, prior, locale: loc })
+      .then((narration) => {
+        if (!narration?.announceText || narration.announceText === label) return;
+        setMessages((prev) => prev.map((m) => {
+          if (m.id !== announceMsgId) return m;
+          return {
+            ...m,
+            content: narration.announceText,
+            taskAnnounce: m.taskAnnounce
+              ? { ...m.taskAnnounce, label: narration.announceText }
+              : m.taskAnnounce,
+          };
+        }));
+      })
+      .catch((err) => console.warn('[copilot-context] narration error swallowed:', err));
+  }, []);
+
   // I-2 Round 3: resume a parked intent after the user finishes creating a new contact via the inline draft form.
   // Also propagates the new contact's account back into the parked args so the resumed form (e.g. Activity)
   // gets the correct account pre-filled — fixes the case where the agent only resolved the contact gap and
   // never resolved the account on its own.
+
+  // G-1: Replay any inferred sibling intents (additionalActions) after the parked primary intent resumes.
+  // Each sibling becomes an inline form-card so the user can confirm/edit it independently. Newly resolved
+  // ids/names from the chain (account/contact/opportunity) are merged into each sibling's args so they
+  // inherit the same context.
+  const replayAdditionalActions = useCallback(async (
+    actions: Array<{ function: string; arguments: Record<string, unknown>; reason?: string }> | undefined,
+    inheritedContext: Record<string, unknown>,
+  ) => {
+    if (!actions || actions.length === 0) return;
+    const { executeFunction } = await import('@/lib/function-executor');
+    const { getDisplayName } = await import('@/lib/function-registry');
+    for (let i = 0; i < actions.length; i++) {
+      const action = actions[i];
+      if (!action.function.startsWith('draft')) continue;
+      const mergedArgs: Record<string, unknown> = { ...action.arguments };
+      // Inherit ids/names from the resolved chain when the sibling didn't supply its own
+      for (const [key, val] of Object.entries(inheritedContext)) {
+        if (val != null && (mergedArgs[key] == null || mergedArgs[key] === '')) {
+          mergedArgs[key] = val;
+        }
+      }
+      try {
+        const result = await executeFunction(
+          action.function,
+          mergedArgs,
+          { userId: user?.objectId, userEmail: user?.userPrincipalName },
+        );
+        if (!result.success || !result.data) {
+          console.warn('[CopilotContext] replayAdditionalActions: draft failed', action.function, result.error);
+          continue;
+        }
+        const data = result.data as { type: string; isNew: boolean; data: Record<string, unknown> };
+        const fnDisplay = getDisplayName(action.function, locale === 'zh-Hans' ? 'zh-Hans' : 'en-US');
+        setMessages((prev) => [...prev, {
+          id: `msg-${Date.now()}-extra-${i}`,
+          type: 'form-card',
+          role: 'assistant',
+          content: action.reason || (locale === 'zh-Hans' ? '从对话中推断' : 'Inferred from conversation'),
+          functionCalled: action.function,
+          functionDisplayName: fnDisplay,
+          timestamp: new Date().toISOString(),
+          formCard: {
+            type: data.type as 'activity' | 'opportunity' | 'account' | 'contact',
+            isNew: data.isNew,
+            data: data.data,
+            status: 'pending',
+          },
+        }]);
+      } catch (err) {
+        console.warn('[CopilotContext] replayAdditionalActions error:', action.function, err);
+      }
+    }
+  }, [user, locale]);
+
   const completeParkedIntentWithNewContact = useCallback(async (contactId: string, contactName: string, accountId?: string, accountName?: string) => {
     const parked = parkedIntentRef.current;
     if (!parked || parked.pendingKind !== 'contact') return;
@@ -475,6 +890,13 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             status: 'pending',
           },
         }]);
+        // G-1: replay inferred siblings, inheriting the newly resolved contact + account
+        await replayAdditionalActions(parked.additionalActions, {
+          contactId,
+          contactName,
+          ...(accountId ? { accountId } : {}),
+          ...(accountName ? { accountName } : {}),
+        });
       } else {
         setMessages((prev) => [...prev, {
           id: `msg-${Date.now()}-resume-err`,
@@ -492,7 +914,96 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsSending(false);
     }
-  }, [user, locale]);
+  }, [user, locale, replayAdditionalActions]);
+
+  // Generic resume helper for the parked intent — used by both account and opportunity create paths.
+  // Patches the parked args with the newly created entity id/name (and any propagated parent), then
+  // re-runs the parked draft function and renders the resumed form-card.
+  const resumeParkedAfterEntityCreate = useCallback(async (
+    expectedKind: 'account' | 'opportunity',
+    patch: Record<string, unknown>,
+  ) => {
+    const parked = parkedIntentRef.current;
+    if (!parked || parked.pendingKind !== expectedKind) return;
+    parkedIntentRef.current = null;
+
+    const newArgs: Record<string, unknown> = { ...parked.arguments, ...patch };
+
+    setIsSending(true);
+    try {
+      const { executeFunction } = await import('@/lib/function-executor');
+      const { getDisplayName } = await import('@/lib/function-registry');
+      const fnResult = await executeFunction(
+        parked.function,
+        newArgs,
+        { userId: user?.objectId, userEmail: user?.userPrincipalName },
+      );
+      const fnDisplay = getDisplayName(parked.function, locale === 'zh-Hans' ? 'zh-Hans' : 'en-US');
+      const kindZh = expectedKind === 'account' ? '客户' : '商机';
+      const kindEn = expectedKind === 'account' ? 'Account' : 'Opportunity';
+
+      if (fnResult.success && fnResult.data) {
+        const formData = fnResult.data as { type: string; isNew: boolean; data: Record<string, unknown> };
+        setMessages((prev) => [...prev, {
+          id: `msg-${Date.now()}-resumed-form`,
+          type: 'form-card',
+          role: 'assistant',
+          content: locale === 'zh-Hans'
+            ? `${kindZh}已新建，请确认以下信息`
+            : `${kindEn} created. Please confirm the following information`,
+          functionCalled: parked.function,
+          functionDisplayName: fnDisplay,
+          timestamp: new Date().toISOString(),
+          formCard: {
+            type: formData.type as 'activity' | 'opportunity' | 'account' | 'contact',
+            isNew: formData.isNew,
+            data: formData.data,
+            status: 'pending',
+          },
+        }]);
+        // G-1: replay inferred siblings, inheriting the resolved entity ids/names
+        await replayAdditionalActions(parked.additionalActions, patch);
+      } else {
+        setMessages((prev) => [...prev, {
+          id: `msg-${Date.now()}-resume-err`,
+          type: 'agent',
+          role: 'assistant',
+          content: locale === 'zh-Hans'
+            ? `❌ 新建${kindZh}后恢复操作失败: ${fnResult.error}`
+            : `❌ Failed to resume after ${expectedKind} create: ${fnResult.error}`,
+          agentName: 'System',
+          timestamp: new Date().toISOString(),
+        }]);
+      }
+    } catch (err) {
+      console.error(`[CopilotContext] resume after ${expectedKind} create error:`, err);
+    } finally {
+      setIsSending(false);
+    }
+  }, [user, locale, replayAdditionalActions]);
+
+  const completeParkedIntentWithNewAccount = useCallback(async (
+    accountId: string,
+    accountName: string,
+  ) => {
+    await resumeParkedAfterEntityCreate('account', { accountId, accountName });
+  }, [resumeParkedAfterEntityCreate]);
+
+  const completeParkedIntentWithNewOpportunity = useCallback(async (
+    opportunityId: string,
+    opportunityName: string,
+    accountId?: string,
+    accountName?: string,
+  ) => {
+    const patch: Record<string, unknown> = { opportunityId, opportunityName };
+    // If parked args don't already have an account, propagate the opportunity's parent account.
+    const parked = parkedIntentRef.current;
+    if (parked) {
+      if (accountId && !parked.arguments.accountId) patch.accountId = accountId;
+      if (accountName && !parked.arguments.accountName) patch.accountName = accountName;
+    }
+    await resumeParkedAfterEntityCreate('opportunity', patch);
+  }, [resumeParkedAfterEntityCreate]);
   const pageContext = pageContextState;
   const pageContextRef = useRef<PageContext | null>(null);
   
@@ -503,8 +1014,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     pageContextRef.current = pageContext;
   }, [pageContext]);
 
-  // Extract structured visit data using Copilot Studio Direct Line
-  // Delegates to the visit-extraction helper module
+  // Extract structured visit data using Copilot Studio SDK connector
   const extractVisitData = useCallback(async (
     text: string,
     findAccountByName: (name: string) => { id: string; name1?: string } | undefined
@@ -513,9 +1023,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       text,
       findAccountByName,
       locale,
-      user?.objectId,
-      copilotConversationRef,
-      watermarkRef
+      user?.objectId
     );
   }, [locale, user]);
   
@@ -663,36 +1171,63 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     formFillCallbackRef.current = callback;
   }, []);
   
-  // Refs for copilot connection
-  const copilotConversationRef = useRef<ConversationInfo | null>(null);
-  const userContextSentRef = useRef(false);
-  const watermarkRef = useRef<string | undefined>(undefined);
-  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const isReconnectingRef = useRef(false);
-  const wsCleanupRef = useRef<(() => void) | null>(null);
+  // Refs for copilot UI state
   const typingMessageIdRef = useRef<string | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const streamingRafRef = useRef<number | null>(null);
+  const sendAbortRef = useRef<AbortController | null>(null);
 
-  // Direct Line session refs for Copilot Studio multi-turn conversations
-  const directLineTokenRef = useRef<DirectLineTokenRef | null>(null);
-  const directLineConversationRef = useRef<DirectLineConversationRef | null>(null);
-  const directLineSessionRefs: DirectLineSessionRefs = useMemo(() => ({
-    tokenRef: directLineTokenRef,
-    conversationRef: directLineConversationRef,
-  }), []);
+  // Cancel the current send — aborts pending LLM calls, stops streaming, resets UI.
+  const cancelSend = useCallback(() => {
+    // 1. Signal abort to any in-flight async work
+    if (sendAbortRef.current) {
+      sendAbortRef.current.abort();
+      sendAbortRef.current = null;
+    }
+    // 2. Stop streaming animation
+    if (streamingRafRef.current) {
+      cancelAnimationFrame(streamingRafRef.current);
+      streamingRafRef.current = null;
+    }
+    if (streamingIntervalRef.current) {
+      clearInterval(streamingIntervalRef.current);
+      streamingIntervalRef.current = null;
+    }
+    // 3. Finalise any thinking message → show what we have so far
+    setMessages((prev) => prev.map((msg) => {
+      if (msg.isThinking || msg.isStreaming) {
+        return {
+          ...msg,
+          isThinking: false,
+          isStreaming: false,
+          content: msg.content || (locale === 'zh-Hans' ? '已取消' : 'Cancelled'),
+        };
+      }
+      return msg;
+    }));
+    // 4. Reset sending state
+    setIsSending(false);
+  }, [locale]);
 
-  // Helper function to simulate streaming text effect
+  // Helper function to simulate streaming text effect — reveals character-by-character
+  // using requestAnimationFrame for buttery-smooth animation.
   const simulateStreamingText = useCallback((messageId: string, fullContent: string, agentName: string, timestamp: string, onComplete?: () => void) => {
-    // Clean up any existing streaming interval
+    // Clean up any existing streaming
+    if (streamingRafRef.current) {
+      cancelAnimationFrame(streamingRafRef.current);
+      streamingRafRef.current = null;
+    }
     if (streamingIntervalRef.current) {
       clearInterval(streamingIntervalRef.current);
       streamingIntervalRef.current = null;
     }
     
-    let currentIndex = 0;
-    const charsPerTick = 15; // Characters to add per tick (increased from 3 for performance)
-    const tickInterval = 50; // Milliseconds between ticks (increased from 20 for performance)
+    const totalChars = fullContent.length;
+    // Linear reveal: fixed chars per tick, no ease-out stalling
+    const charsPerTick = Math.max(3, Math.ceil(totalChars / 80)); // ~80 ticks total
+    const tickInterval = 30; // 30ms per tick → ~2.4s total
+    let revealedIndex = 0;
     
     // Start with empty content, then gradually reveal
     setMessages((prev) => {
@@ -703,7 +1238,6 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       // Check for duplicate
       const existingContents = new Set(filtered.filter((p) => p.type === 'agent').map((p) => p.content));
       if (existingContents.has(fullContent)) {
-        // Call onComplete even if duplicate to ensure isSending is cleared
         if (onComplete) onComplete();
         return filtered;
       }
@@ -721,283 +1255,40 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     
     typingMessageIdRef.current = null;
     
-    streamingIntervalRef.current = setInterval(() => {
-      currentIndex += charsPerTick;
-      const partialContent = fullContent.slice(0, currentIndex);
+    const animate = () => {
+      revealedIndex += charsPerTick;
       
-      if (currentIndex >= fullContent.length) {
-        // Done streaming
-        if (streamingIntervalRef.current) {
-          clearInterval(streamingIntervalRef.current);
-          streamingIntervalRef.current = null;
-        }
+      if (revealedIndex >= totalChars) {
+        // Done
         setMessages((prev) => prev.map((msg) =>
           msg.id === messageId
             ? { ...msg, content: fullContent, isStreaming: false }
             : msg
         ));
-        // Call onComplete callback when streaming finishes
+        if (streamingIntervalRef.current) {
+          clearInterval(streamingIntervalRef.current);
+          streamingIntervalRef.current = null;
+        }
         if (onComplete) onComplete();
       } else {
-        // Update with partial content
+        const partialContent = fullContent.slice(0, revealedIndex);
         setMessages((prev) => prev.map((msg) =>
           msg.id === messageId
             ? { ...msg, content: partialContent }
             : msg
         ));
       }
-    }, tickInterval);
+    };
+    
+    streamingIntervalRef.current = setInterval(animate, tickInterval);
   }, []);
 
-  // Helper function to show typing indicator for Copilot Studio
-  const showTypingIndicator = useCallback(() => {
-    // Clear any existing typing timeout
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-    }
-    
-    // If there's no existing typing message, create one
-    if (!typingMessageIdRef.current) {
-      const thinkingMsgId = `msg-${Date.now()}-typing`;
-      typingMessageIdRef.current = thinkingMsgId;
-      
-      const thinkingMessage: ChatMessage = {
-        id: thinkingMsgId,
-        type: 'agent',
-        role: 'assistant',
-        content: '',
-        agentName: 'Copilot',
-        timestamp: new Date().toISOString(),
-        isThinking: true,
-        thinkingSteps: [
-          { stage: 'generating', status: 'active', label: locale === 'zh-Hans' ? 'Copilot \u6b63\u5728\u601d\u8003...' : 'Copilot is thinking...' },
-        ],
-      };
-      setMessages((prev) => [...prev, thinkingMessage]);
-    }
-    
-    // Set timeout to remove typing indicator if no response (safety net)
-    typingTimeoutRef.current = setTimeout(() => {
-      if (typingMessageIdRef.current) {
-        setMessages((prev) => prev.filter((msg) => msg.id !== typingMessageIdRef.current));
-        typingMessageIdRef.current = null;
-      }
-    }, 30000); // 30 second timeout
-  }, [locale]);
-
-  // Helper function to clear typing indicator and add actual message
-  // Helper function to clear typing indicator and add actual message
-  const handleBotMessage = useCallback((message: CopilotMessage) => {
-    // Clear typing timeout
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-      typingTimeoutRef.current = null;
-    }
-    
-    const messageId = `bot-${message.timestamp.getTime()}-${Math.random().toString(36).slice(2, 7)}`;
-    const fullContent = message.text || '';
-    const timestamp = message.timestamp.toISOString();
-    
-    // Check if streaming is enabled
-    if (getSimulateStreaming() && fullContent.length > 0) {
-      // Keep isSending true during streaming, will be set to false when streaming completes
-      simulateStreamingText(messageId, fullContent, 'Copilot', timestamp, () => {
-        // Callback when streaming completes
-        setIsSending(false);
-      });
-    } else {
-      // Add message immediately without streaming
-      setIsSending(false);
-      
-      const newMessage: ChatMessage = {
-        id: messageId,
-        type: 'agent',
-        role: 'assistant',
-        content: fullContent,
-        agentName: 'Copilot',
-        timestamp,
-      };
-      
-      setMessages((prev) => {
-        // Remove typing indicator if present
-        const filtered = typingMessageIdRef.current 
-          ? prev.filter((msg) => msg.id !== typingMessageIdRef.current)
-          : prev;
-        
-        // Check for duplicate content
-        const existingContents = new Set(filtered.filter((p) => p.type === 'agent').map((p) => p.content));
-        if (existingContents.has(newMessage.content)) {
-          return filtered;
-        }
-        
-        return [...filtered, newMessage];
-      });
-      
-      typingMessageIdRef.current = null;
-    }
-  }, [simulateStreamingText]);
-
-  // Initialize copilot connection when panel opens AND settings are ready
-  // Connection is non-blocking - Copilot Studio is just a tool, not required for user interaction
+  // With SDK connector, Copilot Studio is always available — mark connected when settings are ready
   useEffect(() => {
-    // Wait for settings to be loaded from Dataverse before attempting connection
-    if (!settingsReady) {
-      console.log('[Copilot] Waiting for settings to load from Dataverse...');
-      return;
+    if (settingsReady) {
+      setIsConnected(true);
     }
-    
-    if (!isOpen) return;
-    if (copilotConversationRef.current) return; // Already connected
-    
-    // Polling fallback function (hoisted for use in initCopilot)
-    const startPolling = () => {
-      console.log('[Copilot] Starting polling fallback');
-      pollIntervalRef.current = setInterval(async () => {
-        if (!copilotConversationRef.current) return;
-        
-        try {
-          const { activities, watermark } = await pollMessages(
-            copilotConversationRef.current,
-            watermarkRef.current
-          );
-          watermarkRef.current = watermark;
-          
-          // Check for typing activities - Direct Line uses type === 'typing'
-          const typingActivities = activities.filter(
-            (a) => a.type === 'typing' && a.from === 'bot'
-          );
-          if (typingActivities.length > 0) {
-            showTypingIndicator();
-          }
-          
-          const botMessages = activities.filter(
-            (a) => a.type === 'message' && a.from === 'bot' && a.text
-          );
-          
-          if (botMessages.length > 0) {
-            for (const m of botMessages) {
-              handleBotMessage(m);
-            }
-          }
-        } catch (err) {
-          const error = err as Error & { status?: number };
-          if ((error.status === 403 || error.message?.includes('403')) && !isReconnectingRef.current) {
-            isReconnectingRef.current = true;
-            clearConversation();
-            copilotConversationRef.current = null;
-            userContextSentRef.current = false;
-            watermarkRef.current = undefined;
-            
-            if (pollIntervalRef.current) {
-              clearInterval(pollIntervalRef.current);
-              pollIntervalRef.current = null;
-            }
-            
-            setTimeout(async () => {
-              try {
-                const config = getCopilotConfig();
-                if (config) {
-                  const conversation = await getOrCreateConversation(config);
-                  copilotConversationRef.current = conversation;
-                  setIsConnected(true);
-                }
-              } catch (reconnectErr) {
-                console.error('Failed to reconnect:', reconnectErr);
-                setIsConnected(false);
-              } finally {
-                isReconnectingRef.current = false;
-              }
-            }, 1000);
-          }
-        }
-      }, 1000);
-    };
-    
-    // Initialize Copilot Studio connection in background (non-blocking)
-    const initCopilot = async () => {
-      const config = getCopilotConfig();
-      if (!config) {
-        console.log('[Copilot] No Copilot config found in localStorage');
-        setIsConnected(false);
-        return;
-      }
-      
-      // Don't set isConnecting - let user interact immediately
-      // Connection happens silently in background
-      console.log('[Copilot] Background: Initializing Copilot Studio connection...');
-      try {
-        const conversation = await getOrCreateConversation(config);
-        copilotConversationRef.current = conversation;
-        setIsConnected(true);
-        console.log('[Copilot] Background: Successfully connected');
-        
-        // Send user context if user is available
-        if (user && !userContextSentRef.current) {
-          await sendUserContext(conversation, {
-            userId: user.objectId || '',
-            userPrincipalName: user.userPrincipalName || '',
-            displayName: user.fullName || '',
-          });
-          userContextSentRef.current = true;
-        }
-        
-        // Try WebSocket connection first for real-time updates
-        // WebSocket provides typing indicators, polling is the fallback
-        if (conversation.streamUrl) {
-          console.log('[Copilot] Setting up WebSocket connection');
-          wsCleanupRef.current = createWebSocketConnection(conversation, {
-            onTyping: () => {
-              console.log('[Copilot] Received typing indicator');
-              showTypingIndicator();
-            },
-            onMessage: (message) => {
-              console.log('[Copilot] Received WebSocket message:', message);
-              handleBotMessage(message);
-            },
-            onClose: () => {
-              console.log('[Copilot] WebSocket closed, falling back to polling');
-              // Fall back to polling if WebSocket closes (includes error cases)
-              wsCleanupRef.current = null;
-              if (!pollIntervalRef.current && copilotConversationRef.current) {
-                startPolling();
-              }
-            },
-          });
-        } else {
-          // No streamUrl, use polling
-          startPolling();
-        }
-      } catch (error) {
-        console.error('[Copilot] Background: Failed to initialize:', error);
-        setIsConnected(false);
-        // Silent failure - Copilot Studio is optional, orchestration uses Power Automate Flow
-        // Only show error toast for critical issues (like invalid config)
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        if (errorMessage.includes('404')) {
-          console.warn('[Copilot] Token Endpoint not found - check Settings');
-        } else if (errorMessage.includes('HTML instead of JSON')) {
-          console.warn('[Copilot] Token Endpoint returned invalid response');
-        }
-      }
-    };
-    
-    initCopilot();
-    
-    return () => {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
-      }
-      if (wsCleanupRef.current) {
-        wsCleanupRef.current();
-        wsCleanupRef.current = null;
-      }
-      if (typingTimeoutRef.current) {
-        clearTimeout(typingTimeoutRef.current);
-        typingTimeoutRef.current = null;
-      }
-    };
-  }, [isOpen, settingsReady, user, showTypingIndicator, handleBotMessage]);
+  }, [settingsReady]);
 
   const openPanel = useCallback((fullScreen = false) => {
     setIsOpen(true);
@@ -1013,8 +1304,14 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     setIsFullScreen((prev) => !prev);
   }, []);
 
-  const sendMessage = useCallback(async (text: string) => {
+  const sendMessage = useCallback(async (text: string, attachments?: CopilotAttachment[]) => {
     if (!text.trim()) return;
+
+    // Register composer attachment blobs in the session store and project to
+    // lightweight meta carried on the user message + (later) the activity intent.
+    const turnAttachments = attachments ?? [];
+    if (turnAttachments.length) putAttachments(turnAttachments);
+    const turnAttachmentMeta: AttachmentMeta[] = turnAttachments.map(toAttachmentMeta);
 
     // ===== I-2 Stage 1: Awaiting-clarification gate =====
     // If the last assistant message is blocked on user clarification, intercept this reply
@@ -1026,6 +1323,36 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       lastForGate.type === 'awaiting-clarification' &&
       lastForGate.awaitingClarification
     ) {
+      // Queue-driven awaiting card → dispatch to runtime.
+      if (lastForGate.queueIntentId && queueRef.current) {
+        const userReplyMsg: ChatMessage = {
+          id: `msg-${Date.now()}-user`,
+          type: 'user',
+          role: 'user',
+          content: text.trim(),
+          timestamp: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, userReplyMsg]);
+        setInputValue('');
+        try {
+          const result = await (await loadQR()).handleAwaitingReply(
+            queueRef.current,
+            lastForGate.queueIntentId,
+            text.trim(),
+            buildRuntimeDeps(),
+          );
+          if (result.handled) {
+            queueRef.current = result.queue;
+            bumpQueue();
+            return;
+          }
+        } catch (err) {
+          console.error('[CopilotContext] queue awaiting reply error:', err);
+        }
+        // Not handled by queue → fall through to normal flow (mark resolved + re-detect intent).
+        setMessages((prev) => prev.map((m) => m.id === lastForGate.id ? { ...m, resolutionState: 'resolved' as const } : m));
+        // Fall through past the legacy gate by treating the rest as a fresh request.
+      } else {
       const trimmed = text.trim();
       const isCreate = /^(\u65b0\u5efa|create|\u521b\u5efa)/i.test(trimmed);
       const isSkip = /^(\u8df3\u8fc7|skip)/i.test(trimmed);
@@ -1044,12 +1371,19 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
 
         // Mark the blocked message as resolved
         const blockedId = lastForGate.id;
-        setMessages((prev) => prev.map((m) => m.id === blockedId ? { ...m, resolutionState: 'resolved' as const } : m));
-
-        const { function: fn, arguments: args } = lastForGate.awaitingClarification.originalIntent;
+        const { function: fn, arguments: args, additionalActions: parkedExtras } = lastForGate.awaitingClarification.originalIntent;
         const pendingResolution = lastForGate.awaitingClarification.pendingResolutions[0];
         const pendingKind = pendingResolution.kind;
         const queryName = pendingResolution.query;
+        const kindLabelZh = pendingKind === 'contact' ? '联系人' : pendingKind === 'account' ? '客户' : '商机';
+        const gateResultText = isCreate
+          ? (locale === 'zh-Hans' ? `新建${kindLabelZh}：${queryName}` : `Created new ${pendingKind}: ${queryName}`)
+          : (locale === 'zh-Hans' ? `已跳过${kindLabelZh}关联` : `Skipped ${pendingKind} link`);
+        setMessages((prev) => prev.map((m) =>
+          m.id === blockedId
+            ? { ...m, resolutionState: 'resolved' as const, resolutionResult: gateResultText }
+            : m
+        ));
 
         // I-2 Round 3: differentiate 'create' from 'skip'
         if (isCreate && pendingKind === 'contact') {
@@ -1059,6 +1393,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             arguments: args,
             pendingKind: 'contact',
             blockedMsgId: blockedId,
+            additionalActions: parkedExtras,
           };
           const contactDraftMsg: ChatMessage = {
             id: `msg-${Date.now()}-contact-draft`,
@@ -1085,22 +1420,53 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         }
 
         if (isCreate && (pendingKind === 'account' || pendingKind === 'opportunity')) {
-          // Stage 5 stub: notify, then fall through to skip-style execution.
-          const kindZh = pendingKind === 'account' ? '客户' : '商机';
+          // Park the original intent and spawn a draft form for the new account/opportunity.
+          // After the user saves it, completeParkedIntentWithNewAccount/Opportunity resumes the parked draft.
+          parkedIntentRef.current = {
+            function: fn,
+            arguments: args,
+            pendingKind,
+            blockedMsgId: blockedId,
+            additionalActions: parkedExtras,
+          };
+          const isAccount = pendingKind === 'account';
+          const draftFn = isAccount ? 'createAccount' : 'createOpportunity';
+          const draftLabel = isAccount
+            ? (locale === 'zh-Hans' ? '新建客户' : 'New Account')
+            : (locale === 'zh-Hans' ? '新建商机' : 'New Opportunity');
+          const draftBody = isAccount
+            ? (locale === 'zh-Hans'
+                ? '新建客户，保存后将自动关联到本次操作'
+                : 'Create a new account — it will be linked automatically after save')
+            : (locale === 'zh-Hans'
+                ? '新建商机，保存后将自动关联到本次操作'
+                : 'Create a new opportunity — it will be linked automatically after save');
+          const draftData: Record<string, unknown> = isAccount
+            ? { name: queryName }
+            : {
+                name: queryName,
+                accountName: (args.accountName as string | undefined) ?? '',
+                accountId: (args.accountId as string | undefined) ?? '',
+              };
           setMessages((prev) => [...prev, {
-            id: `msg-${Date.now()}-stage5`,
-            type: 'agent',
+            id: `msg-${Date.now()}-${pendingKind}-draft`,
+            type: 'form-card',
             role: 'assistant',
-            content: locale === 'zh-Hans'
-              ? `ℹ️ 新建${kindZh}功能即将开放（Stage 5），本次先跳过${kindZh}关联。`
-              : `ℹ️ Creating new ${pendingKind} is coming soon (Stage 5). Skipping ${pendingKind} link for now.`,
-            agentName: 'System',
+            content: draftBody,
+            functionCalled: draftFn,
+            functionDisplayName: draftLabel,
             timestamp: new Date().toISOString(),
+            formCard: {
+              type: pendingKind,
+              isNew: true,
+              data: draftData,
+              status: 'pending',
+            },
           }]);
-          // Fall through to skip-style execution below.
+          return;
         }
 
-        // Skip (or Stage 5 fall-through): strip the unresolved entity and execute the original function directly.
+        // Skip: strip the unresolved entity and execute the original function directly.
         const strippedArgs: Record<string, unknown> = { ...args };
         if (pendingKind === 'contact') { delete strippedArgs.contactId; delete strippedArgs.contactName; }
         else if (pendingKind === 'account') { delete strippedArgs.accountId; delete strippedArgs.accountName; }
@@ -1159,6 +1525,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       const blockedId2 = lastForGate.id;
       setMessages((prev) => prev.map((m) => m.id === blockedId2 ? { ...m, resolutionState: 'resolved' as const } : m));
       // Fall through to normal flow below (which adds the user message and calls processMessage).
+      }
     }
 
     // Add user message immediately
@@ -1168,16 +1535,20 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       role: 'user',
       content: text.trim(),
       timestamp: new Date().toISOString(),
+      ...(turnAttachmentMeta.length ? { attachments: turnAttachmentMeta } : {}),
     };
     setMessages((prev) => [...prev, userMessage]);
     setInputValue('');
     clearClarificationSuggestions(); // Clear any pending clarification suggestions
     setIsSending(true);
+
+    // Set up abort controller so cancelSend can signal this pipeline to stop
+    const abortController = new AbortController();
+    sendAbortRef.current = abortController;
+    const signal = abortController.signal;
     
-    // Always use Power Automate Flow as the orchestrator for LLM function calling
-    // Local agent processes data operations, Copilot Studio is available as a tool/function
-    const llmConfig = getLLMConfig();
-      if (llmConfig?.enabled && llmConfig?.endpoint) {
+    // Proceed directly — invokeFlowForLLM has its own availability guard
+    {
         // Create a thinking message that will be updated with progress
         const thinkingMsgId = `msg-${Date.now()}-thinking`;
         const thinkingMessage: ChatMessage = {
@@ -1201,10 +1572,24 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           // Use messagesRef to get current messages without depending on messages state
           const currentMessages = [...messages]; // Create copy at call time
           const conversationHistory = currentMessages
-            .filter((m: ChatMessage) => m.role === 'user' || m.role === 'assistant')
+            .filter((m: ChatMessage) => {
+              // Only include actual conversational messages, not UI narration or cards.
+              if (!m.role || (m.role !== 'user' && m.role !== 'assistant')) return false;
+              if (!m.content || !m.content.trim()) return false;
+              // Skip queue narration messages (announce, substep, overview) — they're UI chrome, not conversation.
+              if (m.taskRole === 'announce' || m.taskRole === 'substep' || m.taskRole === 'overview') return false;
+              // Skip thinking/streaming placeholders.
+              if (m.isThinking || m.isStreaming) return false;
+              // Skip non-text message types (cards etc.) — only agent text and user text.
+              if (m.type !== 'user' && m.type !== 'agent') return false;
+              return true;
+            })
             .map((m: ChatMessage) => ({
               role: m.role as 'user' | 'assistant',
               content: m.content,
+              // Carry function metadata so Frame can resolve anaphora
+              // ("list them" after getSalesSummary → "them" = opportunities)
+              ...(m.functionCalled ? { functionCalled: m.functionCalled } : {}),
             }));
           
           // Progress callback to update thinking message
@@ -1264,25 +1649,155 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             }));
           };
           
+          // Extract last function result for context-first analysis.
+          // Use messagesRef for latest state (avoids stale closure after startNewConversation).
+          const lastAgentMsg = [...messagesRef.current].reverse().find(
+            (m: ChatMessage) => m.role === 'assistant' && m.type === 'agent' && m.recordList
+          );
+
+          const { processMessage } = await import('@/lib/copilot-agent');
+          // Conversation State (§4.2): hydrate the prior state before processing,
+          // pass a read-only snapshot to the agent, and commit the returned
+          // mutation afterwards. Behaviour-neutral until the agent emits mutations
+          // and decision logic consumes the state (later Phase-B tasks).
+          const hydratedState = hydrateConversationState({
+            prevState: conversationStateRef.current,
+            pageContext: pageContextToFocus(pageContextRef.current),
+            turn: messagesRef.current.length,
+          });
+          conversationStateRef.current = hydratedState;
           const response = await processMessage(text.trim(), {
             userId: user?.objectId,
             userEmail: user?.userPrincipalName,
             locale,
             conversationHistory,
+            lastFunctionResult: lastAgentMsg?.recordList,
+            lastFunctionCalled: lastAgentMsg?.functionCalled,
             pageContext: pageContextRef.current ? {
               currentPage: pageContextRef.current.currentPage,
               pageData: pageContextRef.current.pageData,
               summary: pageContextRef.current.summary,
             } : undefined,
-            sessionRefs: directLineSessionRefs,
+            state: hydratedState,
           }, handleProgress);
+
+          // Bail out if the user cancelled while we were waiting for the LLM
+          if (signal.aborted) return;
+
+          // Commit the conversation-state mutation (no-op when undefined).
+          conversationStateRef.current = commitConversationState(
+            conversationStateRef.current,
+            response.stateMutation ?? {},
+          );
+          // C1: record a per-turn state snapshot for the Frame Inspector State panel.
+          try {
+            recordConversationState(
+              buildStateSnapshot(text.trim(), conversationStateRef.current, response.convStateDebug ?? []),
+            );
+          } catch { /* observability must never break the turn */ }
           
+          // ===== IntentQueue intercept =====
+          // When the parsed intent triggers queue mode (draft / batch / matching / additionalActions),
+          // discard the agent's pre-rendered cards and hand off to the queue runtime instead.
+          // The thinking message becomes a brief agent ack and the queue pushes its own cards.
+          if (response.rawIntent && shouldUseQueue(response.rawIntent)) {
+            setIsSending(false);
+            setMessages((prev) => prev.map((msg) => {
+              if (msg.id !== thinkingMsgId) return msg;
+              const ri = response.rawIntent!;
+              const stepCount = 1 + (ri.additionalActions?.length ?? 0);
+              const ackContent = stepCount > 1
+                ? buildMultiStepAck(ri, stepCount, locale)
+                : buildQueueAck(ri, locale);
+              return {
+                ...msg,
+                type: 'agent' as const,
+                content: ackContent,
+                functionCalled: response.functionCalled,
+                functionDisplayName: response.functionDisplayName,
+                isThinking: false,
+                // Keep the agent's reasoning steps (intent classification, drafting, etc.)
+                // so the user sees meaningful progress above the queued cards, matching
+                // the non-queue paths. Previously these were dropped, leaving a bare
+                // "Preparing..." with no context.
+                thinkingSteps: response.thinkingSteps?.map((s) => ({
+                  stage: s.stage,
+                  status: 'completed' as const,
+                  label: s.label,
+                  detail: s.detail,
+                })),
+              };
+            }));
+            // Assign composer attachments to the activity draft(s) in this turn
+            // (single → all; multiple → LLM mapping). Stamps __attachmentIds onto
+            // each activity intent's arguments, which the queue carries to the form-card.
+            if (turnAttachmentMeta.length) {
+              await assignAttachmentsToIntent(response.rawIntent, turnAttachmentMeta, userMessage.content, locale);
+            }
+            const newQueue = buildQueueFromIntent(response.rawIntent);
+            // Seed page-bound entities (account / contact / opportunity) into the
+            // queue's resolvedContext so every step auto-links to what the user is
+            // viewing — e.g. on an Opportunity Detail page, a drafted activity links
+            // to that opportunity. Primary-resolved values (already seeded by
+            // buildQueueFromIntent) win; buildEffectiveArgs only fills missing keys.
+            // Phase 2: use the shared extractEntitySeed so page → frame → queue all
+            // derive entity context from the same canonical key set (no drift).
+            if (pageContextRef.current?.pageData) {
+              const pageSeed = extractEntitySeed(pageContextRef.current.pageData);
+              for (const key of Object.keys(pageSeed)) {
+                if (newQueue.resolvedContext[key]) delete pageSeed[key]; // primary wins
+              }
+              newQueue.resolvedContext = { ...pageSeed, ...newQueue.resolvedContext };
+            }
+            newQueue.userMessage = userMessage.content;
+            await runAndStoreQueue(newQueue);
+            return;
+          }
+
           // Clarification is now handled naturally by the LLM as a regular response
           // No special clarificationQuestions handling needed - LLM will ask for more info naturally
 
           // ===== I-2 Stage 1: Handle awaiting-clarification response =====
           if (response.awaitingClarification) {
             setIsSending(false);
+            // Phase B: emit overview + announce before the awaiting-clarification card
+            const overviewAc = response.intentsOverview;
+            const intentIdxAc = response.currentIntentIndex;
+            const isZhAc = locale === 'zh-Hans';
+            let acTaskGroupId: string | undefined;
+            if (overviewAc && overviewAc.length > 1 && intentIdxAc !== undefined) {
+              acTaskGroupId = `task-${intentIdxAc}`;
+              const announceForAc = buildAnnounceMessage(intentIdxAc, overviewAc, isZhAc);
+              let didInsertAnnounceAc = false;
+              setMessages((prev) => {
+                const idx = prev.findIndex((m) => m.id === thinkingMsgId);
+                if (idx < 0) return prev;
+                const inserts: ChatMessage[] = [];
+                if (!hasMessageAfterLastUser(prev, (m) => m.taskRole === 'overview')) {
+                  inserts.push(buildOverviewMessage(overviewAc, isZhAc));
+                }
+                if (announceForAc && !hasMessageAfterLastUser(prev, (m) => m.taskRole === 'announce' && m.taskGroupId === `task-${intentIdxAc}`)) {
+                  inserts.push(announceForAc);
+                  didInsertAnnounceAc = true;
+                }
+                if (inserts.length === 0) return prev;
+                // Phase D: fold any earlier task's substeps before showing the new announce.
+                const folded = collapseEarlierTasks(prev, intentIdxAc);
+                return [...folded.slice(0, idx), ...inserts, ...folded.slice(idx)];
+              });
+              // Phase C: async LLM narration kick-off (best effort).
+              if (didInsertAnnounceAc && announceForAc?.taskAnnounce) {
+                kickOffNarration({
+                  announceMsgId: announceForAc.id,
+                  intentIndex: intentIdxAc,
+                  taskIndex: announceForAc.taskAnnounce.index,
+                  total: announceForAc.taskAnnounce.total,
+                  label: announceForAc.taskAnnounce.label,
+                  fnName: response.functionCalled ?? '',
+                  locale: isZhAc ? 'zh-Hans' : 'en',
+                });
+              }
+            }
             setMessages((prev) => prev.map((msg) => {
               if (msg.id !== thinkingMsgId) return msg;
               return {
@@ -1300,6 +1815,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                 })),
                 awaitingClarification: response.awaitingClarification,
                 resolutionState: 'blocked' as const,
+                ...(acTaskGroupId ? { taskGroupId: acTaskGroupId, taskRole: 'substep' as const } : {}),
               };
             }));
             return;
@@ -1343,45 +1859,10 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           // Check if response is a draft function (returns form card)
           const isDraftFunction = response.functionCalled && ['draftActivity', 'draftOpportunity', 'draftAccount', 'draftContact'].includes(response.functionCalled);
           
-          // Check if response is a batch draft function
-          const isBatchDraftFunction = response.functionCalled === 'batchDraft' && response.success && response.functionResult;
-          
           // Check if response is a fuzzy match function
-          const isFuzzyMatchFunction = response.functionCalled && ['fuzzyMatchAccount', 'fuzzyMatchContact', 'fuzzyMatchOpportunity'].includes(response.functionCalled);
+          const isFuzzyMatchFunction = response.functionCalled && ['fuzzyMatchAccount', 'fuzzyMatchContact', 'fuzzyMatchOpportunity', 'fuzzyMatchActivity'].includes(response.functionCalled);
           
-          if (isBatchDraftFunction) {
-            // Create a batch-form-card message for multiple drafts
-            setIsSending(false);
-            const batchResult = response.functionResult as { isBatch: boolean; items: Array<{ type: string; isNew: boolean; data: Record<string, unknown>; batchIndex: number }>; totalCount: number };
-            
-            setMessages((prev) => prev.map((msg) => {
-              if (msg.id !== thinkingMsgId) return msg;
-              return {
-                ...msg,
-                type: 'batch-form-card' as const,
-                content: response.content || (locale === 'zh-Hans' ? `共${batchResult.totalCount}条记录待确认` : `${batchResult.totalCount} records to confirm`),
-                functionCalled: response.functionCalled,
-                functionDisplayName: response.functionDisplayName,
-                isThinking: false,
-                thinkingSteps: response.thinkingSteps?.map((s) => ({
-                  stage: s.stage,
-                  status: 'completed' as const,
-                  label: s.label,
-                  detail: s.detail,
-                })),
-                batchFormCards: {
-                  items: batchResult.items.map((item) => ({
-                    type: item.type as 'activity' | 'opportunity' | 'account' | 'contact',
-                    isNew: item.isNew,
-                    data: item.data,
-                    batchIndex: item.batchIndex,
-                    status: 'pending' as const,
-                  })),
-                  totalCount: batchResult.totalCount,
-                },
-              };
-            }));
-          } else if (isFuzzyMatchFunction && response.success && response.functionResult) {
+          if (isFuzzyMatchFunction && response.success && response.functionResult) {
             // Create a match-selection message for fuzzy matching
             setIsSending(false);
             const matchResult = response.functionResult as { 
@@ -1397,7 +1878,45 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             const entityType = response.functionCalled === 'fuzzyMatchAccount' ? 'account' :
                              response.functionCalled === 'fuzzyMatchContact' ? 'contact' :
                              response.functionCalled === 'fuzzyMatchActivity' ? 'activity' : 'opportunity';
-            
+
+            // ===== Phase B: emit task narration overview + announce BEFORE the match-selection =====
+            const overview = response.intentsOverview;
+            const intentIdx = response.currentIntentIndex;
+            const isZhLocale = locale === 'zh-Hans';
+            let currentTaskGroupId: string | undefined;
+            if (overview && overview.length > 1 && intentIdx !== undefined) {
+              currentTaskGroupId = `task-${intentIdx}`;
+              const announceForIntent = buildAnnounceMessage(intentIdx, overview, isZhLocale);
+              let didInsertAnnounce = false;
+              setMessages((prev) => {
+                const idx = prev.findIndex((m) => m.id === thinkingMsgId);
+                if (idx < 0) return prev;
+                const inserts: ChatMessage[] = [];
+                if (!hasMessageAfterLastUser(prev, (m) => m.taskRole === 'overview')) {
+                  inserts.push(buildOverviewMessage(overview, isZhLocale));
+                }
+                if (announceForIntent && !hasMessageAfterLastUser(prev, (m) => m.taskRole === 'announce' && m.taskGroupId === `task-${intentIdx}`)) {
+                  inserts.push(announceForIntent);
+                  didInsertAnnounce = true;
+                }
+                if (inserts.length === 0) return prev;
+                // Phase D: fold prior tasks before the new announce lands.
+                const folded = collapseEarlierTasks(prev, intentIdx);
+                return [...folded.slice(0, idx), ...inserts, ...folded.slice(idx)];
+              });
+              if (didInsertAnnounce && announceForIntent?.taskAnnounce) {
+                kickOffNarration({
+                  announceMsgId: announceForIntent.id,
+                  intentIndex: intentIdx,
+                  taskIndex: announceForIntent.taskAnnounce.index,
+                  total: announceForIntent.taskAnnounce.total,
+                  label: announceForIntent.taskAnnounce.label,
+                  fnName: response.functionCalled ?? '',
+                  locale: isZhLocale ? 'zh-Hans' : 'en',
+                });
+              }
+            }
+
             setMessages((prev) => prev.map((msg) => {
               if (msg.id !== thinkingMsgId) return msg;
               return {
@@ -1415,6 +1934,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                   label: s.label,
                   detail: s.detail,
                 })),
+                ...(currentTaskGroupId ? { taskGroupId: currentTaskGroupId, taskRole: 'substep' as const } : {}),
                 matchSelection: {
                   entityType: entityType as 'account' | 'contact' | 'opportunity' | 'activity',
                   query: '',
@@ -1478,8 +1998,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             
             if (shouldStream) {
               // Start streaming simulation for local agent
-              // Start streaming simulation for local agent
               // First, mark the message as streaming with initial empty content
+              // Note: recordList is NOT set yet — it will appear after streaming completes
               setMessages((prev) => prev.map((msg) => {
                 if (msg.id !== thinkingMsgId) return msg;
                 return {
@@ -1495,42 +2015,41 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                     label: s.label,
                     detail: s.detail,
                   })),
-                  recordList: response.recordList,
                 };
               }));
               
-              // Simulate streaming with interval
+              // Smooth linear streaming
               const fullContent = response.content;
-              let currentIndex = 0;
-              const charsPerTick = 15; // Characters to add per tick (increased from 3 for performance)
-              const tickInterval = 50; // Milliseconds between ticks (increased from 20 for performance)
+              const totalChars = fullContent.length;
+              const charsPerTick = Math.max(3, Math.ceil(totalChars / 80));
+              const tickInterval = 30;
+              let revIdx = 0;
               
-              const streamInterval = setInterval(() => {
-                currentIndex += charsPerTick;
-                const partialContent = fullContent.slice(0, currentIndex);
+              const animateStream = () => {
+                revIdx += charsPerTick;
                 
-                if (currentIndex >= fullContent.length) {
-                  clearInterval(streamInterval);
-                  // Streaming complete
-                  setMessages((prev) => {
-                    const found = prev.find((m) => m.id === thinkingMsgId);
-
-                    return prev.map((msg) =>
-                      msg.id === thinkingMsgId
-                        ? { ...msg, content: fullContent, isStreaming: false }
-                        : msg
-                    );
-                  });
-                  // Set isSending false only after streaming completes
+                if (revIdx >= totalChars) {
+                  if (streamingIntervalRef.current) {
+                    clearInterval(streamingIntervalRef.current);
+                    streamingIntervalRef.current = null;
+                  }
+                  // Streaming complete — now attach data cards (recordList etc.)
+                  setMessages((prev) => prev.map((msg) =>
+                    msg.id === thinkingMsgId
+                      ? { ...msg, content: fullContent, isStreaming: false, recordList: response.recordList }
+                      : msg
+                  ));
                   setIsSending(false);
                 } else {
                   setMessages((prev) => prev.map((msg) =>
                     msg.id === thinkingMsgId
-                      ? { ...msg, content: partialContent }
+                      ? { ...msg, content: fullContent.slice(0, revIdx) }
                       : msg
                   ));
                 }
-              }, tickInterval);
+              };
+              
+              streamingIntervalRef.current = setInterval(animateStream, tickInterval);
             } else {
               // No streaming - set content immediately
               setIsSending(false);
@@ -1572,16 +2091,13 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             }
           }
           
-          // Check if this is a form fill action and execute callback
-          if (response.functionCalled === 'fillActivityForm' && response.functionResult && formFillCallbackRef.current) {
-            formFillCallbackRef.current(response.functionResult as Record<string, unknown>);
-          }
-          
-          // Invalidate React Query cache if the operation modified data
+          // Invalidate React Query cache if the operation modified data.
+          // Handlers report list keys (e.g. 'activity-list'), but the page the
+          // user is currently on usually subscribes to a SINGLE-record key
+          // (e.g. ['activity', id]). Invalidate BOTH so the open detail page
+          // refreshes in place, not just the list behind it.
           if (response.invalidateQueries && response.invalidateQueries.length > 0) {
-            response.invalidateQueries.forEach((queryKey: string) => {
-              queryClient.invalidateQueries({ queryKey: [queryKey] });
-            });
+            invalidateRelatedQueries(queryClient, response.invalidateQueries);
           }
           
           // Log function call for debugging
@@ -1605,102 +2121,75 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             };
           }));
         }
-    } else {
-      // Power Automate endpoint not configured
-      setIsSending(false);
-      const notConfiguredMessage: ChatMessage = {
-        id: `msg-${Date.now()}-system`,
-        type: 'agent',
-        role: 'assistant',
-        content: locale === 'zh-Hans'
-          ? '⚠️ Power Automate Flow 端点尚未配置。请前往设置页面配置 LLM Function Calling 端点。'
-          : '⚠️ Power Automate Flow endpoint is not configured. Please go to Settings to configure your LLM Function Calling endpoint.',
-        agentName: 'System',
-        timestamp: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, notConfiguredMessage]);
     }
-  }, [user, locale]); // pageContext accessed via ref to avoid re-creating sendMessage
+  }, [user, locale]); // pageContext accessed via ref to avoid re-create sendMessage
 
   const startNewConversation = useCallback(async () => {
-    // Clear current session immediately for instant UX
-    clearConversation();
-    copilotConversationRef.current = null;
-    userContextSentRef.current = false;
-    watermarkRef.current = undefined;
-    // Clear Direct Line conversation ref (keep token if not expired)
-    directLineConversationRef.current = null;
+    // Clear current session
+    clearCopilotConversation();
     typingMessageIdRef.current = null;
     setMessages([]);
+    messagesRef.current = []; // Clear ref immediately (avoids stale closure in sendMessage)
+    conversationStateRef.current = emptyState(); // §4.4: reset state with the same wipe to avoid cross-session bleed
+    queueRef.current = null;
     
-    // Also clear persisted messages
+    // Clear persisted messages
     try {
-      sessionStorage.removeItem('copilot-messages');
+      localStorage.removeItem(PERSIST_KEY);
     } catch (e) {
       console.warn('Failed to clear persisted messages:', e);
     }
     
-    // Clean up existing connections
-    if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
-      pollIntervalRef.current = null;
-    }
-    if (wsCleanupRef.current) {
-      wsCleanupRef.current();
-      wsCleanupRef.current = null;
-    }
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = null;
     }
-    
-    // Re-initialize Copilot Studio connection in background (non-blocking)
-    // Copilot Studio is just a tool, not required for conversation to start
-    const config = getCopilotConfig();
-    if (config) {
-      // Don't set isConnecting - let user interact immediately
-      // Connection happens silently in background
-      (async () => {
-        try {
-          console.log('[Copilot] Background: Re-initializing Copilot Studio connection...');
-          const conversation = await getOrCreateConversation(config);
-          copilotConversationRef.current = conversation;
-          setIsConnected(true);
-          console.log('[Copilot] Background: Successfully connected');
-          
-          if (user) {
-            await sendUserContext(conversation, {
-              userId: user.objectId || '',
-              userPrincipalName: user.userPrincipalName || '',
-              displayName: user.fullName || '',
-            });
-            userContextSentRef.current = true;
-          }
-          
-          // Set up WebSocket connection for new conversation
-          if (conversation.streamUrl) {
-            wsCleanupRef.current = createWebSocketConnection(conversation, {
-              onTyping: () => showTypingIndicator(),
-              onMessage: (message: CopilotMessage) => handleBotMessage(message),
-              onError: (error: Error) => console.error('[Copilot] WebSocket error:', error),
-              onClose: () => console.log('[Copilot] WebSocket closed'),
-            });
-          }
-        } catch (error) {
-          console.error('[Copilot] Background: Failed to re-initialize:', error);
-          setIsConnected(false);
-          // Silent failure - Copilot Studio is optional, orchestration uses Power Automate Flow
-        }
-      })();
-    }
-  }, [user, showTypingIndicator, handleBotMessage]);
+  }, []);
 
   // Continue pending action after user selects a match from match-selection card
   const continuePendingAction = useCallback(async (
     selectedRecord: { id: string; name: string; accountId?: string; accountName?: string },
     pendingIntent: { function: string; arguments: Record<string, unknown> },
-    entityType: 'account' | 'contact' | 'opportunity' | 'activity'
+    entityType: 'account' | 'contact' | 'opportunity' | 'activity',
+    sourceMessageId?: string
   ) => {
+    // Queue intercept: when the card belongs to an active queue intent, route the pick
+    // to the runtime so the queue advances; bypass the legacy resolution cascade.
+    if (sourceMessageId) {
+      const srcMsg = messagesRef.current.find((m) => m.id === sourceMessageId);
+      const intentId = srcMsg?.queueIntentId;
+      const q = queueRef.current;
+      if (intentId && q && findIntentByMessageId(q, sourceMessageId)) {
+        const after = await (await loadQR()).handlePick(q, intentId, {
+          id: selectedRecord.id,
+          name: selectedRecord.name,
+          accountId: selectedRecord.accountId,
+          accountName: selectedRecord.accountName,
+        }, buildRuntimeDeps());
+        queueRef.current = after;
+        bumpQueue();
+        return;
+      }
+    }
+
+    // Lock the source match-selection card with a result line.
+    if (sourceMessageId) {
+      const resultText = locale === 'zh-Hans'
+        ? `已选择：${selectedRecord.name}`
+        : `Selected: ${selectedRecord.name}`;
+      setMessages((prev) => prev.map((m) =>
+        m.id === sourceMessageId
+          ? { ...m, resolutionState: 'resolved' as const, resolutionResult: resultText }
+          : m
+      ));
+    }
+
+    // Activity "select existing" semantic: don't draft a duplicate. We still
+    // need to walk any remainingResolutions and advance through subsequent
+    // intents — only the *final* draftActivity executeFunction call gets
+    // suppressed. (draftActivity always returns isNew:true regardless of
+    // activityId, which is why the old behavior produced a duplicate form.)
+    const bypassFinalActivityDraft = entityType === 'activity' && pendingIntent.function === 'draftActivity';
     setIsSending(true);
     
     // Create a thinking message
@@ -1763,7 +2252,6 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
 
       const fnDisplayName = getDisplayName(pendingIntent.function, locale === 'zh-Hans' ? 'zh-Hans' : 'en-US');
       const isDraftFunction = ['draftActivity', 'draftOpportunity', 'draftAccount', 'draftContact'].includes(pendingIntent.function);
-      const isBatchDraft = pendingIntent.function === 'batchDraft';
 
       // I-3 Slice 3: Walk remaining resolution chain before executing the final draft.
       // For each remaining ResolutionItem: scopeBy-inject, run fuzzyMatch, then:
@@ -1771,7 +2259,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       //   - multi/medium-high-conf → render matchSelection card (with shortened queue) + stop
       //   - no high-conf (draft only) → render awaiting-clarification card + stop
       const remainingResolutions = (pendingIntent as { remainingResolutions?: ResolutionItem[] }).remainingResolutions;
-      if ((isDraftFunction || isBatchDraft) && remainingResolutions && remainingResolutions.length > 0) {
+      if (isDraftFunction && remainingResolutions && remainingResolutions.length > 0) {
         console.log('[CopilotContext] I-3 cascade: walking', remainingResolutions.length, 'remaining resolutions');
         const resolvedSoFar: Record<string, string> = {};
         resolvedSoFar[entityType] = selectedRecord.id;
@@ -1781,9 +2269,73 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         if (updatedArguments.opportunityId && !resolvedSoFar.opportunity) resolvedSoFar.opportunity = updatedArguments.opportunityId as string;
 
         let cascadeBlocked = false;
+        // ===== Phase B: recover prior task narration context from the message stream =====
+        // Latest taskGroupId among messages tells us which intent we were on; the
+        // overview message tells us the per-intent labels for future announces.
+        const stateForNarration = messages;
+        let prevIntentIndex: number | undefined = undefined;
+        for (let k = stateForNarration.length - 1; k >= 0; k--) {
+          const gid = stateForNarration[k].taskGroupId;
+          if (gid && gid.startsWith('task-')) {
+            const n = Number.parseInt(gid.slice(5), 10);
+            if (Number.isFinite(n)) { prevIntentIndex = n; break; }
+          }
+        }
+        const overviewFromStream: IntentsOverview | undefined = (() => {
+          const overviewMsg = stateForNarration.find((m) => m.taskRole === 'overview' && m.taskOverview);
+          if (!overviewMsg?.taskOverview) return undefined;
+          return overviewMsg.taskOverview.intents.map((it) => ({
+            intentIndex: it.index,
+            userFacingLabel: { zh: it.label, en: it.label },
+          }));
+        })();
+        const isZhCascade = locale === 'zh-Hans';
+        let currentCascadeGroupId: string | undefined =
+          prevIntentIndex !== undefined ? `task-${prevIntentIndex}` : undefined;
+
         for (let i = 0; i < remainingResolutions.length; i++) {
           const item = remainingResolutions[i];
           const remainingAfter = remainingResolutions.slice(i + 1);
+
+          // Phase B: on intent boundary change, emit an announce message before
+          // creating the next blocking card. This is what makes the user see
+          // "Starting task 2 of 4: …" between two related matches.
+          // If intermediate intents auto-resolved (no blocking entity), fill in
+          // their announces too so the user doesn't see Task 1 → Task 3 jumps.
+          const itemIntentIndex = (item as { intentIndex?: number }).intentIndex;
+          if (
+            overviewFromStream &&
+            overviewFromStream.length > 1 &&
+            itemIntentIndex !== undefined &&
+            itemIntentIndex !== prevIntentIndex
+          ) {
+            const startIdx = (prevIntentIndex ?? -1) + 1;
+            for (let stepIdx = startIdx; stepIdx <= itemIntentIndex; stepIdx++) {
+              const announce = buildAnnounceMessage(stepIdx, overviewFromStream, isZhCascade);
+              if (announce) {
+                setMessages((prev) => {
+                  // Phase D: fold any prior task's substeps before the next announce.
+                  const folded = collapseEarlierTasks(prev, stepIdx);
+                  const idx = folded.findIndex((m) => m.id === thinkingMsgId);
+                  if (idx < 0) return [...folded, announce];
+                  return [...folded.slice(0, idx), announce, ...folded.slice(idx)];
+                });
+                if (announce.taskAnnounce) {
+                  kickOffNarration({
+                    announceMsgId: announce.id,
+                    intentIndex: stepIdx,
+                    taskIndex: announce.taskAnnounce.index,
+                    total: announce.taskAnnounce.total,
+                    label: announce.taskAnnounce.label,
+                    fnName: '',
+                    locale: isZhCascade ? 'zh-Hans' : 'en',
+                  });
+                }
+              }
+            }
+            currentCascadeGroupId = `task-${itemIntentIndex}`;
+            prevIntentIndex = itemIntentIndex;
+          }
 
           // scopeBy injection from accumulated resolvedSoFar
           if (item.scopeBy && resolvedSoFar[item.scopeBy]) {
@@ -1862,7 +2414,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
               if (msg.id !== thinkingMsgId) return msg;
               return {
                 ...msg,
-                type: 'agent' as const,
+                type: 'match-selection' as const,
                 content: locale === 'zh-Hans'
                   ? `找到 ${highConf.length} 个匹配的${entityLabel}，请选择：`
                   : `Found ${highConf.length} matching ${entityLabel}(s). Please select:`,
@@ -1878,6 +2430,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                   confidence: 'high' as const,
                   pendingIntent: newPendingIntent,
                 },
+                resolutionState: 'blocked' as const,
+                ...(currentCascadeGroupId ? { taskGroupId: currentCascadeGroupId, taskRole: 'substep' as const } : {}),
               };
             }));
             cascadeBlocked = true;
@@ -1925,6 +2479,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                 { stage: 'matching' as const, status: 'completed' as const, label: locale === 'zh-Hans' ? `未找到「${item.query}」匹配` : `No match for "${item.query}"` },
               ],
               awaitingClarification: ac,
+              resolutionState: 'blocked' as const,
+              ...(currentCascadeGroupId ? { taskGroupId: currentCascadeGroupId, taskRole: 'substep' as const } : {}),
             };
           }));
           cascadeBlocked = true;
@@ -1938,56 +2494,26 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         console.log('[CopilotContext] cascade exhausted, final args:', JSON.stringify(updatedArguments, null, 2));
       }
 
-      if (isBatchDraft) {
-        // For batch draft, execute and show batch form cards
-        const functionResult = await executeFunction(
-          pendingIntent.function,
-          updatedArguments,
-          { userId: user?.objectId, userEmail: user?.userPrincipalName }
-        );
-        
-        if (functionResult.success && functionResult.data) {
-          const batchResult = functionResult.data as { isBatch: boolean; items: Array<{ type: string; isNew: boolean; data: Record<string, unknown>; batchIndex: number }>; totalCount: number };
+      if (isDraftFunction) {
+        // bypassFinalActivityDraft: user picked an existing activity earlier.
+        // Convert the thinking message into a plain ack instead of running
+        // draftActivity (which would always produce a duplicate form).
+        if (bypassFinalActivityDraft) {
           setMessages((prev) => prev.map((msg) => {
             if (msg.id !== thinkingMsgId) return msg;
             return {
               ...msg,
-              type: 'batch-form-card' as const,
-              content: locale === 'zh-Hans' ? `共${batchResult.totalCount}条记录待确认` : `${batchResult.totalCount} records to confirm`,
-              functionCalled: pendingIntent.function,
-              functionDisplayName: fnDisplayName,
+              type: 'agent' as const,
+              content: locale === 'zh-Hans'
+                ? `已关联到现有活动「${selectedRecord.name}」，未创建重复记录。`
+                : `Linked to existing activity "${selectedRecord.name}" — no duplicate created.`,
               isThinking: false,
               thinkingSteps: [
-                { stage: 'executing' as const, status: 'completed' as const, label: locale === 'zh-Hans' ? `${fnDisplayName}：已准备表单` : `${fnDisplayName}: Forms ready` },
+                { stage: 'executing' as const, status: 'completed' as const, label: locale === 'zh-Hans' ? `关联现有活动` : `Linked existing activity` },
               ],
-              batchFormCards: {
-                items: batchResult.items.map((item) => ({
-                  type: item.type as 'activity' | 'opportunity' | 'account' | 'contact',
-                  isNew: item.isNew,
-                  data: item.data,
-                  batchIndex: item.batchIndex,
-                  status: 'pending' as const,
-                })),
-                totalCount: batchResult.totalCount,
-              },
             };
           }));
         } else {
-          // Show error for batch draft failure
-          setMessages((prev) => prev.map((msg) => {
-            if (msg.id !== thinkingMsgId) return msg;
-            return {
-              ...msg,
-              content: locale === 'zh-Hans'
-                ? `❌ 操作失败: ${functionResult.error}`
-                : `❌ Error: ${functionResult.error}`,
-              agentName: 'System',
-              isThinking: false,
-              thinkingSteps: undefined,
-            };
-          }));
-        }
-      } else if (isDraftFunction) {
         // For single draft functions, execute directly and show form card
         const functionResult = await executeFunction(
           pendingIntent.function,
@@ -2032,6 +2558,16 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             };
           }));
         }
+        } // end bypassFinalActivityDraft else
+
+        // Replay any additional intents (e.g. draftOpportunity, follow-up draftActivity)
+        // that were carried through the match-selection flow. These were originally part
+        // of the LLM's multi-intent response but got parked when matching blocked.
+        const carriedActions = (pendingIntent as { additionalActions?: Array<{ function: string; arguments: Record<string, unknown>; reason?: string }> }).additionalActions;
+        if (carriedActions && carriedActions.length > 0) {
+          console.log('[CopilotContext] replaying', carriedActions.length, 'additional actions after match resolution');
+          await replayAdditionalActions(carriedActions, updatedArguments);
+        }
       } else {
         // For non-draft functions (queries, summaries, etc.), use full processMessage flow
         // Reconstruct the original user message with the selected entity
@@ -2042,7 +2578,14 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         // Build conversation history
         const currentMessages = messages;
         const conversationHistory = currentMessages
-          .filter((m: ChatMessage) => m.role === 'user' || m.role === 'assistant')
+          .filter((m: ChatMessage) => {
+            if (!m.role || (m.role !== 'user' && m.role !== 'assistant')) return false;
+            if (!m.content || !m.content.trim()) return false;
+            if (m.taskRole === 'announce' || m.taskRole === 'substep' || m.taskRole === 'overview') return false;
+            if (m.isThinking || m.isStreaming) return false;
+            if (m.type !== 'user' && m.type !== 'agent') return false;
+            return true;
+          })
           .map((m: ChatMessage) => ({
             role: m.role as 'user' | 'assistant',
             content: m.content,
@@ -2097,6 +2640,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           // Now use processMessage for full response generation
           // But we need to pass the already-executed function result
           // So we'll call processMessage with a hint about the selected record
+          const { processMessage } = await import('@/lib/copilot-agent');
           const response = await processMessage(syntheticMessage, {
             userId: user?.objectId,
             userEmail: user?.userPrincipalName,
@@ -2121,7 +2665,6 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
               },
               summary: `User selected ${entityType}: ${selectedRecord.name}`,
             },
-            sessionRefs: directLineSessionRefs,
           }, handleProgress);
           
           // Update message with response
@@ -2177,7 +2720,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsSending(false);
     }
-  }, [user, locale, messages, directLineSessionRefs]);
+  }, [user, locale, messages, buildRuntimeDeps, bumpQueue]);
 
   // Create new record from pending intent (when user clicks 'Create New' instead of selecting a match)
   const createNewFromIntent = useCallback(async (
@@ -2278,14 +2821,54 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
   // then resume it via completeParkedIntentWithNewContact after the user saves the new entity.
   // Mirrors the gate's create branch (sendMessage 'create' path) so button clicks bypass text-token matching.
   const createEntityForResolution = useCallback(async (
-    pendingIntent: { function: string; arguments: Record<string, unknown> },
-    entityKind: 'contact' | 'account' | 'opportunity',
+    pendingIntent: { function: string; arguments: Record<string, unknown>; additionalActions?: Array<{ function: string; arguments: Record<string, unknown>; reason?: string }> },
+    entityKind: 'contact' | 'account' | 'opportunity' | 'activity',
     queryName: string,
     blockedMsgId?: string
   ) => {
+    // Queue intercept
+    if (blockedMsgId) {
+      const srcMsg = messagesRef.current.find((m) => m.id === blockedMsgId);
+      const intentId = srcMsg?.queueIntentId;
+      const q = queueRef.current;
+      if (intentId && q && findIntentByMessageId(q, blockedMsgId)) {
+        const kind: 'contact' | 'account' | 'opportunity' =
+          entityKind === 'activity' ? 'opportunity' : entityKind;
+        const after = await (await loadQR()).handleCreateNew(q, intentId, kind, queryName, buildRuntimeDeps());
+        queueRef.current = after;
+        bumpQueue();
+        return;
+      }
+    }
+    // Activity branch: "create new anyway" — lock the card, then run the
+    // original draftActivity. Original args carry no activityId, so the form
+    // will be a fresh draft (matching the duplicate-check bypass semantic).
+    if (entityKind === 'activity') {
+      if (blockedMsgId) {
+        const resultText = locale === 'zh-Hans'
+          ? `新建活动：${queryName}`
+          : `Creating new activity: ${queryName}`;
+        setMessages((prev) => prev.map((m) =>
+          m.id === blockedMsgId
+            ? { ...m, resolutionState: 'resolved' as const, resolutionResult: resultText }
+            : m
+        ));
+      }
+      await skipResolutionAndDraftImpl(pendingIntent, 'activity');
+      return;
+    }
+
     // Mark the source message resolved so the card freezes
     if (blockedMsgId) {
-      setMessages((prev) => prev.map((m) => m.id === blockedMsgId ? { ...m, resolutionState: 'resolved' as const } : m));
+      const kindLabelZh = entityKind === 'contact' ? '联系人' : entityKind === 'account' ? '客户' : '商机';
+      const resultText = locale === 'zh-Hans'
+        ? `新建${kindLabelZh}：${queryName}`
+        : `Created new ${entityKind}: ${queryName}`;
+      setMessages((prev) => prev.map((m) =>
+        m.id === blockedMsgId
+          ? { ...m, resolutionState: 'resolved' as const, resolutionResult: resultText }
+          : m
+      ));
     }
 
     if (entityKind === 'contact') {
@@ -2295,6 +2878,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         arguments: pendingIntent.arguments,
         pendingKind: 'contact',
         blockedMsgId: blockedMsgId || '',
+        additionalActions: pendingIntent.additionalActions,
       };
       const contactDraftMsg: ChatMessage = {
         id: `msg-${Date.now()}-contact-draft`,
@@ -2320,33 +2904,71 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // account / opportunity chain-create is Stage 5 — for now, show a stub and fall through to skip
-    const kindZh = entityKind === 'account' ? '客户' : '商机';
-    setMessages((prev) => [...prev, {
-      id: `msg-${Date.now()}-stage5`,
-      type: 'agent',
-      role: 'assistant',
-      content: locale === 'zh-Hans'
-        ? `ℹ️ 新建${kindZh}功能即将开放（Stage 5），本次先跳过${kindZh}关联。`
-        : `ℹ️ Creating new ${entityKind} is coming soon (Stage 5). Skipping ${entityKind} link for now.`,
-      agentName: 'System',
-      timestamp: new Date().toISOString(),
-    }]);
-    // Fall through: run the main draft with the entity stripped
+    // account / opportunity chain-create: park original intent, spawn a draft form for the new entity.
+    // After the user saves it, completeParkedIntentWithNewAccount/Opportunity resumes the parked draft.
+    if (entityKind === 'account' || entityKind === 'opportunity') {
+      const blockedId = blockedMsgId || `msg-${Date.now()}-park-anchor`;
+      parkedIntentRef.current = {
+        function: pendingIntent.function,
+        arguments: pendingIntent.arguments,
+        pendingKind: entityKind,
+        blockedMsgId: blockedId,
+        additionalActions: pendingIntent.additionalActions,
+      };
+      const isAccount = entityKind === 'account';
+      const draftFn = isAccount ? 'createAccount' : 'createOpportunity';
+      const draftLabel = isAccount
+        ? (locale === 'zh-Hans' ? '新建客户' : 'New Account')
+        : (locale === 'zh-Hans' ? '新建商机' : 'New Opportunity');
+      const draftBody = isAccount
+        ? (locale === 'zh-Hans'
+            ? '新建客户，保存后将自动关联到本次操作'
+            : 'Create a new account — it will be linked automatically after save')
+        : (locale === 'zh-Hans'
+            ? '新建商机，保存后将自动关联到本次操作'
+            : 'Create a new opportunity — it will be linked automatically after save');
+      const draftData: Record<string, unknown> = isAccount
+        ? { name: queryName }
+        : {
+            name: queryName,
+            accountName: (pendingIntent.arguments.accountName as string | undefined) ?? '',
+            accountId: (pendingIntent.arguments.accountId as string | undefined) ?? '',
+          };
+      setMessages((prev) => [...prev, {
+        id: `msg-${Date.now()}-${entityKind}-draft`,
+        type: 'form-card',
+        role: 'assistant',
+        content: draftBody,
+        functionCalled: draftFn,
+        functionDisplayName: draftLabel,
+        timestamp: new Date().toISOString(),
+        formCard: {
+          type: entityKind,
+          isNew: true,
+          data: draftData,
+          status: 'pending',
+        },
+      }]);
+      return;
+    }
+
+    // Unreachable — entityKind is exhausted by the contact / account / opportunity / activity branches above.
     await skipResolutionAndDraftImpl(pendingIntent, entityKind);
-  }, [user, locale]);
+  }, [user, locale, buildRuntimeDeps, bumpQueue]);
 
   // Unified resolution — skip: strip the unresolved entity from args and run the original draft directly.
   // The resulting form-card has an empty lookup for the skipped entity so the user can pick it in-form.
-  // Mirrors the gate's skip branch.
+  // Mirrors the gate's skip branch. entityKind === 'activity' uses this path for "create new anyway"
+  // (no fields to strip; runs draftActivity with original args).
   const skipResolutionAndDraftImpl = async (
     pendingIntent: { function: string; arguments: Record<string, unknown> },
-    entityKind: 'contact' | 'account' | 'opportunity'
+    entityKind: 'contact' | 'account' | 'opportunity' | 'activity'
   ) => {
     const strippedArgs: Record<string, unknown> = { ...pendingIntent.arguments };
     if (entityKind === 'contact') { delete strippedArgs.contactId; delete strippedArgs.contactName; }
     else if (entityKind === 'account') { delete strippedArgs.accountId; delete strippedArgs.accountName; }
     else if (entityKind === 'opportunity') { delete strippedArgs.opportunityId; delete strippedArgs.opportunityName; }
+    else if (entityKind === 'activity') { delete strippedArgs.activityId; }
 
     setIsSending(true);
     try {
@@ -2395,14 +3017,50 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
 
   const skipResolutionAndDraft = useCallback(async (
     pendingIntent: { function: string; arguments: Record<string, unknown> },
-    entityKind: 'contact' | 'account' | 'opportunity',
+    entityKind: 'contact' | 'account' | 'opportunity' | 'activity',
     blockedMsgId?: string
   ) => {
+    // Queue intercept
     if (blockedMsgId) {
-      setMessages((prev) => prev.map((m) => m.id === blockedMsgId ? { ...m, resolutionState: 'resolved' as const } : m));
+      const srcMsg = messagesRef.current.find((m) => m.id === blockedMsgId);
+      const intentId = srcMsg?.queueIntentId;
+      const q = queueRef.current;
+      if (intentId && q && findIntentByMessageId(q, blockedMsgId)) {
+        const after = await (await loadQR()).handleSkip(q, intentId, buildRuntimeDeps());
+        queueRef.current = after;
+        bumpQueue();
+        return;
+      }
+    }
+    // Activity branch: "skip" = cancel the draft entirely. The activity IS the
+    // thing being drafted, so there's nothing left to draft — just lock the
+    // card and stop. No executeFunction call.
+    if (entityKind === 'activity') {
+      if (blockedMsgId) {
+        const resultText = locale === 'zh-Hans'
+          ? '已取消活动草稿'
+          : 'Activity draft cancelled';
+        setMessages((prev) => prev.map((m) =>
+          m.id === blockedMsgId
+            ? { ...m, resolutionState: 'resolved' as const, resolutionResult: resultText }
+            : m
+        ));
+      }
+      return;
+    }
+    if (blockedMsgId) {
+      const kindLabelZh = entityKind === 'contact' ? '联系人' : entityKind === 'account' ? '客户' : '商机';
+      const resultText = locale === 'zh-Hans'
+        ? `已跳过${kindLabelZh}关联`
+        : `Skipped ${entityKind} link`;
+      setMessages((prev) => prev.map((m) =>
+        m.id === blockedMsgId
+          ? { ...m, resolutionState: 'resolved' as const, resolutionResult: resultText }
+          : m
+      ));
     }
     await skipResolutionAndDraftImpl(pendingIntent, entityKind);
-  }, [user, locale]);
+  }, [user, locale, buildRuntimeDeps, bumpQueue]);
 
   // Unified resolution — search other: re-run fuzzyMatch with a new query and patch matchSelection in place.
   // Used by the "Search other" inline input on the resolution card.
@@ -2414,6 +3072,18 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
   ) => {
     const trimmed = newQuery.trim();
     if (!trimmed) return;
+    // Queue intercept
+    {
+      const srcMsg = messagesRef.current.find((m) => m.id === messageId);
+      const intentId = srcMsg?.queueIntentId;
+      const q = queueRef.current;
+      if (intentId && q && findIntentByMessageId(q, messageId)) {
+        const after = await (await loadQR()).handleSearchOther(q, intentId, trimmed, buildRuntimeDeps());
+        queueRef.current = after;
+        bumpQueue();
+        return;
+      }
+    }
     const matchFnName = entityType === 'account' ? 'fuzzyMatchAccount'
       : entityType === 'contact' ? 'fuzzyMatchContact'
       : entityType === 'activity' ? 'fuzzyMatchActivity'
@@ -2463,10 +3133,10 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.error('[CopilotContext] refreshResolution error:', err);
     }
-  }, [user]);
+  }, [user, buildRuntimeDeps, bumpQueue]);
   const updateFormCardStatus = useCallback((
     messageId: string,
-    status: 'pending' | 'confirmed' | 'modified',
+    status: 'pending' | 'confirmed' | 'modified' | 'cancelled',
     batchIndex?: number,
     createdRecordId?: string
   ) => {
@@ -2504,6 +3174,68 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  // ===== IntentQueue: unified form-card save / cancel dispatchers =====
+  // If the form-card belongs to an active queue intent, route to the runtime so the queue
+  // advances correctly. Otherwise fall through to the legacy parked-intent resume paths
+  // (kept for backward compatibility with persisted pre-refactor messages).
+  const formCardSaved = useCallback(async (args: {
+    messageId: string;
+    type: 'activity' | 'opportunity' | 'account' | 'contact';
+    recordId: string;
+    recordName?: string;
+    accountId?: string;
+    accountName?: string;
+    contactId?: string;
+    contactName?: string;
+    opportunityId?: string;
+    opportunityName?: string;
+  }): Promise<void> => {
+    const msg = messagesRef.current.find((m) => m.id === args.messageId);
+    const intentId = msg?.queueIntentId;
+    const q = queueRef.current;
+    if (intentId && q && findIntentByMessageId(q, args.messageId)) {
+      const after = await (await loadQR()).handleSave(q, intentId, {
+        recordId: args.recordId,
+        recordName: args.recordName,
+        type: args.type,
+        accountId: args.accountId,
+        accountName: args.accountName,
+        contactId: args.contactId,
+        contactName: args.contactName,
+        opportunityId: args.opportunityId,
+        opportunityName: args.opportunityName,
+      }, buildRuntimeDeps());
+      queueRef.current = after;
+      bumpQueue();
+      return;
+    }
+    // Legacy path: delegate to existing completeParkedIntentWith* based on entity type.
+    if (args.type === 'contact') {
+      await completeParkedIntentWithNewContact(args.recordId, args.recordName ?? '', args.accountId, args.accountName);
+    } else if (args.type === 'account') {
+      await completeParkedIntentWithNewAccount(args.recordId, args.recordName ?? '');
+    } else if (args.type === 'opportunity') {
+      await completeParkedIntentWithNewOpportunity(args.recordId, args.recordName ?? '', args.accountId, args.accountName);
+    }
+    // Activity: no legacy parked resume — saving an activity ends the flow naturally.
+  }, [buildRuntimeDeps, bumpQueue, completeParkedIntentWithNewContact, completeParkedIntentWithNewAccount, completeParkedIntentWithNewOpportunity]);
+
+  const formCardCancelled = useCallback(async (messageId: string): Promise<void> => {
+    const msg = messagesRef.current.find((m) => m.id === messageId);
+    const intentId = msg?.queueIntentId;
+    const q = queueRef.current;
+    if (intentId && q && findIntentByMessageId(q, messageId)) {
+      const after = await (await loadQR()).handleCancel(q, intentId, buildRuntimeDeps());
+      queueRef.current = after;
+      bumpQueue();
+      return;
+    }
+    // No legacy cancel path — just clear parked state if it was tied to this message.
+    if (parkedIntentRef.current?.blockedMsgId === messageId) {
+      parkedIntentRef.current = null;
+    }
+  }, [buildRuntimeDeps, bumpQueue]);
+
   const value: CopilotContextValue = useMemo(() => ({
     isOpen,
     isFullScreen,
@@ -2519,11 +3251,12 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     isSending,
     setIsSending,
     sendMessage,
+    cancelSend,
     inputValue,
     setInputValue,
     isRecording,
     setIsRecording,
-    pageContext: pageContextRef.current,
+    pageContext: pageContextState,
     setPageContext,
     inputPlaceholder,
     setInputPlaceholder,
@@ -2531,7 +3264,6 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     setFormFillCallback,
     startNewConversation,
     extractVisitData,
-    directLineSessionRefs,
     continuePendingAction,
     createNewFromIntent,
     createEntityForResolution,
@@ -2539,11 +3271,16 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     refreshResolution,
     updateFormCardStatus,
     rollbackToMessage,
+    toggleTaskGroupCollapsed,
     clarificationSuggestions,
     setClarificationSuggestions,
     clearClarificationSuggestions,
     executeClarificationAction,
     completeParkedIntentWithNewContact,
+    completeParkedIntentWithNewAccount,
+    completeParkedIntentWithNewOpportunity,
+    formCardSaved,
+    formCardCancelled,
   }), [
     isOpen,
     isFullScreen,
@@ -2556,27 +3293,32 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     messages,
     isSending,
     sendMessage,
+    cancelSend,
     inputValue,
     isRecording,
-
+    pageContextState,
     setPageContext,
     inputPlaceholder,
     setInputPlaceholder,
     setFormFillCallback,
     startNewConversation,
     extractVisitData,
-    directLineSessionRefs,
     continuePendingAction,
     createNewFromIntent,
     createEntityForResolution,
     skipResolutionAndDraft,
     refreshResolution,
     updateFormCardStatus,
+    toggleTaskGroupCollapsed,
     clarificationSuggestions,
     setClarificationSuggestions,
     clearClarificationSuggestions,
     executeClarificationAction,
     completeParkedIntentWithNewContact,
+    completeParkedIntentWithNewAccount,
+    completeParkedIntentWithNewOpportunity,
+    formCardSaved,
+    formCardCancelled,
   ]);
 
   return (
