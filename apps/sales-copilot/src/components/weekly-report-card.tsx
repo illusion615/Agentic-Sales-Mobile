@@ -4,7 +4,7 @@ import { Sparkles, RefreshCw, ChevronDown, ChevronUp, Loader2, FileText, CheckCi
 import { cn } from '@/lib/utils';
 import { GlassCard } from './glass-card';
 import { MarkdownContent } from './markdown-content';
-import { getLocale } from '@/lib/i18n';
+import { getLocale, t, localeBcp47 } from '@/lib/i18n';
 import {
   type WeeklyReportActivity,
   weeklyReportCacheKey,
@@ -90,7 +90,7 @@ export function WeeklyReportCard({
   const hasReport = markdown.length > 0;
 
   const formatTs = (ts: number) =>
-    new Date(ts).toLocaleDateString(locale === 'zh-Hans' ? 'zh-CN' : 'en-US', {
+    new Date(ts).toLocaleDateString(localeBcp47(locale), {
       month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
     });
 
@@ -104,13 +104,13 @@ export function WeeklyReportCard({
           </div>
           <div className="flex-1 min-w-0">
             <h3 className="text-sm font-semibold text-foreground">
-              {locale === 'zh-Hans' ? '周报' : 'Weekly Report'}
+              {t('weeklyReport', locale)}
             </h3>
             <p className="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-1 truncate">
               {hasReport && generatedAt ? (
                 <>
                   <CheckCircle2 className="w-3 h-3 text-emerald-500 flex-shrink-0" />
-                  {locale === 'zh-Hans' ? '生成于 ' : 'Generated '}{formatTs(generatedAt)}
+                  {t('generatedPrefix', locale)}{formatTs(generatedAt)}
                 </>
               ) : (
                 weekRangeLabel(weekStart, weekEnd, locale)
@@ -124,8 +124,8 @@ export function WeeklyReportCard({
           onClick={generate}
           disabled={isGenerating}
           aria-label={hasReport
-            ? (locale === 'zh-Hans' ? '重新生成周报' : 'Regenerate weekly report')
-            : (locale === 'zh-Hans' ? '生成周报' : 'Generate weekly report')}
+            ? (t('regenerateWeeklyReport', locale))
+            : (t('generateWeeklyReport', locale))}
           className="h-8 w-8 rounded-full bg-primary/10 text-primary hover:bg-primary/20 transition-colors flex items-center justify-center flex-shrink-0 disabled:opacity-60"
         >
           {isGenerating ? (
@@ -142,8 +142,8 @@ export function WeeklyReportCard({
             type="button"
             onClick={() => setIsExpanded((v) => !v)}
             aria-label={isExpanded
-              ? (locale === 'zh-Hans' ? '收起' : 'Collapse')
-              : (locale === 'zh-Hans' ? '展开' : 'Expand')}
+              ? (t('collapse', locale))
+              : (t('expand', locale))}
             className="h-8 w-8 rounded-full hover:bg-muted/50 transition-colors flex items-center justify-center flex-shrink-0"
           >
             {isExpanded ? (

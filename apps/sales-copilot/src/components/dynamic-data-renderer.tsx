@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { cn } from '@/lib/utils';
 import { ChevronRight, Building2, Target, Calendar, Users, FileText, Package } from 'lucide-react';
-import { getLocale, type Locale } from '@/lib/i18n';
+import { getLocale, t, localeBcp47, type Locale } from '@/lib/i18n';
 import { formatCurrencyFull } from '@/lib/format-currency';
 import { useCopilot } from '@/contexts/copilot-context';
 // Import Choice field mappings from generated models (not hardcoded)
@@ -542,7 +542,7 @@ function formatCellValue(key: string, value: unknown, locale: Locale): string {
     try {
       const date = new Date(dateStr);
       if (!isNaN(date.getTime())) {
-        return date.toLocaleDateString(locale === 'zh-Hans' ? 'zh-CN' : 'en-US', {
+        return date.toLocaleDateString(localeBcp47(locale), {
           year: 'numeric',
           month: 'short',
           day: 'numeric',
@@ -825,7 +825,7 @@ export function DynamicDataRenderer({ content }: DynamicDataRendererProps) {
           <div className="flex items-center gap-2">
             <Icon className="w-4 h-4 text-primary" />
             <span className="text-xs font-medium text-foreground">
-              {locale === 'zh-Hans' ? `${itemCount} 条记录` : `${itemCount} records`}
+              {t('recordsCount', locale, { count: itemCount })}
             </span>
           </div>
           <span className="text-[10px] text-muted-foreground">
@@ -838,7 +838,7 @@ export function DynamicDataRenderer({ content }: DynamicDataRendererProps) {
           {items.slice(0, 10).map((item: DataItem, idx: number) => renderItemCard(item, idx))}
           {items.length > 10 && (
             <p className="text-xs text-muted-foreground text-center py-2">
-              {locale === 'zh-Hans' ? `还有 ${items.length - 10} 条记录...` : `And ${items.length - 10} more...`}
+              {t('andMoreRecords', locale, { count: items.length - 10 })}
             </p>
           )}
         </div>

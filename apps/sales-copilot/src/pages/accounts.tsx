@@ -23,7 +23,7 @@ import {
 } from '@/components/ui/select';
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
 import { useCopilot } from '@/contexts/copilot-context';
-import { getLocale } from '@/lib/i18n';
+import { getLocale, t } from '@/lib/i18n';
 import { PullToRefresh } from '@/components/pull-to-refresh';
 import { useFirstMount } from '@/hooks/use-first-mount';
 
@@ -179,7 +179,7 @@ export default function ClientsPage() {
         if (Array.isArray(parsed) && parsed.length > 0) {
           setAiSlides(parsed);
           setCurrentSlide(0);
-          localStorage.setItem(AI_CACHE_KEY, JSON.stringify({ ts: Date.now(), slides: parsed }));
+          localStorage.setItem(AI_CACHE_KEY, JSON.stringify({ ts: Date.now(), slides: parsed, locale }));
         } else {
           console.warn('[ClientCoverage] AI summary: unexpected data shape');
         }
@@ -193,12 +193,12 @@ export default function ClientsPage() {
     try {
       const cached = localStorage.getItem(AI_CACHE_KEY);
       if (cached) {
-        const { ts, slides } = JSON.parse(cached);
-        if (Date.now() - ts < AI_TTL && slides?.length > 0) { setAiSlides(slides); return; }
+        const { ts, slides, locale: cachedLocale } = JSON.parse(cached);
+        if (Date.now() - ts < AI_TTL && slides?.length > 0 && cachedLocale === locale) { setAiSlides(slides); return; }
       }
     } catch { /* ignore */ }
     generateAISummary();
-  }, [enrichedAccounts.length > 0]);
+  }, [enrichedAccounts.length > 0, locale]);
 
   const handleCarouselScroll = () => {
     if (!carouselRef.current) return;
@@ -270,7 +270,7 @@ export default function ClientsPage() {
               <div className="flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-primary" />
                 <span className="text-[11px] font-medium text-foreground">
-                  {locale === 'zh-Hans' ? 'AI 客户洞察' : 'AI Client Insights'}
+                  {t('aiClientInsights', locale)}
                 </span>
               </div>
               <button
@@ -279,14 +279,14 @@ export default function ClientsPage() {
                 className="flex items-center gap-1 text-[11px] text-primary hover:text-primary/80 disabled:opacity-50"
               >
                 {aiLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                {locale === 'zh-Hans' ? '刷新' : 'Refresh'}
+                {t('refresh', locale)}
               </button>
             </div>
             {aiLoading && aiSlides.length === 0 ? (
               <div className="glass-card p-6 flex items-center justify-center gap-2" style={{ borderRadius: 16 }}>
                 <Loader2 className="w-4 h-4 animate-spin text-primary" />
                 <span className="text-[11px] text-muted-foreground">
-                  {locale === 'zh-Hans' ? '正在分析客户数据...' : 'Analyzing client data...'}
+                  {t('analyzingClientData', locale)}
                 </span>
               </div>
             ) : aiSlides.length > 0 ? (

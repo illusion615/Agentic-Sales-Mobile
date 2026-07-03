@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { ArrowLeft, Moon, Sun, Globe, HelpCircle, LogOut, Volume2, Play, Type, Palette, CircleDot, LayoutGrid, Speech, X, Zap, MessageSquare, LayoutDashboard, Database, Bug, FileCode, ChevronRight, Monitor, Calendar, Maximize, Bot, Sparkles, Compass } from 'lucide-react';
+import { ArrowLeft, Moon, Sun, Globe, HelpCircle, LogOut, Volume2, Play, Type, Palette, CircleDot, LayoutGrid, Speech, X, Zap, MessageSquare, LayoutDashboard, Database, Bug, FileCode, ChevronRight, Monitor, Calendar, Maximize, Bot, Sparkles, Compass, Rows3 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
 import { ThinkingIndicator } from '@/components/thinking-indicator';
@@ -11,9 +11,10 @@ import { useAppSettings } from '@/hooks/use-app-settings';
 import { useCopilotConfigured } from '@/hooks/use-copilot-configured';
 import { getCopilotConfig } from '@/services/copilot-service';
 import { getPromptResolutionStatus, PROMPT_RESOLUTION_EVENT } from '@/services/prompt-resolver';
-import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, setSelectedVoice, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getDebugMode, setDebugMode, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, getCopilotDockLayout, setCopilotDockLayout, copilotDockLayoutLabels, getWeekStartDay, setWeekStartDay, getCopilotFullscreenDefault, setCopilotFullscreenDefault, getAgendaDefaultExpanded, setAgendaDefaultExpanded, getCopilotListDefaultView, setCopilotListDefaultView, getCopilotListTopN, setCopilotListTopN, type Locale, type VoiceOption, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget, type CopilotDockLayout, type WeekStartDay, type CopilotListDefaultView } from '@/lib/i18n';
+import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, setSelectedVoice, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getDebugMode, setDebugMode, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, getCopilotDockLayout, setCopilotDockLayout, copilotDockLayoutLabels, getWeekStartDay, setWeekStartDay, getCopilotFullscreenDefault, setCopilotFullscreenDefault, getCompactDraftForms, setCompactDraftForms, getAgendaDefaultExpanded, setAgendaDefaultExpanded, getCopilotListDefaultView, setCopilotListDefaultView, getCopilotListTopN, setCopilotListTopN, SUPPORTED_LOCALES, LOCALE_META, speechLang, localeLangPrefix, pickLabel, type Locale, type VoiceOption, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget, type CopilotDockLayout, type WeekStartDay, type CopilotListDefaultView } from '@/lib/i18n';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
+import { useSpeechPlayer } from '@/hooks/use-speech-player';
 import {
   getFeedbackEnabled,
   setFeedbackEnabled,
@@ -104,10 +105,23 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const [locale, setLocaleState] = useState<Locale>(getLocale);
   const [isDark, setIsDark] = useState(true);
   const [selectedVoice, setSelectedVoiceState] = useState(getSelectedVoice);
-  const [isPlaying, setIsPlaying] = useState(false);
   const [systemVoicesLoaded, setSystemVoicesLoaded] = useState(false);
   const [systemVoices, setSystemVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [selectedSystemVoice, setSelectedSystemVoiceState] = useState<string>(() => getSelectedSystemVoiceName() || '');
+
+  // Voice preview — driven by the shared speech player (mobile-safe priming).
+  const voicePreviewPlayer = useSpeechPlayer({
+    getLang: () => speechLang(locale),
+    getRate: () => 0.95,
+    getVoice: () => {
+      const voices = systemVoices.length > 0 ? systemVoices : window.speechSynthesis.getVoices();
+      const exact = voices.find((v: SpeechSynthesisVoice) => v.name === selectedSystemVoice);
+      if (exact) return exact;
+      const langCode = localeLangPrefix(locale);
+      return voices.find((v: SpeechSynthesisVoice) => v.lang.startsWith(langCode)) || null;
+    },
+  });
+  const isPlaying = voicePreviewPlayer.state.isActive;
 
   // Font size state
   const [chatFontSize, setChatFontSize] = useState<FontSizeOption>(() => getFontSizeConfig().chat);
@@ -128,6 +142,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const [simulateStreaming, setSimulateStreamingState] = useState(() => getSimulateStreaming());
   const [debugMode, setDebugModeState] = useState(() => getDebugMode());
   const [copilotFullscreenDefault, setCopilotFullscreenDefaultState] = useState(() => getCopilotFullscreenDefault());
+  const [compactDraftForms, setCompactDraftFormsState] = useState(() => getCompactDraftForms());
   const [agendaDefaultExpanded, setAgendaDefaultExpandedState] = useState(() => getAgendaDefaultExpanded());
   const [copilotListDefaultView, setCopilotListDefaultViewState] = useState<CopilotListDefaultView>(() => getCopilotListDefaultView());
   const [copilotListTopN, setCopilotListTopNState] = useState<number>(() => getCopilotListTopN());
@@ -273,6 +288,11 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
     setCopilotFullscreenDefault(enabled);
   };
 
+  const handleCompactDraftFormsChange = (enabled: boolean) => {
+    setCompactDraftFormsState(enabled);
+    setCompactDraftForms(enabled);
+  };
+
   const handleAgendaDefaultExpandedChange = (enabled: boolean) => {
     setAgendaDefaultExpandedState(enabled);
     setAgendaDefaultExpanded(enabled);
@@ -304,69 +324,12 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   };
 
 
-  const playVoicePreview = async () => {
-    if (isPlaying) return;
-    
-    window.speechSynthesis.cancel();
-    
-    // Get latest voices
-    let voices = systemVoices;
-    if (voices.length === 0) {
-      voices = window.speechSynthesis.getVoices();
-      if (voices.length === 0) {
-        await new Promise<void>((resolve) => {
-          const checkVoices = () => {
-            voices = window.speechSynthesis.getVoices();
-            if (voices.length > 0) {
-              resolve();
-            } else {
-              setTimeout(checkVoices, 100);
-            }
-          };
-          checkVoices();
-        });
-      }
-    }
-    
-    const sampleText = locale === 'zh-Hans' 
+  const playVoicePreview = () => {
+    if (voicePreviewPlayer.state.isActive) return;
+    const sampleText = locale === 'zh-Hans'
       ? '您好，我是您的销售助手，很高兴为您服务。'
       : 'Hello, I am your sales assistant. Nice to meet you.';
-    
-    const utterance = new SpeechSynthesisUtterance(sampleText);
-    utterance.lang = locale === 'zh-Hans' ? 'zh-CN' : 'en-US';
-    
-    // Find the selected system voice directly by name
-    const selectedVoice = voices.find((v: SpeechSynthesisVoice) => v.name === selectedSystemVoice);
-    
-    if (selectedVoice) {
-      utterance.voice = selectedVoice;
-      console.log(`[Voice Preview] Using voice: ${selectedVoice.name} (lang: ${selectedVoice.lang})`);
-    } else {
-      // Fallback: try to find any voice for the current locale
-      const langCode = locale === 'zh-Hans' ? 'zh' : 'en';
-      const fallbackVoice = voices.find((v: SpeechSynthesisVoice) => v.lang.startsWith(langCode));
-      if (fallbackVoice) {
-        utterance.voice = fallbackVoice;
-        console.log(`[Voice Preview] Fallback voice: ${fallbackVoice.name}`);
-      } else {
-        console.log('[Voice Preview] No matching voice found, using system default');
-      }
-    }
-    
-    utterance.rate = 0.95;
-    utterance.pitch = 1;
-    
-    setIsPlaying(true);
-    
-    utterance.onend = () => {
-      setIsPlaying(false);
-    };
-    
-    utterance.onerror = () => {
-      setIsPlaying(false);
-    };
-    
-    window.speechSynthesis.speak(utterance);
+    voicePreviewPlayer.play([{ id: 'voice-preview', text: sampleText }]);
   };
 
   // Update voice when locale changes
@@ -465,44 +428,45 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
           {/* General Section */}
           <motion.div variants={itemVariants} className="space-y-3">
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
-              {locale === 'zh-Hans' ? '通用' : 'General'}
+              {t('general', locale)}
             </h3>
             <div className="glass-card p-4 space-y-2">
               <SettingsItem
                 icon={Globe}
-                label={locale === 'zh-Hans' ? '语言' : 'Language'}
+                label={t('language', locale)}
                 rightElement={
                   <Select value={locale} onValueChange={(val: string) => handleLocaleChange(val as Locale)}>
-                    <SelectTrigger className="w-28 h-8 text-sm bg-transparent border-border/50">
+                    <SelectTrigger className="w-32 h-8 text-sm bg-transparent border-border/50">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="zh-Hans">中文</SelectItem>
-                      <SelectItem value="en-US">English</SelectItem>
+                      {SUPPORTED_LOCALES.map((loc) => (
+                        <SelectItem key={loc} value={loc}>{LOCALE_META[loc].label}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 }
               />
               <SettingsItem
                 icon={LayoutDashboard}
-                label={locale === 'zh-Hans' ? '主页顶部显示' : 'Home Header Display'}
+                label={t('homeHeaderDisplay', locale)}
                 rightElement={
                   <Select value={homeHeaderWidget} onValueChange={handleHomeHeaderWidgetChange}>
                     <SelectTrigger className="w-36 h-8 text-sm bg-transparent border-border/50">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="date-time">{locale === 'zh-Hans' ? '日期和时间' : 'Date & Time'}</SelectItem>
-                      <SelectItem value="performance">{locale === 'zh-Hans' ? '我的绩效' : 'My Performance'}</SelectItem>
-                      <SelectItem value="task-completion">{locale === 'zh-Hans' ? '今日任务完成率' : 'Task Completion'}</SelectItem>
-                      <SelectItem value="pipeline-forecast">{locale === 'zh-Hans' ? '本季度成交/预测' : 'Pipeline/Forecast'}</SelectItem>
+                      <SelectItem value="date-time">{t('widgetDateTime', locale)}</SelectItem>
+                      <SelectItem value="performance">{t('widgetMyPerformance', locale)}</SelectItem>
+                      <SelectItem value="task-completion">{t('widgetTaskCompletion', locale)}</SelectItem>
+                      <SelectItem value="pipeline-forecast">{t('widgetPipelineForecast', locale)}</SelectItem>
                     </SelectContent>
                   </Select>
                 }
               />
               <SettingsItem
                 icon={Calendar}
-                label={locale === 'zh-Hans' ? '每周第一天' : 'Week Starts On'}
+                label={t('weekStartsOn', locale)}
                 rightElement={
                   <div className="flex rounded-lg overflow-hidden border border-border/60">
                     {(['sunday', 'monday'] as WeekStartDay[]).map((d) => (
@@ -517,8 +481,8 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                         )}
                       >
                         {d === 'sunday'
-                          ? (locale === 'zh-Hans' ? '周日' : 'Sun')
-                          : (locale === 'zh-Hans' ? '周一' : 'Mon')}
+                          ? (t('weekdaySun', locale))
+                          : (t('weekdayMon', locale))}
                       </button>
                     ))}
                   </div>
@@ -526,7 +490,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
               />
               <SettingsItem
                 icon={Calendar}
-                label={locale === 'zh-Hans' ? '默认展开今日待办' : "Expand Today's Agenda by Default"}
+                label={t('expandAgendaDefault', locale)}
                 rightElement={
                   <Switch
                     checked={agendaDefaultExpanded}
@@ -537,7 +501,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
               />
               <SettingsItem
                 icon={Compass}
-                label={locale === 'zh-Hans' ? '新手指引' : 'App Tour'}
+                label={t('appTour', locale)}
                 onClick={() => {
                   if (onClose) onClose();
                   // Let the home screen mount so spotlight anchors are present.
@@ -551,12 +515,12 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
           {/* Style Section */}
           <motion.div variants={itemVariants} className="space-y-3">
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
-              {locale === 'zh-Hans' ? '风格' : 'Style'}
+              {t('styleSection', locale)}
             </h3>
             <div className="glass-card p-4 space-y-2">
               <SettingsItem
                 icon={isDark ? Moon : Sun}
-                label={locale === 'zh-Hans' ? '深色模式' : 'Dark Mode'}
+                label={t('darkMode', locale)}
                 rightElement={
                   <Switch
                     checked={isDark}
@@ -612,8 +576,8 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                           : 'border-transparent hover:scale-105'
                       )}
 
-                      title={locale === 'zh-Hans' ? colorThemeLabels[theme].zh : colorThemeLabels[theme].en}
-                      aria-label={locale === 'zh-Hans' ? colorThemeLabels[theme].zh : colorThemeLabels[theme].en}
+                      title={pickLabel(colorThemeLabels[theme], locale)}
+                      aria-label={pickLabel(colorThemeLabels[theme], locale)}
                     >
                       <div
                         className="w-6 h-6 rounded-full"
@@ -638,7 +602,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                         <SelectItem key={style} value={style}>
                           <span className="flex items-center gap-2">
                             <ThinkingIndicator style={style} />
-                            <span>{locale === 'zh-Hans' ? thinkingDotStyleLabels[style].zh : thinkingDotStyleLabels[style].en}</span>
+                            <span>{pickLabel(thinkingDotStyleLabels[style], locale)}</span>
                           </span>
                         </SelectItem>
                       ))}
@@ -649,7 +613,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
               {/* ── Scenario feedback animations ── */}
               <SettingsItem
                 icon={Sparkles}
-                label={locale === 'zh-Hans' ? '场景反馈动画' : 'Scenario Feedback'}
+                label={t('scenarioFeedback', locale)}
                 rightElement={
                   <Switch checked={feedbackEnabled} onCheckedChange={handleFeedbackEnabledChange} />
                 }
@@ -662,10 +626,10 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                       <div key={scenario} className="flex items-center gap-3">
                         <div className="flex-1 min-w-0">
                           <p className="text-sm text-foreground truncate">
-                            {locale === 'zh-Hans' ? meta.label.zh : meta.label.en}
+                            {pickLabel(meta.label, locale)}
                           </p>
                           <p className="text-[11px] text-muted-foreground truncate">
-                            {locale === 'zh-Hans' ? meta.hint.zh : meta.hint.en}
+                            {pickLabel(meta.hint, locale)}
                           </p>
                         </div>
                         <Select
@@ -678,7 +642,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                           <SelectContent>
                             {meta.styles.map((styleId: FeedbackStyleId) => (
                               <SelectItem key={styleId} value={styleId}>
-                                {locale === 'zh-Hans' ? STYLE_META[styleId].label.zh : STYLE_META[styleId].label.en}
+                                {pickLabel(STYLE_META[styleId].label, locale)}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -694,33 +658,33 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
           {/* AI Assistant Configuration */}
           <motion.div variants={itemVariants} className="space-y-3">
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
-              {locale === 'zh-Hans' ? 'AI 助手配置' : 'AI Assistant Configuration'}
+              {t('aiAssistantConfig', locale)}
             </h3>
             <div className="glass-card p-4 space-y-3">
               {/* ── List display ── */}
               <p className="text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wide">
-                {locale === 'zh-Hans' ? '列表显示' : 'List Display'}
+                {t('listDisplay', locale)}
               </p>
               {/* Record list display behavior */}
               <div className="space-y-3">
                 <SettingsItem
                   icon={LayoutGrid}
-                  label={locale === 'zh-Hans' ? 'Copilot 列表默认状态' : 'Copilot List Default State'}
+                  label={t('copilotListDefaultState', locale)}
                   rightElement={
                     <Select value={copilotListDefaultView} onValueChange={handleCopilotListDefaultViewChange}>
                       <SelectTrigger className="w-28 h-8 text-sm bg-transparent border-border/50">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="expanded">{locale === 'zh-Hans' ? '展开' : 'Expanded'}</SelectItem>
-                        <SelectItem value="collapsed">{locale === 'zh-Hans' ? '收起' : 'Collapsed'}</SelectItem>
+                        <SelectItem value="expanded">{t('expanded', locale)}</SelectItem>
+                        <SelectItem value="collapsed">{t('collapsed', locale)}</SelectItem>
                       </SelectContent>
                     </Select>
                   }
                 />
                 <SettingsItem
                   icon={LayoutGrid}
-                  label={locale === 'zh-Hans' ? '列表默认显示条数 (Top N)' : 'Default List Size (Top N)'}
+                  label={t('defaultListSize', locale)}
                   rightElement={
                     <Select value={String(copilotListTopN)} onValueChange={handleCopilotListTopNChange}>
                       <SelectTrigger className="w-24 h-8 text-sm bg-transparent border-border/50">
@@ -745,11 +709,11 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
               <div className="pt-3 border-t border-border/30">
                 {/* ── Copilot panel ── */}
                 <p className="text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wide mb-2">
-                  {locale === 'zh-Hans' ? 'Copilot 面板' : 'Copilot Panel'}
+                  {t('copilotPanel', locale)}
                 </p>
                 <SettingsItem
                   icon={LayoutGrid}
-                  label={locale === 'zh-Hans' ? '在所有页面显示 Copilot' : 'Display Copilot in all screens'}
+                  label={t('displayCopilotAllScreens', locale)}
                   rightElement={
                     <Switch
                       checked={copilotInAllScreens}
@@ -768,7 +732,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
               <div className="pt-3 border-t border-border/30">
                 <SettingsItem
                   icon={Monitor}
-                  label={locale === 'zh-Hans' ? '宽屏模式 Copilot 布局' : 'Widescreen Copilot Layout'}
+                  label={t('widescreenCopilotLayout', locale)}
                   rightElement={
                     <div className="flex rounded-lg overflow-hidden border border-border/60">
                       {(['float', 'left', 'right'] as CopilotDockLayout[]).map((opt) => (
@@ -782,7 +746,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                               : 'bg-background hover:bg-muted text-muted-foreground'
                           )}
                         >
-                          {locale === 'zh-Hans' ? copilotDockLayoutLabels[opt].zh : copilotDockLayoutLabels[opt].en}
+                          {pickLabel(copilotDockLayoutLabels[opt], locale)}
                         </button>
                       ))}
                     </div>
@@ -799,7 +763,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
               <div className="pt-3 border-t border-border/30">
                 <SettingsItem
                   icon={Maximize}
-                  label={locale === 'zh-Hans' ? '全屏展开 Copilot' : 'Fullscreen Copilot by Default'}
+                  label={t('fullscreenCopilotDefault', locale)}
                   rightElement={
                     <Switch
                       checked={copilotFullscreenDefault}
@@ -814,6 +778,23 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                 </p>
               </div>
 
+              {/* Compact draft forms toggle */}
+              <div className="pt-3 border-t border-border/30">
+                <SettingsItem
+                  icon={Rows3}
+                  label={t('compactDraftForms', locale)}
+                  rightElement={
+                    <Switch
+                      checked={compactDraftForms}
+                      onCheckedChange={handleCompactDraftFormsChange}
+                    />
+                  }
+                />
+                <p className="text-xs text-muted-foreground mt-1 pl-8">
+                  {t('compactDraftFormsDesc', locale)}
+                </p>
+              </div>
+
               {/* New bottom dock (ActionDock) toggle */}
             </div>
           </motion.div>
@@ -823,7 +804,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
           {/* Voice Section */}
           <motion.div variants={itemVariants} className="space-y-3">
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
-              {locale === 'zh-Hans' ? '语音' : 'Voice'}
+              {t('voiceSection', locale)}
             </h3>
             <div className="glass-card p-4 space-y-2">
               <SettingsItem
@@ -836,18 +817,18 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                       setSelectedSystemVoiceName(name);
                     }}>
                       <SelectTrigger className="w-32 h-8 text-sm bg-transparent border-border/50">
-                        <SelectValue placeholder={locale === 'zh-Hans' ? '选择声音' : 'Select voice'} />
+                        <SelectValue placeholder={t('selectVoice', locale)} />
                       </SelectTrigger>
                       <SelectContent>
                         {systemVoices.length === 0 ? (
                           <div className="px-2 py-2 text-xs text-muted-foreground">
-                            {locale === 'zh-Hans' ? '正在加载声音...' : 'Loading voices...'}
+                            {t('loadingVoices', locale)}
                           </div>
                         ) : (
                           <>
                             {/* Group voices by language */}
                             {(() => {
-                              const langCode = locale === 'zh-Hans' ? 'zh' : 'en';
+                              const langCode = localeLangPrefix(locale);
                               const forLang = systemVoices.filter((v: SpeechSynthesisVoice) => v.lang.startsWith(langCode));
                               // D11: only show HIGH-QUALITY voices. Browser system voices carry no
                               // tier metadata, but the high-quality ones reliably signal themselves
@@ -869,8 +850,8 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                                     <>
                                       <div className="px-2 py-1.5 text-xs text-muted-foreground font-medium">
                                         {hq.length > 0
-                                          ? (locale === 'zh-Hans' ? '高质量语音' : 'High-quality voices')
-                                          : (locale === 'zh-Hans' ? '可用语音' : 'Available voices')}
+                                          ? (t('highQualityVoices', locale))
+                                          : (t('availableVoices', locale))}
                                       </div>
                                       {voicesToShow.map((voice: SpeechSynthesisVoice) => (
                                         <SelectItem key={voice.name} value={voice.name}>
@@ -894,7 +875,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                           ? 'bg-primary text-primary-foreground animate-pulse'
                           : 'bg-primary/10 text-primary hover:bg-primary/20'
                       )}
-                      aria-label={locale === 'zh-Hans' ? '播放预览' : 'Play preview'}
+                      aria-label={t('playPreview', locale)}
                     >
                       <Play className="w-4 h-4" />
                     </button>
@@ -929,7 +910,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
           {/* Help & Feedback Section */}
           <motion.div variants={itemVariants} className="space-y-3">
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
-              {locale === 'zh-Hans' ? '帮助与反馈' : 'Help & Feedback'}
+              {t('helpFeedback', locale)}
             </h3>
             <div className="glass-card p-3 rounded-xl space-y-2">
               <button
@@ -944,10 +925,10 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                 </div>
                 <div className="flex-1 text-left">
                   <p className="text-sm font-medium text-foreground">
-                    {locale === 'zh-Hans' ? '技能与工具指南' : 'Skills & Tools Guide'}
+                    {t('skillsToolsGuide', locale)}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {locale === 'zh-Hans' ? '了解所有可用的技能及其使用方法' : 'Learn all available skills and how to use them'}
+                    {t('skillsGuideDesc', locale)}
                   </p>
                 </div>
                 <ChevronRight className="w-5 h-5 text-muted-foreground" />
@@ -964,10 +945,10 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                 </div>
                 <div className="flex-1 text-left">
                   <p className="text-sm font-medium text-foreground">
-                    {locale === 'zh-Hans' ? '代码审查报告' : 'Code Review Report'}
+                    {t('codeReviewReport', locale)}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {locale === 'zh-Hans' ? '查看最新的代码质量分析' : 'View latest code quality analysis'}
+                    {t('codeReviewDesc', locale)}
                   </p>
                 </div>
                 <ChevronRight className="w-5 h-5 text-muted-foreground" />
@@ -976,7 +957,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
               <div className="border-t border-border/30 pt-2">
                 <SettingsItem
                   icon={Bug}
-                  label={locale === 'zh-Hans' ? '调试模式' : 'Debug Mode'}
+                  label={t('debugMode', locale)}
                   rightElement={
                     <Switch
                       checked={debugMode}
@@ -995,7 +976,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
               <div className="border-t border-border/30 pt-2">
                 <SettingsItem
                   icon={Bot}
-                  label={locale === 'zh-Hans' ? 'Copilot 连接状态' : 'Copilot Connection'}
+                  label={t('copilotConnection', locale)}
                   rightElement={
                     <div className="flex items-center gap-2">
                       <span
@@ -1010,17 +991,17 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                       />
                       <span className="text-sm text-muted-foreground">
                         {!isSettingsFetched
-                          ? (locale === 'zh-Hans' ? '检查中…' : 'Checking…')
+                          ? (t('checking', locale))
                           : (isCopilotConfigured && hasAgent)
-                            ? (locale === 'zh-Hans' ? '已连接' : 'Connected')
-                            : (locale === 'zh-Hans' ? '未配置' : 'Not configured')}
+                            ? (t('connected', locale))
+                            : (t('notConfigured', locale))}
                       </span>
                     </div>
                   }
                 />
                 <SettingsItem
                   icon={MessageSquare}
-                  label={locale === 'zh-Hans' ? '当前 Agent' : 'Current Agent'}
+                  label={t('currentAgent', locale)}
                   rightElement={
                     hasAgent ? (
                       <div className="flex flex-col items-end max-w-[60%]">
@@ -1029,13 +1010,13 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                         </span>
                         <span className="text-[10px] text-muted-foreground">
                           {agentFromSettingTable
-                            ? (locale === 'zh-Hans' ? '来自 Setting 表' : 'From Setting table')
-                            : (locale === 'zh-Hans' ? '已缓存' : 'Cached')}
+                            ? (t('fromSettingTable', locale))
+                            : (t('cached', locale))}
                         </span>
                       </div>
                     ) : (
                       <span className="text-sm text-amber-600 dark:text-amber-500 text-right max-w-[65%]">
-                        {locale === 'zh-Hans' ? '未配置' : 'Not configured'}
+                        {t('notConfigured', locale)}
                       </span>
                     )
                   }
@@ -1052,7 +1033,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
               <div className="border-t border-border/30 pt-2">
                 <SettingsItem
                   icon={Sparkles}
-                  label={locale === 'zh-Hans' ? 'AI Prompt 状态' : 'AI Prompt Status'}
+                  label={t('aiPromptStatus', locale)}
                   rightElement={
                     <div className="flex items-center gap-2">
                       <span
@@ -1067,19 +1048,19 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                       />
                       <span className="text-sm text-muted-foreground">
                         {promptStatus.state === 'checking'
-                          ? (locale === 'zh-Hans' ? '解析中…' : 'Resolving…')
+                          ? (t('resolving', locale))
                           : promptStatus.state === 'resolved'
-                            ? (locale === 'zh-Hans' ? '已就绪' : 'Ready')
+                            ? (t('ready', locale))
                             : promptStatus.state === 'cached'
-                              ? (locale === 'zh-Hans' ? '已就绪（缓存）' : 'Ready (cached)')
-                              : (locale === 'zh-Hans' ? '默认配置' : 'Default')}
+                              ? (t('readyCached', locale))
+                              : (t('defaultConfig', locale))}
                       </span>
                     </div>
                   }
                 />
                 <SettingsItem
                   icon={FileCode}
-                  label={locale === 'zh-Hans' ? '模型名称' : 'Model Name'}
+                  label={t('modelName', locale)}
                   rightElement={
                     <span className="text-sm text-foreground font-mono truncate max-w-[60%] text-right">
                       {promptStatus.modelName}
@@ -1106,7 +1087,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
 
           {/* Sign Out */}
           <div className="pt-4 space-y-2">
-            <SettingsItem icon={LogOut} label={locale === 'zh-Hans' ? '退出登录' : 'Sign Out'} danger />
+            <SettingsItem icon={LogOut} label={t('signOut', locale)} danger />
           </div>
 
           <motion.p variants={itemVariants} className="text-center text-helper text-muted-foreground pt-4">

@@ -8,7 +8,7 @@ import { motion } from 'motion/react';
 import { Check, ChevronDown, ChevronUp, Package } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { getLocale, type Locale } from '@/lib/i18n';
+import { getLocale, t, type Locale } from '@/lib/i18n';
 import { FormCard, type FormCardData } from '@/components/form-card';
 import { useCopilot } from '@/contexts/copilot-context';
 
@@ -44,13 +44,14 @@ export function BatchFormCard({ messageId, batchFormCards, onStatusChange }: Bat
   });
 
   const getTypeLabel = (type: string) => {
-    const labels: Record<string, { zh: string; en: string }> = {
-      activity: { zh: '活动', en: 'Activity' },
-      opportunity: { zh: '商机', en: 'Opportunity' },
-      account: { zh: '客户', en: 'Account' },
-      contact: { zh: '联系人', en: 'Contact' },
+    const keyMap: Record<string, 'activityTab' | 'opportunity' | 'account' | 'contact'> = {
+      activity: 'activityTab',
+      opportunity: 'opportunity',
+      account: 'account',
+      contact: 'contact',
     };
-    return locale === 'zh-Hans' ? labels[type]?.zh || type : labels[type]?.en || type;
+    const key = keyMap[type];
+    return key ? t(key, locale) : type;
   };
 
   const getTypeColor = (type: string) => {
@@ -91,12 +92,10 @@ export function BatchFormCard({ messageId, batchFormCards, onStatusChange }: Bat
           </div>
           <div>
             <h4 className="font-medium text-sm text-foreground">
-              {locale === 'zh-Hans' ? '批量创建' : 'Batch Create'}
+              {t('batchCreate', locale)}
             </h4>
             <p className="text-xs text-muted-foreground">
-              {locale === 'zh-Hans' 
-                ? `共 ${batchFormCards.totalCount} 条记录 · ${confirmedCount} 已确认`
-                : `${batchFormCards.totalCount} records · ${confirmedCount} confirmed`}
+              {t('batchRecordsConfirmed', locale, { total: batchFormCards.totalCount, confirmed: confirmedCount })}
             </p>
           </div>
         </div>
@@ -104,7 +103,7 @@ export function BatchFormCard({ messageId, batchFormCards, onStatusChange }: Bat
           <div className="flex items-center gap-1.5 text-green-600 bg-green-50 dark:bg-green-900/20 px-2 py-1 rounded-md">
             <Check className="w-3.5 h-3.5" />
             <span className="text-xs font-medium">
-              {locale === 'zh-Hans' ? '全部已保存' : 'All Saved'}
+              {t('allSaved', locale)}
             </span>
           </div>
         )}
@@ -149,7 +148,7 @@ export function BatchFormCard({ messageId, batchFormCards, onStatusChange }: Bat
                           : ''
                       }
                     >
-                      {locale === 'zh-Hans' ? '可能重复' : 'Possible duplicate'}
+                      {t('possibleDuplicate', locale)}
                     </span>
                   )}
                   {status === 'confirmed' && (

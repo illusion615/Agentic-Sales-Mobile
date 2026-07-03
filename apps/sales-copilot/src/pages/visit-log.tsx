@@ -90,6 +90,11 @@ const translations = {
     editField: '编辑',
     cancel: '取消',
     pickDate: '选择日期',
+    aiExtractLimited: 'AI 提取受限，请手动补充信息',
+    processFailed: '处理失败，请重试',
+    describeVisitNL: '用自然语言描述您的拜访',
+    extractInfo: '提取信息',
+    previewConfirm: '预览并确认',
   },
   'en-US': {
     title: 'Log Visit',
@@ -125,11 +130,136 @@ const translations = {
     editField: 'Edit',
     cancel: 'Cancel',
     pickDate: 'Pick a date',
+    aiExtractLimited: 'AI extraction limited, please complete manually',
+    processFailed: 'Processing failed, please retry',
+    describeVisitNL: 'Describe your visit in natural language',
+    extractInfo: 'Extract Info',
+    previewConfirm: 'Preview & Confirm',
+  },
+  'de-DE': {
+    title: 'Besuch erfassen',
+    copilotMode: 'KI-Assistent',
+    manualMode: 'Manuelle Eingabe',
+    inputPlaceholder: 'Beschreiben Sie Ihren Kundenbesuch...',
+    inputHint: 'Beispiel: Heute John von Microsoft getroffen, Cloud-Partnerschaft besprochen, Kunde ist interessiert, Demo nächste Woche',
+    holdToSpeak: 'Zum Sprechen halten',
+    processing: 'Wird analysiert...',
+    reviewTitle: 'Besuchsdetails bestätigen',
+    confidence: 'Konfidenz',
+    account: 'Kunde',
+    contact: 'Kontakt',
+    visitDate: 'Besuchsdatum',
+    visitType: 'Besuchsart',
+    summary: 'Zusammenfassung',
+    outcome: 'Ergebnis',
+    nextSteps: 'Nächste Schritte',
+    opportunitySignal: 'Verkaufssignal',
+    selectAccount: 'Kunde auswählen',
+    enterContact: 'Kontaktname eingeben',
+    enterSummary: 'Besuchszusammenfassung eingeben',
+    enterOutcome: 'Besuchsergebnis eingeben',
+    enterNextSteps: 'Nächste Schritte eingeben',
+    reInput: 'Erneut eingeben',
+    confirm: 'Bestätigen & speichern',
+    saving: 'Wird gespeichert...',
+    saved: 'Besuch erfolgreich erfasst',
+    saveFailed: 'Speichern fehlgeschlagen, bitte erneut versuchen',
+    copilotNotConfigured: 'Copilot nicht konfiguriert. Bitte Token-Endpunkt in den Einstellungen festlegen.',
+    noAccountsFound: 'Keine Kunden gefunden',
+    aiExtracted: 'KI-extrahiert',
+    editField: 'Bearbeiten',
+    cancel: 'Abbrechen',
+    pickDate: 'Datum wählen',
+    aiExtractLimited: 'KI-Extraktion eingeschränkt, bitte manuell ergänzen',
+    processFailed: 'Verarbeitung fehlgeschlagen, bitte erneut versuchen',
+    describeVisitNL: 'Beschreiben Sie Ihren Besuch in natürlicher Sprache',
+    extractInfo: 'Informationen extrahieren',
+    previewConfirm: 'Vorschau & Bestätigen',
+  },
+  'fr-FR': {
+    title: 'Enregistrer une visite',
+    copilotMode: 'Assistant IA',
+    manualMode: 'Saisie manuelle',
+    inputPlaceholder: 'Décrivez votre visite client...',
+    inputHint: 'Exemple : Rencontré John de Microsoft aujourd\'hui, discuté du partenariat cloud, client intéressé, démo prévue la semaine prochaine',
+    holdToSpeak: 'Maintenez pour parler',
+    processing: 'Analyse...',
+    reviewTitle: 'Confirmer les détails de la visite',
+    confidence: 'Confiance',
+    account: 'Compte',
+    contact: 'Contact',
+    visitDate: 'Date de visite',
+    visitType: 'Type de visite',
+    summary: 'Résumé',
+    outcome: 'Résultat',
+    nextSteps: 'Prochaines étapes',
+    opportunitySignal: 'Signal d\'opportunité',
+    selectAccount: 'Sélectionner un compte',
+    enterContact: 'Saisir le nom du contact',
+    enterSummary: 'Saisir le résumé de la visite',
+    enterOutcome: 'Saisir le résultat de la visite',
+    enterNextSteps: 'Saisir les prochaines étapes',
+    reInput: 'Ressaisir',
+    confirm: 'Confirmer et enregistrer',
+    saving: 'Enregistrement...',
+    saved: 'Visite enregistrée avec succès',
+    saveFailed: 'Échec de l\'enregistrement, veuillez réessayer',
+    copilotNotConfigured: 'Copilot non configuré. Veuillez définir le point de terminaison du jeton dans les Paramètres.',
+    noAccountsFound: 'Aucun compte trouvé',
+    aiExtracted: 'Extrait par IA',
+    editField: 'Modifier',
+    cancel: 'Annuler',
+    pickDate: 'Choisir une date',
+    aiExtractLimited: 'Extraction IA limitée, veuillez compléter manuellement',
+    processFailed: 'Échec du traitement, veuillez réessayer',
+    describeVisitNL: 'Décrivez votre visite en langage naturel',
+    extractInfo: 'Extraire les informations',
+    previewConfirm: 'Aperçu et confirmation',
+  },
+  'es-ES': {
+    title: 'Registrar visita',
+    copilotMode: 'Asistente IA',
+    manualMode: 'Entrada manual',
+    inputPlaceholder: 'Describe tu visita al cliente...',
+    inputHint: 'Ejemplo: Hoy me reúní con John de Microsoft, hablamos de la alianza en la nube, el cliente está interesado, demo la próxima semana',
+    holdToSpeak: 'Mantén pulsado para hablar',
+    processing: 'Analizando...',
+    reviewTitle: 'Confirmar detalles de la visita',
+    confidence: 'Confianza',
+    account: 'Cuenta',
+    contact: 'Contacto',
+    visitDate: 'Fecha de visita',
+    visitType: 'Tipo de visita',
+    summary: 'Resumen',
+    outcome: 'Resultado',
+    nextSteps: 'Próximos pasos',
+    opportunitySignal: 'Señal de oportunidad',
+    selectAccount: 'Seleccionar cuenta',
+    enterContact: 'Introduce el nombre del contacto',
+    enterSummary: 'Introduce el resumen de la visita',
+    enterOutcome: 'Introduce el resultado de la visita',
+    enterNextSteps: 'Introduce los próximos pasos',
+    reInput: 'Volver a introducir',
+    confirm: 'Confirmar y guardar',
+    saving: 'Guardando...',
+    saved: 'Visita registrada correctamente',
+    saveFailed: 'Error al guardar, inténtalo de nuevo',
+    copilotNotConfigured: 'Copilot no configurado. Configura el Token Endpoint en Ajustes.',
+    noAccountsFound: 'No se encontraron cuentas',
+    aiExtracted: 'Extraído por IA',
+    editField: 'Editar',
+    cancel: 'Cancelar',
+    pickDate: 'Elegir fecha',
+    aiExtractLimited: 'Extracción de IA limitada, completa manualmente',
+    processFailed: 'Error de procesamiento, inténtalo de nuevo',
+    describeVisitNL: 'Describe tu visita en lenguaje natural',
+    extractInfo: 'Extraer información',
+    previewConfirm: 'Vista previa y confirmar',
   },
 };
 
 function t(key: keyof typeof translations['zh-Hans'], locale: Locale): string {
-  return translations[locale][key] || translations['en-US'][key] || key;
+  return (translations[locale as keyof typeof translations] ?? translations['en-US'])[key] || translations['en-US'][key] || key;
 }
 
 // Confidence indicator component
@@ -406,11 +536,11 @@ export default function VisitLogPage() {
           confidence: 30,
         });
         setFlowState('review');
-        toast.info(locale === 'zh-Hans' ? 'AI 提取受限，请手动补充信息' : 'AI extraction limited, please complete manually');
+        toast.info(t('aiExtractLimited', locale));
       }
     } catch (error) {
       console.error('Processing failed:', error);
-      toast.error(locale === 'zh-Hans' ? '处理失败，请重试' : 'Processing failed, please retry');
+      toast.error(t('processFailed', locale));
       setFlowState('input');
     }
   }, [inputText, isLLMConfigured, isCopilotConfigured, extractWithLLM, extractWithCopilot, locale]);
@@ -548,7 +678,7 @@ export default function VisitLogPage() {
                 <div className="flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-primary" />
                   <span className="text-sm font-medium text-foreground">
-                    {locale === 'zh-Hans' ? '用自然语言描述您的拜访' : 'Describe your visit in natural language'}
+                    {t('describeVisitNL', locale)}
                   </span>
                 </div>
                 <Textarea
@@ -904,7 +1034,7 @@ export default function VisitLogPage() {
             className="w-full h-12 accent-gradient text-white font-medium"
           >
             <Send className="w-4 h-4 mr-2" />
-            {locale === 'zh-Hans' ? '提取信息' : 'Extract Info'}
+            {t('extractInfo', locale)}
           </Button>
         )}
 
@@ -921,7 +1051,7 @@ export default function VisitLogPage() {
             className="w-full h-12 accent-gradient text-white font-medium"
           >
             <ChevronRight className="w-4 h-4 mr-2" />
-            {locale === 'zh-Hans' ? '预览并确认' : 'Preview & Confirm'}
+            {t('previewConfirm', locale)}
           </Button>
         )}
 

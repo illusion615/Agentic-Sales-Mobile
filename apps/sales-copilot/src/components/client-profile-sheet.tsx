@@ -32,7 +32,7 @@ import { useActivityList } from '@/generated/hooks/use-activity';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import type { Activity } from '@/generated/models/activity-model';
 import type { Opportunity } from '@/generated/models/opportunity-model';
-import { getLocale } from '@/lib/i18n';
+import { getLocale, t } from '@/lib/i18n';
 
 interface ClientProfileSheetProps {
   accountId: string;
@@ -213,9 +213,9 @@ export function ClientProfileSheet({ accountId, open, onOpenChange }: ClientProf
   };
 
   const screenTitles = [
-    locale === 'zh-Hans' ? '拜访摘要' : 'Visit Summary',
-    locale === 'zh-Hans' ? '商机进度' : 'Opportunity Progress',
-    locale === 'zh-Hans' ? '行动 & 采购' : 'Actions & Procurement',
+    t('visitSummary', locale),
+    t('opportunityProgress', locale),
+    t('actionsProcurement', locale),
   ];
 
   if (!account) return null;
@@ -302,7 +302,7 @@ export function ClientProfileSheet({ accountId, open, onOpenChange }: ClientProf
                     <div className="text-center py-12">
                       <Calendar className="w-12 h-12 mx-auto mb-3 text-muted-foreground/40" />
                       <p className="text-sm text-muted-foreground">
-                        {locale === 'zh-Hans' ? '暂无拜访记录' : 'No visits recorded'}
+                        {t('noVisitsRecorded', locale)}
                       </p>
                     </div>
                   ) : (
@@ -367,7 +367,7 @@ export function ClientProfileSheet({ accountId, open, onOpenChange }: ClientProf
                     <div className="text-center py-12">
                       <Target className="w-12 h-12 mx-auto mb-3 text-muted-foreground/40" />
                       <p className="text-sm text-muted-foreground">
-                        {locale === 'zh-Hans' ? '暂无开放商机' : 'No open opportunities'}
+                        {t('noOpenOpportunities', locale)}
                       </p>
                     </div>
                   ) : (
@@ -409,7 +409,7 @@ export function ClientProfileSheet({ accountId, open, onOpenChange }: ClientProf
                             <div className="flex items-center justify-between text-xs">
                               <span className="text-muted-foreground">{stageLabel}</span>
                               <span className="text-muted-foreground">
-                                {locale === 'zh-Hans' ? '预计' : 'Close'}: {formatDate(opp.expectedclosedate)}
+                                {t('closeLabel', locale)}: {formatDate(opp.expectedclosedate)}
                               </span>
                             </div>
                             <Progress value={progress} className="h-2" />
@@ -424,7 +424,7 @@ export function ClientProfileSheet({ accountId, open, onOpenChange }: ClientProf
                           
                           {opp.lastaction && (
                             <p className="text-xs text-muted-foreground">
-                              <span className="font-medium">{locale === 'zh-Hans' ? '最近动作' : 'Last action'}:</span> {opp.lastaction}
+                              <span className="font-medium">{t('lastActionShort', locale)}:</span> {opp.lastaction}
                             </p>
                           )}
                         </GlassCard>
@@ -441,12 +441,12 @@ export function ClientProfileSheet({ accountId, open, onOpenChange }: ClientProf
                   <div className="space-y-3">
                     <div className="flex items-center gap-2 text-sm font-medium text-foreground">
                       <ListChecks className="w-4 h-4 text-primary" />
-                      <span>{locale === 'zh-Hans' ? 'Follow-up 清单' : 'Follow-up Actions'}</span>
+                      <span>{t('followUpActions', locale)}</span>
                     </div>
                     
                     {followUpActions.length === 0 ? (
                       <p className="text-xs text-muted-foreground py-4 text-center">
-                        {locale === 'zh-Hans' ? '暂无待办事项' : 'No follow-up actions'}
+                        {t('noFollowUpActions', locale)}
                       </p>
                     ) : (
                       <div className="space-y-2">
@@ -491,19 +491,19 @@ export function ClientProfileSheet({ accountId, open, onOpenChange }: ClientProf
                     <div className="flex items-center gap-2 text-sm font-medium text-foreground">
                       <BarChart3 className="w-4 h-4 text-primary" />
                       <span>
-                        {locale === 'zh-Hans' ? '近6个月采购倾向' : '6-Month Procurement Trends'}
+                        {t('procurementTrends', locale)}
                       </span>
                     </div>
                     
                     {procurementTrends.length === 0 ? (
                       <p className="text-xs text-muted-foreground py-4 text-center">
-                        {locale === 'zh-Hans' ? '暂无采购数据' : 'No procurement data'}
+                        {t('noProcurementData', locale)}
                       </p>
                     ) : (
                       <GlassCard className="space-y-3">
                         <div className="flex items-center justify-between">
                           <span className="text-xs text-muted-foreground">
-                            {locale === 'zh-Hans' ? '总金额' : 'Total Value'}
+                            {t('totalValue', locale)}
                           </span>
                           <span className="text-lg font-bold text-foreground">
                             {formatCurrency(totalProcurementValue)}

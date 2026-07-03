@@ -68,6 +68,13 @@ export const dataSourcesInfo = {
     "dataSourceType": "Dataverse",
     "apis": {}
   },
+  "skills": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "skillid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
   "contacts": {
     "tableId": "",
     "version": "",

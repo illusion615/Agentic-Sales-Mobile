@@ -52,7 +52,7 @@ const SKILL_OBJECT_MAP: Record<string, FrameSalesObject[]> = {
 };
 
 /** Skills that are always available regardless of salesObject targeting. */
-const ALWAYS_AVAILABLE = new Set(['externalKnowledgeQuery']);
+const ALWAYS_AVAILABLE = new Set(['externalKnowledgeQuery', 'proposeChanges']);
 
 /**
  * Select skills relevant to the union of salesObjects across all intents.

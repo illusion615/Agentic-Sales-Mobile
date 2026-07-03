@@ -32,7 +32,7 @@ describe('buildOverviewMessage', () => {
     const msg = buildOverviewMessage([
       { intentIndex: 0, userFacingLabel: { zh: '登记拜访', en: 'Log visit' } },
       { intentIndex: 1, userFacingLabel: { zh: '创建商机', en: 'Create opp' } },
-    ], true);
+    ], 'zh-Hans');
     expect(msg.content).toContain('2 个意图');
     expect(msg.content).toContain('登记拜访');
     expect(msg.taskRole).toBe('overview');
@@ -46,7 +46,7 @@ describe('buildAnnounceMessage', () => {
   ];
 
   it('builds announce for existing intent', () => {
-    const msg = buildAnnounceMessage(0, overview, true);
+    const msg = buildAnnounceMessage(0, overview, 'zh-Hans');
     expect(msg).not.toBeNull();
     expect(msg!.taskRole).toBe('announce');
     expect(msg!.taskAnnounce?.index).toBe(1);
@@ -54,7 +54,7 @@ describe('buildAnnounceMessage', () => {
   });
 
   it('returns null for non-existent intent', () => {
-    expect(buildAnnounceMessage(99, overview, true)).toBeNull();
+    expect(buildAnnounceMessage(99, overview, 'zh-Hans')).toBeNull();
   });
 });
 

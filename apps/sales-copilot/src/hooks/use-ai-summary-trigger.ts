@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCreateAISummary, useUpdateAISummary, useAISummaryList } from '@/generated/hooks/use-aisummary';
 import type { AISummary } from '@/generated/models/ai-summary-model';
+import { getLocale, type Locale } from '@/lib/i18n';
 import { useAppSettings } from './use-app-settings';
 import { useUser } from './use-user';
 
@@ -22,11 +23,15 @@ export const STATUSES = {
 
 export type EntityType = 'account' | 'opportunity' | 'contact' | 'activity';
 
+/** localStorage marker of the language an entity's stored summary was generated in. */
+const aiSummaryLocaleKey = (entityType: EntityType, entityId: string) => `ai-summary-locale:${entityType}:${entityId}`;
+
 interface TriggerSummaryParams {
   entityType: EntityType;
   entityId: string;
   entityData: Record<string, unknown>;
   relatedData?: Record<string, unknown>;
+  locale?: Locale;
 }
 
 /**
@@ -171,14 +176,15 @@ async function triggerFlowInBackground(
   userPrompt: string,
   entityType: EntityType,
   summaryId: string,
-  updateSummary: (params: { id: string; changedFields: Partial<Omit<AISummary, 'id'>> }) => Promise<unknown>
+  updateSummary: (params: { id: string; changedFields: Partial<Omit<AISummary, 'id'>> }) => Promise<unknown>,
+  locale: Locale,
 ) {
   try {
     const { executeFunction } = await import('@/lib/function-executor');
     const result = await executeFunction('generateEntitySummary', {
       data: userPrompt,
       entityType,
-    }, {});
+    }, { locale });
     
     if (!result.success) {
       throw new Error(result.error || 'Skill execution failed');
@@ -307,7 +313,17 @@ export function useEntityAISummary(entityType: EntityType, entityId: string) {
   const isGenerating = (summary?.status === STATUSES.generating || summary?.status === STATUSES.pending) && !generatingTooLong;
   const isCompleted = summary?.status === STATUSES.completed;
   const isFailed = summary?.status === STATUSES.failed || generatingTooLong;
-  
+
+  // True when a finished summary exists but was generated in a different language
+  // than the one currently selected — the page should regenerate it.
+  let localeMismatch = false;
+  if (summary && isCompleted) {
+    try {
+      const genLocale = localStorage.getItem(aiSummaryLocaleKey(entityType, entityId));
+      localeMismatch = !!genLocale && genLocale !== getLocale();
+    } catch { /* ignore */ }
+  }
+
   return {
     summary,
     isLoading,
@@ -315,6 +331,7 @@ export function useEntityAISummary(entityType: EntityType, entityId: string) {
     isGenerating,
     isCompleted,
     isFailed,
+    localeMismatch,
     refetch,
   };
 }
@@ -336,7 +353,11 @@ export function useAISummaryTrigger() {
     meta: { suppressGlobalToast: true },
     mutationFn: async (params: TriggerSummaryParams) => {
       const { entityType, entityId, entityData, relatedData } = params;
+      const locale = params.locale ?? getLocale();
       const entityTypeLabel = ENTITY_TYPES[entityType];
+      // Remember the language this summary is generated in so the UI can detect a
+      // stale summary after the user switches languages and regenerate it.
+      try { localStorage.setItem(aiSummaryLocaleKey(entityType, entityId), locale); } catch { /* ignore */ }
       
       // Create a pending summary record first
       const summaryRecord = await createAISummary.mutateAsync({
@@ -361,7 +382,7 @@ export function useAISummaryTrigger() {
         const userPrompt = buildAIPrompt(entityType, entityData, relatedData);
         
         // Fire and forget - don't wait for the flow to complete
-        triggerFlowInBackground(userPrompt, entityType, summaryRecord.id, updateAISummary.mutateAsync);
+        triggerFlowInBackground(userPrompt, entityType, summaryRecord.id, updateAISummary.mutateAsync, locale);
       } else {
         // No flow configured or no user - generate a placeholder summary
         const placeholderSummary = generatePlaceholderSummary(entityType, entityData);
@@ -411,6 +432,7 @@ export function useWithAISummaryTrigger() {
         entityId,
         entityData,
         relatedData,
+        locale: getLocale(),
       });
     }, 100);
   };

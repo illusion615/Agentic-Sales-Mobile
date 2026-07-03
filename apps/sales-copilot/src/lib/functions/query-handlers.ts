@@ -42,8 +42,11 @@ const STAGE_ALIASES: Record<string, string> = {
 };
 
 function normalizeStage(raw: string): string {
-  const key = raw.trim().toLowerCase();
-  return STAGE_ALIASES[key] ?? STAGE_ALIASES[raw.trim()] ?? key;
+  // Coerce defensively: the LLM sometimes passes a non-string (e.g. an array for
+  // multi-stage queries), which used to crash here with "raw.trim is not a function".
+  const s = String(raw ?? '').trim();
+  const key = s.toLowerCase();
+  return STAGE_ALIASES[key] ?? STAGE_ALIASES[s] ?? key;
 }
 
 export { normalizeStage };
@@ -82,7 +85,7 @@ const queryOpportunities: FunctionHandler = async (args, ctx) => {
   if (!oppAccountId && args.accountName) {
     oppAccountId = await resolveAccountByName(args.accountName as string);
   }
-  const stage = args.stage as string | undefined;
+  const stage = args.stage;
   const closingWithinDays = args.closingWithinDays as number | undefined ?? (args.days as number | undefined);
   const minAmount = args.minAmount as number | undefined;
   const minConfidence = args.minConfidence as number | undefined;
@@ -97,9 +100,16 @@ const queryOpportunities: FunctionHandler = async (args, ctx) => {
   // but the LLM often emits it Capitalized ("Negotiation"), in English variants, or in
   // Chinese ("谈判"). normalizeStage maps all known synonyms to the canonical value so
   // "谈判阶段商机" / "negotiation stage" don't return 0. (Defect D1 + Chinese aliases)
-  if (stage) {
-    const stageCanon = normalizeStage(stage);
-    filtered = filtered.filter((o: Opportunity) => (o.stage ?? '').toLowerCase() === stageCanon);
+  // The LLM may also pass MULTIPLE stages (e.g. "negotiation and proposal") as an array
+  // or a comma-joined string; match any of them.
+  if (stage != null && stage !== '') {
+    const stageList = (Array.isArray(stage) ? stage : [stage])
+      .flatMap((s) => String(s).split(/[,;、，]/))
+      .map((s) => normalizeStage(s))
+      .filter(Boolean);
+    if (stageList.length) {
+      filtered = filtered.filter((o: Opportunity) => stageList.includes((o.stage ?? '').toLowerCase()));
+    }
   }
   if (minAmount) filtered = filtered.filter((o: Opportunity) => o.totalamount >= minAmount);
   // Confidence range filter — used by "at risk" (minConfidence:0,maxConfidence:49).

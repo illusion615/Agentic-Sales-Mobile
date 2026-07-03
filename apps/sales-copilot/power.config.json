@@ -120,6 +120,11 @@
           "entitySetName": "msdyn_aimodels",
           "logicalName": "msdyn_aimodel",
           "isHidden": false
+        },
+        "businessskills": {
+          "entitySetName": "skills",
+          "logicalName": "skill",
+          "isHidden": false
         }
       },
       "version": "v9.0",

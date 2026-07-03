@@ -28,7 +28,7 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { useLocale, type Locale } from '@/lib/i18n';
+import { useLocale, t, type Locale } from '@/lib/i18n';
 import { startOnboarding } from '@/lib/onboarding';
 import { cn } from '@/lib/utils';
 import { useFirstMount } from '@/hooks/use-first-mount';
@@ -347,10 +347,10 @@ export default function HelpFeedbackPage() {
           </Button>
           <div className="flex-1 min-w-0">
             <h1 className="text-lg font-semibold text-foreground truncate">
-              {locale === 'zh-Hans' ? '技能与工具指南' : 'Skills & Tools Guide'}
+              {t('skillsToolsGuide', locale)}
             </h1>
             <p className="text-xs text-muted-foreground truncate">
-              {locale === 'zh-Hans' ? '了解如何使用Sales Copilot的所有功能' : 'Learn how to use all Sales Copilot features'}
+              {t('learnAllFeatures', locale)}
             </p>
           </div>
         </div>
@@ -372,12 +372,10 @@ export default function HelpFeedbackPage() {
               </div>
               <div className="flex-1 min-w-0">
                 <h2 className="text-sm font-semibold text-foreground mb-1">
-                  {locale === 'zh-Hans' ? '工作原理' : 'How It Works'}
+                  {t('howItWorks', locale)}
                 </h2>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  {locale === 'zh-Hans'
-                    ? 'Sales Copilot 将销售数据组织成相互关联的实体：客户、联系人、商机、活动和产品。每个实体都有专门的技能来帮助您查看、创建和管理数据。AI 功能可以跨实体分析模式，提供智能洞察和建议。'
-                    : 'Sales Copilot organizes sales data into interconnected entities: Accounts, Contacts, Opportunities, Activities, and Products. Each entity has dedicated skills to help you view, create, and manage data. AI features analyze patterns across entities to provide intelligent insights and recommendations.'}
+                  {t('howItWorksDesc', locale)}
                 </p>
               </div>
             </div>
@@ -398,10 +396,10 @@ export default function HelpFeedbackPage() {
             </div>
             <div className="flex-1 min-w-0">
               <h2 className="text-sm font-semibold text-foreground">
-                {locale === 'zh-Hans' ? '新手指引' : 'App Tour'}
+                {t('appTour', locale)}
               </h2>
               <p className="text-xs text-muted-foreground">
-                {locale === 'zh-Hans' ? '重新观看快速上手引导' : 'Replay the quick-start walkthrough'}
+                {t('replayWalkthrough', locale)}
               </p>
             </div>
             <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
@@ -411,23 +409,23 @@ export default function HelpFeedbackPage() {
           <motion.div variants={itemVariants} className="glass-card p-4 rounded-2xl">
             <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
               <Info className="w-4 h-4 text-primary" />
-              {locale === 'zh-Hans' ? '数据实体关系' : 'Data Entity Relationships'}
+              {t('dataEntityRelationships', locale)}
             </h3>
             <div className="bg-muted/30 rounded-xl p-3">
               <div className="flex flex-wrap items-center justify-center gap-2 text-xs">
                 <span className="px-2 py-1 bg-primary/10 text-primary rounded-lg font-medium flex items-center gap-1">
                   <Building2 className="w-3 h-3" />
-                  {locale === 'zh-Hans' ? '客户' : 'Account'}
+                  {t('account', locale)}
                 </span>
                 <ChevronRight className="w-4 h-4 text-muted-foreground" />
                 <span className="px-2 py-1 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-lg font-medium flex items-center gap-1">
                   <Users className="w-3 h-3" />
-                  {locale === 'zh-Hans' ? '联系人' : 'Contact'}
+                  {t('contact', locale)}
                 </span>
                 <ChevronRight className="w-4 h-4 text-muted-foreground" />
                 <span className="px-2 py-1 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-lg font-medium flex items-center gap-1">
                   <Target className="w-3 h-3" />
-                  {locale === 'zh-Hans' ? '商机' : 'Opportunity'}
+                  {t('opportunity', locale)}
                 </span>
               </div>
               <div className="flex justify-center my-2">
@@ -436,17 +434,15 @@ export default function HelpFeedbackPage() {
               <div className="flex flex-wrap items-center justify-center gap-2 text-xs">
                 <span className="px-2 py-1 bg-green-500/10 text-green-600 dark:text-green-400 rounded-lg font-medium flex items-center gap-1">
                   <Calendar className="w-3 h-3" />
-                  {locale === 'zh-Hans' ? '活动' : 'Activity'}
+                  {t('activityTab', locale)}
                 </span>
                 <span className="px-2 py-1 bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded-lg font-medium flex items-center gap-1">
                   <Package className="w-3 h-3" />
-                  {locale === 'zh-Hans' ? '产品' : 'Product'}
+                  {t('product', locale)}
                 </span>
               </div>
               <p className="text-xs text-muted-foreground text-center mt-3">
-                {locale === 'zh-Hans'
-                  ? '客户可以有多个联系人和商机，活动链接到客户和商机'
-                  : 'Accounts can have multiple Contacts and Opportunities. Activities link to Accounts and Opportunities.'}
+                {t('entityRelFooter', locale)}
               </p>
             </div>
           </motion.div>
@@ -528,7 +524,7 @@ export default function HelpFeedbackPage() {
                                 <div className="bg-background/50 rounded-lg p-3">
                                   <h5 className="text-xs font-semibold text-foreground mb-1 flex items-center gap-1">
                                     <Info className="w-3 h-3" />
-                                    {locale === 'zh-Hans' ? '功能说明' : 'Description'}
+                                    {t('descriptionLabel', locale)}
                                   </h5>
                                   <p className="text-xs text-muted-foreground">
                                     {locale === 'zh-Hans' ? skill.descriptionZh : skill.description}
@@ -539,7 +535,7 @@ export default function HelpFeedbackPage() {
                                   <div className="bg-background/50 rounded-lg p-3">
                                     <h5 className="text-xs font-semibold text-foreground mb-2 flex items-center gap-1">
                                       <MessageSquare className="w-3 h-3" />
-                                      {locale === 'zh-Hans' ? '语音/文本示例' : 'Voice/Text Examples'}
+                                      {t('voiceTextExamples', locale)}
                                     </h5>
                                     <ul className="space-y-1.5">
                                       {(locale === 'zh-Hans' ? skill.voiceExamplesZh : skill.voiceExamples).map((example: string, idx: number) => (

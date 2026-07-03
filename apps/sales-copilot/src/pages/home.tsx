@@ -12,8 +12,9 @@ import { useAccountList } from '@/generated/hooks/use-account';
 import { useUpdateCopilotConversation, useCreateCopilotConversation } from '@/generated/hooks/use-copilot-conversation';
 import { useCreateBusinessInsight, useBusinessInsightList, useDeleteBusinessInsight } from '@/generated/hooks/use-business-insight';
 import { useLocale } from '@/lib/i18n';
-import { t, getGreeting, getChatFontClass, getThinkingDotStyle, getAutoPlayAgentResponse, getSelectedVoice, findMatchingSystemVoice, getVoiceSummaryEnabled, generateVoiceSummary, getAgentFramework, getHomeHeaderWidget, type Locale, type ThinkingDotStyle, type HomeHeaderWidget } from '@/lib/i18n';
-import { ensureVoicesReady } from '@/lib/speech';
+import { t, getGreeting, getChatFontClass, getThinkingDotStyle, getAutoPlayAgentResponse, getSelectedVoice, findMatchingSystemVoice, getVoiceSummaryEnabled, generateVoiceSummary, getAgentFramework, getHomeHeaderWidget, speechLang, localeBcp47, type Locale, type ThinkingDotStyle, type HomeHeaderWidget } from '@/lib/i18n';
+import { splitIntoSegments } from '@/lib/speech';
+import { useSpeechPlayer, type SpeechTrack } from '@/hooks/use-speech-player';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { formatCurrencyCompact, formatCurrencyFull } from '@/lib/format-currency';
 
@@ -82,7 +83,7 @@ function DateTimeClock({ locale }: { locale: Locale }) {
   };
 
   const formatTime = (date: Date) => {
-    return date.toLocaleTimeString(locale === 'zh-Hans' ? 'zh-CN' : 'en-US', {
+    return date.toLocaleTimeString(localeBcp47(locale), {
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
@@ -143,7 +144,7 @@ function HomeHeaderWidgetDisplay({
   };
 
   const formatTime = (date: Date) => {
-    return date.toLocaleTimeString(locale === 'zh-Hans' ? 'zh-CN' : 'en-US', {
+    return date.toLocaleTimeString(localeBcp47(locale), {
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
@@ -177,14 +178,14 @@ function HomeHeaderWidgetDisplay({
     case 'performance':
       return (
         <div>
-          <p className="text-sm text-muted-foreground leading-none">{locale === 'zh-Hans' ? '我的业绩' : 'My Performance'}</p>
+          <p className="text-sm text-muted-foreground leading-none">{t('myPerformance', locale)}</p>
           <p className="text-2xl font-bold text-foreground leading-tight mt-0.5 tabular-nums">{performancePercent}%</p>
         </div>
       );
     case 'task-completion':
       return (
         <div>
-          <p className="text-sm text-muted-foreground leading-none">{locale === 'zh-Hans' ? '今日任务完成率' : "Today's Task Completion"}</p>
+          <p className="text-sm text-muted-foreground leading-none">{t('todayTaskCompletion', locale)}</p>
           <p className="text-2xl font-bold text-foreground leading-tight mt-0.5 tabular-nums">
             {taskCompletionRate}% 
             <span className="text-sm font-normal text-muted-foreground">
@@ -197,7 +198,7 @@ function HomeHeaderWidgetDisplay({
     default:
       return (
         <div>
-          <p className="text-sm text-muted-foreground leading-none">{locale === 'zh-Hans' ? '本季度业绩完成率' : 'Quarterly Goal Progress'}</p>
+          <p className="text-sm text-muted-foreground leading-none">{t('quarterlyGoalProgress', locale)}</p>
           <p className="text-2xl font-bold text-foreground leading-tight mt-0.5 tabular-nums">
             {quarterlyProgress}%
             <span className="text-sm font-normal text-muted-foreground ml-1.5">
@@ -383,9 +384,12 @@ export default function HomeDashboard() {
   const [briefMeCurrentSegmentIndex, setBriefMeCurrentSegmentIndex] = useState(0);
   const [briefMeSegmentCount, setBriefMeSegmentCount] = useState(0);
   const [briefMeCurrentSegmentLabel, setBriefMeCurrentSegmentLabel] = useState('');
-  const briefMeUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const briefMeStartTimeRef = useRef<number>(0);
   const briefMeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Mirror the speed in a ref so the shared player always reads the latest rate
+  // (a speed toggle takes effect immediately, even mid-async-playback start).
+  const briefMeSpeedRef = useRef(briefMeSpeed);
+  briefMeSpeedRef.current = briefMeSpeed;
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -393,7 +397,6 @@ export default function HomeDashboard() {
   // messages that arrive AFTER the panel opened. Existing messages are ignored.
   const initialMessageCountRef = useRef<number | null>(null);
   const lastAutoPlayedIdRef = useRef<string | null>(null);
-  const speechSynthesisRef = useRef<SpeechSynthesisUtterance | null>(null);
   
   // Track the last log snapshot we wrote so background saves stay deduplicated.
   const lastSavedRef = useRef<string>('');
@@ -900,6 +903,12 @@ export default function HomeDashboard() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
+  // Shared player for auto-spoken agent replies (same engine as everywhere else).
+  const chatAutoPlayer = useSpeechPlayer({
+    getLang: () => speechLang(locale),
+    getVoice: () => findMatchingSystemVoice(getSelectedVoice(), locale),
+  });
+
   // Auto-play agent response with TTS when enabled
   useEffect(() => {
     if (!getAutoPlayAgentResponse()) return;
@@ -933,32 +942,13 @@ export default function HomeDashboard() {
     
     // Mark as played
     lastAutoPlayedIdRef.current = latestMessage.id;
-    
-    // Cancel any ongoing speech
-    if (window.speechSynthesis) {
-      window.speechSynthesis.cancel();
-    }
-    
-    // Function to speak text
+
+    // Function to speak text via the shared player. The text passed in is
+    // already plain (markdown/JSON stripped below), so it is spoken as one
+    // utterance (segments:[text]) to match the prior behaviour exactly.
     const speakText = (text: string) => {
       if (!text.trim()) return;
-      if (!('speechSynthesis' in window)) return;
-      // D12: wait for the async voice list to populate before the first utterance
-      // so it uses the selected (premium) voice, not a default fallback. Resolves
-      // immediately once voices are ready.
-      void ensureVoicesReady().then(() => {
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = locale === 'zh-Hans' ? 'zh-CN' : 'en-US';
-        const selectedVoiceId = getSelectedVoice();
-        const matchingVoice = findMatchingSystemVoice(selectedVoiceId, locale);
-        if (matchingVoice) {
-          utterance.voice = matchingVoice;
-        }
-        utterance.rate = 1.0;
-        utterance.pitch = 1.0;
-        speechSynthesisRef.current = utterance;
-        window.speechSynthesis.speak(utterance);
-      });
+      chatAutoPlayer.play([{ id: latestMessage.id, text, segments: [text] }]);
     };
     
     // Extract plain text from content (remove markdown/json)
@@ -1113,129 +1103,79 @@ export default function HomeDashboard() {
     }
   };
 
-  // Play insight at a specific index - used for auto-advance
+  // Build one TTS track per insight card, pre-segmented for natural pauses, in
+  // the SAME order the Insights sheet renders them so playback can drive the
+  // sheet to follow the card being read.
+  const buildInsightTracks = useCallback((): SpeechTrack[] => {
+    return briefMeInsightTexts.map((text: string, i: number) => ({
+      id: `insight-${i}`,
+      segments: splitIntoSegments(text),
+    }));
+  }, [briefMeInsightTexts]);
+
+  // Shared speech player — owns the audio mechanics + mobile gesture unlock.
+  // The Insight UI keeps its own player bar; this only feeds it state.
+  const insightPlayer = useSpeechPlayer({
+    getLang: () => speechLang(locale),
+    getVoice: () => findMatchingSystemVoice(getSelectedVoice(), locale),
+    getRate: () => briefMeSpeedRef.current,
+    trackPauseMs: 800,
+    segmentPauseMs: 500,
+    onTrackChange: (index: number, track: SpeechTrack) => {
+      setBriefMeCurrentIndex(index);
+      setBriefMeSegmentCount(track.segments?.length ?? 0);
+      setBriefMeCurrentSegmentIndex(0);
+    },
+    onSegmentChange: (_trackIndex: number, segIndex: number, text: string) => {
+      setBriefMeCurrentSegmentIndex(segIndex);
+      setBriefMeCurrentSegmentLabel(text);
+    },
+    onEnd: () => {
+      setBriefMeIsPlaying(false);
+      if (briefMeTimerRef.current) clearInterval(briefMeTimerRef.current);
+    },
+  });
+
+  // Play insight at a specific index. Delegates audio to the shared player and
+  // keeps the legacy briefMe* state in sync for the existing player bar.
   const playInsightAtIndex = useCallback((index: number) => {
-    if (!('speechSynthesis' in window)) {
-      return;
-    }
-    
-    // Cancel any existing speech
-    window.speechSynthesis.cancel();
-    
-    const textToSpeak = briefMeInsightTexts[index];
-    if (!textToSpeak) return;
-    
-    // Split text into paragraphs for natural pauses
-    // Paragraphs are separated by double newlines or multiple newlines
-    const paragraphs = textToSpeak
-      .split(/\n\n+/)
-      .map((p: string) => p.trim())
-      .filter((p: string) => p.length > 0);
-    
-    // If no clear paragraphs, split by sentences for some pausing
-    const segments = paragraphs.length > 1 
-      ? paragraphs 
-      : textToSpeak.split(/(?<=[。！？.!?])/).map((s: string) => s.trim()).filter((s: string) => s.length > 0);
-    
-    let currentSegment = 0;
-    setBriefMeSegmentCount(segments.length);
-    
-    const speakNextSegment = () => {
-      if (currentSegment >= segments.length) {
-        // Finished all segments in this insight, move to next insight
-        const nextIndex = index + 1;
-        if (nextIndex < briefMeInsightTexts.length) {
-          setBriefMeCurrentIndex(nextIndex);
-          // Play next insight with a longer pause between insights
-          setTimeout(() => {
-            playInsightAtIndex(nextIndex);
-          }, 800);
-        } else {
-          // Finished all insights
-          setBriefMeIsPlaying(false);
-          if (briefMeTimerRef.current) {
-            clearInterval(briefMeTimerRef.current);
-          }
-        }
-        return;
-      }
-      
-      const segment = segments[currentSegment];
-      setBriefMeCurrentSegmentIndex(currentSegment);
-      setBriefMeCurrentSegmentLabel(segment);
-      const utterance = new SpeechSynthesisUtterance(segment);
-      utterance.lang = locale === 'zh-Hans' ? 'zh-CN' : 'en-US';
-      utterance.rate = briefMeSpeed;
-      
-      const selectedVoiceId = getSelectedVoice();
-      const matchingVoice = findMatchingSystemVoice(selectedVoiceId, locale);
-      if (matchingVoice) {
-        utterance.voice = matchingVoice;
-      }
-      
-      utterance.onend = () => {
-        currentSegment++;
-        // Add a natural pause between paragraphs (500ms)
-        setTimeout(speakNextSegment, 500);
-      };
-      
-      utterance.onerror = () => {
-        setBriefMeIsPlaying(false);
-        if (briefMeTimerRef.current) {
-          clearInterval(briefMeTimerRef.current);
-        }
-      };
-      
-      briefMeUtteranceRef.current = utterance;
-      window.speechSynthesis.speak(utterance);
-    };
-    
+    const tracks = buildInsightTracks();
+    if (tracks.length === 0) return;
     briefMeStartTimeRef.current = Date.now();
     setBriefMeIsPlaying(true);
-    // D12: wait for the browser's async voice list to populate BEFORE the first
-    // utterance, otherwise segment 0 (the first sentence) speaks with a default
-    // low-quality voice while the premium voice is still loading. Resolves
-    // immediately once voices are ready (no delay on subsequent insights).
-    void ensureVoicesReady().then(speakNextSegment);
-    
-    // Start timer for current time
-    if (briefMeTimerRef.current) {
-      clearInterval(briefMeTimerRef.current);
-    }
+    insightPlayer.play(tracks, index);
+
+    // Drive the elapsed-time readout (independent of the audio engine).
+    if (briefMeTimerRef.current) clearInterval(briefMeTimerRef.current);
     briefMeTimerRef.current = setInterval(() => {
       setBriefMeCurrentTime((prev: number) => Math.min(prev + 1, briefMeTotalTime));
     }, 1000);
-  }, [briefMeInsightTexts, briefMeSpeed, briefMeTotalTime, locale]);
+  }, [buildInsightTracks, insightPlayer, briefMeTotalTime]);
 
   const handleBriefMePlay = () => {
     playInsightAtIndex(briefMeCurrentIndex);
   };
 
   const handleBriefMePause = () => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.pause();
-      setBriefMeIsPlaying(false);
-      if (briefMeTimerRef.current) {
-        clearInterval(briefMeTimerRef.current);
-      }
+    insightPlayer.pause();
+    setBriefMeIsPlaying(false);
+    if (briefMeTimerRef.current) {
+      clearInterval(briefMeTimerRef.current);
     }
   };
 
   const handleBriefMeResume = () => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.resume();
-      setBriefMeIsPlaying(true);
-      briefMeStartTimeRef.current = Date.now();
-      briefMeTimerRef.current = setInterval(() => {
-        setBriefMeCurrentTime((prev: number) => Math.min(prev + 1, briefMeTotalTime));
-      }, 1000);
-    }
+    insightPlayer.resume();
+    setBriefMeIsPlaying(true);
+    briefMeStartTimeRef.current = Date.now();
+    if (briefMeTimerRef.current) clearInterval(briefMeTimerRef.current);
+    briefMeTimerRef.current = setInterval(() => {
+      setBriefMeCurrentTime((prev: number) => Math.min(prev + 1, briefMeTotalTime));
+    }, 1000);
   };
 
   const handleBriefMeStop = () => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
+    insightPlayer.stop();
     setBriefMeIsPlaying(false);
     setBriefMeCurrentTime(0);
     setBriefMeCurrentIndex(0);
@@ -1252,31 +1192,29 @@ export default function HomeDashboard() {
     const currentIdx = speeds.indexOf(briefMeSpeed);
     const nextSpeed = speeds[(currentIdx + 1) % speeds.length];
     setBriefMeSpeed(nextSpeed);
-    // If currently playing, restart with new speed
+    // Re-speak the current insight at the new rate (the player reads the speed
+    // from briefMeSpeedRef, so the change applies immediately).
     if (briefMeIsPlaying) {
-      window.speechSynthesis.cancel();
-      setTimeout(() => playInsightAtIndex(briefMeCurrentIndex), 100);
+      insightPlayer.restart();
     }
   };
 
   const handleBriefMePrev = () => {
     if (briefMeCurrentIndex > 0) {
-      window.speechSynthesis.cancel();
       const prevIndex = briefMeCurrentIndex - 1;
       setBriefMeCurrentIndex(prevIndex);
       if (briefMeIsPlaying) {
-        setTimeout(() => playInsightAtIndex(prevIndex), 100);
+        playInsightAtIndex(prevIndex);
       }
     }
   };
 
   const handleBriefMeNext = () => {
     if (briefMeCurrentIndex < briefMeInsightTexts.length - 1) {
-      window.speechSynthesis.cancel();
       const nextIndex = briefMeCurrentIndex + 1;
       setBriefMeCurrentIndex(nextIndex);
       if (briefMeIsPlaying) {
-        setTimeout(() => playInsightAtIndex(nextIndex), 100);
+        playInsightAtIndex(nextIndex);
       }
     }
   };
@@ -1326,12 +1264,12 @@ export default function HomeDashboard() {
     }
     
     setIsRefreshingInsight(true);
-    setInsightRefreshStatus(locale === 'zh-Hans' ? '正在收集数据...' : 'Gathering data...');
+    setInsightRefreshStatus(t('gatheringData', locale));
     try {
       let agentResponse = '';
       
       // Update status for LLM analysis
-      setInsightRefreshStatus(locale === 'zh-Hans' ? '正在分析业务数据...' : 'Analyzing business data...');
+      setInsightRefreshStatus(t('analyzingBusinessData', locale));
 
       // Build detailed context with specific names and data for richer insights (used by both branches)
       const todayAgendaDetails = kpiData.agendaItems.slice(0, 5).map((item: AgendaItem) => 
@@ -1345,8 +1283,8 @@ export default function HomeDashboard() {
       const atRiskClientsDetails = kpiData.clientsAtRiskList.slice(0, 5).map((client: AtRiskClient) => {
         const days = client.lastContactDays;
         const reason = days == null
-          ? (locale === 'zh-Hans' ? '从未联系' : 'never contacted')
-          : (locale === 'zh-Hans' ? `${days} 天未联系` : `no contact for ${days} days`);
+          ? (t('neverContacted', locale))
+          : (t('noContactForDays', locale, { days }));
         return `${client.name} (${reason})`;
       }).join('; ');
       
@@ -1401,7 +1339,7 @@ ${atRiskClientsDetails || 'No at-risk clients'}
           : 'Give me today\'s business insight briefing, including: 1) Top priority items to address; 2) Key opportunities to follow up; 3) At-risk clients to proactively contact. Be specific with client and opportunity names.';
         
         // Update status for generating response
-        setInsightRefreshStatus(locale === 'zh-Hans' ? '正在生成洞察...' : 'Generating insights...');
+        setInsightRefreshStatus(t('generatingInsights', locale));
         // Call LLM directly using generateVoiceSummary with custom prompts
         const summaryResult = await generateVoiceSummary(userPrompt, locale, systemPrompt);
         
@@ -1417,7 +1355,7 @@ ${atRiskClientsDetails || 'No at-risk clients'}
       }
       
       // Update status for saving insights
-      setInsightRefreshStatus(locale === 'zh-Hans' ? '正在保存洞察...' : 'Saving insights...');
+      setInsightRefreshStatus(t('savingInsights', locale));
       
       // Step 1: Generate insight bullet points for cards
       // Generate insights with rationale in JSON format
@@ -1556,7 +1494,7 @@ Return only the JSON array, no other text.`;
           .slice(0, 6);
         parsedInsights = insightLines.map((line: string) => ({
           insight: line,
-          rationale: locale === 'zh-Hans' ? '基于业务数据分析生成' : 'Generated from business data analysis',
+          rationale: t('insightRationaleShort', locale),
           type: 'activity'
         }));
       }
@@ -1637,41 +1575,41 @@ ${agentResponse}`;
           // Map generated insight categories to the Dataverse choice labels accepted by BusinessInsight.type.
           const typeMapping: Record<string, { title: string; type: 'warning' | 'info' | 'success' }> = {
             'followup': {
-              title: locale === 'zh-Hans' ? '今日跟进提醒' : 'Follow-up Alert',
+              title: t('insightFollowUpAlert', locale),
               type: 'info'
             },
             'closing': {
-              title: locale === 'zh-Hans' ? '本周成交预测' : 'Closing This Week',
+              title: t('insightClosingThisWeek', locale),
               type: 'success'
             },
             'risk': {
-              title: locale === 'zh-Hans' ? '风险商机警告' : 'At-Risk Alert',
+              title: t('insightAtRiskAlert', locale),
               type: 'warning'
             },
             'revisit': {
-              title: locale === 'zh-Hans' ? '待回访客户' : 'Pending Revisit',
+              title: t('insightPendingRevisit', locale),
               type: 'warning'
             },
             'performance': {
-              title: locale === 'zh-Hans' ? '业绩达成分析' : 'Performance Analysis',
+              title: t('insightPerformanceAnalysis', locale),
               type: 'success'
             },
             'opportunity': {
-              title: locale === 'zh-Hans' ? '商机动态' : 'Opportunity Update',
+              title: t('insightOpportunityUpdate', locale),
               type: 'info'
             },
             'client': {
-              title: locale === 'zh-Hans' ? '客户洞察' : 'Client Insight',
+              title: t('insightClientInsight', locale),
               type: 'success'
             },
             'activity': {
-              title: locale === 'zh-Hans' ? '活动动态' : 'Activity Update',
+              title: t('insightActivityUpdate', locale),
               type: 'info'
             }
           };
           
           const categoryInfo = typeMapping[item.type] || {
-            title: locale === 'zh-Hans' ? `智能洞察 #${idx + 1}` : `Smart Insight #${idx + 1}`,
+            title: t('smartInsightNum', locale, { num: idx + 1 }),
             type: 'info' as const
           };
           
@@ -1745,10 +1683,16 @@ ${agentResponse}`;
   };
 
   const handleInsightsPanelPlay = useCallback(async () => {
+    // CRITICAL (mobile): unlock the speech engine synchronously inside this
+    // user gesture BEFORE any await. Generating insights below is async (and may
+    // hit the network), which would otherwise strip the gesture and leave iOS
+    // silently blocking playback.
+    insightPlayer.prime();
+
     if (briefMeIsPlaying) return;
 
     if (briefMeExpanded) {
-      if ('speechSynthesis' in window && window.speechSynthesis.paused) {
+      if (insightPlayer.state.isPaused) {
         handleBriefMeResume();
       } else {
         handleBriefMePlay();
@@ -1757,7 +1701,7 @@ ${agentResponse}`;
     }
 
     await handleBriefMe();
-  }, [briefMeExpanded, briefMeIsPlaying, handleBriefMe, handleBriefMePlay, handleBriefMeResume]);
+  }, [briefMeExpanded, briefMeIsPlaying, insightPlayer, handleBriefMe, handleBriefMePlay, handleBriefMeResume]);
 
   const handleInsightsPanelStop = useCallback(() => {
     handleBriefMeStop();
@@ -1800,13 +1744,13 @@ ${agentResponse}`;
         : [];
 
       if (myInsights.length === 0) {
-        toast.info(locale === 'zh-Hans' ? '没有需要清除的洞察数据' : 'No insights to clear');
+        toast.info(t('noInsightsToClear', locale));
         return;
       }
       
       // Delete insights one by one with progress
       const totalCount = myInsights.length;
-      toast.loading(locale === 'zh-Hans' ? `正在清除 ${totalCount} 条洞察数据...` : `Clearing ${totalCount} insights...`, { id: 'clearing-insights' });
+      toast.loading(t('clearingInsights', locale, { count: totalCount }), { id: 'clearing-insights' });
       
       for (const insight of myInsights) {
         await deleteBusinessInsight.mutateAsync(insight.id);
@@ -1816,11 +1760,11 @@ ${agentResponse}`;
       await refetchBusinessInsights();
       
       toast.dismiss('clearing-insights');
-      toast.success(locale === 'zh-Hans' ? `已清除 ${totalCount} 条历史洞察数据` : `Cleared ${totalCount} historical insights`);
+      toast.success(t('clearedInsights', locale, { count: totalCount }));
     } catch (error) {
       console.error('[Clear Insights] Error:', error);
       toast.dismiss('clearing-insights');
-      toast.error(locale === 'zh-Hans' ? '清除失败，请重试' : 'Failed to clear insights. Please try again.');
+      toast.error(t('clearInsightsFailed', locale));
     } finally {
       setIsClearingInsights(false);
     }
@@ -1872,42 +1816,42 @@ ${agentResponse}`;
     // Default actions
     if (chatMessages.length === 0) {
       return [
-        { text: locale === 'zh-Hans' ? '今日待办' : "Today's tasks", query: locale === 'zh-Hans' ? '今天有哪些待办事项？' : 'What are my tasks for today?' },
-        { text: locale === 'zh-Hans' ? '商机状态' : 'Pipeline status', query: locale === 'zh-Hans' ? '我的商机状态如何？' : 'What is my pipeline status?' },
-        { text: locale === 'zh-Hans' ? '客户跟进' : 'Follow-ups', query: locale === 'zh-Hans' ? '哪些客户需要跟进？' : 'Which customers need follow-up?' },
+        { text: t('qpTodayTasks', locale), query: t('qpTodayTasksQ', locale) },
+        { text: t('qpPipelineStatus', locale), query: t('qpPipelineStatusQ', locale) },
+        { text: t('qpFollowUps', locale), query: t('qpFollowUpsQ', locale) },
       ];
     }
 
     // Context-aware actions
     if (hasOpportunityContext) {
       return [
-        { text: locale === 'zh-Hans' ? '风险商机' : 'At-risk deals', query: locale === 'zh-Hans' ? '哪些商机有风险？' : 'Which deals are at risk?' },
-        { text: locale === 'zh-Hans' ? '本周成交' : 'Closing this week', query: locale === 'zh-Hans' ? '本周有哪些商机要成交？' : 'What deals are closing this week?' },
-        { text: locale === 'zh-Hans' ? '商机详情' : 'Deal details', query: locale === 'zh-Hans' ? '告诉我更多详情' : 'Tell me more details' },
+        { text: t('qpAtRiskDeals', locale), query: t('qpAtRiskDealsQ', locale) },
+        { text: t('qpClosingThisWeek', locale), query: t('qpClosingThisWeekQ', locale) },
+        { text: t('qpDealDetails', locale), query: t('qpMoreDetailsQ', locale) },
       ];
     }
 
     if (hasAccountContext) {
       return [
-        { text: locale === 'zh-Hans' ? '联系记录' : 'Contact history', query: locale === 'zh-Hans' ? '最近的联系记录' : 'Show recent contact history' },
-        { text: locale === 'zh-Hans' ? '相关商机' : 'Related deals', query: locale === 'zh-Hans' ? '这个客户有哪些商机？' : 'What deals are associated?' },
-        { text: locale === 'zh-Hans' ? '新建拜访' : 'New visit', query: locale === 'zh-Hans' ? '我想记录一次拜访' : 'I want to log a visit' },
+        { text: t('qpContactHistory', locale), query: t('qpContactHistoryQ', locale) },
+        { text: t('qpRelatedDeals', locale), query: t('qpRelatedDealsQ', locale) },
+        { text: t('qpNewVisit', locale), query: t('qpNewVisitQ', locale) },
       ];
     }
 
     if (hasScheduleContext) {
       return [
-        { text: locale === 'zh-Hans' ? '明日日程' : 'Tomorrow', query: locale === 'zh-Hans' ? '明天的日程是什么？' : "What's my schedule tomorrow?" },
-        { text: locale === 'zh-Hans' ? '安排会议' : 'Schedule meeting', query: locale === 'zh-Hans' ? '帮我安排一个会议' : 'Help me schedule a meeting' },
-        { text: locale === 'zh-Hans' ? '准备事项' : 'Prep notes', query: locale === 'zh-Hans' ? '帮我准备会议资料' : 'Help me prepare for the meeting' },
+        { text: t('qpTomorrow', locale), query: t('qpTomorrowQ', locale) },
+        { text: t('qpScheduleMeeting', locale), query: t('qpScheduleMeetingQ', locale) },
+        { text: t('qpPrepNotes', locale), query: t('qpPrepNotesQ', locale) },
       ];
     }
 
     // General follow-up actions
     return [
-      { text: locale === 'zh-Hans' ? '更多详情' : 'More details', query: locale === 'zh-Hans' ? '告诉我更多详情' : 'Tell me more details' },
-      { text: locale === 'zh-Hans' ? '今日待办' : "Today's tasks", query: locale === 'zh-Hans' ? '今天有哪些待办事项？' : 'What are my tasks for today?' },
-      { text: locale === 'zh-Hans' ? '帮助' : 'Help', query: locale === 'zh-Hans' ? '你能帮我做什么？' : 'What can you help me with?' },
+      { text: t('qpMoreDetails', locale), query: t('qpMoreDetailsQ', locale) },
+      { text: t('qpTodayTasks', locale), query: t('qpTodayTasksQ', locale) },
+      { text: t('qpHelp', locale), query: t('qpHelpQ', locale) },
     ];
   }, [chatMessages, locale]);
 
@@ -1970,7 +1914,7 @@ ${agentResponse}`;
                 refetchAccounts(),
                 refetchBusinessInsights()
               ]);
-              toast.success(locale === 'zh-Hans' ? '已刷新' : 'Refreshed');
+              toast.success(t('refreshed', locale));
             } catch (err) {
               console.error('Refresh failed:', err);
             } finally {
@@ -1995,7 +1939,7 @@ ${agentResponse}`;
               <div className="flex items-center gap-2">
                 <Loader2 className="w-5 h-5 text-primary animate-spin" />
                 <span className="text-sm text-muted-foreground">
-                  {locale === 'zh-Hans' ? '刷新中...' : 'Refreshing...'}
+                  {t('refreshing', locale)}
                 </span>
               </div>
             ) : (
@@ -2008,8 +1952,8 @@ ${agentResponse}`;
                 />
                 <span className="text-xs text-muted-foreground">
                   {pullDistance >= 60
-                    ? (locale === 'zh-Hans' ? '松开刷新' : 'Release to refresh')
-                    : (locale === 'zh-Hans' ? '下拉刷新' : 'Pull to refresh')}
+                    ? (t('releaseToRefresh', locale))
+                    : (t('pullToRefresh', locale))}
                 </span>
               </div>
             )}
@@ -2043,7 +1987,7 @@ ${agentResponse}`;
                 onClick={() => navigate('/products')}
                 data-tour="nav-products"
                 className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-muted/50 active:bg-muted transition-colors"
-                aria-label={locale === 'zh-Hans' ? '产品手册' : 'Product Manual'}
+                aria-label={t('productManual', locale)}
               >
                 <BookOpen className="w-5 h-5 text-foreground" />
               </button>
@@ -2054,7 +1998,7 @@ ${agentResponse}`;
                   onClick={() => setInsightsSheetOpen(true)}
                   data-tour="home-insights"
                   className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-muted/50 active:bg-muted transition-colors relative"
-                  aria-label={locale === 'zh-Hans' ? '洞察' : 'Insights'}
+                  aria-label={t('insights', locale)}
                 >
                   <Bell className="w-5 h-5 text-foreground" />
                   {unreadInsightCount > 0 && (
@@ -2085,7 +2029,7 @@ ${agentResponse}`;
                 {!isCopilotConfigured && (
                   <span 
                     className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-muted-foreground/50 rounded-full border-2 border-background"
-                    title={locale === 'zh-Hans' ? '未配置' : 'Not configured'}
+                    title={t('notConfigured', locale)}
                   />
                 )}
               </button>
@@ -2154,18 +2098,18 @@ ${agentResponse}`;
         <SheetContent side="bottom" className="bg-card border-t border-border rounded-t-3xl">
           <SheetHeader className="pb-3 border-b border-border">
             <SheetTitle className="text-foreground">
-              {selectedSource?.label || (locale === 'zh-Hans' ? '来源详情' : 'Source Details')}
+              {selectedSource?.label || (t('sourceDetails', locale))}
             </SheetTitle>
           </SheetHeader>
           <div className="py-4">
             {selectedSource?.type === 'account' && sourceData && 'name1' in sourceData && (
               <div className="space-y-3">
                 <div>
-                  <p className="text-xs text-muted-foreground">{locale === 'zh-Hans' ? '客户名称' : 'Account Name'}</p>
+                  <p className="text-xs text-muted-foreground">{t('accountName', locale)}</p>
                   <p className="text-sm text-foreground font-medium">{(sourceData as Account).name1}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground">{locale === 'zh-Hans' ? '地址' : 'Address'}</p>
+                  <p className="text-xs text-muted-foreground">{t('fieldAddress', locale)}</p>
                   <p className="text-sm text-foreground">{(sourceData as Account).address || '-'}</p>
                 </div>
                 <button
@@ -2175,18 +2119,18 @@ ${agentResponse}`;
                   }}
                   className="w-full mt-2 py-2 px-4 rounded-xl bg-primary text-white text-sm font-medium"
                 >
-                  {locale === 'zh-Hans' ? '查看详情' : 'View Details'}
+                  {t('viewDetails', locale)}
                 </button>
               </div>
             )}
             {selectedSource?.type === 'opportunity' && sourceData && 'name1' in sourceData && (
               <div className="space-y-3">
                 <div>
-                  <p className="text-xs text-muted-foreground">{locale === 'zh-Hans' ? '商机名称' : 'Opportunity Name'}</p>
+                  <p className="text-xs text-muted-foreground">{t('opportunityName', locale)}</p>
                   <p className="text-sm text-foreground font-medium">{(sourceData as Opportunity).name1}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground">{locale === 'zh-Hans' ? '总金额' : 'Total Amount'}</p>
+                  <p className="text-xs text-muted-foreground">{t('totalAmount', locale)}</p>
                   <p className="text-sm text-foreground">${((sourceData as Opportunity).totalamount || 0).toLocaleString()}</p>
                 </div>
                 <button
@@ -2196,18 +2140,18 @@ ${agentResponse}`;
                   }}
                   className="w-full mt-2 py-2 px-4 rounded-xl bg-primary text-white text-sm font-medium"
                 >
-                  {locale === 'zh-Hans' ? '查看详情' : 'View Details'}
+                  {t('viewDetails', locale)}
                 </button>
               </div>
             )}
             {selectedSource?.type === 'activity' && sourceData && 'title' in sourceData && (
               <div className="space-y-3">
                 <div>
-                  <p className="text-xs text-muted-foreground">{locale === 'zh-Hans' ? '活动主题' : 'Activity Subject'}</p>
+                  <p className="text-xs text-muted-foreground">{t('activitySubject', locale)}</p>
                   <p className="text-sm text-foreground font-medium">{(sourceData as Activity).title}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground">{locale === 'zh-Hans' ? '活动日期' : 'Date'}</p>
+                  <p className="text-xs text-muted-foreground">{t('activityDate', locale)}</p>
                   <p className="text-sm text-foreground">{(sourceData as Activity).scheduleddate ? new Date((sourceData as Activity).scheduleddate as string).toLocaleDateString() : '-'}</p>
                 </div>
                 <button
@@ -2218,7 +2162,7 @@ ${agentResponse}`;
                   }}
                   className="w-full mt-2 py-2 px-4 rounded-xl bg-primary text-white text-sm font-medium"
                 >
-                  {locale === 'zh-Hans' ? '查看详情' : 'View Details'}
+                  {t('viewDetails', locale)}
                 </button>
               </div>
             )}
@@ -2269,20 +2213,20 @@ ${agentResponse}`;
             >
               <div className="px-4 py-3 border-b border-border flex items-center justify-between bg-card">
                 <h3 className="text-base font-semibold text-foreground">
-                  {locale === 'zh-Hans' ? '通知' : 'Notifications'}
+                  {t('notifications', locale)}
                 </h3>
                 <div className="flex items-center gap-3">
                   <span
-                    onClick={() => toast.success(locale === 'zh-Hans' ? '已全部标为已读' : 'All marked as read')}
+                    onClick={() => toast.success(t('allMarkedRead', locale))}
                     className="text-xs text-primary font-medium cursor-pointer hover:underline"
                   >
-                    {locale === 'zh-Hans' ? '全部标为已读' : 'Mark all as read'}
+                    {t('markAllRead', locale)}
                   </span>
                   <button
                     onClick={() => setNotificationOpen(false)}
                     className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-muted transition-colors"
-                    aria-label={locale === 'zh-Hans' ? '关闭通知' : 'Close notifications'}
-                    title={locale === 'zh-Hans' ? '关闭通知' : 'Close notifications'}
+                    aria-label={t('closeNotifications', locale)}
+                    title={t('closeNotifications', locale)}
                   >
                     <X className="w-4 h-4 text-muted-foreground" />
                   </button>
@@ -2297,13 +2241,13 @@ ${agentResponse}`;
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-foreground font-medium">
-                        {locale === 'zh-Hans' ? '商机更新' : 'Opportunity Update'}
+                        {t('notifOpportunityUpdate', locale)}
                       </p>
                       <p className="text-sm text-muted-foreground mt-0.5">
-                        {locale === 'zh-Hans' ? '"华为云服务" 商机阶段已更新为"提案"' : '"Huawei Cloud Service" opportunity stage updated to "Propose"'}
+                        {t('notifOppBody', locale)}
                       </p>
                       <p className="text-xs text-muted-foreground/70 mt-1.5">
-                        {locale === 'zh-Hans' ? '10分钟前' : '10 minutes ago'}
+                        {t('min10Ago', locale)}
                       </p>
                     </div>
                   </div>
@@ -2315,13 +2259,13 @@ ${agentResponse}`;
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-foreground font-medium">
-                        {locale === 'zh-Hans' ? '拜访提醒' : 'Visit Reminder'}
+                        {t('notifVisitReminder', locale)}
                       </p>
                       <p className="text-sm text-muted-foreground mt-0.5">
-                        {locale === 'zh-Hans' ? '下午2点与"腾讯科技"的拜访即将开始' : 'Your 2 PM visit with "Tencent Tech" is starting soon'}
+                        {t('notifVisitBody', locale)}
                       </p>
                       <p className="text-xs text-muted-foreground/70 mt-1.5">
-                        {locale === 'zh-Hans' ? '30分钟前' : '30 minutes ago'}
+                        {t('min30Ago', locale)}
                       </p>
                     </div>
                   </div>
@@ -2333,13 +2277,13 @@ ${agentResponse}`;
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-foreground font-medium">
-                        {locale === 'zh-Hans' ? '日报生成完成' : 'Daily Report Ready'}
+                        {t('notifDailyReportReady', locale)}
                       </p>
                       <p className="text-sm text-muted-foreground mt-0.5">
-                        {locale === 'zh-Hans' ? '您的每日销售简报已生成，点击查看' : 'Your daily sales brief is ready. Tap to view'}
+                        {t('notifDailyReportBody', locale)}
                       </p>
                       <p className="text-xs text-muted-foreground/70 mt-1.5">
-                        {locale === 'zh-Hans' ? '2小时前' : '2 hours ago'}
+                        {t('hours2Ago', locale)}
                       </p>
                     </div>
                   </div>
@@ -2351,13 +2295,13 @@ ${agentResponse}`;
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-foreground font-medium">
-                        {locale === 'zh-Hans' ? '系统通知' : 'System Notice'}
+                        {t('notifSystemNotice', locale)}
                       </p>
                       <p className="text-sm text-muted-foreground mt-0.5">
-                        {locale === 'zh-Hans' ? '您的月度报告已准备就绪' : 'Your monthly report is ready for review'}
+                        {t('notifSystemBody', locale)}
                       </p>
                       <p className="text-xs text-muted-foreground/70 mt-1.5">
-                        {locale === 'zh-Hans' ? '昨天' : 'Yesterday'}
+                        {t('yesterday', locale)}
                       </p>
                     </div>
                   </div>
@@ -2367,11 +2311,11 @@ ${agentResponse}`;
                 <button
                   onClick={() => {
                     setNotificationOpen(false);
-                    toast.info(locale === 'zh-Hans' ? '通知中心即将推出' : 'Notification center coming soon');
+                    toast.info(t('notifCenterComingSoon', locale));
                   }}
                   className="w-full text-center text-sm text-primary font-medium hover:underline"
                 >
-                  {locale === 'zh-Hans' ? '查看全部通知' : 'View all notifications'}
+                  {t('viewAllNotifications', locale)}
                 </button>
               </div>
             </motion.div>
@@ -2445,7 +2389,7 @@ ${agentResponse}`;
       <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
         <SheetContent side="right" className="w-[420px] max-w-[90vw] p-0 overflow-hidden">
           <SheetHeader className="sr-only">
-            <SheetTitle>{locale === 'zh-Hans' ? '设置' : 'Settings'}</SheetTitle>
+            <SheetTitle>{t('settings', locale)}</SheetTitle>
           </SheetHeader>
           <SettingsPanel onClose={() => setSettingsOpen(false)} isOverlay={true} />
         </SheetContent>

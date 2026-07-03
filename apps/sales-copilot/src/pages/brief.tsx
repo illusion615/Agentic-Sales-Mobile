@@ -6,7 +6,8 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { useUser } from '@/hooks/use-user';
 import { useBriefingList, useUpdateBriefing } from '@/generated/hooks/use-briefing';
-import { getLocale, getSelectedVoice, findMatchingSystemVoice, voiceOptions, type Locale, type VoiceOption } from '@/lib/i18n';
+import { getLocale, getSelectedVoice, findMatchingSystemVoice, voiceOptions, speechLang, t, type Locale, type VoiceOption } from '@/lib/i18n';
+import { primeSpeech } from '@/lib/speech';
 import {
   parseBriefingPayload,
   priorityColors,
@@ -212,7 +213,7 @@ export default function BriefMePage() {
     }
 
     const utterance = new SpeechSynthesisUtterance(segments[index]);
-    utterance.lang = locale === 'zh-Hans' ? 'zh-CN' : 'en-US';
+    utterance.lang = speechLang(locale);
     utterance.rate = playbackRate;
     utterance.pitch = 1;
     const voice = getSystemVoice();
@@ -234,7 +235,7 @@ export default function BriefMePage() {
       console.error('Speech error:', e);
       setIsSpeaking(false);
       utteranceRef.current = null;
-      toast.error(locale === 'zh-Hans' ? '语音播放失败' : 'Speech playback failed');
+      toast.error(t('speechPlaybackFailed', locale));
     };
     utteranceRef.current = utterance;
     window.speechSynthesis.speak(utterance);
@@ -252,7 +253,7 @@ export default function BriefMePage() {
     const runId = chapterRunIdRef.current;
 
     if (!voicesReady) {
-      toast.error(locale === 'zh-Hans' ? '语音引擎正在加载...' : 'Voice engine loading...');
+      toast.error(t('voiceEngineLoading', locale));
       return;
     }
 
@@ -288,7 +289,9 @@ export default function BriefMePage() {
       setIsPlaying(false);
       setIsSpeaking(false);
     } else {
-      // Play
+      // Play — unlock the speech engine synchronously inside this gesture so
+      // mobile (iOS) does not silently block the upcoming utterance.
+      primeSpeech();
       setIsPlaying(true);
       if (currentItem) {
         speakChapter(currentItem);
@@ -367,7 +370,11 @@ export default function BriefMePage() {
   // Chapter navigation
   const goToChapter = useCallback((index: number) => {
     if (index < 0 || index >= items.length) return;
-    
+
+    // Unlock the engine inside the gesture (this runs from taps / swipes / keys)
+    // before the async setTimeout below detaches us from the user gesture.
+    primeSpeech();
+
     // Cancel current speech
     window.speechSynthesis.cancel();
     setIsSpeaking(false);
@@ -440,7 +447,7 @@ export default function BriefMePage() {
   // Mic handlers
   const handleMicDown = useCallback(() => {
     if (isOffline) {
-      toast.error(locale === 'zh-Hans' ? '离线无法提问' : 'Cannot ask while offline');
+      toast.error(t('offlineNoAsk', locale));
       return;
     }
     recordStartRef.current = Date.now();
@@ -472,21 +479,19 @@ export default function BriefMePage() {
   }, [isPlaying, Math.floor(currentTime / 500)]);
   
   // Header title
-  const headerTitle = locale === 'zh-Hans' 
-    ? `今日简报 · ${totalChapters} 章节 ${formatTime(duration)}`
-    : `Daily Briefing · ${totalChapters} chapters ${formatTime(duration)}`;
+  const headerTitle = t('briefHeaderTitle', locale, { chapters: totalChapters, time: formatTime(duration) });
   
   if (!payload || items.length === 0) {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center gap-6">
         <p className="text-muted-foreground text-base">
-          {locale === 'zh-Hans' ? '暂无播报内容' : 'No briefing available'}
+          {t('noBriefing', locale)}
         </p>
         <button
           onClick={() => navigate('/')}
           className="px-6 py-2.5 rounded-full bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
         >
-          {locale === 'zh-Hans' ? '返回首页' : 'Back to Home'}
+          {t('backToHome', locale)}
         </button>
       </div>
     );
@@ -506,7 +511,7 @@ export default function BriefMePage() {
             className="bg-amber-500/90 text-amber-950 px-4 py-2 flex items-center justify-center gap-2 text-sm font-medium safe-area-top"
           >
             <WifiOff className="w-4 h-4" />
-            <span>{locale === 'zh-Hans' ? '离线 · 显示最近一次缓存' : 'Offline · showing cached data'}</span>
+            <span>{t('offline', locale)}</span>
           </motion.div>
         )}
       </AnimatePresence>
@@ -536,7 +541,7 @@ export default function BriefMePage() {
             <SheetContent side="bottom" className="h-[70vh] bg-background border-t border-border">
               <SheetHeader>
                 <SheetTitle className="text-foreground">
-                  {locale === 'zh-Hans' ? '文字稿' : 'Transcript'}
+                  {t('transcript', locale)}
                 </SheetTitle>
               </SheetHeader>
               <div className="mt-4 space-y-4 overflow-y-auto scrollbar-hide max-h-[calc(70vh-80px)]">
@@ -585,7 +590,7 @@ export default function BriefMePage() {
             transition={{ duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] }}
             onDoubleClick={handleCardDoubleClick}
             role="article"
-            aria-roledescription={locale === 'zh-Hans' ? '播报章节' : 'briefing chapter'}
+            aria-roledescription={t('briefingChapter', locale)}
             className="flex-1 flex flex-col glass-card overflow-hidden"
             style={{
               background: `linear-gradient(180deg, ${prioColors.bg} 0%, rgba(255,255,255,0.03) 100%)`,
@@ -689,7 +694,7 @@ export default function BriefMePage() {
         <div 
           className="flex justify-center gap-2 mt-4"
           role="tablist"
-          aria-label={locale === 'zh-Hans' ? '章节导航' : 'Chapter navigation'}
+          aria-label={t('chapterNavigation', locale)}
         >
           {items.map((_, idx) => (
             <button
@@ -703,14 +708,14 @@ export default function BriefMePage() {
                   ? 'w-6 h-2 rounded-full bg-primary'
                   : 'w-2 h-2 rounded-full bg-foreground/20 hover:bg-foreground/30'
               )}
-              aria-label={`${locale === 'zh-Hans' ? '章节' : 'Chapter'} ${idx + 1}`}
+              aria-label={`${t('chapter', locale)} ${idx + 1}`}
             />
           ))}
         </div>
         
         {/* Swipe Hint */}
         <p className="text-center text-sm text-muted-foreground mt-4">
-          {locale === 'zh-Hans' ? '左右滑动 · 切换章节' : 'Swipe left/right · switch chapters'}
+          {t('swipeToSwitch', locale)}
         </p>
       </main>
       
@@ -793,7 +798,7 @@ export default function BriefMePage() {
                   whileTap={{ scale: 0.95 }}
                   className="relative w-14 h-14 rounded-full flex items-center justify-center accent-gradient shadow-lg shadow-primary/30"
                   style={{ touchAction: 'none' }}
-                  aria-label={isRecording ? (locale === 'zh-Hans' ? '录音中' : 'Recording') : (isPlaying ? 'Pause' : 'Play')}
+                  aria-label={isRecording ? t('recordingState', locale) : (isPlaying ? t('pause', locale) : t('play', locale))}
                 >
                   {isRecording ? (
                     <Mic className="w-6 h-6 text-white" />
@@ -819,8 +824,8 @@ export default function BriefMePage() {
           {/* Hint */}
           <p className="text-sm text-muted-foreground mt-3">
             {isRecording 
-              ? (locale === 'zh-Hans' ? '松开发送' : 'Release to send')
-              : (locale === 'zh-Hans' ? '长按向Copilot提问' : 'Long press to ask Copilot')
+              ? t('releaseToSend', locale)
+              : t('longPressAskCopilot', locale)
             }
           </p>
           

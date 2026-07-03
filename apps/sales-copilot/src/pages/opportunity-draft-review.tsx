@@ -21,7 +21,7 @@ import { useUser } from '@/hooks/use-user';
 import { useActivity, useUpdateActivity } from '@/generated/hooks/use-activity';
 import { useAccountList } from '@/generated/hooks/use-account';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
-import { getLocale, type Locale } from '@/lib/i18n';
+import { getLocale, localeBcp47, type Locale } from '@/lib/i18n';
 import {
   Sheet,
   SheetContent,
@@ -83,6 +83,17 @@ const translations = {
     recordingMention: '录音 {time} 提到{content}',
     emailSource: '客户邮件 {date}',
     lastVisitSource: '上次拜访 {date}',
+    confHigh: '高置信度',
+    confMedium: '中置信度',
+    confLow: '低置信度',
+    recordingSegment: '录音片段',
+    emailContent: '邮件内容',
+    visitRecord: '拜访记录',
+    backHome: '返回首页',
+    mockSignContract: '下周签约',
+    mockAmount620: '金额 ¥620 万',
+    mockFollowUp: '本周回访确认',
+    mockAmount580: '金额 ¥580 万',
   },
   'en-US': {
     oppDraft: 'Opportunity Draft',
@@ -117,11 +128,151 @@ const translations = {
     recordingMention: 'Recording at {time} mentioned {content}',
     emailSource: 'Client email {date}',
     lastVisitSource: 'Last visit {date}',
+    confHigh: 'High',
+    confMedium: 'Medium',
+    confLow: 'Low',
+    recordingSegment: 'Recording Segment',
+    emailContent: 'Email Content',
+    visitRecord: 'Visit Record',
+    backHome: 'Back to Home',
+    mockSignContract: 'Sign contract next week',
+    mockAmount620: 'amount $620K',
+    mockFollowUp: 'Follow up this week',
+    mockAmount580: 'amount $580K',
+  },
+  'de-DE': {
+    oppDraft: 'Verkaufschancen-Entwurf',
+    aiGenerated: 'KI-generiert',
+    pendingConfirm: 'Ausstehend',
+    generatedFrom: 'Automatisch aus Aktivität #{id} generiert',
+    account: 'Kunde',
+    stage: 'Phase',
+    amount: 'Betrag',
+    expectedClose: 'Voraussichtlicher Abschluss',
+    nextAction: 'Nächste Aktion',
+    owner: 'Owner',
+    modifiedFields: '{count} Feld(er) geändert, ursprüngliche KI-Werte als Tooltip erhalten',
+    sourceTracing: 'Quellrückverfolgung',
+    abandon: 'Verwerfen',
+    submit: 'Absenden',
+    submittedToQueue: 'In Warteschlange gestellt, ERP-Rückschreibung läuft',
+    abandonedDraft: 'Entwurf verworfen',
+    regenerate: 'Mit KI neu generieren',
+    rejectDraft: 'Entwurf ablehnen',
+    processingAI: 'KI-Entwurf wird verarbeitet...',
+    noActivity: 'Aktivität nicht gefunden',
+    viewInReview: 'In OpportunityDraftReview öffnen',
+    prospecting: 'Akquise',
+    qualification: 'Qualifizierung',
+    proposal: 'Angebot',
+    negotiation: 'Verhandlung',
+    won: 'Gewonnen',
+    lost: 'Verloren',
+    recordingMention: 'Aufnahme bei {time} erwähnte {content}',
+    emailSource: 'Kunden-E-Mail {date}',
+    lastVisitSource: 'Letzter Besuch {date}',
+    confHigh: 'Hoch',
+    confMedium: 'Mittel',
+    confLow: 'Niedrig',
+    recordingSegment: 'Aufnahmeausschnitt',
+    emailContent: 'E-Mail-Inhalt',
+    visitRecord: 'Besuchsprotokoll',
+    backHome: 'Zur Startseite',
+    mockSignContract: 'Nächste Woche unterzeichnen',
+    mockAmount620: 'Betrag 620.000 €',
+    mockFollowUp: 'Diese Woche nachfassen',
+    mockAmount580: 'Betrag 580.000 €',
+  },
+  'fr-FR': {
+    oppDraft: 'Brouillon d\'opportunité',
+    aiGenerated: 'Généré par IA',
+    pendingConfirm: 'En attente',
+    generatedFrom: 'Généré automatiquement à partir de l\'activité #{id}',
+    account: 'Compte',
+    stage: 'Étape',
+    amount: 'Montant',
+    expectedClose: 'Clôture prévue',
+    nextAction: 'Prochaine action',
+    owner: 'Owner',
+    modifiedFields: '{count} champ(s) modifié(s), valeurs IA d\'origine conservées en infobulle',
+    sourceTracing: 'Traçabilité des sources',
+    abandon: 'Abandonner',
+    submit: 'Soumettre',
+    submittedToQueue: 'Mis en file d\'attente, réécriture ERP en cours',
+    abandonedDraft: 'Brouillon abandonné',
+    regenerate: 'Régénérer avec l\'IA',
+    rejectDraft: 'Rejeter le brouillon',
+    processingAI: 'Traitement du brouillon IA...',
+    noActivity: 'Activité introuvable',
+    viewInReview: 'Ouvrir dans OpportunityDraftReview',
+    prospecting: 'Prospection',
+    qualification: 'Qualification',
+    proposal: 'Proposition',
+    negotiation: 'Négociation',
+    won: 'Gagné',
+    lost: 'Perdu',
+    recordingMention: 'Enregistrement à {time} a mentionné {content}',
+    emailSource: 'E-mail client {date}',
+    lastVisitSource: 'Dernière visite {date}',
+    confHigh: 'Élevée',
+    confMedium: 'Moyenne',
+    confLow: 'Faible',
+    recordingSegment: 'Extrait d\'enregistrement',
+    emailContent: 'Contenu de l\'e-mail',
+    visitRecord: 'Compte rendu de visite',
+    backHome: 'Retour à l\'accueil',
+    mockSignContract: 'Signer la semaine prochaine',
+    mockAmount620: 'Montant 620 000 €',
+    mockFollowUp: 'Relancer cette semaine',
+    mockAmount580: 'Montant 580 000 €',
+  },
+  'es-ES': {
+    oppDraft: 'Borrador de oportunidad',
+    aiGenerated: 'Generado por IA',
+    pendingConfirm: 'Pendiente',
+    generatedFrom: 'Generado automáticamente a partir de la actividad #{id}',
+    account: 'Cuenta',
+    stage: 'Etapa',
+    amount: 'Importe',
+    expectedClose: 'Cierre previsto',
+    nextAction: 'Siguiente acción',
+    owner: 'Owner',
+    modifiedFields: '{count} campo(s) modificado(s), valores de IA originales conservados como información sobre herramientas',
+    sourceTracing: 'Trazabilidad de fuentes',
+    abandon: 'Descartar',
+    submit: 'Enviar',
+    submittedToQueue: 'En cola, reescritura ERP en curso',
+    abandonedDraft: 'Borrador descartado',
+    regenerate: 'Regenerar con IA',
+    rejectDraft: 'Rechazar borrador',
+    processingAI: 'Procesando borrador de IA...',
+    noActivity: 'Actividad no encontrada',
+    viewInReview: 'Abrir en OpportunityDraftReview',
+    prospecting: 'Prospección',
+    qualification: 'Cualificación',
+    proposal: 'Propuesta',
+    negotiation: 'Negociación',
+    won: 'Ganado',
+    lost: 'Perdido',
+    recordingMention: 'La grabación en {time} mencionó {content}',
+    emailSource: 'Correo del cliente {date}',
+    lastVisitSource: 'Última visita {date}',
+    confHigh: 'Alta',
+    confMedium: 'Media',
+    confLow: 'Baja',
+    recordingSegment: 'Fragmento de grabación',
+    emailContent: 'Contenido del correo',
+    visitRecord: 'Registro de visita',
+    backHome: 'Volver al inicio',
+    mockSignContract: 'Firmar la próxima semana',
+    mockAmount620: 'Importe 620.000 €',
+    mockFollowUp: 'Seguimiento esta semana',
+    mockAmount580: 'Importe 580.000 €',
   },
 };
 
 function t(key: keyof (typeof translations)['zh-Hans'], locale: Locale, params?: Record<string, string | number>): string {
-  let text = translations[locale][key] ?? translations['zh-Hans'][key] ?? key;
+  let text = (translations[locale as keyof typeof translations] ?? translations['en-US'])[key] ?? translations['en-US'][key] ?? key;
   if (params) {
     Object.entries(params).forEach(([k, v]: [string, string | number]) => {
       text = text.replace(`{${k}}`, String(v));
@@ -139,9 +290,9 @@ function ConfidenceBar({ confidence, locale }: { confidence: number; locale: Loc
   };
 
   const getLabel = () => {
-    if (confidence >= 80) return locale === 'zh-Hans' ? '高置信度' : 'High';
-    if (confidence >= 50) return locale === 'zh-Hans' ? '中置信度' : 'Medium';
-    return locale === 'zh-Hans' ? '低置信度' : 'Low';
+    if (confidence >= 80) return t('confHigh', locale);
+    if (confidence >= 50) return t('confMedium', locale);
+    return t('confLow', locale);
   };
 
   return (
@@ -204,7 +355,7 @@ function EditableRow({
       return num >= 1000 ? `$${(num / 1000).toFixed(0)}K` : `$${num.toLocaleString()}`;
     }
     if (type === 'date' && value) {
-      return new Date(value).toLocaleDateString(locale === 'zh-Hans' ? 'zh-CN' : 'en-US', {
+      return new Date(value).toLocaleDateString(localeBcp47(locale), {
         year: 'numeric',
         month: 'short',
         day: 'numeric',
@@ -441,7 +592,7 @@ export default function OpportunityDraftReviewPage() {
           stage: 'proposal', // proposal
           amount: 620000,
           expectedCloseDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-          nextAction: locale === 'zh-Hans' ? '下周签约' : 'Sign contract next week',
+          nextAction: t('mockSignContract', locale),
           ownerId: userId,
           confidence: 78,
           sources: [
@@ -449,7 +600,7 @@ export default function OpportunityDraftReviewPage() {
               id: '1',
               type: 'recording',
               time: '00:42',
-              content: locale === 'zh-Hans' ? '金额 ¥620 万' : 'amount $620K',
+              content: t('mockAmount620', locale),
               rawData: { transcript: '...提到金额大概在620万左右...' },
             },
             {
@@ -575,7 +726,7 @@ export default function OpportunityDraftReviewPage() {
           stage: 'proposal',
           amount: 580000,
           expectedCloseDate: new Date(Date.now() + 25 * 24 * 60 * 60 * 1000).toISOString(),
-          nextAction: locale === 'zh-Hans' ? '本周回访确认' : 'Follow up this week',
+          nextAction: t('mockFollowUp', locale),
           ownerId: userId,
           confidence: 82,
           sources: [
@@ -583,7 +734,7 @@ export default function OpportunityDraftReviewPage() {
               id: '1',
               type: 'recording',
               time: '01:15',
-              content: locale === 'zh-Hans' ? '金额 ¥580 万' : 'amount $580K',
+              content: t('mockAmount580', locale),
               rawData: { transcript: '...讨论后金额调整为580万...' },
             },
           ],
@@ -694,7 +845,7 @@ export default function OpportunityDraftReviewPage() {
               <AlertCircle className="w-12 h-12 text-muted-foreground mb-4" />
               <p className="text-body text-muted-foreground">{t('noActivity', locale)}</p>
               <Button variant="outline" className="mt-4" onClick={() => navigate('/home')}>
-                {locale === 'zh-Hans' ? '返回首页' : 'Back to Home'}
+                {t('backHome', locale)}
               </Button>
             </motion.div>
           ) : (
@@ -860,11 +1011,11 @@ export default function OpportunityDraftReviewPage() {
           <SheetHeader className="border-b border-border/20 pb-4">
             <SheetTitle className="text-foreground flex items-center gap-2">
               {selectedSource?.type === 'recording' ? (
-                <><Mic className="w-5 h-5" /> {locale === 'zh-Hans' ? '录音片段' : 'Recording Segment'}</>
+                <><Mic className="w-5 h-5" /> {t('recordingSegment', locale)}</>
               ) : selectedSource?.type === 'email' ? (
-                <><Mail className="w-5 h-5" /> {locale === 'zh-Hans' ? '邮件内容' : 'Email Content'}</>
+                <><Mail className="w-5 h-5" /> {t('emailContent', locale)}</>
               ) : (
-                <><MapPin className="w-5 h-5" /> {locale === 'zh-Hans' ? '拜访记录' : 'Visit Record'}</>
+                <><MapPin className="w-5 h-5" /> {t('visitRecord', locale)}</>
               )}
             </SheetTitle>
           </SheetHeader>

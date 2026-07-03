@@ -12,10 +12,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar as CalendarComponent } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
-import { getLocale, type Locale } from '@/lib/i18n';
+import { getLocale, t, getCompactDraftForms, type Locale, type TranslationKey } from '@/lib/i18n';
 import { formatCurrencyCompact } from '@/lib/format-currency';
 import { useCopilot } from '@/contexts/copilot-context';
 import { format } from 'date-fns/format';
@@ -52,8 +51,108 @@ interface FormCardProps {
   onStatusChange?: (status: 'confirmed' | 'modified' | 'cancelled') => void;
 }
 
+// Reactive "compact draft forms" flag — recomputes live when the setting toggles.
+function useCompactDraftForms(): boolean {
+  const [compact, setCompact] = useState(() => getCompactDraftForms());
+  useEffect(() => {
+    const handler = (e: Event) => setCompact((e as CustomEvent<boolean>).detail);
+    window.addEventListener('compactdraftforms-changed', handler);
+    return () => window.removeEventListener('compactdraftforms-changed', handler);
+  }, []);
+  return compact;
+}
+
+/**
+ * Shared field wrapper for all draft-form rows (EditableField + the custom
+ * selectors). In the default layout the label sits above the control; in compact
+ * mode the label moves inline to the left (fixed width) and vertical padding is
+ * tightened, roughly halving each row's height.
+ */
+function FieldShell({ icon: Icon, label, required, isMissing, compact, alignTop, className, children }: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  required?: boolean;
+  isMissing?: boolean;
+  compact: boolean;
+  /** Tall controls (textarea, attendee chips) top-align the icon/label instead of centering. */
+  alignTop?: boolean;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const labelNode = (
+    <span className={cn('text-xs', isMissing ? 'text-destructive' : 'text-muted-foreground')}>
+      {label}{required && <span className="text-destructive"> *</span>}
+    </span>
+  );
+  if (compact) {
+    // Compact mode hides the per-field icon to reclaim horizontal space; the
+    // inline label alone identifies the field.
+    return (
+      <div className={cn('flex gap-2 py-0.5', alignTop ? 'items-start' : 'items-center', className)}>
+        <div className={cn('w-20 shrink-0 leading-tight', alignTop && 'mt-1.5')}>{labelNode}</div>
+        <div className="flex-1 min-w-0">{children}</div>
+      </div>
+    );
+  }
+  return (
+    <div className={cn('flex items-start gap-2 py-1', className)}>
+      <Icon className={cn('w-4 h-4 mt-2 flex-shrink-0', isMissing ? 'text-destructive' : 'text-muted-foreground')} />
+      <div className="flex-1 min-w-0">
+        {labelNode}
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Width-controlled date field (button + inline calendar). Used in compact mode
+ * because the native <input type="date"> has an intrinsic min-width on mobile
+ * WebKit that overflows narrow inline columns. The calendar renders IN-FLOW
+ * below the button (not a portal/popover) because Radix's Floating-UI popover
+ * mis-positions inside the copilot sheet's portaled + scrolled context (it landed
+ * off-screen above the viewport). Emits a 'yyyy-MM-dd' string to preserve the
+ * same value contract as the native input.
+ */
+function DateField({ value, onChange, inputCls, label, placeholder }: {
+  value: string | number | undefined;
+  onChange: (value: string) => void;
+  inputCls: string;
+  label: string;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const str = value != null ? String(value) : '';
+  // Parse date-only strings as local midnight so the calendar highlights the
+  // correct day regardless of timezone.
+  const parsed = str ? new Date(str.length <= 10 ? `${str}T00:00:00` : str) : undefined;
+  const selected = parsed && !isNaN(parsed.getTime()) ? parsed : undefined;
+  return (
+    <div className="min-w-0">
+      <Button
+        type="button"
+        variant="outline"
+        onClick={() => setOpen((o) => !o)}
+        className={cn('w-full min-w-0 justify-between text-left font-normal px-3', inputCls)}
+      >
+        <span className="truncate">{str ? str.slice(0, 10) : (placeholder || label)}</span>
+        <Calendar className="ml-2 h-4 w-4 shrink-0 text-muted-foreground opacity-50" />
+      </Button>
+      {open && (
+        <div className="mt-1 w-fit max-w-full overflow-x-auto rounded-md border bg-popover shadow-md">
+          <CalendarComponent
+            mode="single"
+            selected={selected}
+            onSelect={(date?: Date) => { if (date) { onChange(format(date, 'yyyy-MM-dd')); setOpen(false); } }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Editable field component
-function EditableField({ 
+function EditableField({
   icon: Icon, 
   label, 
   value, 
@@ -78,67 +177,73 @@ function EditableField({
   /** Custom hint text shown when a required field is empty. */
   missingHint?: string;
 }) {
-  const [isOpen, setIsOpen] = useState(false);
+  const compact = useCompactDraftForms();
   const isMissing = required && (value === undefined || value === null || String(value).trim() === '');
-  
+  // Control sizing: compact drops the label-gap margin and shrinks the height.
+  const inputCls = compact ? 'h-7 text-sm' : 'h-8 text-sm mt-0.5';
+
+  const control =
+    type === 'select' && options ? (
+      <Select value={String(value || '')} onValueChange={onChange}>
+        <SelectTrigger className={cn(inputCls, 'w-full min-w-0')}>
+          <SelectValue placeholder={placeholder || label} />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((opt: { value: string; label: string }) => (
+            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    ) : type === 'date' ? (
+      compact ? (
+        <DateField value={value} onChange={onChange} inputCls={inputCls} label={label} placeholder={placeholder} />
+      ) : (
+        <input
+          type="date"
+          aria-label={label}
+          title={label}
+          className={cn(
+            'w-full min-w-0 rounded-md border border-input bg-transparent dark:bg-input/30 px-3 py-1 text-sm text-foreground shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]',
+            inputCls,
+          )}
+          value={value ? String(value) : ''}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )
+    ) : type === 'textarea' ? (
+      <Textarea
+        value={String(value || '')}
+        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className={cn('text-sm resize-none', compact ? 'min-h-[34px]' : 'min-h-[60px] mt-0.5')}
+      />
+    ) : type === 'number' ? (
+      <Input
+        type="number"
+        value={String(value || '')}
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className={inputCls}
+      />
+    ) : (
+      <Input
+        type="text"
+        value={String(value || '')}
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className={inputCls}
+      />
+    );
+
   return (
-    <div className={cn('flex items-start gap-2 py-1', className)}>
-      <Icon className={cn('w-4 h-4 mt-2 flex-shrink-0', isMissing ? 'text-destructive' : 'text-muted-foreground')} />
-      <div className="flex-1 min-w-0">
-        <span className={cn('text-xs', isMissing ? 'text-destructive' : 'text-muted-foreground')}>
-          {label}{required && <span className="text-destructive"> *</span>}
-        </span>
-        {type === 'select' && options ? (
-          <Select value={String(value || '')} onValueChange={onChange}>
-            <SelectTrigger className="h-8 text-sm mt-0.5 w-full min-w-0">
-              <SelectValue placeholder={placeholder || label} />
-            </SelectTrigger>
-            <SelectContent>
-              {options.map((opt: { value: string; label: string }) => (
-                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        ) : type === 'date' ? (
-          <input
-            type="date"
-            aria-label={label}
-            title={label}
-            className="h-8 w-full rounded-md border border-input bg-transparent dark:bg-input/30 px-3 py-1 text-sm mt-0.5 text-foreground shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
-            value={value ? String(value) : ''}
-            onChange={(e) => onChange(e.target.value)}
-          />
-        ) : type === 'textarea' ? (
-          <Textarea
-            value={String(value || '')}
-            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => onChange(e.target.value)}
-            placeholder={placeholder}
-            className="min-h-[60px] text-sm mt-0.5 resize-none"
-          />
-        ) : type === 'number' ? (
-          <Input
-            type="number"
-            value={String(value || '')}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
-            placeholder={placeholder}
-            className="h-8 text-sm mt-0.5"
-          />
-        ) : (
-          <Input
-            type="text"
-            value={String(value || '')}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
-            placeholder={placeholder}
-            className="h-8 text-sm mt-0.5"
-          />
-        )}
-        {isMissing && (
-          <p className="mt-1 text-[11px] text-destructive">
-            {missingHint || (getLocale() === 'zh-Hans' ? `请填写${label}` : `${label} is required`)}
-          </p>
-        )}
-      </div>
-    </div>
+    <FieldShell icon={Icon} label={label} required={required} isMissing={isMissing} compact={compact} alignTop={type === 'textarea'} className={className}>
+      {control}
+      {isMissing && (
+        <p className={cn('text-[11px] text-destructive', compact ? 'mt-0.5' : 'mt-1')}>
+          {missingHint || t('fieldRequired', getLocale(), { label })}
+        </p>
+      )}
+    </FieldShell>
   );
 }
 
@@ -153,14 +258,10 @@ function AccountSelector({
   locale: Locale;
 }) {
   const { data: accounts = [] } = useAccountList();
-  
+  const compact = useCompactDraftForms();
+
   return (
-    <div className="flex items-start gap-2 py-1">
-      <Building2 className="w-4 h-4 text-muted-foreground mt-2 flex-shrink-0" />
-      <div className="flex-1 min-w-0">
-        <span className="text-xs text-muted-foreground">
-          {locale === 'zh-Hans' ? '客户' : 'Account'}
-        </span>
+    <FieldShell icon={Building2} label={t('account', locale)} compact={compact}>
         <Select 
           value={value || ''} 
           onValueChange={(val: string) => {
@@ -170,8 +271,8 @@ function AccountSelector({
             }
           }}
         >
-          <SelectTrigger className="h-8 text-sm mt-0.5 w-full min-w-0">
-            <SelectValue placeholder={locale === 'zh-Hans' ? '选择客户' : 'Select account'} />
+          <SelectTrigger className={cn(compact ? 'h-7 text-sm' : 'h-8 text-sm mt-0.5', 'w-full min-w-0')}>
+            <SelectValue placeholder={t('formSelectAccount', locale)} />
           </SelectTrigger>
           <SelectContent>
             {accounts.map((account: Account) => (
@@ -181,8 +282,7 @@ function AccountSelector({
             ))}
           </SelectContent>
         </Select>
-      </div>
-    </div>
+    </FieldShell>
   );
 }
 
@@ -204,14 +304,10 @@ function OpportunitySelector({
   const filteredOpportunities = accountId 
     ? opportunities.filter((o: Opportunity) => o.account?.id === accountId)
     : opportunities;
-  
+  const compact = useCompactDraftForms();
+
   return (
-    <div className="flex items-start gap-2 py-1">
-      <Target className="w-4 h-4 text-muted-foreground mt-2 flex-shrink-0" />
-      <div className="flex-1 min-w-0">
-        <span className="text-xs text-muted-foreground">
-          {locale === 'zh-Hans' ? '关联商机' : 'Opportunity'}
-        </span>
+    <FieldShell icon={Target} label={t('linkedOpportunity', locale)} compact={compact}>
         <Select 
           value={value || 'none'} 
           onValueChange={(val: string) => {
@@ -225,12 +321,12 @@ function OpportunitySelector({
             }
           }}
         >
-          <SelectTrigger className="h-8 text-sm mt-0.5 w-full min-w-0">
-            <SelectValue placeholder={locale === 'zh-Hans' ? '选择商机（可选）' : 'Select opportunity (optional)'} />
+          <SelectTrigger className={cn(compact ? 'h-7 text-sm' : 'h-8 text-sm mt-0.5', 'w-full min-w-0')}>
+            <SelectValue placeholder={t('formSelectOpportunity', locale)} />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="none">
-              {locale === 'zh-Hans' ? '无' : 'None'}
+              {t('none', locale)}
             </SelectItem>
             {filteredOpportunities.map((opp: Opportunity) => (
               <SelectItem key={opp.id} value={opp.id}>
@@ -239,8 +335,7 @@ function OpportunitySelector({
             ))}
           </SelectContent>
         </Select>
-      </div>
-    </div>
+    </FieldShell>
   );
 }
 
@@ -262,14 +357,10 @@ function ContactSelector({
   const filteredContacts = accountId 
     ? contacts.filter((c: Contact) => c.account?.id === accountId)
     : contacts;
-  
+  const compact = useCompactDraftForms();
+
   return (
-    <div className="flex items-start gap-2 py-1">
-      <User className="w-4 h-4 text-muted-foreground mt-2 flex-shrink-0" />
-      <div className="flex-1 min-w-0">
-        <span className="text-xs text-muted-foreground">
-          {locale === 'zh-Hans' ? '联系人' : 'Contact'}
-        </span>
+    <FieldShell icon={User} label={t('contact', locale)} compact={compact}>
         <Select 
           value={value || 'none'} 
           onValueChange={(val: string) => {
@@ -283,12 +374,12 @@ function ContactSelector({
             }
           }}
         >
-          <SelectTrigger className="h-8 text-sm mt-0.5 w-full min-w-0">
-            <SelectValue placeholder={locale === 'zh-Hans' ? '选择联系人（可选）' : 'Select contact (optional)'} />
+          <SelectTrigger className={cn(compact ? 'h-7 text-sm' : 'h-8 text-sm mt-0.5', 'w-full min-w-0')}>
+            <SelectValue placeholder={t('formSelectContact', locale)} />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="none">
-              {locale === 'zh-Hans' ? '无' : 'None'}
+              {t('none', locale)}
             </SelectItem>
             {filteredContacts.map((contact: Contact) => (
               <SelectItem key={contact.id} value={contact.id}>
@@ -297,8 +388,7 @@ function ContactSelector({
             ))}
           </SelectContent>
         </Select>
-      </div>
-    </div>
+    </FieldShell>
   );
 }
 
@@ -354,15 +444,12 @@ function MultiContactSelector({
     }
   }, [contacts, suggestedNames, accountId, attendees.length, onChange]);
 
+  const compact = useCompactDraftForms();
+
   return (
-    <div className="flex items-start gap-2 py-1">
-      <Users className="w-4 h-4 text-muted-foreground mt-2 flex-shrink-0" />
-      <div className="flex-1 min-w-0">
-        <span className="text-xs text-muted-foreground">
-          {locale === 'zh-Hans' ? '参会人' : 'Attendees'}
-        </span>
+    <FieldShell icon={Users} label={t('attendees', locale)} compact={compact} alignTop={attendees.length > 0}>
         {attendees.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mt-1 mb-1">
+          <div className={cn('flex flex-wrap gap-1.5 mb-1', compact ? 'mt-0.5' : 'mt-1')}>
             {attendees.map((a) => (
               <span
                 key={a.id}
@@ -373,7 +460,7 @@ function MultiContactSelector({
                   type="button"
                   onClick={() => onChange(attendees.filter((x) => x.id !== a.id))}
                   className="hover:text-destructive"
-                  aria-label={locale === 'zh-Hans' ? '移除' : 'Remove'}
+                  aria-label={t('remove', locale)}
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -389,12 +476,12 @@ function MultiContactSelector({
             if (contact) onChange([...attendees, { id: contact.id, fullname: contact.fullname || '' }]);
           }}
         >
-          <SelectTrigger className="h-8 text-sm mt-0.5 w-full min-w-0">
-            <SelectValue placeholder={locale === 'zh-Hans' ? '添加参会人' : 'Add attendee'} />
+          <SelectTrigger className={cn(compact ? 'h-7 text-sm' : 'h-8 text-sm mt-0.5', 'w-full min-w-0')}>
+            <SelectValue placeholder={t('addAttendee', locale)} />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="add">
-              {locale === 'zh-Hans' ? '添加参会人…' : 'Add attendee…'}
+              {t('addAttendeeEllipsis', locale)}
             </SelectItem>
             {available.map((contact: Contact) => (
               <SelectItem key={contact.id} value={contact.id}>
@@ -403,8 +490,7 @@ function MultiContactSelector({
             ))}
           </SelectContent>
         </Select>
-      </div>
-    </div>
+    </FieldShell>
   );
 }
 
@@ -419,43 +505,47 @@ function ActivityFormCard({ data, formData, setFormData, onConfirm, onCancel, is
   locale: Locale;
 }) {
   const typeOptions = [
-    { value: 'visit', label: locale === 'zh-Hans' ? '拜访' : 'Visit' },
-    { value: 'call', label: locale === 'zh-Hans' ? '电话' : 'Call' },
-    { value: 'meeting', label: locale === 'zh-Hans' ? '会议' : 'Meeting' },
-    { value: 'email', label: locale === 'zh-Hans' ? '邮件' : 'Email' },
-    { value: 'other', label: locale === 'zh-Hans' ? '其他' : 'Other' },
+    { value: 'visit', label: t('typeVisit', locale) },
+    { value: 'call', label: t('typeCall', locale) },
+    { value: 'meeting', label: t('typeMeeting', locale) },
+    { value: 'email', label: t('typeEmail', locale) },
   ];
 
-  const activityType = formData.type as string || 'visit';
+  // Native Dataverse activity tables only cover visit/meeting (appointment),
+  // call (phonecall) and email — there is no table for a generic "other" type,
+  // so it is not offered. Coerce any legacy/stray value to a representable type.
+  const rawType = (formData.type as string) || 'visit';
+  const activityType = typeOptions.some((o) => o.value === rawType) ? rawType : 'meeting';
   const typeLabel = typeOptions.find((t: { value: string; label: string }) => t.value === activityType)?.label || activityType;
+  const compact = useCompactDraftForms();
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2 mb-3">
-        <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+    <div className={compact ? 'space-y-1.5' : 'space-y-2'}>
+      <div className={cn('flex items-center gap-2', compact ? 'mb-1.5' : 'mb-3')}>
+        <div className={cn('rounded-lg bg-primary/10 flex items-center justify-center', compact ? 'w-7 h-7' : 'w-8 h-8')}>
           <Calendar className="w-4 h-4 text-primary" />
         </div>
         <div className="flex-1 min-w-0">
           <h4 className="font-medium text-sm text-foreground truncate">
-            {locale === 'zh-Hans' ? '新建活动' : 'New Activity'}
+            {t('newActivity', locale)}
           </h4>
           <span className="text-xs text-muted-foreground">{typeLabel}</span>
         </div>
       </div>
 
-      <div className="bg-muted/30 rounded-lg p-3 space-y-1">
+      <div className={cn('bg-muted/30 rounded-lg', compact ? 'p-2.5 space-y-0' : 'p-3 space-y-1')}>
         <EditableField 
           icon={FileText} 
-          label={locale === 'zh-Hans' ? '标题' : 'Title'} 
+          label={t('fieldTitle', locale)} 
           value={formData.title as string}
           onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, title: v }))}
-          placeholder={locale === 'zh-Hans' ? '输入活动标题' : 'Enter activity title'}
+          placeholder={t('enterActivityTitle', locale)}
           required
         />
         <EditableField 
           icon={Tag} 
-          label={locale === 'zh-Hans' ? '类型' : 'Type'} 
-          value={formData.type as string}
+          label={t('fieldType', locale)} 
+          value={activityType}
           onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, type: v }))}
           type="select"
           options={typeOptions}
@@ -467,11 +557,11 @@ function ActivityFormCard({ data, formData, setFormData, onConfirm, onCancel, is
         />
         <EditableField 
           icon={Calendar} 
-          label={locale === 'zh-Hans' ? '日期' : 'Date'} 
+          label={t('fieldDate', locale)} 
           value={formData.scheduledDate as string}
           onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, scheduledDate: v }))}
           type="date"
-          placeholder={locale === 'zh-Hans' ? '选择日期' : 'Select date'}
+          placeholder={t('selectDate', locale)}
         />
         <OpportunitySelector
           value={formData.opportunityId as string}
@@ -505,14 +595,14 @@ function ActivityFormCard({ data, formData, setFormData, onConfirm, onCancel, is
             user can recall why the task exists; for a completed one it captures the outcome/discussion. */}
         <EditableField
           icon={FileText}
-          label={locale === 'zh-Hans' ? '详情' : 'Details'}
+          label={t('details', locale)}
           value={formData.result as string}
           onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, result: v }))}
           type="textarea"
           placeholder={
             formData.temporalMode === 'planned'
-              ? (locale === 'zh-Hans' ? '输入目的 / 议程 / 背景，便于日后回忆' : 'Add purpose / agenda / context for later recall')
-              : (locale === 'zh-Hans' ? '输入活动结果或讨论要点' : 'Enter outcome or discussion points')
+              ? (t('detailsPlaceholderUpcoming', locale))
+              : (t('detailsPlaceholderPast', locale))
           }
         />
       </div>
@@ -526,7 +616,7 @@ function ActivityFormCard({ data, formData, setFormData, onConfirm, onCancel, is
           className="flex-1"
         >
           <X className="w-3.5 h-3.5 mr-1.5" />
-          {locale === 'zh-Hans' ? '取消' : 'Cancel'}
+          {t('cancel', locale)}
         </Button>
         <Button
           size="sm"
@@ -535,11 +625,11 @@ function ActivityFormCard({ data, formData, setFormData, onConfirm, onCancel, is
           className="flex-1"
         >
           {isConfirming ? (
-            <span className="animate-pulse">{locale === 'zh-Hans' ? '保存中...' : 'Saving...'}</span>
+            <span className="animate-pulse">{t('saving', locale)}</span>
           ) : (
             <>
               <Check className="w-3.5 h-3.5 mr-1.5" />
-              {locale === 'zh-Hans' ? '确认' : 'Confirm'}
+              {t('confirm', locale)}
             </>
           )}
         </Button>
@@ -582,7 +672,7 @@ function OpportunitySignalsHeader({ formData, locale }: {
         <div className="flex items-center gap-1.5">
           <Sparkles className="w-3.5 h-3.5" />
           <span className="text-xs font-medium">
-            {locale === 'zh-Hans' ? '为什么推荐' : 'Why this was suggested'}
+            {t('whySuggested', locale)}
           </span>
         </div>
         <div className="flex items-center gap-1">
@@ -622,26 +712,27 @@ function OpportunityFormCard({ data, formData, setFormData, onConfirm, onCancel,
   locale: Locale;
 }) {
   const stageOptions = [
-    { value: 'prospecting', label: locale === 'zh-Hans' ? '发现' : 'Prospecting' },
-    { value: 'qualification', label: locale === 'zh-Hans' ? '资质' : 'Qualification' },
-    { value: 'proposal', label: locale === 'zh-Hans' ? '提案' : 'Proposal' },
-    { value: 'negotiation', label: locale === 'zh-Hans' ? '谈判' : 'Negotiation' },
-    { value: 'won', label: locale === 'zh-Hans' ? '成交' : 'Won' },
-    { value: 'lost', label: locale === 'zh-Hans' ? '失败' : 'Lost' },
+    { value: 'prospecting', label: t('stageProspecting', locale) },
+    { value: 'qualification', label: t('stageQualification', locale) },
+    { value: 'proposal', label: t('stageProposal', locale) },
+    { value: 'negotiation', label: t('stageNegotiation', locale) },
+    { value: 'won', label: t('stageWon', locale) },
+    { value: 'lost', label: t('stageLost', locale) },
   ];
 
   const stage = formData.stage as string || 'prospecting';
   const stageLabel = stageOptions.find((s: { value: string; label: string }) => s.value === stage)?.label || stage;
+  const compact = useCompactDraftForms();
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2 mb-3">
-        <div className="w-8 h-8 rounded-lg bg-green-500/10 flex items-center justify-center">
+    <div className={compact ? 'space-y-1.5' : 'space-y-2'}>
+      <div className={cn('flex items-center gap-2', compact ? 'mb-1.5' : 'mb-3')}>
+        <div className={cn('rounded-lg bg-green-500/10 flex items-center justify-center', compact ? 'w-7 h-7' : 'w-8 h-8')}>
           <TrendingUp className="w-4 h-4 text-green-600" />
         </div>
         <div>
           <h4 className="font-medium text-sm text-foreground">
-            {locale === 'zh-Hans' ? '新建商机' : 'New Opportunity'}
+            {t('newOpportunity', locale)}
           </h4>
           <span className="text-xs text-muted-foreground">{stageLabel}</span>
         </div>
@@ -649,13 +740,13 @@ function OpportunityFormCard({ data, formData, setFormData, onConfirm, onCancel,
 
       <OpportunitySignalsHeader formData={formData} locale={locale} />
 
-      <div className="bg-muted/30 rounded-lg p-3 space-y-1">
+      <div className={cn('bg-muted/30 rounded-lg', compact ? 'p-2.5 space-y-0' : 'p-3 space-y-1')}>
         <EditableField 
           icon={FileText} 
-          label={locale === 'zh-Hans' ? '名称' : 'Name'} 
+          label={t('fieldName', locale)} 
           value={formData.name as string}
           onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, name: v }))}
-          placeholder={locale === 'zh-Hans' ? '输入商机名称' : 'Enter opportunity name'}
+          placeholder={t('enterOpportunityName', locale)}
           required
         />
         <AccountSelector
@@ -665,7 +756,7 @@ function OpportunityFormCard({ data, formData, setFormData, onConfirm, onCancel,
         />
         <EditableField 
           icon={DollarSign} 
-          label={locale === 'zh-Hans' ? '金额' : 'Amount'} 
+          label={t('amount', locale)} 
           value={formData.amount as number}
           onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, amount: Number(v) || 0 }))}
           type="number"
@@ -673,7 +764,7 @@ function OpportunityFormCard({ data, formData, setFormData, onConfirm, onCancel,
         />
         <EditableField 
           icon={Tag} 
-          label={locale === 'zh-Hans' ? '阶段' : 'Stage'} 
+          label={t('fieldStage', locale)} 
           value={formData.stage as string}
           onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, stage: v }))}
           type="select"
@@ -681,7 +772,7 @@ function OpportunityFormCard({ data, formData, setFormData, onConfirm, onCancel,
         />
         <EditableField 
           icon={TrendingUp} 
-          label={locale === 'zh-Hans' ? '信心度' : 'Confidence'} 
+          label={t('confidence', locale)} 
           value={formData.confidence as number}
           onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, confidence: Math.min(100, Math.max(0, Number(v) || 50)) }))}
           type="number"
@@ -689,11 +780,11 @@ function OpportunityFormCard({ data, formData, setFormData, onConfirm, onCancel,
         />
         <EditableField 
           icon={Calendar} 
-          label={locale === 'zh-Hans' ? '预计成交' : 'Expected Close'} 
+          label={t('expectedClose', locale)} 
           value={formData.expectedCloseDate as string}
           onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, expectedCloseDate: v }))}
           type="date"
-          placeholder={locale === 'zh-Hans' ? '选择日期' : 'Select date'}
+          placeholder={t('selectDate', locale)}
         />
 
       </div>
@@ -707,7 +798,7 @@ function OpportunityFormCard({ data, formData, setFormData, onConfirm, onCancel,
           className="flex-1"
         >
           <X className="w-3.5 h-3.5 mr-1.5" />
-          {locale === 'zh-Hans' ? '取消' : 'Cancel'}
+          {t('cancel', locale)}
         </Button>
         <Button
           size="sm"
@@ -716,11 +807,11 @@ function OpportunityFormCard({ data, formData, setFormData, onConfirm, onCancel,
           className="flex-1"
         >
           {isConfirming ? (
-            <span className="animate-pulse">{locale === 'zh-Hans' ? '保存中...' : 'Saving...'}</span>
+            <span className="animate-pulse">{t('saving', locale)}</span>
           ) : (
             <>
               <Check className="w-3.5 h-3.5 mr-1.5" />
-              {locale === 'zh-Hans' ? '确认' : 'Confirm'}
+              {t('confirm', locale)}
             </>
           )}
         </Button>
@@ -739,63 +830,64 @@ function AccountFormCard({ data, formData, setFormData, onConfirm, onCancel, isC
   isConfirming: boolean;
   locale: Locale;
 }) {
+  const compact = useCompactDraftForms();
   return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2 mb-3">
-        <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
+    <div className={compact ? 'space-y-1.5' : 'space-y-2'}>
+      <div className={cn('flex items-center gap-2', compact ? 'mb-1.5' : 'mb-3')}>
+        <div className={cn('rounded-lg bg-blue-500/10 flex items-center justify-center', compact ? 'w-7 h-7' : 'w-8 h-8')}>
           <Building2 className="w-4 h-4 text-blue-600" />
         </div>
         <div>
           <h4 className="font-medium text-sm text-foreground">
-            {locale === 'zh-Hans' ? '新建客户' : 'New Account'}
+            {t('newAccount', locale)}
           </h4>
         </div>
       </div>
 
-      <div className="bg-muted/30 rounded-lg p-3 space-y-1">
+      <div className={cn('bg-muted/30 rounded-lg', compact ? 'p-2.5 space-y-0' : 'p-3 space-y-1')}>
         <EditableField 
           icon={Building2} 
-          label={locale === 'zh-Hans' ? '名称' : 'Name'} 
+          label={t('fieldName', locale)} 
           value={formData.name as string}
           onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, name: v }))}
-          placeholder={locale === 'zh-Hans' ? '输入客户名称' : 'Enter account name'}
+          placeholder={t('enterAccountName', locale)}
           required
         />
         <EditableField 
           icon={Tag} 
-          label={locale === 'zh-Hans' ? '行业' : 'Industry'} 
+          label={t('fieldIndustry', locale)} 
           value={formData.industry as string}
           onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, industry: v }))}
-          placeholder={locale === 'zh-Hans' ? '输入行业' : 'Enter industry'}
+          placeholder={t('enterIndustry', locale)}
         />
         <EditableField 
           icon={Phone} 
-          label={locale === 'zh-Hans' ? '电话' : 'Phone'} 
+          label={t('fieldPhone', locale)} 
           value={formData.phone as string}
           onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, phone: v }))}
-          placeholder={locale === 'zh-Hans' ? '输入电话' : 'Enter phone'}
+          placeholder={t('enterPhone', locale)}
         />
         <EditableField 
           icon={Mail} 
-          label={locale === 'zh-Hans' ? '邮箱' : 'Email'} 
+          label={t('fieldEmail', locale)} 
           value={formData.email as string}
           onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, email: v }))}
-          placeholder={locale === 'zh-Hans' ? '输入邮箱' : 'Enter email'}
+          placeholder={t('enterEmail', locale)}
         />
         <EditableField 
           icon={FileText} 
-          label={locale === 'zh-Hans' ? '备注' : 'Notes'} 
+          label={t('notes', locale)} 
           value={formData.notes as string}
           onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, notes: v }))}
           type="textarea"
-          placeholder={locale === 'zh-Hans' ? '输入备注信息' : 'Enter notes'}
+          placeholder={t('enterNotes', locale)}
         />
         <EditableField 
           icon={MapPin} 
-          label={locale === 'zh-Hans' ? '地址' : 'Address'} 
+          label={t('fieldAddress', locale)} 
           value={formData.address as string}
           onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, address: v }))}
-          placeholder={locale === 'zh-Hans' ? '输入地址' : 'Enter address'}
+          placeholder={t('enterAddress', locale)}
         />
       </div>
 
@@ -808,7 +900,7 @@ function AccountFormCard({ data, formData, setFormData, onConfirm, onCancel, isC
           className="flex-1"
         >
           <X className="w-3.5 h-3.5 mr-1.5" />
-          {locale === 'zh-Hans' ? '取消' : 'Cancel'}
+          {t('cancel', locale)}
         </Button>
         <Button
           size="sm"
@@ -817,11 +909,11 @@ function AccountFormCard({ data, formData, setFormData, onConfirm, onCancel, isC
           className="flex-1"
         >
           {isConfirming ? (
-            <span className="animate-pulse">{locale === 'zh-Hans' ? '保存中...' : 'Saving...'}</span>
+            <span className="animate-pulse">{t('saving', locale)}</span>
           ) : (
             <>
               <Check className="w-3.5 h-3.5 mr-1.5" />
-              {locale === 'zh-Hans' ? '确认' : 'Confirm'}
+              {t('confirm', locale)}
             </>
           )}
         </Button>
@@ -840,27 +932,28 @@ function ContactFormCard({ data, formData, setFormData, onConfirm, onCancel, isC
   isConfirming: boolean;
   locale: Locale;
 }) {
+  const compact = useCompactDraftForms();
   return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2 mb-3">
-        <div className="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center">
+    <div className={compact ? 'space-y-1.5' : 'space-y-2'}>
+      <div className={cn('flex items-center gap-2', compact ? 'mb-1.5' : 'mb-3')}>
+        <div className={cn('rounded-lg bg-purple-500/10 flex items-center justify-center', compact ? 'w-7 h-7' : 'w-8 h-8')}>
           <User className="w-4 h-4 text-purple-600" />
         </div>
         <div>
           <h4 className="font-medium text-sm text-foreground">
-            {locale === 'zh-Hans' ? '新建联系人' : 'New Contact'}
+            {t('newContact', locale)}
           </h4>
           {typeof formData.title === 'string' && formData.title && <span className="text-xs text-muted-foreground">{formData.title}</span>}
         </div>
       </div>
 
-      <div className="bg-muted/30 rounded-lg p-3 space-y-1">
+      <div className={cn('bg-muted/30 rounded-lg', compact ? 'p-2.5 space-y-0' : 'p-3 space-y-1')}>
         <EditableField 
           icon={User} 
-          label={locale === 'zh-Hans' ? '姓名' : 'Name'} 
+          label={t('fieldFullName', locale)} 
           value={formData.fullName as string}
           onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, fullName: v }))}
-          placeholder={locale === 'zh-Hans' ? '输入姓名' : 'Enter name'}
+          placeholder={t('enterName', locale)}
           required
         />
         <AccountSelector
@@ -870,24 +963,24 @@ function ContactFormCard({ data, formData, setFormData, onConfirm, onCancel, isC
         />
         <EditableField 
           icon={Tag} 
-          label={locale === 'zh-Hans' ? '职位' : 'Title'} 
+          label={t('fieldJobTitle', locale)} 
           value={formData.title as string}
           onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, title: v }))}
-          placeholder={locale === 'zh-Hans' ? '输入职位' : 'Enter title'}
+          placeholder={t('enterJobTitle', locale)}
         />
         <EditableField 
           icon={Phone} 
-          label={locale === 'zh-Hans' ? '电话' : 'Phone'} 
+          label={t('fieldPhone', locale)} 
           value={formData.phone as string}
           onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, phone: v }))}
-          placeholder={locale === 'zh-Hans' ? '输入电话' : 'Enter phone'}
+          placeholder={t('enterPhone', locale)}
         />
         <EditableField 
           icon={Mail} 
-          label={locale === 'zh-Hans' ? '邮箱' : 'Email'} 
+          label={t('fieldEmail', locale)} 
           value={formData.email as string}
           onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, email: v }))}
-          placeholder={locale === 'zh-Hans' ? '输入邮箱' : 'Enter email'}
+          placeholder={t('enterEmail', locale)}
         />
       </div>
 
@@ -900,7 +993,7 @@ function ContactFormCard({ data, formData, setFormData, onConfirm, onCancel, isC
           className="flex-1"
         >
           <X className="w-3.5 h-3.5 mr-1.5" />
-          {locale === 'zh-Hans' ? '取消' : 'Cancel'}
+          {t('cancel', locale)}
         </Button>
         <Button
           size="sm"
@@ -909,11 +1002,11 @@ function ContactFormCard({ data, formData, setFormData, onConfirm, onCancel, isC
           className="flex-1"
         >
           {isConfirming ? (
-            <span className="animate-pulse">{locale === 'zh-Hans' ? '保存中...' : 'Saving...'}</span>
+            <span className="animate-pulse">{t('saving', locale)}</span>
           ) : (
             <>
               <Check className="w-3.5 h-3.5 mr-1.5" />
-              {locale === 'zh-Hans' ? '确认' : 'Confirm'}
+              {t('confirm', locale)}
             </>
           )}
         </Button>
@@ -928,7 +1021,7 @@ function ConfirmedBadge({ locale }: { locale: Locale }) {
     <div className="flex items-center gap-1.5 text-green-600 bg-green-50 dark:bg-green-900/20 px-2 py-1 rounded-md">
       <Check className="w-3.5 h-3.5" />
       <span className="text-xs font-medium">
-        {locale === 'zh-Hans' ? '已保存' : 'Saved'}
+        {t('saved', locale)}
       </span>
     </div>
   );
@@ -937,21 +1030,20 @@ function ConfirmedBadge({ locale }: { locale: Locale }) {
 // ── Saved-card read-only summary helpers ───────────────────────────────────
 type SummaryIcon = React.ComponentType<{ className?: string }>;
 
-const ACTIVITY_TYPE_LABELS: Record<string, [string, string]> = {
-  visit: ['拜访', 'Visit'],
-  call: ['电话', 'Call'],
-  meeting: ['会议', 'Meeting'],
-  email: ['邮件', 'Email'],
-  other: ['其他', 'Other'],
+const ACTIVITY_TYPE_KEYS: Record<string, TranslationKey> = {
+  visit: 'typeVisit',
+  call: 'typeCall',
+  meeting: 'typeMeeting',
+  email: 'typeEmail',
 };
 
-const STAGE_LABELS: Record<string, [string, string]> = {
-  prospecting: ['发现', 'Prospecting'],
-  qualification: ['资质', 'Qualification'],
-  proposal: ['提案', 'Proposal'],
-  negotiation: ['谈判', 'Negotiation'],
-  won: ['成交', 'Won'],
-  lost: ['失败', 'Lost'],
+const STAGE_KEYS: Record<string, TranslationKey> = {
+  prospecting: 'stageProspecting',
+  qualification: 'stageQualification',
+  proposal: 'stageProposal',
+  negotiation: 'stageNegotiation',
+  won: 'stageWon',
+  lost: 'stageLost',
 };
 
 /** Format an ISO/date string for compact display; falls back to the raw value. */
@@ -959,7 +1051,7 @@ function formatCardDate(dateStr: string | undefined, locale: Locale): string {
   if (!dateStr) return '';
   const d = new Date(dateStr);
   if (Number.isNaN(d.getTime())) return dateStr;
-  return format(d, locale === 'zh-Hans' ? 'yyyy年M月d日' : 'MMM d, yyyy');
+  return format(d, t('dateFormatLong', locale));
 }
 
 /** A single read-only label/value row in the expanded saved card. */
@@ -985,15 +1077,13 @@ function buildSavedCardDetails(
   formData: Record<string, unknown>,
   locale: Locale,
 ): { summary: string; rows: Array<{ icon: SummaryIcon; label: string; value: string }> } {
-  const tr = (zh: string, en: string) => (locale === 'zh-Hans' ? zh : en);
-  const idx = locale === 'zh-Hans' ? 0 : 1;
   const str = (k: string) => (typeof formData[k] === 'string' ? (formData[k] as string).trim() : '');
   const rows: Array<{ icon: SummaryIcon; label: string; value: string }> = [];
   let summary = '';
 
   if (type === 'activity') {
     const at = str('type') || 'visit';
-    const atLabel = ACTIVITY_TYPE_LABELS[at]?.[idx] || at;
+    const atKey = ACTIVITY_TYPE_KEYS[at]; const atLabel = atKey ? t(atKey, locale) : at;
     const dateStr = formatCardDate(str('scheduledDate'), locale);
     const accName = str('accountName');
     const oppName = str('opportunityName');
@@ -1003,23 +1093,23 @@ function buildSavedCardDetails(
     const isPlanned = str('temporalMode') === 'planned';
 
     summary = [atLabel, dateStr, oppName || accName].filter(Boolean).join(' · ');
-    rows.push({ icon: Tag, label: tr('类型', 'Type'), value: atLabel });
+    rows.push({ icon: Tag, label: t('fieldType', locale), value: atLabel });
     rows.push({
       icon: Calendar,
-      label: isPlanned ? tr('计划日期', 'Scheduled') : tr('日期', 'Date'),
+      label: isPlanned ? t('fieldScheduled', locale) : t('fieldDate', locale),
       value: dateStr,
     });
-    rows.push({ icon: Building2, label: tr('客户', 'Account'), value: accName });
-    rows.push({ icon: Target, label: tr('关联商机', 'Opportunity'), value: oppName });
+    rows.push({ icon: Building2, label: t('account', locale), value: accName });
+    rows.push({ icon: Target, label: t('linkedOpportunity', locale), value: oppName });
     if (at === 'visit' || at === 'meeting') {
-      rows.push({ icon: Users, label: tr('参会人', 'Attendees'), value: attendeeNames });
+      rows.push({ icon: Users, label: t('attendees', locale), value: attendeeNames });
     } else {
-      rows.push({ icon: User, label: tr('联系人', 'Contact'), value: contactName });
+      rows.push({ icon: User, label: t('contact', locale), value: contactName });
     }
-    rows.push({ icon: FileText, label: tr('结果', 'Result'), value: str('result') });
+    rows.push({ icon: FileText, label: t('fieldResult', locale), value: str('result') });
   } else if (type === 'opportunity') {
     const stage = str('stage') || 'prospecting';
-    const stageLabel = STAGE_LABELS[stage]?.[idx] || stage;
+    const stageKey = STAGE_KEYS[stage]; const stageLabel = stageKey ? t(stageKey, locale) : stage;
     const amount = typeof formData.amount === 'number' ? formData.amount : Number(str('amount'));
     const amountStr = amount ? formatCurrencyCompact(amount) : '';
     const confidence = typeof formData.confidence === 'number' ? formData.confidence : Number(str('confidence'));
@@ -1027,24 +1117,24 @@ function buildSavedCardDetails(
     const closeStr = formatCardDate(str('expectedCloseDate'), locale);
 
     summary = [stageLabel, amountStr].filter(Boolean).join(' · ');
-    rows.push({ icon: Building2, label: tr('客户', 'Account'), value: str('accountName') });
-    rows.push({ icon: DollarSign, label: tr('金额', 'Amount'), value: amountStr });
-    rows.push({ icon: Tag, label: tr('阶段', 'Stage'), value: stageLabel });
-    rows.push({ icon: TrendingUp, label: tr('信心度', 'Confidence'), value: confStr });
-    rows.push({ icon: Calendar, label: tr('预计成交', 'Expected Close'), value: closeStr });
+    rows.push({ icon: Building2, label: t('account', locale), value: str('accountName') });
+    rows.push({ icon: DollarSign, label: t('amount', locale), value: amountStr });
+    rows.push({ icon: Tag, label: t('fieldStage', locale), value: stageLabel });
+    rows.push({ icon: TrendingUp, label: t('confidence', locale), value: confStr });
+    rows.push({ icon: Calendar, label: t('expectedClose', locale), value: closeStr });
   } else if (type === 'account') {
     summary = [str('industry'), str('phone')].filter(Boolean).join(' · ');
-    rows.push({ icon: Tag, label: tr('行业', 'Industry'), value: str('industry') });
-    rows.push({ icon: Phone, label: tr('电话', 'Phone'), value: str('phone') });
-    rows.push({ icon: Mail, label: tr('邮箱', 'Email'), value: str('email') });
-    rows.push({ icon: MapPin, label: tr('地址', 'Address'), value: str('address') });
-    rows.push({ icon: FileText, label: tr('备注', 'Notes'), value: str('notes') });
+    rows.push({ icon: Tag, label: t('fieldIndustry', locale), value: str('industry') });
+    rows.push({ icon: Phone, label: t('fieldPhone', locale), value: str('phone') });
+    rows.push({ icon: Mail, label: t('fieldEmail', locale), value: str('email') });
+    rows.push({ icon: MapPin, label: t('fieldAddress', locale), value: str('address') });
+    rows.push({ icon: FileText, label: t('notes', locale), value: str('notes') });
   } else if (type === 'contact') {
     summary = [str('title'), str('accountName')].filter(Boolean).join(' · ');
-    rows.push({ icon: Tag, label: tr('职位', 'Title'), value: str('title') });
-    rows.push({ icon: Building2, label: tr('客户', 'Account'), value: str('accountName') });
-    rows.push({ icon: Phone, label: tr('电话', 'Phone'), value: str('phone') });
-    rows.push({ icon: Mail, label: tr('邮箱', 'Email'), value: str('email') });
+    rows.push({ icon: Tag, label: t('fieldJobTitle', locale), value: str('title') });
+    rows.push({ icon: Building2, label: t('account', locale), value: str('accountName') });
+    rows.push({ icon: Phone, label: t('fieldPhone', locale), value: str('phone') });
+    rows.push({ icon: Mail, label: t('fieldEmail', locale), value: str('email') });
   }
 
   return { summary, rows: rows.filter((r) => r.value) };
@@ -1122,7 +1212,11 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
       const { type } = formCard;
 
       if (type === 'activity') {
-        const activityType = (formData.type as string) || 'visit';
+        // Only visit/call/meeting/email are backed by native Dataverse tables.
+        // Coerce any legacy/stray value (e.g. a pre-existing 'other' draft) to a
+        // representable type so the create path never receives an invalid type.
+        const rawType = (formData.type as string) || 'visit';
+        const activityType = ['visit', 'call', 'meeting', 'email'].includes(rawType) ? rawType : 'meeting';
         
         // Use accountId directly if provided
         let targetAccount: Account | undefined;
@@ -1267,7 +1361,7 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
         }
         
         if (!targetAccount) {
-          setValidationError(locale === 'zh-Hans' ? '未找到关联客户，请先创建客户' : 'Account not found, please create account first');
+          setValidationError(t('accountNotFoundCreate', locale));
           setIsConfirming(false);
           return;
         }
@@ -1275,7 +1369,7 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
         // Validate required fields before saving
         const oppName = (formData.name as string || '').trim();
         if (!oppName) {
-          setValidationError(locale === 'zh-Hans' ? '商机名称为必填项' : 'Opportunity name is required');
+          setValidationError(t('opportunityNameRequired', locale));
           setIsConfirming(false);
           return;
         }
@@ -1343,7 +1437,7 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
         }
         
         if (!targetAccount) {
-          setValidationError(locale === 'zh-Hans' ? '未找到关联客户，请先创建客户' : 'Account not found, please create account first');
+          setValidationError(t('accountNotFoundCreate', locale));
           setIsConfirming(false);
           return;
         }
@@ -1412,7 +1506,7 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
           <div className="flex items-center gap-1.5 text-muted-foreground bg-muted/30 px-2 py-1 rounded-md">
             <X className="w-3.5 h-3.5" />
             <span className="text-xs font-medium">
-              {locale === 'zh-Hans' ? '已取消' : 'Cancelled'}
+              {t('cancelled2', locale)}
             </span>
           </div>
         </div>
@@ -1515,7 +1609,7 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
                     onClick={handleConfirmedClick}
                     className="w-full mt-2.5"
                   >
-                    {locale === 'zh-Hans' ? '查看完整详情' : 'Open full details'}
+                    {t('openFullDetails', locale)}
                     <ChevronRight className="w-3.5 h-3.5 ml-1.5" />
                   </Button>
                 </motion.div>
@@ -1538,7 +1632,7 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
       {formCard.type === 'activity' && formCard.attachmentIds && formCard.attachmentIds.length > 0 && (
         <div className="mb-3">
           <div className="text-helper text-muted-foreground mb-1.5">
-            {locale === 'zh-Hans' ? `附件 (${formCard.attachmentIds.length})` : `Attachments (${formCard.attachmentIds.length})`}
+            {t('attachmentsCount', locale, { count: formCard.attachmentIds.length })}
           </div>
           <div className="flex gap-2 flex-wrap">
             {getAttachments(formCard.attachmentIds).map((att) => (

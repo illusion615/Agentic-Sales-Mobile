@@ -15,7 +15,7 @@
 import { startOfWeek } from 'date-fns/startOfWeek';
 import { endOfWeek } from 'date-fns/endOfWeek';
 import { addWeeks } from 'date-fns/addWeeks';
-import { getWeekStartDay } from '@/lib/i18n';
+import { getWeekStartDay, localeBcp47, outputLanguageDirective, type Locale } from '@/lib/i18n';
 
 const CACHE_PREFIX = 'weekly-report:v1:';
 
@@ -75,7 +75,7 @@ export function writeWeeklyReport(weekStart: Date, markdown: string, activityCou
 
 export function weekRangeLabel(weekStart: Date, weekEnd: Date, locale: string): string {
   const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
-  const loc = locale === 'zh-Hans' ? 'zh-CN' : 'en-US';
+  const loc = localeBcp47(locale as Locale);
   return `${weekStart.toLocaleDateString(loc, opts)} – ${weekEnd.toLocaleDateString(loc, opts)}`;
 }
 
@@ -88,7 +88,7 @@ export function buildWeeklyReportPrompt(
   locale: string,
 ): string {
   const lines = activities.map((a) => {
-    const when = new Date(a.scheduledAt).toLocaleDateString(locale === 'zh-Hans' ? 'zh-CN' : 'en-US', {
+    const when = new Date(a.scheduledAt).toLocaleDateString(localeBcp47(locale as Locale), {
       weekday: 'short', month: 'short', day: 'numeric',
     });
     const parts = [
@@ -128,7 +128,9 @@ Respond in plain Markdown with these sections (use ### headings):
 ### Pending & Overdue
 ### Next Week
 
-Requirements: reference specific account/opportunity names; use bulleted lists; no JSON or code fences; professional and concise.`;
+Requirements: reference specific account/opportunity names; use bulleted lists; no JSON or code fences; professional and concise.
+
+${outputLanguageDirective(locale as Locale)}`;
 }
 
 /**

@@ -12,8 +12,9 @@
  *   - `relatesTo` is a 0-based integer dependency between intents. Models
  *     stubbornly wrap it as `[{item:N}]` / `[{index:N}]` / `["N"]`; we coerce
  *     all three forms back to plain integers.
- *   - Frame is invoked with `responseFormat: 'json'` so the Flow forces the
- *     LLM into JSON-object mode (much fewer parse failures).
+ *   - Frame calls the single Text prompt (`responseFormat: 'text'`) and parses
+ *     the JSON object client-side (jsonrepair + Zod), since the legacy JSON-mode
+ *     AI Builder prompt was retired.
  *
  * The viewer (frame-viewer.tsx) renders the ring buffer of recent
  * runs for boss-facing inspection.

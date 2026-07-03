@@ -105,7 +105,7 @@ const TOAST_DURATION = {
  */
 function getMessage(key: ToastMessageKey, locale?: Locale): string {
   const currentLocale = locale ?? getLocale();
-  return toastMessages[currentLocale][key] ?? toastMessages['en-US'][key] ?? key;
+  return (toastMessages[currentLocale as keyof typeof toastMessages] ?? toastMessages['en-US'])[key] ?? toastMessages['en-US'][key] ?? key;
 }
 
 /**

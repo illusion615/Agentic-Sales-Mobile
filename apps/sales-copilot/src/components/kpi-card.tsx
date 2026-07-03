@@ -3,7 +3,7 @@ import { motion, AnimatePresence, type PanInfo } from 'motion/react';
 import { ChevronRight, ChevronLeft, ChevronDown, Calendar, Target, Phone, MapPin, FileText, CheckCircle2, Clock, X, Lightbulb, AlertTriangle, TrendingUp, Sparkles, Mail, CheckSquare, RefreshCw, Play, Pause, Square, SkipBack, SkipForward, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatCurrencyCompact } from '@/lib/format-currency';
-import { getLocale, getWeekStartDay, type Locale } from '@/lib/i18n';
+import { getLocale, getWeekStartDay, t, localeBcp47, type Locale } from '@/lib/i18n';
 import { fireFeedback } from '@/lib/feedback';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -57,17 +57,15 @@ function formatGeneratedAt(iso: string | undefined, locale: Locale): string | nu
   if (!iso) return null;
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return null;
-  const isZh = locale === 'zh-Hans';
   const diffMs = Date.now() - then;
   const mins = Math.floor(diffMs / 60000);
-  const prefix = isZh ? '生成于 ' : 'Generated ';
-  if (mins < 1) return isZh ? '生成于 刚刚' : 'Generated just now';
-  if (mins < 60) return prefix + (isZh ? `${mins} 分钟前` : `${mins}m ago`);
+  if (mins < 1) return t('generatedJustNow', locale);
+  if (mins < 60) return t('generatedMinsAgo', locale, { mins });
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return prefix + (isZh ? `${hours} 小时前` : `${hours}h ago`);
+  if (hours < 24) return t('generatedHoursAgo', locale, { hours });
   const days = Math.floor(hours / 24);
-  if (days < 30) return prefix + (isZh ? `${days} 天前` : `${days}d ago`);
-  return prefix + new Date(then).toLocaleDateString();
+  if (days < 30) return t('generatedDaysAgo', locale, { days });
+  return t('generatedOn', locale, { date: new Date(then).toLocaleDateString(localeBcp47(locale)) });
 }
 
 export interface KPIData {
@@ -289,9 +287,7 @@ export function KPICards({
       // Get rationale text or generate fallback
       const rationaleText = insight.rationale && insight.rationale.trim()
         ? insight.rationale
-        : (locale === 'zh-Hans'
-          ? '基于您的销售数据和活动记录分析得出的个性化建议。'
-          : 'Personalized recommendation based on your sales data and activity records.');
+        : t('insightRationaleFallback', locale);
       
       // Determine type based on title/content
       let insightType: 'info' | 'warning' | 'success' = 'info';
@@ -374,9 +370,7 @@ export function KPICards({
     });
     
     // Get month name
-    const monthName = locale === 'zh-Hans'
-      ? `${currentMonth + 1}月`
-      : now.toLocaleString('en-US', { month: 'long' });
+    const monthName = now.toLocaleString(localeBcp47(locale), { month: 'long' });
     
     return {
       year: currentYear,
@@ -475,10 +469,10 @@ export function KPICards({
                 🎉
               </motion.div>
               <p className="text-lg font-semibold text-foreground">
-                {locale === 'zh-Hans' ? '太棒了！' : 'Awesome!'}
+                {t('awesome', locale)}
               </p>
               <p className="text-sm text-muted-foreground mt-1">
-                {locale === 'zh-Hans' ? '所有逾期任务已处理完成' : 'All overdue tasks completed!'}
+                {t('allOverdueDone', locale)}
               </p>
             </div>
           </motion.div>
@@ -529,12 +523,9 @@ export function KPICards({
   // Format date for overdue item display
   const formatOverdueDate = (date?: Date) => {
     if (!date) return '';
-    const weekdays = locale === 'zh-Hans'
-      ? ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
-      : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const month = date.getMonth() + 1;
     const day = date.getDate();
-    const weekday = weekdays[date.getDay()];
+    const weekday = date.toLocaleDateString(localeBcp47(locale), { weekday: 'short' });
     return `${weekday} ${month}/${day}`;
   };
   return (
@@ -592,19 +583,19 @@ export function KPICards({
               if (progress >= 100) {
                 return (
                   <span className="inline-flex shrink-0 items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300" style={{ whiteSpace: 'nowrap' }}>
-                    🎉 {locale === 'zh-Hans' ? '已达成' : 'Achieved'}
+                    🎉 {t('quarterAchieved', locale)}
                   </span>
                 );
               } else if (progress >= 70) {
                 return (
                   <span className="inline-flex shrink-0 items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" style={{ whiteSpace: 'nowrap' }}>
-                    {locale === 'zh-Hans' ? '接近目标' : 'On Track'}
+                    {t('onTrack', locale)}
                   </span>
                 );
               } else {
                 return (
                   <span className="inline-flex shrink-0 items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-primary/10 text-primary" style={{ whiteSpace: 'nowrap' }}>
-                    {locale === 'zh-Hans' ? '进行中' : 'Active'}
+                    {t('active', locale)}
                   </span>
                 );
               }
@@ -613,7 +604,7 @@ export function KPICards({
 
           {/* Row 2: label */}
           <p className="text-[10px] text-muted-foreground leading-tight">
-            {locale === 'zh-Hans' ? '季度业绩完成率' : 'Quarterly Performance'}
+            {t('quarterlyPerformance', locale)}
           </p>
           {/* Row 3: value */}
           <p className="text-lg font-bold text-foreground leading-tight whitespace-nowrap mb-2">
@@ -623,11 +614,11 @@ export function KPICards({
           {/* Target and progress */}
           <div className="space-y-1">
             <div className="flex items-center justify-between text-[10px]">
-              <span className="text-muted-foreground">{locale === 'zh-Hans' ? '目标' : 'Target'}</span>
+              <span className="text-muted-foreground">{t('target', locale)}</span>
               <span className="text-foreground/80 font-medium">{formatCurrencyValue(data.quarterlyTarget)}</span>
             </div>
             <div className="flex items-center justify-between text-[10px]">
-              <span className="text-muted-foreground">{locale === 'zh-Hans' ? '成交/商机' : 'Won/Total'}</span>
+              <span className="text-muted-foreground">{t('wonTotal', locale)}</span>
               <span className="text-foreground/80 font-medium">{data.quarterlyWonCount}/{data.quarterlyTotalCount}</span>
             </div>
           </div>
@@ -653,19 +644,19 @@ export function KPICards({
               if (coverageProgress >= 80) {
                 return (
                   <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 whitespace-nowrap">
-                    {locale === 'zh-Hans' ? '充分' : 'Strong'}
+                    {t('coverageStrong', locale)}
                   </span>
                 );
               } else if (coverageProgress >= 50) {
                 return (
                   <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 whitespace-nowrap">
-                    {locale === 'zh-Hans' ? '一般' : 'OK'}
+                    {t('coverageOk', locale)}
                   </span>
                 );
               } else {
                 return (
                   <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 whitespace-nowrap">
-                    {locale === 'zh-Hans' ? '偏低' : 'Low'}
+                    {t('coverageLow', locale)}
                   </span>
                 );
               }
@@ -674,7 +665,7 @@ export function KPICards({
 
           {/* Row 2: label */}
           <p className="text-[10px] text-muted-foreground leading-tight">
-            {locale === 'zh-Hans' ? '客户覆盖' : 'Client Coverage'}
+            {t('clientCoverage', locale)}
           </p>
           {/* Row 3: value */}
           <p className="text-lg font-bold text-foreground leading-tight whitespace-nowrap mb-2">
@@ -692,7 +683,7 @@ export function KPICards({
               ))}
               {data.clientsAtRiskList.length > 2 && (
                 <p className="text-[10px] text-muted-foreground/60 pl-2">
-                  +{data.clientsAtRiskList.length - 2} {locale === 'zh-Hans' ? '更多' : 'more'}
+                  +{data.clientsAtRiskList.length - 2} {t('moreCount', locale)}
                 </p>
               )}
             </div>
@@ -724,16 +715,16 @@ export function KPICards({
                   : 'bg-violet-50 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300'
             )}>
               {momentumProgress >= 100
-                ? (locale === 'zh-Hans' ? '🎉 达成' : '🎉 Hit!')
+                ? t('momentumHit', locale)
                 : momentumProgress >= 70
-                  ? (locale === 'zh-Hans' ? '接近' : 'Close')
-                  : (locale === 'zh-Hans' ? '加油' : 'Go!')}
+                  ? t('momentumClose', locale)
+                  : t('momentumGo', locale)}
             </span>
           </div>
 
           {/* Row 2: label */}
           <p className="text-[10px] text-muted-foreground leading-tight">
-            {locale === 'zh-Hans' ? '本周动力' : 'Weekly Momentum'}
+            {t('weeklyMomentum', locale)}
           </p>
           {/* Row 3: value */}
           <p className="text-lg font-bold text-foreground leading-tight whitespace-nowrap mb-2">
@@ -819,7 +810,7 @@ export function KPICards({
                   </div>
                   <div>
                     <p className="text-xs font-medium text-muted-foreground">
-                      {locale === 'zh-Hans' ? '本月活动日历' : 'Monthly Calendar'}
+                      {t('monthlyCalendar', locale)}
                     </p>
                     <p className="text-sm font-semibold text-foreground">
                       {calendarMonthData.monthName} {calendarMonthData.year}
@@ -843,7 +834,7 @@ export function KPICards({
                       className="flex items-center gap-1 px-2 py-1 rounded-full bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-800/60 transition-colors"
                     >
                       <Clock className="w-3 h-3" />
-                      <span className="text-xs font-medium">{overdueCount} {locale === 'zh-Hans' ? '逾期' : 'overdue'}</span>
+                      <span className="text-xs font-medium">{overdueCount} {t('overdueShort', locale)}</span>
                     </button>
                   )}
                 </div>
@@ -855,9 +846,11 @@ export function KPICards({
                 <div className="grid grid-cols-7 gap-0.5 mb-1">
                   {(() => {
                     const wso = getWeekStartDay();
-                    const zhHeaders = wso === 'monday' ? ['一', '二', '三', '四', '五', '六', '日'] : ['日', '一', '二', '三', '四', '五', '六'];
-                    const enHeaders = wso === 'monday' ? ['M', 'T', 'W', 'T', 'F', 'S', 'S'] : ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-                    return (locale === 'zh-Hans' ? zhHeaders : enHeaders).map((day: string, i: number) => (
+                    const startIdx = wso === 'monday' ? 1 : 0;
+                    const headers = Array.from({ length: 7 }, (_, i: number) =>
+                      new Date(2024, 0, 7 + ((startIdx + i) % 7)).toLocaleDateString(localeBcp47(locale), { weekday: 'narrow' })
+                    );
+                    return headers.map((day: string, i: number) => (
                       <div key={i} className="text-center text-[11px] text-muted-foreground font-medium">{day}</div>
                     ));
                   })()}
@@ -932,11 +925,11 @@ export function KPICards({
                   <div key={type} className="flex items-center gap-1">
                     <div className={cn('w-2 h-2 rounded-full', activityTypeColors[type]?.dot || 'bg-gray-500')} />
                     <span className={cn('text-[10px] font-medium', activityTypeColors[type]?.text || 'text-gray-600')}>
-                      {type === 'visit' ? (locale === 'zh-Hans' ? '拜访' : 'Visit') :
-                       type === 'call' ? (locale === 'zh-Hans' ? '电话' : 'Call') :
-                       type === 'meeting' ? (locale === 'zh-Hans' ? '会议' : 'Meeting') :
-                       type === 'email' ? (locale === 'zh-Hans' ? '邮件' : 'Email') :
-                       (locale === 'zh-Hans' ? '其他' : 'Other')}
+                      {type === 'visit' ? t('typeVisit', locale) :
+                       type === 'call' ? t('typeCall', locale) :
+                       type === 'meeting' ? t('typeMeeting', locale) :
+                       type === 'email' ? t('typeEmail', locale) :
+                       t('typeOther', locale)}
                       <span className="text-muted-foreground"> ({count})</span>
                     </span>
                   </div>
@@ -954,7 +947,7 @@ export function KPICards({
                 <Calendar className="w-4 h-4" />
               </div>
               <p className="text-sm text-muted-foreground">
-                {locale === 'zh-Hans' ? '暂无活动数据' : 'No activity data yet'}
+                {t('noActivityData', locale)}
               </p>
             </div>
           </div>
@@ -973,12 +966,12 @@ export function KPICards({
           >
             <span className="flex items-center gap-2 text-sm font-medium">
               <Calendar className="w-4 h-4" />
-              {locale === 'zh-Hans' ? '今日待办' : "Today's Agenda"}
+              {t('todaysAgenda', locale)}
             </span>
             <span className="flex items-center gap-2">
               {data.agendaItems.length > 0 && (
                 <span className="text-xs font-medium text-primary/70">
-                  {data.agendaItems.length} {locale === 'zh-Hans' ? '项任务' : 'tasks'}
+                  {data.agendaItems.length} {t('tasksCount', locale)}
                 </span>
               )}
               <motion.span
@@ -1041,7 +1034,7 @@ export function KPICards({
                 ) : (
                   <div className="p-4 text-center">
                     <p className="text-sm text-muted-foreground">
-                      {locale === 'zh-Hans' ? '今日暂无待办' : 'No agenda items for today'}
+                      {t('noAgendaToday', locale)}
                     </p>
                   </div>
                 )}
@@ -1062,7 +1055,7 @@ export function KPICards({
             <SheetTitle className="flex items-center justify-between">
               <span className="flex items-center gap-2">
                 <Clock className="w-5 h-5 text-amber-500" />
-                {locale === 'zh-Hans' ? '逾期任务' : 'Overdue Tasks'}
+                {t('overdueTasks', locale)}
               </span>
               {overdueCount > 1 && (
                 <span className="text-sm font-normal text-muted-foreground">
@@ -1132,7 +1125,7 @@ export function KPICards({
                       <div className="flex items-center gap-2 mb-4">
                         <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-300">
                           <Clock className="w-3 h-3 mr-1" />
-                          {locale === 'zh-Hans' ? '原定: ' : 'Was due: '}{formatOverdueDate(currentItem.scheduledDate)}
+                          {t('wasDue', locale)}{formatOverdueDate(currentItem.scheduledDate)}
                         </span>
                       </div>
                       
@@ -1148,7 +1141,7 @@ export function KPICards({
                         }}
                       >
                         <FileText className="w-4 h-4 mr-2" />
-                        {locale === 'zh-Hans' ? '查看详情' : 'Go to Detail'}
+                        {t('goToDetail', locale)}
                         <ChevronRight className="w-4 h-4 ml-auto" />
                       </Button>
                       
@@ -1162,8 +1155,8 @@ export function KPICards({
                                 e.stopPropagation();
                                 setOverdueCurrentIndex(idx);
                               }}
-                              aria-label={locale === 'zh-Hans' ? `跳转到第 ${idx + 1} 条逾期事项` : `Jump to overdue item ${idx + 1}`}
-                              title={locale === 'zh-Hans' ? `跳转到第 ${idx + 1} 条逾期事项` : `Jump to overdue item ${idx + 1}`}
+                              aria-label={t('jumpToOverdue', locale, { n: idx + 1 })}
+                              title={t('jumpToOverdue', locale, { n: idx + 1 })}
                               className={cn(
                                 "w-2 h-2 rounded-full transition-all",
                                 idx === overdueCurrentIndex
@@ -1214,8 +1207,8 @@ export function KPICards({
                   }}
                 >
                   {overdueProcessing === 'done'
-                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{locale === 'zh-Hans' ? '处理中...' : 'Processing...'}</>
-                    : <><CheckCircle2 className="w-4 h-4 mr-2" />{locale === 'zh-Hans' ? '标记完成' : 'Mark Done'}</>}
+                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{t('processing', locale)}</>
+                    : <><CheckCircle2 className="w-4 h-4 mr-2" />{t('markDone', locale)}</>}
                 </Button>
                 <Button
                   variant="outline"
@@ -1245,8 +1238,8 @@ export function KPICards({
                   }}
                 >
                   {overdueProcessing === 'cancel'
-                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{locale === 'zh-Hans' ? '处理中...' : 'Processing...'}</>
-                    : <><X className="w-4 h-4 mr-2" />{locale === 'zh-Hans' ? '取消任务' : 'Cancel Task'}</>}
+                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{t('processing', locale)}</>
+                    : <><X className="w-4 h-4 mr-2" />{t('cancelTask', locale)}</>}
                 </Button>
               </div>
               
@@ -1257,7 +1250,7 @@ export function KPICards({
                 </div>
                 <div className="relative flex justify-center text-xs uppercase">
                   <span className="bg-background px-2 text-muted-foreground">
-                    {locale === 'zh-Hans' ? '重新安排' : 'Reschedule'}
+                    {t('reschedule', locale)}
                   </span>
                 </div>
               </div>
@@ -1292,8 +1285,8 @@ export function KPICards({
                   }}
                 >
                   {overdueProcessing === 'today'
-                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{locale === 'zh-Hans' ? '处理中...' : 'Processing...'}</>
-                    : locale === 'zh-Hans' ? '今天' : 'Today'}
+                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{t('processing', locale)}</>
+                    : t('today', locale)}
                 </Button>
                 <Button
                   variant="outline"
@@ -1323,8 +1316,8 @@ export function KPICards({
                   }}
                 >
                   {overdueProcessing === 'tomorrow'
-                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{locale === 'zh-Hans' ? '处理中...' : 'Processing...'}</>
-                    : locale === 'zh-Hans' ? '明天' : 'Tomorrow'}
+                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{t('processing', locale)}</>
+                    : t('tomorrow', locale)}
                 </Button>
                 <Button
                   variant="outline"
@@ -1354,8 +1347,8 @@ export function KPICards({
                   }}
                 >
                   {overdueProcessing === 'dayafter'
-                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{locale === 'zh-Hans' ? '处理中...' : 'Processing...'}</>
-                    : locale === 'zh-Hans' ? '后天' : 'Day after'}
+                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{t('processing', locale)}</>
+                    : t('dayAfter', locale)}
                 </Button>
                 <Button
                   variant="outline"
@@ -1374,7 +1367,7 @@ export function KPICards({
                     }
                   }}
                 >
-                  {locale === 'zh-Hans' ? '自定义日期' : 'Custom Date'}
+                  {t('customDate', locale)}
                 </Button>
               </div>
             </div>
@@ -1396,7 +1389,7 @@ export function KPICards({
                     setSelectedCustomDate(undefined);
                   }}
                 >
-                  {locale === 'zh-Hans' ? '返回' : 'Back'}
+                  {t('back', locale)}
                 </Button>
                 <Button
                   className="flex-1"
@@ -1421,7 +1414,7 @@ export function KPICards({
                     setSelectedCustomDate(undefined);
                   }}
                 >
-                  {locale === 'zh-Hans' ? '确认' : 'Confirm'}
+                  {t('confirm', locale)}
                 </Button>
               </div>
             </div>
@@ -1437,7 +1430,7 @@ export function KPICards({
               <div className="min-w-0 flex-1">
                 <span className="flex items-center gap-2">
                   <Sparkles className="w-5 h-5 text-primary" />
-                  {locale === 'zh-Hans' ? '洞察' : 'Insights'}
+                  {t('insights', locale)}
                 </span>
                 {(isRefreshingInsights || isInsightPlaybackActive) && (
                   <div className="mt-2 space-y-1">
@@ -1461,8 +1454,8 @@ export function KPICards({
                   onClick={() => onRefreshInsights?.()}
                   disabled={isRefreshingInsights || !onRefreshInsights}
                   className="flex h-9 w-9 items-center justify-center rounded-full bg-muted/60 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                  aria-label={locale === 'zh-Hans' ? '重新生成洞察' : 'Regenerate insights'}
-                  title={locale === 'zh-Hans' ? '重新生成洞察' : 'Regenerate insights'}
+                  aria-label={t('regenerateInsights', locale)}
+                  title={t('regenerateInsights', locale)}
                 >
                   <RefreshCw className={cn('h-4 w-4', isRefreshingInsights && 'animate-spin')} />
                 </button>
@@ -1471,8 +1464,8 @@ export function KPICards({
                   onClick={() => onSpeedToggle?.()}
                   disabled={!onSpeedToggle}
                   className="flex h-9 min-w-9 items-center justify-center rounded-full bg-muted/60 px-2 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-                  aria-label={locale === 'zh-Hans' ? '播放速度' : 'Playback speed'}
-                  title={locale === 'zh-Hans' ? '播放速度' : 'Playback speed'}
+                  aria-label={t('playbackSpeed', locale)}
+                  title={t('playbackSpeed', locale)}
                 >
                   {playbackSpeed}x
                 </button>
@@ -1481,8 +1474,8 @@ export function KPICards({
                   onClick={() => onPrevInsight?.()}
                   disabled={!onPrevInsight || !canPrevInsight}
                   className="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30"
-                  aria-label={locale === 'zh-Hans' ? '上一条' : 'Previous'}
-                  title={locale === 'zh-Hans' ? '上一条' : 'Previous'}
+                  aria-label={t('previous', locale)}
+                  title={t('previous', locale)}
                 >
                   <SkipBack className="h-4 w-4" />
                 </button>
@@ -1494,12 +1487,8 @@ export function KPICards({
                   }}
                   disabled={isInsightPlaybackActive ? !onPauseInsights : !onPlayInsights}
                   className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-                  aria-label={isInsightPlaybackActive
-                    ? (locale === 'zh-Hans' ? '暂停' : 'Pause')
-                    : (locale === 'zh-Hans' ? '播放洞察' : 'Play insights')}
-                  title={isInsightPlaybackActive
-                    ? (locale === 'zh-Hans' ? '暂停' : 'Pause')
-                    : (locale === 'zh-Hans' ? '播放洞察' : 'Play insights')}
+                  aria-label={isInsightPlaybackActive ? t('pause', locale) : t('playInsights', locale)}
+                  title={isInsightPlaybackActive ? t('pause', locale) : t('playInsights', locale)}
                 >
                   {isInsightPlaybackActive ? <Pause className="h-4 w-4" /> : <Play className="ml-0.5 h-4 w-4" />}
                 </button>
@@ -1508,8 +1497,8 @@ export function KPICards({
                   onClick={() => onNextInsight?.()}
                   disabled={!onNextInsight || !canNextInsight}
                   className="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30"
-                  aria-label={locale === 'zh-Hans' ? '下一条' : 'Next'}
-                  title={locale === 'zh-Hans' ? '下一条' : 'Next'}
+                  aria-label={t('next', locale)}
+                  title={t('next', locale)}
                 >
                   <SkipForward className="h-4 w-4" />
                 </button>
@@ -1586,8 +1575,8 @@ export function KPICards({
                                 e.stopPropagation();
                                 setInsightsSheetIndex(idx);
                               }}
-                              aria-label={locale === 'zh-Hans' ? `跳转到第 ${idx + 1} 条洞察` : `Jump to insight ${idx + 1}`}
-                              title={locale === 'zh-Hans' ? `跳转到第 ${idx + 1} 条洞察` : `Jump to insight ${idx + 1}`}
+                              aria-label={t('jumpToInsight', locale, { n: idx + 1 })}
+                              title={t('jumpToInsight', locale, { n: idx + 1 })}
                               className={cn(
                                 "w-2 h-2 rounded-full transition-all",
                                 idx === insightsSheetIndex

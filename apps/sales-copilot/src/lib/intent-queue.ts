@@ -16,6 +16,7 @@
  */
 
 import { extractEntitySeed, type ResolutionItem } from './agent-utils';
+import { getFunctionSubject } from './function-registry';
 import type { IntentResult } from './copilot-agent';
 
 export type IntentStatus =
@@ -123,32 +124,37 @@ export function buildQueueFromIntent(intent: IntentResult): IntentQueue {
     });
   };
 
+  // I-3: normalize resolutions[] (or wrap legacy matchTarget). Each resolution
+  // carries an `intentIndex` (0 = head, 1+ = additionalActions). Route each one to
+  // the intent it belongs to — WITHOUT this, ALL resolutions pool onto the head,
+  // so intent 0 resolves intent 1's account/contact (the "step 1 mixed in step 2's
+  // account name" bug). Resolutions with no intentIndex default to the head.
+  const allResolutions: ResolutionItem[] = intent.requiresMatching
+    ? (intent.resolutions?.length
+        ? intent.resolutions
+        : intent.matchTarget
+          ? [{ entityType: intent.matchTarget.entityType, query: intent.matchTarget.query }]
+          : [])
+    : [];
+  const resolutionsFor = (idx: number): ResolutionItem[] =>
+    allResolutions.filter((r) => (r.intentIndex ?? 0) === idx);
+
   // Primary intent
   if (intent.function) {
-    // I-3: normalize resolutions[] (or wrap legacy matchTarget) onto the primary intent.
-    const primaryResolutions: ResolutionItem[] = intent.requiresMatching
-      ? (intent.resolutions?.length
-          ? intent.resolutions
-          : intent.matchTarget
-            ? [{ entityType: intent.matchTarget.entityType, query: intent.matchTarget.query }]
-            : [])
-      : [];
     pushIntent(intent.function, (intent.arguments as Record<string, unknown>) ?? {}, {
       userFacingLabel: intent.userFacingLabel,
       reason: intent.multiIntentAnalysis?.summary,
-      resolutions: primaryResolutions,
+      resolutions: resolutionsFor(0),
     });
   }
 
-  // Additional intents — each one its own queue entry. We do NOT auto-attach
-  // resolutions here; the per-step name→id lookup happens at execute time via
-  // the runtime's "implicit fuzzy match" pass (mirrors processAdditionalIntents
-  // behavior so accountName / contactName / opportunityName get resolved when
-  // present without an id).
-  (intent.additionalActions ?? []).forEach((action: { function: string; arguments?: Record<string, unknown>; userFacingLabel?: { zh: string; en: string }; reason?: string }) => {
+  // Additional intents — each queue entry carries ONLY its OWN resolutions (routed
+  // by intentIndex), so it resolves its own account/contact when it runs.
+  (intent.additionalActions ?? []).forEach((action: { function: string; arguments?: Record<string, unknown>; userFacingLabel?: { zh: string; en: string }; reason?: string }, i: number) => {
     pushIntent(action.function, action.arguments ?? {}, {
       userFacingLabel: action.userFacingLabel,
       reason: action.reason,
+      resolutions: resolutionsFor(i + 1),
     });
   });
 
@@ -221,6 +227,20 @@ export function dropFirstResolution(q: IntentQueue, intentId: string): IntentQue
     ...q,
     intents: q.intents.map((i) =>
       i.id === intentId ? { ...i, resolutions: i.resolutions.slice(1) } : i
+    ),
+  };
+}
+
+/** Append a resolution to the END of one intent's chain (missing-subject gate). */
+export function appendResolution(
+  q: IntentQueue,
+  intentId: string,
+  resolution: ResolutionItem,
+): IntentQueue {
+  return {
+    ...q,
+    intents: q.intents.map((i) =>
+      i.id === intentId ? { ...i, resolutions: [...i.resolutions, resolution] } : i
     ),
   };
 }
@@ -307,6 +327,29 @@ export function buildEffectiveArgs(
     }
   }
   return out;
+}
+
+/**
+ * Missing-subject gate (pure). If the intent's function declares a required
+ * subject entity (registry `subject`, e.g. updateOpportunity → 'opportunity')
+ * and that subject's id is NOT present in the effective args, append a REQUIRED
+ * resolution for it so the runtime launches fuzzy match — instead of the handler
+ * hard-failing on a missing id. A name in the args ("update opportunity ACME")
+ * seeds the fuzzy query; no name ("update the opportunity") leaves the query
+ * empty → the fuzzy handler returns a pick list. Silent no-op when the subject is
+ * already known (args, or resolvedContext seeded from the page / a prior intent).
+ */
+export function ensureRequiredSubjectResolution(queue: IntentQueue, intent: QueueIntent): IntentQueue {
+  const subject = getFunctionSubject(intent.function);
+  if (!subject) return queue;
+  // Already resolving this subject (a name→id resolution is queued) → skip.
+  if (intent.resolutions.some((r) => r.entityType === subject)) return queue;
+  const args = buildEffectiveArgs(intent, queue.resolvedContext);
+  const idVal = args[`${subject}Id`];
+  if (typeof idVal === 'string' && idVal) return queue; // fast-path: subject already known
+  const nameVal = args[`${subject}Name`];
+  const query = typeof nameVal === 'string' ? nameVal : '';
+  return appendResolution(queue, intent.id, { entityType: subject, query, required: true });
 }
 
 /** Find an intent by id. */

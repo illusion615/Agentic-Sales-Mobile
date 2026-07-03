@@ -5,6 +5,7 @@
 
 import type { AgentResponse } from '@/lib/copilot-agent';
 import type { PriorTaskOutcome } from '@/lib/task-narrator';
+import { t, type Locale } from '@/lib/i18n';
 
 // Re-use ChatMessage type from context (can't extract ChatMessage without circular dep,
 // so we import it at the type level only)
@@ -14,18 +15,16 @@ type IntentsOverview = NonNullable<AgentResponse['intentsOverview']>;
 export function pickLabel(label: { zh: string; en: string }, isZh: boolean): string {
   return isZh ? label.zh : label.en;
 }
-
 const ZH_ORDINALS = ['第一', '第二', '第三', '第四', '第五', '第六', '第七', '第八', '第九'];
 export function ordinalZh(n: number): string {
   return ZH_ORDINALS[n - 1] ?? `第${n}`;
 }
 
-export function buildOverviewMessage(overview: IntentsOverview, isZh: boolean): ChatMessage {
+export function buildOverviewMessage(overview: IntentsOverview, locale: Locale): ChatMessage {
+  const isZh = locale === 'zh-Hans';
   const labels = overview.map((o) => pickLabel(o.userFacingLabel, isZh));
-  const joined = isZh ? labels.join('、') : labels.join(', ');
-  const text = isZh
-    ? `识别到 ${overview.length} 个意图：${joined}`
-    : `Identified ${overview.length} intents: ${joined}`;
+  const joined = labels.join(t('listSeparator', locale));
+  const text = t('identifiedIntents', locale, { n: overview.length, list: joined });
   return {
     id: `msg-${Date.now()}-overview`,
     role: 'assistant',
@@ -33,25 +32,24 @@ export function buildOverviewMessage(overview: IntentsOverview, isZh: boolean): 
     content: text,
     timestamp: new Date().toISOString(),
     taskRole: 'overview',
-    taskOverview: { intents: overview.map((o) => ({ index: o.intentIndex, label: pickLabel(o.userFacingLabel, isZh) })) },
+    taskOverview: { intents: overview.map((o) => ({ index: o.intentIndex, label: pickLabel(o.userFacingLabel, locale === 'zh-Hans') })) },
   };
 }
 
 export function buildAnnounceMessage(
   intentIndex: number,
   overview: IntentsOverview,
-  isZh: boolean,
+  locale: Locale,
 ): ChatMessage | null {
+  const isZh = locale === 'zh-Hans';
   const entry = overview.find((o) => o.intentIndex === intentIndex);
   if (!entry) return null;
   const label = pickLabel(entry.userFacingLabel, isZh);
   const position = overview.findIndex((o) => o.intentIndex === intentIndex) + 1;
   const total = overview.length;
   const text = total > 1
-    ? (isZh
-        ? `现在开始${ordinalZh(position)}个任务：${label}`
-        : `Starting task ${position} of ${total}: ${label}`)
-    : (isZh ? `开始：${label}` : `Starting: ${label}`);
+    ? t('startingTaskNum', locale, { position, total, label })
+    : t('startingLabel', locale, { label });
   const taskGroupId = `task-${intentIndex}`;
   return {
     id: `msg-${Date.now()}-announce-${intentIndex}`,

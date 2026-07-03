@@ -1,14 +1,17 @@
-import { useRef, useEffect, useCallback, useState } from 'react';
+import { useRef, useEffect, useLayoutEffect, useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence, useDragControls, type PanInfo } from 'motion/react';
-import { Sparkles, ArrowUp, SquarePen, X, ChevronDown, Copy, Volume2, VolumeX, Loader2, Square, Play, Pause, Paperclip, RotateCcw, Mic, ScrollText } from 'lucide-react';
+import { ArrowUp, SquarePen, X, Copy, Volume2, VolumeX, Loader2, Square, Play, Pause, Paperclip, RotateCcw, Mic, ScrollText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useCopilot, type ChatMessage, isUnresolvedBlockingCard } from '@/contexts/copilot-context';
-import { getLocale, getChatFontClass, getSelectedVoice, findMatchingSystemVoice, getLLMConfig, getVoiceSummaryEnabled, getCopilotDockLayout, getCopilotFullscreenDefault, getCopilotInAllScreens, getDebugMode, type CopilotDockLayout, type Locale } from '@/lib/i18n';
+import { getLocale, getChatFontClass, getSelectedVoice, findMatchingSystemVoice, getLLMConfig, getVoiceSummaryEnabled, getCopilotDockLayout, getCopilotFullscreenDefault, getDebugMode, speechLang, t, localeBcp47, type CopilotDockLayout, type Locale } from '@/lib/i18n';
+import { useSpeechPlayer } from '@/hooks/use-speech-player';
 import { ThinkingIndicator } from '@/components/thinking-indicator';
 import { DynamicDataRenderer, tryParseJson } from '@/components/dynamic-data-renderer';
 import { FormCard } from '@/components/form-card';
 import { BatchFormCard } from '@/components/batch-form-card';
+import { ParamPickerCard } from '@/components/param-picker-card';
+import { ProposalCard } from '@/components/proposal-card';
 import { MatchSelectionCard, buildMatchReasonText } from '@/components/match-selection-card';
 import { MarkdownContent } from '@/components/markdown-content';
 import { RecordListCard } from '@/components/record-list-card';
@@ -45,6 +48,11 @@ export function CopilotPanel() {
     createEntityForResolution,
     skipResolutionAndDraft,
     refreshResolution,
+    formCardCancelled,
+    paramFieldPicked,
+    paramValuePicked,
+    proposalConfirmed,
+    proposalCancelled,
     pageContext,
     setPageContext,
     clarificationSuggestions,
@@ -67,12 +75,13 @@ export function CopilotPanel() {
   const effectiveLayout: CopilotDockLayout = isMobile ? 'float' : dockLayout;
   const isSideDocked = effectiveLayout === 'left' || effectiveLayout === 'right';
 
-  // "Display Copilot in all screens" — reactive so binary-mode recomputes live.
-  const [copilotInAllScreens, setCopilotInAllScreens] = useState(() => getCopilotInAllScreens());
+  // "Fullscreen Copilot by default" (mobile) — reactive so binary-mode recomputes
+  // live when the setting is toggled.
+  const [copilotFullscreenDefault, setCopilotFullscreenDefault] = useState(() => getCopilotFullscreenDefault());
   useEffect(() => {
-    const handler = (e: Event) => setCopilotInAllScreens((e as CustomEvent<boolean>).detail);
-    window.addEventListener('copilotinallscreens-changed', handler);
-    return () => window.removeEventListener('copilotinallscreens-changed', handler);
+    const handler = (e: Event) => setCopilotFullscreenDefault((e as CustomEvent<boolean>).detail);
+    window.addEventListener('copilotfullscreendefault-changed', handler);
+    return () => window.removeEventListener('copilotfullscreendefault-changed', handler);
   }, []);
 
   // Debug mode — reactive; gates the Frame shadow-log icon so end users don't see it.
@@ -83,12 +92,12 @@ export function CopilotPanel() {
     return () => window.removeEventListener('debugmode-changed', handler);
   }, []);
 
-  // Binary mode: no 78vh mid state — collapsed dock ⇄ fullscreen only.
-  // Active when copilot is shown in all screens AND the panel floats (bottom sheet),
-  // or when the mobile fullscreen-by-default toggle is on.
-  const binaryMode =
-    (isMobile && getCopilotFullscreenDefault()) ||
-    (copilotInAllScreens && effectiveLayout === 'float');
+  // Binary mode: no 78vh mid state — collapsed dock ⇄ fullscreen only. Driven
+  // solely by the "Fullscreen Copilot by default" toggle (mobile only), so that
+  // setting alone decides whether tapping the composer opens fullscreen or the
+  // 78vh mid sheet. NOT tied to "display in all screens" (that only controls
+  // dock visibility).
+  const binaryMode = isMobile && copilotFullscreenDefault;
 
   // Side-docked mode: always keep the panel open (no collapse).
   useEffect(() => {
@@ -119,23 +128,42 @@ export function CopilotPanel() {
   
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-
+  // True while we programmatically focus the composer after opening, so the
+  // resulting onFocus isn't mistaken for a user tap (which would escalate to
+  // fullscreen). See handleInputFocus.
+  const programmaticFocusRef = useRef(false);
   // §8: lock the composer (text + mic + attachments) while any blocking card
   // (draft / batch / match-selection / awaiting-clarification) is unresolved, so
   // the card is the only input entry and there is no "follow-up vs new command"
   // ambiguity. Query-result lists do NOT lock. Derived from the live messages.
   const inputLocked = messages.some(isUnresolvedBlockingCard);
-  // When the user taps the disabled composer, pulse the oldest unresolved
-  // blocking card to guide them to it.
+  // When the user taps the disabled composer, guide them to the blocking card.
+  // If the panel is collapsed we first EXPAND it so the card is visible (the
+  // card — not the composer — is where the user acts); then pulse + scroll to it.
   const [pulseCardId, setPulseCardId] = useState<string | null>(null);
   const guideToBlockingCard = useCallback(() => {
     const target = messages.find(isUnresolvedBlockingCard);
     if (!target) return;
+    const wasCollapsed = !isOpen;
+    // Expand the panel if it is collapsed (same policy as handleInputFocus).
+    const fullscreenDefault = binaryMode;
+    if (!isOpen) {
+      openPanel(fullscreenDefault);
+    } else if (fullscreenDefault && !isFullScreen) {
+      openPanel(true);
+    } else if (isMobile && !isFullScreen) {
+      openPanel(true);
+    }
+    // Pulse + scroll to the card. When we just opened, wait for the expand
+    // animation so the message list is mounted before scrolling.
     setPulseCardId(target.id);
-    const el = document.getElementById(`message-${target.id}`);
-    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    window.setTimeout(() => setPulseCardId((id) => (id === target.id ? null : id)), 1200);
-  }, [messages]);
+    const delay = wasCollapsed ? 320 : 0;
+    window.setTimeout(() => {
+      const el = document.getElementById(`message-${target.id}`);
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, delay);
+    window.setTimeout(() => setPulseCardId((id) => (id === target.id ? null : id)), delay + 1200);
+  }, [messages, isOpen, isFullScreen, isMobile, binaryMode, openPanel]);
 
   
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -146,43 +174,22 @@ export function CopilotPanel() {
   const shouldAutoScrollRef = useRef(true);
   const prevMessagesLenRef = useRef(0);
   
-  // TTS per-message playback
-  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
-  const playedMessageIdsRef = useRef<Set<string>>(new Set());
-
-  const stopSpeaking = useCallback(() => {
-    if (window.speechSynthesis) window.speechSynthesis.cancel();
-    setSpeakingMessageId(null);
-  }, []);
+  // TTS per-message playback — driven by the shared speech player so the same
+  // mobile-safe priming / voice-matching path is used everywhere.
+  const { state: ttsState, play: ttsPlay, stop: ttsStop } = useSpeechPlayer({
+    getLang: () => speechLang(locale),
+    getVoice: () => findMatchingSystemVoice(getSelectedVoice(), locale),
+  });
+  const speakingMessageId = ttsState.isActive ? ttsState.activeId : null;
 
   const speakMessage = useCallback((messageId: string, text: string) => {
-    // Toggle off if already playing this message
-    if (speakingMessageId === messageId) {
-      stopSpeaking();
+    // Toggle off if this message is already playing.
+    if (ttsState.isActive && ttsState.activeId === messageId) {
+      ttsStop();
       return;
     }
-    stopSpeaking();
-    const plain = text
-      .replace(/\*\*([^*]+)\*\*/g, '$1')
-      .replace(/\*([^*]+)\*/g, '$1')
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-      .replace(/#{1,6}\s+/g, '')
-      .replace(/`[^`]+`/g, '')
-      .replace(/```[\s\S]*?```/g, '')
-      .trim();
-    if (!plain || !('speechSynthesis' in window)) return;
-    const utt = new SpeechSynthesisUtterance(plain);
-    utt.lang = locale === 'zh-Hans' ? 'zh-CN' : 'en-US';
-    const voice = findMatchingSystemVoice(getSelectedVoice(), locale);
-    if (voice) utt.voice = voice;
-    utt.rate = 1.0;
-    utt.pitch = 1.0;
-    utt.onend = () => setSpeakingMessageId(null);
-    utt.onerror = () => setSpeakingMessageId(null);
-    setSpeakingMessageId(messageId);
-    playedMessageIdsRef.current.add(messageId);
-    window.speechSynthesis.speak(utt);
-  }, [speakingMessageId, locale, stopSpeaking]);
+    ttsPlay([{ id: messageId, text }]);
+  }, [ttsState.isActive, ttsState.activeId, ttsPlay, ttsStop]);
 
   const panelRef = useRef<HTMLDivElement>(null);
   const dragControls = useDragControls();
@@ -309,18 +316,42 @@ export function CopilotPanel() {
     return () => container.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // Focus input and scroll to bottom when panel opens
+  // Keep the thread pinned to the bottom across the whole open transition.
+  // useLayoutEffect positions it before the first painted frame; a short rAF loop
+  // then re-pins each frame while layout settles (cards/fonts/images can grow
+  // scrollHeight over several frames). This shows the latest message throughout
+  // the expand instead of a single late "catch-up" scroll that fights the motion.
+  useLayoutEffect(() => {
+    if (!isOpen || !shouldAutoScrollRef.current) return;
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    container.scrollTop = container.scrollHeight;
+    let raf = 0;
+    const start = performance.now();
+    const pin = () => {
+      if (!shouldAutoScrollRef.current) return;
+      const el = messagesContainerRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+      if (performance.now() - start < 450) raf = requestAnimationFrame(pin);
+    };
+    raf = requestAnimationFrame(pin);
+    return () => cancelAnimationFrame(raf);
+  }, [isOpen]);
+
+  // Focus the composer shortly after open. Kept separate from the scroll above
+  // so focus (which can itself nudge scroll) happens after the sheet settles.
+  // We flag this focus as programmatic so handleInputFocus doesn't treat it as a
+  // user tap and escalate a 78vh mid sheet to fullscreen.
   useEffect(() => {
-    if (isOpen) {
-      setTimeout(() => {
-        inputRef.current?.focus();
-        // Only auto-scroll to bottom on open if we're not preserving position
-        if (shouldAutoScrollRef.current) {
-          const container = messagesContainerRef.current;
-          if (container) container.scrollTop = container.scrollHeight;
-        }
-      }, 300);
-    }
+    if (!isOpen) return;
+    const id = window.setTimeout(() => {
+      programmaticFocusRef.current = true;
+      inputRef.current?.focus();
+      // Safety: clear on the next tick in case focus() fired no onFocus event
+      // (e.g. the field was already focused), so a later real tap still counts.
+      window.setTimeout(() => { programmaticFocusRef.current = false; }, 0);
+    }, 300);
+    return () => window.clearTimeout(id);
   }, [isOpen]);
 
   // Auto-grow the input textarea up to 4 lines, then scroll inside.
@@ -369,7 +400,14 @@ export function CopilotPanel() {
   // When fullscreen-by-default / binary mode is on: only fullscreen ↔ collapsed, no mid state.
   // Otherwise: open to 78vh, then fullscreen on second tap.
   const handleInputFocus = () => {
-    const fullscreenDefault = (isMobile && getCopilotFullscreenDefault()) || binaryMode;
+    // Ignore the programmatic focus we trigger right after opening — otherwise it
+    // would count as a "second tap" and escalate the 78vh mid sheet straight to
+    // fullscreen, making the "Fullscreen by default = off" setting have no effect.
+    if (programmaticFocusRef.current) {
+      programmaticFocusRef.current = false;
+      return;
+    }
+    const fullscreenDefault = binaryMode;
     if (!isOpen) {
       openPanel(fullscreenDefault);
     } else if (fullscreenDefault && !isFullScreen) {
@@ -412,15 +450,13 @@ export function CopilotPanel() {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SR) {
       toast.error(
-        locale === 'zh-Hans'
-          ? '当前浏览器不支持语音识别'
-          : 'Speech recognition not supported in this browser'
+        t('speechNotSupported', locale)
       );
       return;
     }
 
     const recognition = new SR();
-    recognition.lang = locale === 'zh-Hans' ? 'zh-CN' : 'en-US';
+    recognition.lang = speechLang(locale);
     recognition.continuous = true;
     recognition.interimResults = true;
 
@@ -442,17 +478,13 @@ export function CopilotPanel() {
       setIsListening(false);
       if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
         toast.error(
-          locale === 'zh-Hans'
-            ? '麦克风权限被拒绝（可能是平台 iframe 未授权）'
-            : 'Microphone permission denied (host iframe may not allow it)'
+          t('micPermissionDenied', locale)
         );
       } else if (event.error === 'no-speech') {
         // silent — user simply didn't say anything
       } else {
         toast.error(
-          locale === 'zh-Hans'
-            ? `语音识别出错：${event.error}`
-            : `Speech recognition error: ${event.error}`
+          t('speechRecognitionError', locale, { error: event.error })
         );
       }
     };
@@ -469,9 +501,7 @@ export function CopilotPanel() {
     } catch (err) {
       setIsListening(false);
       toast.error(
-        locale === 'zh-Hans'
-          ? '无法启动语音识别'
-          : 'Failed to start speech recognition'
+        t('speechStartFailed', locale)
       );
     }
   }, [isListening, inputValue, locale, setInputValue]);
@@ -555,11 +585,11 @@ export function CopilotPanel() {
   const renderMessages = () => {
 
     return (
-    <div ref={messagesContainerRef} className="flex-1 overflow-y-auto scrollbar-hide px-3 py-3 min-h-0">
+    <div ref={messagesContainerRef} className="flex-1 overflow-y-auto scrollbar-hide px-3 py-3 min-h-0 flex flex-col">
       {messages.length === 0 ? (
         <div className="flex flex-col h-full justify-center px-4">
           <p className="text-sm font-medium text-foreground mb-4">
-            {locale === 'zh-Hans' ? '我可以帮助您：' : 'I can help you with:'}
+            {t('iCanHelp', locale)}
           </p>
           <ul className="space-y-3">
             <li className="flex items-center gap-3">
@@ -567,7 +597,7 @@ export function CopilotPanel() {
                 <span className="text-xs text-primary font-medium">1</span>
               </span>
               <span className="text-sm text-muted-foreground">
-                {locale === 'zh-Hans' ? '查询和管理客户、商机、联系人、拜访' : 'Query & manage accounts, opportunities, contacts, activities'}
+                {t('helpQuery', locale)}
               </span>
             </li>
             <li className="flex items-center gap-3">
@@ -575,7 +605,7 @@ export function CopilotPanel() {
                 <span className="text-xs text-primary font-medium">2</span>
               </span>
               <span className="text-sm text-muted-foreground">
-                {locale === 'zh-Hans' ? '一句话新建拜访、商机、客户（支持多意图）' : 'Create visits, opportunities & accounts from one sentence'}
+                {t('helpCreate', locale)}
               </span>
             </li>
             <li className="flex items-center gap-3">
@@ -583,7 +613,7 @@ export function CopilotPanel() {
                 <span className="text-xs text-primary font-medium">3</span>
               </span>
               <span className="text-sm text-muted-foreground">
-                {locale === 'zh-Hans' ? '分析商机、生成洞察、语音播报简报' : 'Analyze pipeline, generate insights & voice briefings'}
+                {t('helpAnalyze', locale)}
               </span>
             </li>
             <li className="flex items-center gap-3">
@@ -591,16 +621,19 @@ export function CopilotPanel() {
                 <span className="text-xs text-primary font-medium">4</span>
               </span>
               <span className="text-sm text-muted-foreground">
-                {locale === 'zh-Hans' ? '产品知识问答（连接企业知识库）' : 'Product knowledge Q&A (connected to enterprise KB)'}
+                {t('helpKnowledge', locale)}
               </span>
             </li>
           </ul>
           <p className="text-xs text-muted-foreground mt-6 text-center">
-            {locale === 'zh-Hans' ? '输入问题或按住麦克风开始对话' : 'Type a question or hold the mic to start'}
+            {t('typeOrHoldMic', locale)}
           </p>
         </div>
       ) : (
-        <>
+        // Bottom-anchor the thread: mt-auto glues messages to the bottom (next to
+        // the composer) so when the panel expands the content rises up with the
+        // sheet instead of unfolding top-down.
+        <div className="mt-auto flex flex-col">
 
           {messages.map((message: ChatMessage, msgIndex: number) => {
             // Phase D: hide substep messages when their owning task group is collapsed.
@@ -646,9 +679,7 @@ export function CopilotPanel() {
                     isAnnounceFailed ? 'text-destructive' :
                     isAnnounceCompleted || message.collapsed ? 'text-muted-foreground' : 'text-foreground font-medium'
                   )}>
-                    {locale === 'zh-Hans'
-                      ? `第 ${message.taskAnnounce.index}/${message.taskAnnounce.total} 步 · ${message.taskAnnounce.label}`
-                      : `Step ${message.taskAnnounce.index}/${message.taskAnnounce.total} · ${message.taskAnnounce.label}`}
+                    {t('stepWithLabel', locale, { index: message.taskAnnounce.index, total: message.taskAnnounce.total, label: message.taskAnnounce.label })}
                   </span>
                   {announceDetail && (
                     <span className={cn(
@@ -683,12 +714,12 @@ export function CopilotPanel() {
                         inputRef.current?.focus();
                       }}
                       className="p-1 rounded hover:bg-primary/10 hover:text-primary transition-all"
-                      aria-label={locale === 'zh-Hans' ? '重试' : 'Retry'}
+                      aria-label={t('retry', locale)}
                     >
                       <RotateCcw className="w-3 h-3 text-muted-foreground hover:text-primary" />
                     </button>
                     <p className="text-[9px] text-muted-foreground">
-                      {new Date(message.timestamp).toLocaleTimeString(locale === 'zh-Hans' ? 'zh-CN' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
+                      {new Date(message.timestamp).toLocaleTimeString(localeBcp47(locale), { hour: '2-digit', minute: '2-digit' })}
                     </p>
                   </div>
                 </div>
@@ -730,7 +761,7 @@ export function CopilotPanel() {
                       entityType: message.matchSelection.entityType,
                       query: message.matchSelection.query,
                       pendingFn: message.matchSelection.pendingIntent?.function,
-                      locale: locale === 'zh-Hans' ? 'zh-Hans' : 'en-US',
+                      locale,
                     });
                     if (!reason) return null;
                     return (
@@ -768,7 +799,41 @@ export function CopilotPanel() {
                     onSearchOther={(newQuery, entityType, pendingIntent) => {
                       refreshResolution(message.id, newQuery, entityType, pendingIntent);
                     }}
+                    onCancel={() => formCardCancelled(message.id)}
                   />
+                  </div>
+                </div>
+              )}
+
+              {/* Param Picker Card (missing-parameter gate) */}
+              {message.type === 'param-picker' && message.paramPicker && (
+                <div className="max-w-full">
+                  <div className={cn('rounded-2xl', pulseCardId === message.id && 'ring-2 ring-primary ring-offset-2 ring-offset-background animate-pulse')}>
+                    <ParamPickerCard
+                      messageId={message.id}
+                      paramPicker={message.paramPicker}
+                      resolved={message.resolutionState === 'resolved'}
+                      resolutionResult={message.resolutionResult}
+                      onPickField={(field) => paramFieldPicked(message.id, field)}
+                      onPickValue={(value) => paramValuePicked(message.id, message.paramPicker?.field ?? '', value)}
+                      onCancel={() => formCardCancelled(message.id)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Change-proposal Card (composite / destructive ops confirm gate) */}
+              {message.type === 'proposal-card' && message.proposalCard && (
+                <div className="max-w-full">
+                  <div className={cn('rounded-2xl', pulseCardId === message.id && 'ring-2 ring-primary ring-offset-2 ring-offset-background animate-pulse')}>
+                    <ProposalCard
+                      messageId={message.id}
+                      proposalCard={message.proposalCard}
+                      resolved={message.resolutionState === 'resolved'}
+                      resolutionResult={message.resolutionResult}
+                      onConfirm={() => proposalConfirmed(message.id)}
+                      onCancel={() => proposalCancelled(message.id)}
+                    />
                   </div>
                 </div>
               )}
@@ -813,7 +878,7 @@ export function CopilotPanel() {
                         entityType,
                         query: pr.query,
                         pendingFn: message.awaitingClarification?.originalIntent.function,
-                        locale: locale === 'zh-Hans' ? 'zh-Hans' : 'en-US',
+                        locale,
                       }) || message.content;
                       if (!reason) return null;
                       return (
@@ -840,6 +905,7 @@ export function CopilotPanel() {
                       onSearchOther={(newQuery, et, pendingIntent) => {
                         refreshResolution(message.id, newQuery, et, pendingIntent);
                       }}
+                      onCancel={() => formCardCancelled(message.id)}
                     />
                     </div>
                   </div>
@@ -921,9 +987,7 @@ export function CopilotPanel() {
                     {isJson && isEmpty ? (
                       <div className={cn('text-foreground', getChatFontClass())}>
                         <p className="text-sm text-muted-foreground">
-                          {locale === 'zh-Hans' 
-                            ? '抱歉，未能找到您请求的数据。请尝试换一种方式提问或检查您的查询条件。'
-                            : "Sorry, I couldn't find the data you requested. Please try rephrasing your question or check your search criteria."}
+                          {t('noDataFound', locale)}
                         </p>
                       </div>
                     ) : isJson ? (
@@ -945,7 +1009,7 @@ export function CopilotPanel() {
                     {message.content && !isJson && !message.isThinking && !message.isStreaming && !isQueueSubstep && (
                       <div className="flex items-center justify-between mt-0.5">
                         <p className="text-[9px] text-muted-foreground">
-                          {new Date(message.timestamp).toLocaleTimeString(locale === 'zh-Hans' ? 'zh-CN' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
+                          {new Date(message.timestamp).toLocaleTimeString(localeBcp47(locale), { hour: '2-digit', minute: '2-digit' })}
                         </p>
                         <div className="flex items-center gap-0.5">
                           <button
@@ -1023,7 +1087,7 @@ export function CopilotPanel() {
             );
           })}
           {/* Thinking dots removed - now shown inline in thinking message */}
-        </>
+        </div>
       )}
       <div ref={messagesEndRef} />
     </div>
@@ -1046,7 +1110,7 @@ export function CopilotPanel() {
         <div className="mx-auto w-full max-w-md">
           {hasClarificationSuggestions && (
             <p className="text-xs text-primary mb-2 font-medium">
-              {locale === 'zh-Hans' ? '请选择一个操作：' : 'Please choose an option:'}
+              {t('chooseOption', locale)}
             </p>
           )}
           {/* min-height keeps the bar a constant height so pills fade out → skeleton
@@ -1110,7 +1174,7 @@ export function CopilotPanel() {
                   exit={{ opacity: 0 }}
                   transition={{ duration: 0.18 }}
                   className="flex gap-2"
-                  aria-label={locale === 'zh-Hans' ? '正在生成建议' : 'Generating suggestions'}
+                  aria-label={t('generatingSuggestions', locale)}
                 >
                   <div className="h-[26px] w-16 rounded-full bg-muted/60 animate-pulse" />
                   <div className="h-[26px] w-24 rounded-full bg-muted/60 animate-pulse" />
@@ -1146,8 +1210,8 @@ export function CopilotPanel() {
                 )}
                 <button
                   onClick={() => handleRemoveAttachment(index)}
-                  aria-label={locale === 'zh-Hans' ? '移除附件' : 'Remove attachment'}
-                  title={locale === 'zh-Hans' ? '移除附件' : 'Remove attachment'}
+                  aria-label={t('removeAttachment', locale)}
+                  title={t('removeAttachment', locale)}
                   className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                 >
                   <X className="w-3 h-3" />
@@ -1186,7 +1250,7 @@ export function CopilotPanel() {
           multiple
           onChange={handleFileSelect}
           className="hidden"
-          aria-label={locale === 'zh-Hans' ? '选择照片或文件' : 'Choose photo or file'}
+          aria-label={t('choosePhotoOrFile', locale)}
         />
 
         {/* Attachment button — opens the native picker directly (no popup menu) */}
@@ -1200,8 +1264,8 @@ export function CopilotPanel() {
               ? 'text-muted-foreground/40 cursor-not-allowed'
               : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
           )}
-          aria-label={locale === 'zh-Hans' ? '添加附件' : 'Add attachment'}
-          title={locale === 'zh-Hans' ? '添加附件' : 'Add attachment'}
+          aria-label={t('addAttachment', locale)}
+          title={t('addAttachment', locale)}
         >
           <Paperclip className="w-5 h-5" />
         </button>
@@ -1219,8 +1283,8 @@ export function CopilotPanel() {
           onPointerDown={(e: React.PointerEvent) => { if (inputLocked) { e.preventDefault(); guideToBlockingCard(); } }}
           disabled={inputLocked}
           placeholder={inputLocked
-            ? (locale === 'zh-Hans' ? '请先完成上方卡片' : 'Please complete the card above')
-            : (locale === 'zh-Hans' ? '向 Copilot 提问...' : 'Ask Copilot...')}
+            ? t('completeCardAbove', locale)
+            : t('askCopilotPlaceholder', locale)}
           className={cn(
             'flex-1 bg-transparent border-0 outline-none text-sm text-foreground placeholder:text-muted-foreground resize-none leading-5 py-2 self-end',
             inputLocked && 'cursor-not-allowed opacity-60'
@@ -1232,8 +1296,8 @@ export function CopilotPanel() {
           <button
             onClick={cancelSend}
             className="w-10 h-10 rounded-full flex items-center justify-center text-red-500 hover:bg-muted/50 transition-colors shrink-0"
-            aria-label={locale === 'zh-Hans' ? '停止' : 'Stop'}
-            title={locale === 'zh-Hans' ? '停止' : 'Stop'}
+            aria-label={t('stop', locale)}
+            title={t('stop', locale)}
           >
             <Square className="w-4 h-4 fill-current" />
           </button>
@@ -1242,8 +1306,8 @@ export function CopilotPanel() {
             type="button"
             onClick={guideToBlockingCard}
             className="w-10 h-10 flex items-center justify-center rounded-full text-muted-foreground/40 cursor-not-allowed shrink-0"
-            aria-label={locale === 'zh-Hans' ? '请先完成上方卡片' : 'Please complete the card above'}
-            title={locale === 'zh-Hans' ? '请先完成上方卡片' : 'Please complete the card above'}
+            aria-label={t('completeCardAbove', locale)}
+            title={t('completeCardAbove', locale)}
           >
             <Mic className="w-5 h-5" />
           </button>
@@ -1251,8 +1315,8 @@ export function CopilotPanel() {
           <button
             onClick={() => { if (inputValue.trim()) { handleSend(inputValue); } }}
             className="w-10 h-10 flex items-center justify-center transition-all text-primary hover:brightness-125 shrink-0"
-            aria-label={locale === 'zh-Hans' ? '发送' : 'Send'}
-            title={locale === 'zh-Hans' ? '发送' : 'Send'}
+            aria-label={t('send', locale)}
+            title={t('send', locale)}
           >
             <ArrowUp className="w-5 h-5" />
           </button>
@@ -1268,16 +1332,8 @@ export function CopilotPanel() {
                 ? 'bg-red-500/15 text-red-500 animate-pulse'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
             )}
-            aria-label={
-              isListening
-                ? (locale === 'zh-Hans' ? '点击停止聆听' : 'Tap to stop listening')
-                : (locale === 'zh-Hans' ? '按住说话 · 轻点持续聆听' : 'Hold to talk · tap to keep listening')
-            }
-            title={
-              isListening
-                ? (locale === 'zh-Hans' ? '点击停止聆听' : 'Tap to stop listening')
-                : (locale === 'zh-Hans' ? '按住说话 · 轻点持续聆听' : 'Hold to talk · tap to keep listening')
-            }
+            aria-label={isListening ? t('tapToStopListening', locale) : t('holdToTalk', locale)}
+            title={isListening ? t('tapToStopListening', locale) : t('holdToTalk', locale)}
           >
             <Mic className="w-5 h-5" />
           </button>
@@ -1286,8 +1342,8 @@ export function CopilotPanel() {
             onClick={() => {}}
             disabled
             className="w-10 h-10 flex items-center justify-center text-muted-foreground cursor-not-allowed shrink-0"
-            aria-label={locale === 'zh-Hans' ? '发送' : 'Send'}
-            title={locale === 'zh-Hans' ? '发送' : 'Send'}
+            aria-label={t('send', locale)}
+            title={t('send', locale)}
           >
             <ArrowUp className="w-5 h-5" />
           </button>
@@ -1300,80 +1356,46 @@ export function CopilotPanel() {
   // ─── Unified ActionDock: single container morphs from collapsed dock to expanded panel ───
     const panelChrome = (
       <div className="shrink-0">
-        {/* Drag handle — hidden in full-screen */}
-        {/* Drag handle — hidden in side-docked mode */}
-        {!isFullScreen && !isSideDocked && (
+        {/* Drag handle (grabber) — shown in float mode for BOTH the 78vh and the
+            fullscreen states so collapse-by-swipe works the same in both. Hidden
+            only when side-docked (persistent panel). In fullscreen it clears the
+            top safe area (notch). */}
+        {!isSideDocked && (
           <div
-            className="flex justify-center py-2 cursor-grab active:cursor-grabbing touch-none"
+            className={cn(
+              'flex justify-center py-2 cursor-grab active:cursor-grabbing touch-none',
+              isFullScreen && 'safe-area-top pt-3',
+            )}
             onPointerDown={(e: React.PointerEvent) => dragControls.start(e)}
           >
             <div className="w-10 h-1 rounded-full bg-muted-foreground/30" />
           </div>
         )}
 
-        {/* Header */}
-        <div className={cn(
-          'flex items-center justify-between px-4 py-2 border-b border-border/30',
-          isFullScreen && 'safe-area-top pt-3'
-        )}>
-          {/* Collapse button — hidden in side-docked mode (always open).
-              In side-docked mode the title moves into this left slot since
-              there's no collapse button to balance the layout. */}
-          {isSideDocked ? (
-            <div className="flex items-center gap-2">
-              {isFullScreen && <Sparkles className="w-5 h-5 text-primary" />}
-              <span className="text-sm font-medium text-foreground">Sales Copilot</span>
-              {isConnected && <span className="w-2 h-2 bg-green-500 rounded-full" />}
-              {isConnecting && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
-              {debugMode && (
-                <button
-                  type="button"
-                  onClick={() => setFrameViewerOpen(true)}
-                  className="ml-1 w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-                  title={locale === 'zh-Hans' ? 'Frame 影子模式 · 销售专家思考记录' : 'Frame shadow mode · sales-coach reasoning log'}
-                  aria-label="Frame shadow log"
-                >
-                  <ScrollText className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-          ) : (
-          <button
-            onClick={isFullScreen && !binaryMode ? () => openPanel(false) : handleClose}
-            className="w-8 h-8 flex items-center justify-center rounded-lg transition-all hover:brightness-125 active:brightness-75"
-            aria-label={
-              locale === 'zh-Hans'
-                ? (isFullScreen && !binaryMode ? '返回面板' : '收起')
-                : (isFullScreen && !binaryMode ? 'Back to panel' : 'Collapse')
-            }
-          >
-            <ChevronDown className="w-4 h-4 text-foreground" />
-          </button>
-          )}
-          {/* Centered title — only in non-docked (float/mobile) layout. */}
-          {!isSideDocked && (
-          <div className="flex items-center gap-2">
+        {/* Header — title left-aligned; there is no collapse button, collapse is
+            via the grabber swipe-down (float) or staying open (side-docked). */}
+        <div className="flex items-center justify-between px-4 py-2 border-b border-border/30">
+          <div className="flex items-center gap-2 min-w-0">
             <span className="text-sm font-medium text-foreground">Sales Copilot</span>
-            {isConnected && <span className="w-2 h-2 bg-green-500 rounded-full" />}
-            {isConnecting && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
+            {isConnected && <span className="w-2 h-2 bg-green-500 rounded-full shrink-0" />}
+            {isConnecting && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground shrink-0" />}
             {debugMode && (
               <button
                 type="button"
                 onClick={() => setFrameViewerOpen(true)}
-                className="ml-1 w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-                title={locale === 'zh-Hans' ? 'Frame 影子模式 · 销售专家思考记录' : 'Frame shadow mode · sales-coach reasoning log'}
+                className="ml-1 w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors shrink-0"
+                title={t('frameShadowMode', locale)}
                 aria-label="Frame shadow log"
               >
                 <ScrollText className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
-          )}
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 shrink-0">
             <button
               onClick={() => { shouldAutoScrollRef.current = true; startNewConversation(); }}
               className="w-8 h-8 flex items-center justify-center rounded-lg transition-all hover:brightness-125 active:brightness-75"
-              aria-label={locale === 'zh-Hans' ? '新会话' : 'New session'}
+              aria-label={t('newSession', locale)}
             >
               <SquarePen className="w-4 h-4 text-foreground" />
             </button>
@@ -1385,7 +1407,7 @@ export function CopilotPanel() {
           <div className="px-4 py-2 border-b border-border/20 bg-muted/30">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs text-muted-foreground">
-                {locale === 'zh-Hans' ? '当前上下文:' : 'Context:'}
+                {t('contextLabel', locale)}
               </span>
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 border border-primary/20">
                 <span className="text-xs font-medium text-primary">
@@ -1414,7 +1436,7 @@ export function CopilotPanel() {
                 <button
                   onClick={handleDismissContext}
                   className="ml-0.5 w-4 h-4 flex items-center justify-center rounded-full hover:bg-primary/20 transition-colors"
-                  aria-label={locale === 'zh-Hans' ? '移除上下文' : 'Remove context'}
+                  aria-label={t('removeContext', locale)}
                 >
                   <X className="w-3 h-3 text-primary" />
                 </button>
@@ -1436,13 +1458,18 @@ export function CopilotPanel() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              transition={{ duration: 0.18 }}
+              transition={{ duration: 0.32, ease: 'easeOut' }}
               className="fixed inset-0 z-[55] bg-black/30 backdrop-blur-sm"
               onClick={handleClose}
             />
           )}
         </AnimatePresence>
 
+        {/* Collapsed dock (float) + full inline panel (side-dock). In FLOAT mode the
+            EXPANDED panel is a separate slide-up sheet rendered below, so this
+            container only mounts as the collapsed dock when closed. In side-dock
+            mode it stays the always-open inline panel. */}
+        {(isSideDocked || !isOpen) && (
         <motion.div
           ref={panelRef}
           initial={false}
@@ -1560,7 +1587,60 @@ export function CopilotPanel() {
           {/* Input bar — always rendered inside the panel container */}
           {(!isSideDocked || isOpen) && renderInputWrapper()}
         </motion.div>
+        )}
 
+        {/* Float-mode expanded panel — slides up from the bottom like a native
+            bottom sheet (mirrors the <Sheet> used by the insight / brief / profile
+            panels) instead of growing its height, so the open motion reads as a
+            proper expand. Content is pre-sized; only the transform animates. */}
+        <AnimatePresence>
+          {isOpen && !isSideDocked && (
+            <motion.div
+              key="copilot-sheet"
+              ref={panelRef}
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 36, stiffness: 340 }}
+              drag="y"
+              dragControls={dragControls}
+              dragListener={false}
+              dragConstraints={{ top: 0, bottom: 0 }}
+              dragElastic={{ top: 0.15, bottom: 0.5 }}
+              onDragEnd={(_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+                if (isFullScreen) {
+                  // Full-screen: down-swipe collapses. On mobile / binary mode we skip
+                  // the 78vh mid state and close all the way to the dock.
+                  if (info.offset.y > 80 || info.velocity.y > 500) {
+                    if (isMobile || binaryMode) closePanel();
+                    else openPanel(false);
+                  }
+                  return;
+                }
+                if (info.offset.y < -80 || info.velocity.y < -500) {
+                  openPanel(true);
+                } else if (info.offset.y > 80 || info.velocity.y > 500) {
+                  closePanel();
+                }
+              }}
+              className={cn(
+                'fixed bottom-0 left-0 right-0 z-[60] flex flex-col overflow-clip safe-area-bottom min-h-0',
+                'bg-background/80 backdrop-blur-md border-t border-border/50',
+                !isFullScreen && 'rounded-t-[20px]',
+              )}
+              style={{
+                height: (isFullScreen || binaryMode) ? '100vh' : '78vh',
+                boxShadow: '0 -8px 32px -4px rgba(0, 0, 0, 0.15), 0 -4px 16px -4px rgba(0, 0, 0, 0.1)',
+              }}
+              data-component="copilot-sheet"
+            >
+              {panelChrome}
+              {renderMessages()}
+              {renderInputExtras()}
+              {renderInputWrapper()}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <PipelineViewer open={frameViewerOpen} onClose={() => setFrameViewerOpen(false)} locale={locale} />
       </>

@@ -1,9 +1,14 @@
-// Bilingual support zh-Hans / en-US
+// Multilingual support: zh-Hans / en-US + European languages (de-DE / fr-FR / es-ES)
 
 import { useState, useEffect } from 'react';
 import { testFlowConnection, invokeFlowForLLM } from '@/services/power-automate-service';
+import zhHans from '@/locales/zh-Hans.json';
+import enUS from '@/locales/en-US.json';
+import deDE from '@/locales/de-DE.json';
+import frFR from '@/locales/fr-FR.json';
+import esES from '@/locales/es-ES.json';
 
-export type Locale = 'zh-Hans' | 'en-US';
+export type Locale = 'zh-Hans' | 'en-US' | 'de-DE' | 'fr-FR' | 'es-ES';
 
 export type VoiceId = string;
 
@@ -482,20 +487,20 @@ export function setThinkingDotStyle(style: ThinkingDotStyle): void {
   window.dispatchEvent(new CustomEvent('thinkingdotstyle-changed', { detail: style }));
 }
 
-export const thinkingDotStyleLabels: Record<ThinkingDotStyle, { zh: string; en: string }> = {
-  bounce: { zh: '弹跳', en: 'Bounce' },
-  pulse: { zh: '脉冲', en: 'Pulse' },
-  wave: { zh: '波浪', en: 'Wave' },
-  fade: { zh: '渐隐', en: 'Fade' },
-  orbit: { zh: '环绕', en: 'Orbit' },
+export const thinkingDotStyleLabels: Record<ThinkingDotStyle, { zh: string; en: string; de: string; fr: string; es: string }> = {
+  bounce: { zh: '弹跳', en: 'Bounce', de: 'Springen', fr: 'Rebond', es: 'Rebote' },
+  pulse: { zh: '脉冲', en: 'Pulse', de: 'Puls', fr: 'Pulsation', es: 'Pulso' },
+  wave: { zh: '波浪', en: 'Wave', de: 'Welle', fr: 'Vague', es: 'Onda' },
+  fade: { zh: '渐隐', en: 'Fade', de: 'Verblassen', fr: 'Fondu', es: 'Desvanecer' },
+  orbit: { zh: '环绕', en: 'Orbit', de: 'Orbit', fr: 'Orbite', es: 'Órbita' },
 };
 
-export const colorThemeLabels: Record<ColorTheme, { zh: string; en: string; colors: [string, string] }> = {
-  sunset: { zh: '日落橙', en: 'Sunset', colors: ['#FF7A00', '#0D8F8C'] },
-  ocean: { zh: '海洋蓝', en: 'Ocean', colors: ['#0EA5E9', '#8B5CF6'] },
-  forest: { zh: '森林绿', en: 'Forest', colors: ['#22C55E', '#F97316'] },
-  berry: { zh: '浆果粉', en: 'Berry', colors: ['#EC4899', '#6366F1'] },
-  mono: { zh: '极简灰', en: 'Monochrome', colors: ['#71717A', '#18181B'] },
+export const colorThemeLabels: Record<ColorTheme, { zh: string; en: string; de: string; fr: string; es: string; colors: [string, string] }> = {
+  sunset: { zh: '日落橙', en: 'Sunset', de: 'Sonnenuntergang', fr: 'Coucher de soleil', es: 'Atardecer', colors: ['#FF7A00', '#0D8F8C'] },
+  ocean: { zh: '海洋蓝', en: 'Ocean', de: 'Ozean', fr: 'Océan', es: 'Océano', colors: ['#0EA5E9', '#8B5CF6'] },
+  forest: { zh: '森林绿', en: 'Forest', de: 'Wald', fr: 'Forêt', es: 'Bosque', colors: ['#22C55E', '#F97316'] },
+  berry: { zh: '浆果粉', en: 'Berry', de: 'Beere', fr: 'Baie', es: 'Baya', colors: ['#EC4899', '#6366F1'] },
+  mono: { zh: '极简灰', en: 'Monochrome', de: 'Monochrom', fr: 'Monochrome', es: 'Monocromo', colors: ['#71717A', '#18181B'] },
 };
 
 // Voice options per locale
@@ -555,7 +560,7 @@ export function getSystemVoiceByName(voiceName: string): SpeechSynthesisVoice | 
 // Get available system voices for a locale
 export function getSystemVoicesForLocale(locale: Locale): SpeechSynthesisVoice[] {
   const voices = window.speechSynthesis.getVoices();
-  const langPrefix = locale === 'zh-Hans' ? 'zh' : 'en';
+  const langPrefix = localeLangPrefix(locale);
   return voices.filter((v: SpeechSynthesisVoice) => 
     v.lang.toLowerCase().startsWith(langPrefix)
   );
@@ -567,7 +572,7 @@ export function findMatchingSystemVoice(voiceId: VoiceId, locale: Locale): Speec
   const voices = window.speechSynthesis.getVoices();
   if (voices.length === 0) return null;
 
-  const langPrefix = locale === 'zh-Hans' ? 'zh' : 'en';
+  const langPrefix = localeLangPrefix(locale);
   
   // Filter voices by language first
   const langVoices = voices.filter((v: SpeechSynthesisVoice) => 
@@ -954,9 +959,10 @@ export async function generateVoiceSummary(
     return { success: false, error: 'LLM not configured or disabled' };
   }
   
-  const systemPrompt = customSystemPrompt || (locale === 'zh-Hans'
+  const systemPrompt = customSystemPrompt || ((locale === 'zh-Hans'
     ? '你是一个助手，负责将内容总结为简短的语音播报。请用简洁自然的中文口语风格，概括主要信息，不超过3句话。'
-    : 'You are an assistant that summarizes content into brief voice announcements. Use concise, natural spoken language, summarizing key information in no more than 3 sentences.');
+    : 'You are an assistant that summarizes content into brief voice announcements. Use concise, natural spoken language, summarizing key information in no more than 3 sentences.')
+    + `\n\n${outputLanguageDirective(locale)}`);
   
   // When a custom system prompt is provided, pass content directly as user message
   // (don't wrap in "voice announcement" framing which conflicts with JSON/analysis prompts)
@@ -1201,10 +1207,10 @@ export function setCopilotListTopN(topN: number): void {
 
 // Copilot dock layout setting (widescreen only)
 export type CopilotDockLayout = 'float' | 'right' | 'left';
-export const copilotDockLayoutLabels: Record<CopilotDockLayout, { zh: string; en: string }> = {
-  float: { zh: '浮动', en: 'Float' },
-  right: { zh: '右侧', en: 'Right' },
-  left:  { zh: '左侧', en: 'Left' },
+export const copilotDockLayoutLabels: Record<CopilotDockLayout, { zh: string; en: string; de: string; fr: string; es: string }> = {
+  float: { zh: '浮动', en: 'Float', de: 'Schwebend', fr: 'Flottant', es: 'Flotante' },
+  right: { zh: '右侧', en: 'Right', de: 'Rechts', fr: 'Droite', es: 'Derecha' },
+  left:  { zh: '左侧', en: 'Left', de: 'Links', fr: 'Gauche', es: 'Izquierda' },
 };
 
 export function getCopilotDockLayout(): CopilotDockLayout {
@@ -1237,6 +1243,18 @@ export function getCopilotFullscreenDefault(): boolean {
 
 export function setCopilotFullscreenDefault(enabled: boolean): void {
   localStorage.setItem('copilotFullscreenDefault', String(enabled));
+  window.dispatchEvent(new CustomEvent('copilotfullscreendefault-changed', { detail: enabled }));
+}
+
+// Compact draft forms — denser layout (inline labels, tighter spacing) for the
+// Copilot draft/confirm cards.
+export function getCompactDraftForms(): boolean {
+  return localStorage.getItem('compactDraftForms') === 'true';
+}
+
+export function setCompactDraftForms(enabled: boolean): void {
+  localStorage.setItem('compactDraftForms', String(enabled));
+  window.dispatchEvent(new CustomEvent('compactdraftforms-changed', { detail: enabled }));
 }
 
 // Agenda default expanded on home page
@@ -1291,11 +1309,11 @@ export function setIntentMode(mode: IntentMode): void {
 // Home header widget display setting
 export type HomeHeaderWidget = 'date-time' | 'performance' | 'task-completion' | 'pipeline-forecast';
 
-export const homeHeaderWidgetLabels: Record<HomeHeaderWidget, { zh: string; en: string }> = {
-  'date-time': { zh: '日期和时间', en: 'Date & Time' },
-  'performance': { zh: '我的业绩', en: 'My Performance' },
-  'task-completion': { zh: '今日任务完成率', en: "Today's Task Completion" },
-  'pipeline-forecast': { zh: '本季度成交额/预测', en: 'Closed Pipeline / Forecast' },
+export const homeHeaderWidgetLabels: Record<HomeHeaderWidget, { zh: string; en: string; de: string; fr: string; es: string }> = {
+  'date-time': { zh: '日期和时间', en: 'Date & Time', de: 'Datum & Uhrzeit', fr: 'Date et heure', es: 'Fecha y hora' },
+  'performance': { zh: '我的业绩', en: 'My Performance', de: 'Meine Leistung', fr: 'Ma performance', es: 'Mi rendimiento' },
+  'task-completion': { zh: '今日任务完成率', en: "Today's Task Completion", de: 'Heutige Aufgabenerfüllung', fr: 'Achèvement des tâches du jour', es: 'Tareas completadas hoy' },
+  'pipeline-forecast': { zh: '本季度成交额/预测', en: 'Closed Pipeline / Forecast', de: 'Abgeschlossene Pipeline / Prognose', fr: 'Pipeline clôturé / Prévision', es: 'Pipeline cerrado / Previsión' },
 };
 
 export function getHomeHeaderWidget(): HomeHeaderWidget {
@@ -1311,297 +1329,101 @@ export function setHomeHeaderWidget(widget: HomeHeaderWidget): void {
   window.dispatchEvent(new CustomEvent('homeheaderwidget-changed', { detail: widget }));
 }
 
-export const translations = {
-  'zh-Hans': {
-    // Greetings
-    morning: '早上好',
-    afternoon: '下午好',
-    evening: '晚上好',
-    
-    // Page titles
-    home: '主页',
-    settings: '设置',
-    accounts: '客户',
-    opportunities: '商机',
-    activities: '活动',
-    contacts: '联系人',
-    
-    // KPI cards
-    todayVisits: '今日拜访',
-    confirmedPending: '{confirmed} 已确认 · {pending} 待出发',
-    activeOpportunities: '活跃商机',
-    atRiskNeedAttention: '{risk} 风险 · 需关注',
-    monthlyPerformance: '本月业绩',
-    vsLastMonth: '{direction} {percent}% vs 上月',
-    pendingFollowUp: '待回访客户',
-    sortByDistance: '按距离排序',
-    
-    // Daily briefing
-    dailyBriefing: '我的商机洞察',
-    refreshingInsight: '正在刷新洞察...',
-    insightRefreshed: '洞察已刷新',
-    insightRefreshFailed: '刷新失败，请稍后重试',
-    chapters: '章节',
-    minutes: '分',
-    seconds: '秒',
-    swipeToSwitch: '左右滑动 · 切换章节',
-    holdToAsk: '按住对这条提问',
-    transcript: '转写',
-    playbackSpeed: '播放速度',
-    offlineNoAsk: '离线无法提问',
-    showingYesterday: '离线 · 显示昨日播报',
-    chapterOf: '{current} / {total}',
-    timeRange: '{start}–{end}',
-    generatingBriefing: '正在生成今日播报...',
-    resumeReading: '已恢复跟读',
-    pausedFollowAlong: '已暂停跟读 30 秒',
-    recordingRelease: '录音中，松开发送',
-    releaseCancel: '松开取消',
-    
-    // Quick actions
-    newVisit: '新拜访',
-    askCopilot: '提问 Copilot',
-    viewOpportunities: '看商机',
-    briefMe: '今日简报',
-    comingSoon: '功能即将上线',
-    send: '发送',
-    
-    // Summary
-    todaySummary: '今天有 {followups} 个回访，{closingOpps} 个商机本周收尾',
-    
-    // Offline
-    offline: '离线 · 显示最近一次缓存',
-    
-    // Empty states
-    noData: '—',
-    
-    // Voice / ActivityCapture
-    holdToRecord: '按住录音',
-    recording: '正在录音...',
-    releaseToCancel: '松开取消',
-    swipeUpToCancel: '上滑取消',
-    pressToStartRecord: '按住下方按钮开始录音',
-    processingVoice: '正在处理语音...',
-    voiceBubbleRecording: '正在录音 {time}',
-    maxRecordingWarning: '即将达到最长录音时间',
-    aiDraft: 'AI 草稿',
-    account: '客户',
-    contact: '联系人',
-    visitDate: '拜访日期',
-    result: '结果',
-    nextStep: '下一步',
-    opportunityIntent: '商机意向',
-    abandon: '放弃',
-    reRecord: '重录',
-    confirm: '确认',
-    newVisitTitle: '新拜访',
-    offlineRecordingHint: '离线 · 录音将在恢复网络后上传',
-    thinkingDotStyle: '思考动画',
-    activityDiscarded: '活动已放弃',
-    activityConfirmed: '活动已确认',
-    pollTimeout: 'AI 处理超时，请重试',
-    confidenceHigh: '高置信度',
-    confidenceMedium: '中置信度',
-    confidenceLow: '低置信度',
-    
-    // BYOM settings
-    byomTitle: '自带模型 (BYOM)',
-    byomDescription: '配置你自己的 LLM 模型',
-    llmProvider: 'LLM 提供商',
-    selectProvider: '选择提供商',
-    apiKey: 'API 密钥',
-    apiKeyPlaceholder: '输入 API 密钥',
-    endpoint: '服务端点',
-    endpointPlaceholder: '输入端点 URL',
-    deploymentName: '部署名称',
-    deploymentNamePlaceholder: '输入 Azure 部署名称',
-    modelName: '模型名称',
-    modelNamePlaceholder: '输入模型名称 (如 gpt-4)',
-    enableByom: '启用自定义模型',
-    byomConfigured: '已配置',
-    byomNotConfigured: '未配置',
-    testConnection: '测试连接',
-    testingByom: '测试中...',
-    byomTestSuccess: '连接成功',
-    byomTestFailed: '连接失败',
-    byomLatency: '延迟: {ms}ms',
-    fetchModels: '获取模型列表',
-    fetchingModels: '正在获取...',
-    noModelsFound: '未找到可用模型',
-    selectModel: '选择模型',
+export const translations: Record<Locale, Record<string, string>> = {
+  'zh-Hans': zhHans,
+  'en-US': enUS,
+  'de-DE': deDE,
+  'fr-FR': frFR,
+  'es-ES': esES,
+};
 
-    // Information structure settings
-    voiceSummary: '用语音播报摘要',
+export type TranslationKey = keyof typeof zhHans;
 
-    // Font size settings
-    chatFontSize: '聊天字体大小',
-    uiFontSize: '界面字体大小',
-    fontSizeSmall: '小',
-    fontSizeMedium: '中',
-    fontSizeLarge: '大',
-    
-    // Color theme settings
-    colorTheme: '主题配色',
-    
-    // In-memory banner
-    inMemoryBanner: '本应用使用草稿表进行测试，输入的数据不会保存。请联系应用所有者启用存储。',
-    
-    // Voice settings
-    voiceSetting: '音色',
-    voiceNatural: '自然',
-    voicePremium: '高级',
-    autoPlayAgentResponse: '自动朗读回复',
-    homeHeaderWidget: '首页左上角显示'
-  },
-  'en-US': {
-    // Greetings
-    morning: 'Good morning',
-    afternoon: 'Good afternoon',
-    evening: 'Good evening',
-    
-    // Page titles
-    home: 'Home',
-    settings: 'Settings',
-    accounts: 'Accounts',
-    opportunities: 'Opportunities',
-    activities: 'Activities',
-    contacts: 'Contacts',
-    
-    // KPI cards
-    todayVisits: 'Today\'s Visits',
-    confirmedPending: '{confirmed} confirmed · {pending} pending',
-    activeOpportunities: 'Active Opportunities',
-    atRiskNeedAttention: '{risk} at risk · needs attention',
-    monthlyPerformance: 'Monthly Performance',
-    vsLastMonth: '{direction} {percent}% vs last month',
-    pendingFollowUp: 'Pending Follow-up',
-    sortByDistance: 'Sort by distance',
-    
-    // Daily briefing
-    dailyBriefing: 'My Business Insight',
-    refreshingInsight: 'Refreshing insight...',
-    insightRefreshed: 'Insight refreshed',
-    insightRefreshFailed: 'Refresh failed, please try again',
-    chapters: 'chapters',
-    minutes: 'min',
-    seconds: 'sec',
-    swipeToSwitch: 'Swipe left/right to switch chapters',
-    holdToAsk: 'Hold to ask about this',
-    transcript: 'Transcript',
-    playbackSpeed: 'Playback speed',
-    offlineNoAsk: 'Cannot ask while offline',
-    showingYesterday: 'Offline · showing yesterday\'s briefing',
-    chapterOf: '{current} / {total}',
-    timeRange: '{start}–{end}',
-    generatingBriefing: 'Generating today\'s briefing...',
-    resumeReading: 'Resumed follow-along',
-    pausedFollowAlong: 'Paused follow-along for 30s',
-    recordingRelease: 'Recording, release to send',
-    releaseCancel: 'Release to cancel',
-    // Quick actions
-    newVisit: 'New Visit',
-    askCopilot: 'Ask Copilot',
-    viewOpportunities: 'View Opps',
-    briefMe: 'Brief Me',
-    comingSoon: 'Coming soon',
-    send: 'Send',
-    
-    // Summary
-    todaySummary: '{followups} follow-ups today, {closingOpps} opps closing this week',
-    
-    // Offline
-    offline: 'Offline · showing cached data',
-    
-    // Empty states
-    noData: '—',
-    
-    // Voice / ActivityCapture
-    holdToRecord: 'Hold to record',
-    recording: 'Recording...',
-    releaseToCancel: 'Release to cancel',
-    swipeUpToCancel: 'Swipe up to cancel',
-    pressToStartRecord: 'Hold the button below to start recording',
-    processingVoice: 'Processing voice...',
-    voiceBubbleRecording: 'Recording {time}',
-    maxRecordingWarning: 'Approaching max recording time',
-    aiDraft: 'AI Draft',
-    account: 'Account',
-    contact: 'Contact',
-    visitDate: 'Visit Date',
-    result: 'Result',
-    nextStep: 'Next Step',
-    opportunityIntent: 'Opportunity Intent',
-    abandon: 'Abandon',
-    reRecord: 'Re-record',
-    confirm: 'Confirm',
-    newVisitTitle: 'New Visit',
-    thinkingDotStyle: 'Thinking Animation',
-    offlineRecordingHint: 'Offline · Recording will upload when online',
-    activityDiscarded: 'Activity discarded',
-    
-    // BYOM settings
-    byomTitle: 'Bring Your Own Model',
-    byomDescription: 'Configure your own LLM model',
-    llmProvider: 'LLM Provider',
-    selectProvider: 'Select provider',
-    apiKey: 'API Key',
-    apiKeyPlaceholder: 'Enter API key',
-    endpoint: 'Endpoint',
-    endpointPlaceholder: 'Enter endpoint URL',
-    deploymentName: 'Deployment Name',
-    deploymentNamePlaceholder: 'Enter Azure deployment name',
-    modelName: 'Model Name',
-    modelNamePlaceholder: 'Enter model name (e.g., gpt-4)',
-    enableByom: 'Enable Custom Model',
-    byomConfigured: 'Configured',
-    byomNotConfigured: 'Not configured',
-    testConnection: 'Test Connection',
-    testingByom: 'Testing...',
-    byomTestSuccess: 'Connection successful',
-    byomTestFailed: 'Connection failed',
-    byomLatency: 'Latency: {ms}ms',
-    fetchModels: 'Fetch Models',
-    fetchingModels: 'Fetching...',
-    noModelsFound: 'No models found',
-    selectModel: 'Select model',
+// ---------------------------------------------------------------------------
+// Locale metadata — single source of truth for everything that varies by
+// language: the picker label, the BCP-47 tag used for date/number/currency
+// formatting, and the speech-synthesis / recognition language. Add a new
+// language here + a translations block above and the whole app picks it up.
+// ---------------------------------------------------------------------------
+export interface LocaleMeta {
+  /** Native name shown in the language picker. */
+  label: string;
+  /** BCP-47 tag for Intl date/number/currency formatting. */
+  bcp47: string;
+  /** Language prefix used to match system TTS voices (e.g. 'de'). */
+  lang: string;
+  /** Speech tag for SpeechSynthesisUtterance.lang / recognition.lang. */
+  speech: string;
+  /** English language name, used in LLM output-language directives. */
+  englishName: string;
+}
 
-    // Information structure settings
-    voiceSummary: 'Voice Summary for Response',
-    activityConfirmed: 'Activity confirmed',
-    pollTimeout: 'AI processing timed out, please retry',
-    confidenceHigh: 'High confidence',
-    confidenceMedium: 'Medium confidence',
-    confidenceLow: 'Low confidence',
-    
-    // Font size settings
-    chatFontSize: 'Chat Font Size',
-    uiFontSize: 'UI Font Size',
-    fontSizeSmall: 'Small',
-    fontSizeMedium: 'Medium',
-    fontSizeLarge: 'Large',
-    
-    // Color theme settings
-    colorTheme: 'Color Theme',
-    
-    // In-memory banner
-    inMemoryBanner: 'This app uses draft tables for testing. Data entered won\'t be saved. Contact the app owner to enable storage.',
-    
-    // Voice settings
-    voiceSetting: 'Voice',
-    voiceNatural: 'Natural',
-    autoPlayAgentResponse: 'Auto-play Agent Response',
-    voicePremium: 'Premium',
-    homeHeaderWidget: 'Home Header Widget',
-  },
-} as const;
+export const LOCALE_META: Record<Locale, LocaleMeta> = {
+  'zh-Hans': { label: '中文', bcp47: 'zh-CN', lang: 'zh', speech: 'zh-CN', englishName: 'Simplified Chinese' },
+  'en-US': { label: 'English', bcp47: 'en-US', lang: 'en', speech: 'en-US', englishName: 'English' },
+  'de-DE': { label: 'Deutsch', bcp47: 'de-DE', lang: 'de', speech: 'de-DE', englishName: 'German' },
+  'fr-FR': { label: 'Français', bcp47: 'fr-FR', lang: 'fr', speech: 'fr-FR', englishName: 'French' },
+  'es-ES': { label: 'Español', bcp47: 'es-ES', lang: 'es', speech: 'es-ES', englishName: 'Spanish' },
+};
 
-export type TranslationKey = keyof typeof translations['zh-Hans'];
+export const SUPPORTED_LOCALES = Object.keys(LOCALE_META) as Locale[];
+
+/** BCP-47 tag for Intl.* formatting in the given locale. */
+export function localeBcp47(locale: Locale): string {
+  return LOCALE_META[locale]?.bcp47 ?? 'en-US';
+}
+
+/** Speech tag (SpeechSynthesisUtterance.lang / SpeechRecognition.lang). */
+export function speechLang(locale: Locale): string {
+  return LOCALE_META[locale]?.speech ?? 'en-US';
+}
+
+/** Language prefix used to match system voices for the given locale. */
+export function localeLangPrefix(locale: Locale): string {
+  return LOCALE_META[locale]?.lang ?? 'en';
+}
+
+/**
+ * Model-facing instruction that pins the language of the LLM's USER-VISIBLE
+ * output. Append this to system prompts that are authored only in zh/en so that
+ * de/fr/es users still receive localized content (titles, summaries, prose)
+ * instead of falling back to the English template.
+ */
+export function outputLanguageDirective(locale: Locale): string {
+  const name = LOCALE_META[locale]?.englishName ?? 'English';
+  return `IMPORTANT: Write ALL user-facing text (titles, content, prose) in ${name}, regardless of the language of the input data or these instructions. Keep proper nouns (client / opportunity / product names) exactly as given.`;
+}
+
+/**
+ * Pick the localized string from a small inline label object that carries its
+ * own translations (used by metadata maps that also hold colors/durations).
+ * Falls back to English when a language is missing.
+ */
+export function pickLabel(
+  o: { zh: string; en: string; de?: string; fr?: string; es?: string },
+  locale: Locale,
+): string {
+  switch (locale) {
+    case 'zh-Hans': return o.zh;
+    case 'de-DE': return o.de ?? o.en;
+    case 'fr-FR': return o.fr ?? o.en;
+    case 'es-ES': return o.es ?? o.en;
+    default: return o.en;
+  }
+}
 
 // Get/set locale from localStorage
 export function getLocale(): Locale {
   const saved = localStorage.getItem('locale');
-  if (saved === 'en-US' || saved === 'zh-Hans') return saved;
-  // Default to English regardless of browser language
+  if (saved && Object.prototype.hasOwnProperty.call(LOCALE_META, saved)) {
+    return saved as Locale;
+  }
+  // First run: best-effort detection from the browser language, else English.
+  const nav = typeof navigator !== 'undefined' ? navigator.language.toLowerCase() : '';
+  if (nav.startsWith('zh')) return 'zh-Hans';
+  if (nav.startsWith('de')) return 'de-DE';
+  if (nav.startsWith('fr')) return 'fr-FR';
+  if (nav.startsWith('es')) return 'es-ES';
   return 'en-US';
 }
 
@@ -1616,7 +1438,14 @@ export function t<K extends TranslationKey>(
   locale: Locale = 'zh-Hans',
   params?: Record<string, string | number>
 ): string {
-  let text: string = translations[locale][key] ?? translations['zh-Hans'][key] ?? key;
+  // Index defensively: a locale block may not contain every key (e.g. a string
+  // added to en-US but not yet translated). Fall back to English, then Chinese,
+  // then the key itself. The casts avoid a union-key (TS2536) error when blocks
+  // are not perfectly key-identical.
+  const table = translations[locale] as Record<string, string | undefined>;
+  const en = translations['en-US'] as Record<string, string | undefined>;
+  const zh = translations['zh-Hans'] as Record<string, string | undefined>;
+  let text: string = table?.[key] ?? en[key] ?? zh[key] ?? key;
   
   if (params) {
     Object.entries(params).forEach(([k, v]: [string, string | number]) => {

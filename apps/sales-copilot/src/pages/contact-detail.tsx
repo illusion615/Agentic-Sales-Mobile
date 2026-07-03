@@ -52,7 +52,7 @@ import { useAccountList } from '@/generated/hooks/use-account';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useActivityList } from '@/generated/hooks/use-activity';
 import type { Opportunity } from '@/generated/models/opportunity-model';import type { Activity } from '@/generated/models/activity-model';import type { Account } from '@/generated/models/account-model';import { toast } from 'sonner';
-import { getLocale } from '@/lib/i18n';
+import { getLocale, t } from '@/lib/i18n';
 import { useCopilot } from '@/contexts/copilot-context';
 import { PullToRefresh } from '@/components/pull-to-refresh';
 
@@ -230,7 +230,7 @@ export default function ContactDetailPage() {
 
   if (isLoadingContact) {
     return (
-      <MobileLayout title={locale === 'zh-Hans' ? '联系人详情' : 'Contact Details'}>
+      <MobileLayout title={t('contactDetails', locale)}>
         <div className="px-4 pb-40 space-y-4 mt-4">
           <div className="glass-card p-4 animate-pulse" style={{ borderRadius: 20 }}>
             <div className="flex items-center gap-4">
@@ -314,7 +314,7 @@ export default function ContactDetailPage() {
       <button
         onClick={() => setIsEditMode(true)}
         className="p-2 rounded-full hover:bg-muted/50 transition-colors"
-        aria-label={locale === 'zh-Hans' ? '编辑' : 'Edit contact'}
+        aria-label={t('editContact', locale)}
       >
         <Edit className="w-5 h-5 text-foreground" />
       </button>

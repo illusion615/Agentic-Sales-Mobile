@@ -56,6 +56,9 @@ export type FeedbackStyleId =
 export interface BilingualLabel {
   zh: string;
   en: string;
+  de?: string;
+  fr?: string;
+  es?: string;
 }
 
 export interface FeedbackStyleMeta {
@@ -82,16 +85,16 @@ export interface FeedbackScenarioMeta {
 // ---------------------------------------------------------------------------
 
 export const STYLE_META: Record<FeedbackStyleId, FeedbackStyleMeta> = {
-  'none': { id: 'none', label: { zh: '无', en: 'None' }, durationMs: 0 },
-  'check-pulse': { id: 'check-pulse', label: { zh: '对勾脉冲', en: 'Check Pulse' }, durationMs: 1200 },
-  'glow': { id: 'glow', label: { zh: '微光', en: 'Glow' }, durationMs: 1200 },
-  'confetti': { id: 'confetti', label: { zh: '撒花', en: 'Confetti' }, durationMs: 4500 },
-  'fireworks': { id: 'fireworks', label: { zh: '烟花', en: 'Fireworks' }, durationMs: 4200 },
-  'sparkle': { id: 'sparkle', label: { zh: '星光', en: 'Sparkle' }, durationMs: 2000 },
-  'shake': { id: 'shake', label: { zh: '抖动', en: 'Shake' }, durationMs: 700 },
-  'red-pulse': { id: 'red-pulse', label: { zh: '红色脉冲', en: 'Red Pulse' }, durationMs: 900 },
-  'attention-ring': { id: 'attention-ring', label: { zh: '注意环', en: 'Attention Ring' }, durationMs: 1200 },
-  'blink': { id: 'blink', label: { zh: '闪烁', en: 'Blink' }, durationMs: 900 },
+  'none': { id: 'none', label: { zh: '无', en: 'None', de: 'Keine', fr: 'Aucun', es: 'Ninguno' }, durationMs: 0 },
+  'check-pulse': { id: 'check-pulse', label: { zh: '对勾脉冲', en: 'Check Pulse', de: 'Häkchen-Puls', fr: 'Pulsation de validation', es: 'Pulso de verificación' }, durationMs: 1200 },
+  'glow': { id: 'glow', label: { zh: '微光', en: 'Glow', de: 'Leuchten', fr: 'Lueur', es: 'Resplandor' }, durationMs: 1200 },
+  'confetti': { id: 'confetti', label: { zh: '撒花', en: 'Confetti', de: 'Konfetti', fr: 'Confettis', es: 'Confeti' }, durationMs: 4500 },
+  'fireworks': { id: 'fireworks', label: { zh: '烟花', en: 'Fireworks', de: 'Feuerwerk', fr: "Feux d'artifice", es: 'Fuegos artificiales' }, durationMs: 4200 },
+  'sparkle': { id: 'sparkle', label: { zh: '星光', en: 'Sparkle', de: 'Funkeln', fr: 'Étincelle', es: 'Destello' }, durationMs: 2000 },
+  'shake': { id: 'shake', label: { zh: '抖动', en: 'Shake', de: 'Schütteln', fr: 'Secousse', es: 'Sacudida' }, durationMs: 700 },
+  'red-pulse': { id: 'red-pulse', label: { zh: '红色脉冲', en: 'Red Pulse', de: 'Roter Puls', fr: 'Pulsation rouge', es: 'Pulso rojo' }, durationMs: 900 },
+  'attention-ring': { id: 'attention-ring', label: { zh: '注意环', en: 'Attention Ring', de: 'Aufmerksamkeitsring', fr: "Anneau d'attention", es: 'Anillo de atención' }, durationMs: 1200 },
+  'blink': { id: 'blink', label: { zh: '闪烁', en: 'Blink', de: 'Blinken', fr: 'Clignotement', es: 'Parpadeo' }, durationMs: 900 },
 };
 
 // ---------------------------------------------------------------------------
@@ -101,29 +104,29 @@ export const STYLE_META: Record<FeedbackStyleId, FeedbackStyleMeta> = {
 export const SCENARIOS: Record<FeedbackScenario, FeedbackScenarioMeta> = {
   success: {
     id: 'success',
-    label: { zh: '成功', en: 'Success' },
-    hint: { zh: '保存 / 新建 / 更新成功时', en: 'On save / create / update success' },
+    label: { zh: '成功', en: 'Success', de: 'Erfolg', fr: 'Succès', es: 'Éxito' },
+    hint: { zh: '保存 / 新建 / 更新成功时', en: 'On save / create / update success', de: 'Bei erfolgreichem Speichern / Erstellen / Aktualisieren', fr: "Lors d'un enregistrement / création / mise à jour réussi", es: 'Al guardar / crear / actualizar con éxito' },
     styles: ['none', 'check-pulse', 'glow', 'confetti'],
     defaultStyle: 'none',
   },
   milestone: {
     id: 'milestone',
-    label: { zh: '达成', en: 'Milestone' },
-    hint: { zh: '逾期清零 / 目标达成时', en: 'On clearing overdue / hitting a target' },
+    label: { zh: '达成', en: 'Milestone', de: 'Meilenstein', fr: 'Jalon', es: 'Hito' },
+    hint: { zh: '逾期清零 / 目标达成时', en: 'On clearing overdue / hitting a target', de: 'Beim Abbau von Überfälligem / Erreichen eines Ziels', fr: "À l'élimination des retards / atteinte d'un objectif", es: 'Al eliminar lo vencido / alcanzar un objetivo' },
     styles: ['none', 'confetti', 'fireworks', 'sparkle'],
     defaultStyle: 'confetti',
   },
   failure: {
     id: 'failure',
-    label: { zh: '失败', en: 'Failure' },
-    hint: { zh: '操作失败 / 报错时', en: 'On a failed operation / error' },
+    label: { zh: '失败', en: 'Failure', de: 'Fehler', fr: 'Échec', es: 'Error' },
+    hint: { zh: '操作失败 / 报错时', en: 'On a failed operation / error', de: 'Bei fehlgeschlagenem Vorgang / Fehler', fr: "Lors d'une opération échouée / erreur", es: 'En una operación fallida / error' },
     styles: ['none', 'shake', 'red-pulse'],
     defaultStyle: 'none',
   },
   warning: {
     id: 'warning',
-    label: { zh: '警示', en: 'Warning' },
-    hint: { zh: '危险确认 / 校验提示时', en: 'On a caution / validation prompt' },
+    label: { zh: '警示', en: 'Warning', de: 'Warnung', fr: 'Avertissement', es: 'Advertencia' },
+    hint: { zh: '危险确认 / 校验提示时', en: 'On a caution / validation prompt', de: 'Bei einer Warnung / Validierungsabfrage', fr: "Lors d'une mise en garde / invite de validation", es: 'En una precaución / solicitud de validación' },
     styles: ['none', 'attention-ring', 'blink'],
     defaultStyle: 'none',
   },

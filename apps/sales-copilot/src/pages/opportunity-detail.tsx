@@ -170,7 +170,7 @@ export default function OpportunityDetailPage() {
   }, [queryClient, id]);
 
   // AI Summary hooks
-  const { summary: aiSummary, isLoading: isLoadingAISummary, isGenerating, isExpired, isFailed, refetch: refetchAISummary } = useEntityAISummary('opportunity', id || '');
+  const { summary: aiSummary, isLoading: isLoadingAISummary, isGenerating, isExpired, isFailed, localeMismatch, refetch: refetchAISummary } = useEntityAISummary('opportunity', id || '');
   const { triggerForEntity, isTriggering } = useWithAISummaryTrigger();
 
   // Filter activities for this opportunity
@@ -192,6 +192,13 @@ export default function OpportunityDetailPage() {
       setIsRefreshingAI(false);
     }, 500);
   }, [opportunity, account, activities, triggerForEntity, refetchAISummary]);
+
+  // Regenerate the insight when the user switched language since it was generated.
+  useEffect(() => {
+    if (localeMismatch && opportunity && !isGenerating && !isTriggering && !isRefreshingAI) {
+      handleRefreshAISummary();
+    }
+  }, [localeMismatch, opportunity, isGenerating, isTriggering, isRefreshingAI, handleRefreshAISummary]);
 
   // Calculate days until close
   const daysUntilClose = opportunity?.expectedclosedate
@@ -266,16 +273,14 @@ export default function OpportunityDetailPage() {
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            {locale === 'zh-Hans' ? '确认删除' : 'Delete Opportunity'}
+            {t('deleteOpportunityTitle', locale)}
           </AlertDialogTitle>
           <AlertDialogDescription>
-            {locale === 'zh-Hans'
-              ? '此操作无法撤销，确定要删除这个商机吗？'
-              : 'This action cannot be undone. Are you sure you want to delete this opportunity?'}
+            {t('deleteOpportunityDesc', locale)}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>{locale === 'zh-Hans' ? '取消' : 'Cancel'}</AlertDialogCancel>
+          <AlertDialogCancel>{t('cancel', locale)}</AlertDialogCancel>
           <AlertDialogAction
             onClick={handleDelete}
             disabled={isDeleting}
@@ -284,10 +289,10 @@ export default function OpportunityDetailPage() {
             {isDeleting ? (
               <>
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                {locale === 'zh-Hans' ? '删除中...' : 'Deleting...'}
+                {t('deleting', locale)}
               </>
             ) : (
-              locale === 'zh-Hans' ? '删除' : 'Delete'
+              t('delete', locale)
             )}
           </AlertDialogAction>
         </AlertDialogFooter>
@@ -297,7 +302,7 @@ export default function OpportunityDetailPage() {
 
   if (isLoading) {
     return (
-      <MobileLayout title={locale === 'zh-Hans' ? '商机详情' : 'Opportunity Details'} showBack>
+      <MobileLayout title={t('opportunityDetails', locale)} showBack>
         <div className="px-4 pb-40 space-y-4 mt-4">
           {/* Header card skeleton */}
           <div className="glass-card p-4 animate-pulse" style={{ borderRadius: 20 }}>
@@ -331,19 +336,19 @@ export default function OpportunityDetailPage() {
 
   if (error || !opportunity) {
     return (
-      <MobileLayout title={locale === 'zh-Hans' ? '商机' : 'Opportunity'} showBack>
+      <MobileLayout title={t('opportunity', locale)} showBack>
         <Empty className="py-20">
           <EmptyHeader>
             <Target className="w-16 h-16 mx-auto mb-4 text-muted-foreground/40" />
             <EmptyTitle>
-              {locale === 'zh-Hans' ? '商机不存在' : 'Opportunity not found'}
+              {t('opportunityNotFound', locale)}
             </EmptyTitle>
             <EmptyDescription>
-              {locale === 'zh-Hans' ? '该记录可能已被删除' : 'This record may have been deleted'}
+              {t('recordMayBeDeleted', locale)}
             </EmptyDescription>
           </EmptyHeader>
           <Button variant="outline" className="mt-4" onClick={() => navigate('/opportunities')}>
-            {locale === 'zh-Hans' ? '返回列表' : 'Back to list'}
+            {t('backToList', locale)}
           </Button>
         </Empty>
       </MobileLayout>
@@ -352,7 +357,7 @@ export default function OpportunityDetailPage() {
 
   return (
     <MobileLayout
-      title={opportunity.name1 || (locale === 'zh-Hans' ? '商机详情' : 'Opportunity Details')}
+      title={opportunity.name1 || t('opportunityDetails', locale)}
       showBack
       headerRight={deleteButton}
     >
@@ -433,7 +438,7 @@ export default function OpportunityDetailPage() {
                 {formatCurrency(opportunity.totalamount || 0)}
               </p>
               <p className="text-xs text-muted-foreground">
-                {locale === 'zh-Hans' ? '金额' : 'Amount'}
+                {t('amount', locale)}
               </p>
             </div>
             <div className="text-center">
@@ -441,7 +446,7 @@ export default function OpportunityDetailPage() {
                 {opportunity.confidence || '-'}%
               </p>
               <p className="text-xs text-muted-foreground">
-                {locale === 'zh-Hans' ? '信心度' : 'Confidence'}
+                {t('confidence', locale)}
               </p>
             </div>
             <div className="text-center">
@@ -458,7 +463,7 @@ export default function OpportunityDetailPage() {
                 {daysUntilClose !== null ? `${daysUntilClose}d` : '-'}
               </p>
               <p className="text-xs text-muted-foreground">
-                {locale === 'zh-Hans' ? '距成交' : 'To Close'}
+                {t('toClose', locale)}
               </p>
             </div>
           </div>
@@ -469,13 +474,13 @@ export default function OpportunityDetailPage() {
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList className="w-full grid grid-cols-3 bg-muted/50">
               <TabsTrigger value="overview">
-                {locale === 'zh-Hans' ? '概览' : 'Overview'}
+                {t('overview', locale)}
               </TabsTrigger>
               <TabsTrigger value="timeline">
-                {locale === 'zh-Hans' ? '时间线' : 'Timeline'} ({activities.length})
+                {t('timeline', locale)} ({activities.length})
               </TabsTrigger>
               <TabsTrigger value="notes">
-                {locale === 'zh-Hans' ? '备注' : 'Notes'}
+                {t('notes', locale)}
               </TabsTrigger>
             </TabsList>
 
@@ -495,20 +500,20 @@ export default function OpportunityDetailPage() {
               {/* Key Dates */}
               <div className="glass-card p-4" style={{ borderRadius: 16 }}>
                 <h3 className="text-sm font-medium text-foreground mb-3">
-                  {locale === 'zh-Hans' ? '关键日期' : 'Key Dates'}
+                  {t('keyDates', locale)}
                 </h3>
                 <div className="space-y-3">
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground flex items-center gap-2">
                       <Calendar className="w-4 h-4" />
-                      {locale === 'zh-Hans' ? '创建日期' : 'Created'}
+                      {t('created', locale)}
                     </span>
                     <span className="text-foreground">{formatDate(opportunity.createdon)}</span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground flex items-center gap-2">
                       <Target className="w-4 h-4" />
-                      {locale === 'zh-Hans' ? '预计成交' : 'Expected Close'}
+                      {t('expectedClose', locale)}
                     </span>
                     <span
                       className={cn(
@@ -523,7 +528,7 @@ export default function OpportunityDetailPage() {
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-muted-foreground flex items-center gap-2">
                         <CheckCircle2 className="w-4 h-4" />
-                        {locale === 'zh-Hans' ? '成交日期' : 'Closed On'}
+                        {t('closedOn', locale)}
                       </span>
                       <span className="text-foreground">{formatDate(opportunity.closedon)}</span>
                     </div>
@@ -535,7 +540,7 @@ export default function OpportunityDetailPage() {
               {opportunity.lastaction && (
                 <div className="glass-card p-4" style={{ borderRadius: 16 }}>
                   <h3 className="text-sm font-medium text-foreground mb-2">
-                    {locale === 'zh-Hans' ? '最近动态' : 'Last Action'}
+                    {t('lastAction', locale)}
                   </h3>
                   <p className="text-sm text-muted-foreground">{opportunity.lastaction}</p>
                 </div>
@@ -546,7 +551,7 @@ export default function OpportunityDetailPage() {
                 <div className="glass-card p-4 border-amber-500/30" style={{ borderRadius: 16 }}>
                   <h3 className="text-sm font-medium text-amber-600 dark:text-amber-400 mb-2 flex items-center gap-2">
                     <AlertTriangle className="w-4 h-4" />
-                    {locale === 'zh-Hans' ? '阻碍因素' : 'Blocker'}
+                    {t('blocker', locale)}
                   </h3>
                   <p className="text-sm text-muted-foreground">{opportunity.blocker}</p>
                 </div>
@@ -560,10 +565,10 @@ export default function OpportunityDetailPage() {
                   <EmptyHeader>
                     <Clock className="w-12 h-12 mx-auto mb-3 text-muted-foreground/40" />
                     <EmptyTitle>
-                      {locale === 'zh-Hans' ? '暂无活动' : 'No activities yet'}
+                      {t('noActivitiesYet', locale)}
                     </EmptyTitle>
                     <EmptyDescription>
-                      {locale === 'zh-Hans' ? '记录活动以跟踪互动' : 'Log activities to track engagement'}
+                      {t('logActivitiesHint', locale)}
                     </EmptyDescription>
                   </EmptyHeader>
                 </Empty>
@@ -626,10 +631,10 @@ export default function OpportunityDetailPage() {
                 <EmptyHeader>
                   <FileText className="w-12 h-12 mx-auto mb-3 text-muted-foreground/40" />
                   <EmptyTitle>
-                    {locale === 'zh-Hans' ? '暂无备注' : 'No notes yet'}
+                    {t('noNotesYet', locale)}
                   </EmptyTitle>
                   <EmptyDescription>
-                    {locale === 'zh-Hans' ? '添加备注以记录重要信息' : 'Add notes to track important details'}
+                    {t('addNotesHint', locale)}
                   </EmptyDescription>
                 </EmptyHeader>
               </Empty>
@@ -644,7 +649,7 @@ export default function OpportunityDetailPage() {
           {
             id: 'new-activity',
             icon: Plus,
-            label: locale === 'zh-Hans' ? '新建活动' : 'New Activity',
+            label: t('newActivity', locale),
             onClick: () => navigate(`/activity/${opportunity.account?.id || 'new'}`),
           },
         ]}

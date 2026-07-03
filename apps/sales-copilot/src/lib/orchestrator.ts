@@ -161,7 +161,18 @@ Today is ${todayIso} (${weekday}). ALWAYS resolve relative dates against this:
 "this/next week" relative to ${todayIso}. NEVER invent a year — every date you
 output must be in the same year as today unless the user explicitly says otherwise.
 
-# Skeleton (must be preserved one-to-one)
+# Fidelity (CRITICAL — data integrity)
+- Keep the user's OWN wording for proper nouns (account names, contact names, departments/科室, job titles, products). Do NOT swap in a different or similar-sounding term (e.g. 设备科 must never become 检验科). The user's shorthand/abbreviation is fine — copy it as-is; matching to real records happens later.
+- Extract ONLY what the user actually stated. NEVER invent purposes, agendas, background, amounts, dates, or any detail the user did not give. Leave an optional field empty rather than fabricating a plausible-sounding value.
+
+# Composite operations (merge / deduplicate / reconcile / compare-then-change)
+Some requests are NOT a single update — they must READ records, decide what to change, and CONFIRM before writing. Signals: "合并 / merge", "去重 / deduplicate", "重复 / duplicate", "reconcile", "对比这些再改/删".
+For such an intent, emit a proposeChanges step INSTEAD of a plain update/delete:
+  { "seq": <n>, "function": "proposeChanges", "arguments": { "goal": "<the user's request, verbatim>" } }
+proposeChanges reads the in-scope records, proposes the exact update/delete operations, and asks the user to confirm — nothing is written until they do.
+It needs the records in scope: if a prior step already queried/compared them, place proposeChanges AFTER it (higher seq, dependsOn that step's outputRef). If NO prior step fetched them, ADD a query step BEFORE it (e.g. queryActivities with the right filter) and give proposeChanges the higher seq. For this case you MAY output MORE steps than the skeleton.
+
+# Skeleton (preserve one-to-one, EXCEPT composite operations above)
 ${skeletonLines}
 
 # Available skills
@@ -170,13 +181,13 @@ ${describeBoundEntities(frame)}
 
 # Output rules
 - Output ONE JSON object with shape: { "steps": [ { "seq", "outputRef"?, "dependsOn"?, "function", "arguments", "usePageContext"? }, ... ] }
-- Steps array length MUST equal the skeleton length, and each step's seq / outputRef / dependsOn must match the skeleton.
+- Steps array length normally equals the skeleton length, and each step's seq / outputRef / dependsOn matches the skeleton. EXCEPTION: composite operations (see "# Composite operations") may add a query and/or a proposeChanges step beyond the skeleton.
 - "function" should normally equal the suggestedFunction. Override only if the suggested skill is missing from the available skills list.
 - "arguments" must obey the parameter schema of the chosen skill.
 - For queryCopilotStudio / externalKnowledgeQuery: "query" is REQUIRED — use the intent summary as the query text.
 - For Activity steps: temporal=past → temporalMode="completed"; temporal=future → temporalMode="planned".
 - For draftActivity/updateActivity: when the user mentions a date or relative day ("today", "yesterday", "next Tuesday", "明天"), set scheduledDate to the resolved YYYY-MM-DD using the Current date above. For a past activity with no explicit date ("visited the customer", "called them"), default scheduledDate to today (${todayIso}). Omit scheduledDate only when truly unknown.
-- For draftActivity: "type" is REQUIRED. Infer from context: 拜访/visit/went to/现场 → "visit", 电话/call/phoned/rang → "call", 会议/meeting/met with/讨论会 → "meeting", 邮件/email/sent mail → "email", otherwise → "other".
+- For draftActivity: "type" is REQUIRED. Infer from context: 拜访/visit/went to/现场 → "visit", 电话/call/phoned/rang → "call", 会议/meeting/met with/讨论会 → "meeting", 邮件/email/sent mail → "email", otherwise → "meeting".
 - For draftActivity/updateActivity: "title" is REQUIRED and must be NON-EMPTY, specific, and meaningful — include key info (account name, topic, and/or product), e.g. "Royal London Hospital - BeneVision N22 Demo", "Cedars-Sinai pricing follow-up". NEVER leave title blank, and never use a generic title like "Customer Visit", "Phone Call", or "Meeting". When several activity steps exist (multi-step plans), EVERY step must carry its own specific title.
 - For queryActivities: always set date filters. "today" → dateRange="today" OR scheduledDate=${todayIso}. "this week" → dateRange="7days" OR dateFrom/dateTo. "completed today" → dateRange="today" + status="completed". "pending" → status="draft" or "confirmed".
 - For queryOpportunities: "active/pipeline" → stage != won/lost. "at risk" → minConfidence=0 maxConfidence=49.
@@ -410,8 +421,10 @@ function emptyFrame(): FrameResult {
  * Parse the Orchestrator output. We accept either a DAG plan or a single-
  * intent shape. When the model omits seq/outputRef/dependsOn but emitted the
  * right number of steps, fall back to the skeleton's seq/outputRef.
+ *
+ * Exported for regression testing (composite plans that exceed the skeleton).
  */
-function parseOrchestratorOutput(text: string, skeleton: SkeletonStep[]): SubPromptOutput | null {
+export function parseOrchestratorOutput(text: string, skeleton: SkeletonStep[]): SubPromptOutput | null {
   let candidate: unknown;
   try {
     candidate = JSON.parse(text);
@@ -434,6 +447,23 @@ function parseOrchestratorOutput(text: string, skeleton: SkeletonStep[]): SubPro
     Array.isArray((candidate as { steps?: unknown }).steps)
   ) {
     const steps = (candidate as { steps: Array<Partial<DagStep> & { dependsOn?: unknown; arguments?: unknown }> }).steps;
+    // Normalize EVERY step's shape regardless of skeleton length. Composite plans
+    // (merge / dedupe) legitimately add steps beyond the skeleton, and the model
+    // often emits dependsOn as a string ("$intent_0") or arguments as a JSON
+    // string. Coercing only inside the length-match block made those plans fail
+    // to parse (the "响应解析失败" on merge requests).
+    for (let i = 0; i < steps.length; i++) {
+      const s = steps[i];
+      if (typeof s.dependsOn === 'string') {
+        s.dependsOn = (s.dependsOn as string).split(',').map(v => v.trim()).filter(Boolean) as unknown as string[];
+      }
+      if (typeof s.arguments === 'string') {
+        try { s.arguments = JSON.parse(s.arguments as string); } catch { s.arguments = {}; }
+      }
+      if (!s.arguments) s.arguments = {};
+    }
+    // Skeleton recovery (seq / outputRef / function / dependsOn) only when the
+    // plan is 1:1 with the skeleton.
     if (steps.length === skeleton.length) {
       const patched: string[] = [];
       for (let i = 0; i < steps.length; i++) {
@@ -441,17 +471,8 @@ function parseOrchestratorOutput(text: string, skeleton: SkeletonStep[]): SubPro
         const sk = skeleton[i];
         if (s.seq == null) { s.seq = sk.seq; patched.push(`step${i}.seq`); }
         if (!s.outputRef) { s.outputRef = sk.outputRef; patched.push(`step${i}.outputRef`); }
-        // dependsOn: coerce comma-separated string → array
-        if (typeof s.dependsOn === 'string') {
-          s.dependsOn = (s.dependsOn as string).split(',').map(v => v.trim()).filter(Boolean) as unknown as string[];
-        }
         if (!s.dependsOn && sk.dependsOn) s.dependsOn = sk.dependsOn;
         if (!s.function && sk.suggestedFunction) { s.function = sk.suggestedFunction; patched.push(`step${i}.function`); }
-        // arguments: coerce JSON string → object
-        if (typeof s.arguments === 'string') {
-          try { s.arguments = JSON.parse(s.arguments as string); } catch { s.arguments = {}; patched.push(`step${i}.arguments(unparseable→{})`); }
-        }
-        if (!s.arguments) s.arguments = {};
       }
       // Observability: if we had to repair the model's output, say so — a
       // recovered-but-incomplete plan should never look like a clean one.

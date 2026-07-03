@@ -4,7 +4,7 @@
  * This applies regardless of locale or data language (e.g., Chinese region names).
  */
 
-import { getLocale } from '@/lib/i18n';
+import { getLocale, localeBcp47 } from '@/lib/i18n';
 
 /**
  * Format a numeric value as USD currency.
@@ -37,7 +37,7 @@ export function formatCurrency(
   }
   
   // Full format with locale-appropriate thousand separators
-  const localeCode = locale === 'zh-Hans' ? 'zh-CN' : 'en-US';
+  const localeCode = localeBcp47(locale);
   return '$' + value.toLocaleString(localeCode, {
     minimumFractionDigits: options?.decimals ?? 0,
     maximumFractionDigits: options?.decimals ?? 0,

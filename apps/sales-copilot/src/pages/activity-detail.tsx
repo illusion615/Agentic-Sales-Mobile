@@ -45,7 +45,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { ClientProfileSheet } from '@/components/client-profile-sheet';
 import { FloatingQuickActions, type QuickAction } from '@/components/floating-quick-actions';
-import { getLocale } from '@/lib/i18n';
+import { getLocale, t } from '@/lib/i18n';
 import { useCopilot } from '@/contexts/copilot-context';
 import { PullToRefresh } from '@/components/pull-to-refresh';
 
@@ -134,7 +134,7 @@ export default function ActivityDetailPage() {
   }, [queryClient, id]);
 
   // AI Summary hooks
-  const { summary: aiSummary, isLoading: isLoadingAISummary, isGenerating, isExpired, isFailed, refetch: refetchAISummary } = useEntityAISummary('activity', id || '');
+  const { summary: aiSummary, isLoading: isLoadingAISummary, isGenerating, isExpired, isFailed, localeMismatch, refetch: refetchAISummary } = useEntityAISummary('activity', id || '');
   const { triggerForEntity, isTriggering } = useWithAISummaryTrigger();
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -217,6 +217,13 @@ export default function ActivityDetailPage() {
     }, 500);
   }, [activity, triggerForEntity, refetchAISummary]);
 
+  // Regenerate the insight when the user switched language since it was generated.
+  useEffect(() => {
+    if (localeMismatch && activity && !isGenerating && !isTriggering && !isRefreshingAI) {
+      handleRefreshAISummary();
+    }
+  }, [localeMismatch, activity, isGenerating, isTriggering, isRefreshingAI, handleRefreshAISummary]);
+
   const handleMarkComplete = async () => {
     if (!activity) return;
     // Guard against double-taps: the dock chip stays interactive until the dock
@@ -258,7 +265,7 @@ export default function ActivityDetailPage() {
 
   if (isLoading) {
     return (
-      <MobileLayout title={locale === 'zh-Hans' ? '活动详情' : 'Activity Details'}>
+      <MobileLayout title={t('activityDetails', locale)}>
         <div className="px-4 pb-40 space-y-4 mt-4">
           <div className="glass-card p-4 animate-pulse" style={{ borderRadius: 20 }}>
             <div className="flex items-start gap-4">
@@ -307,9 +314,9 @@ export default function ActivityDetailPage() {
 
   // Left-right switchable detail sections (D20). Order: Details | AI Insights | Related Context.
   const detailTabs: { key: DetailTab; label: string }[] = [
-    { key: 'details', label: locale === 'zh-Hans' ? '详情' : 'Details' },
-    { key: 'insights', label: locale === 'zh-Hans' ? 'AI 洞察' : 'AI Insights' },
-    { key: 'related', label: locale === 'zh-Hans' ? '关联' : 'Related' },
+    { key: 'details', label: t('details', locale) },
+    { key: 'insights', label: t('aiInsights', locale) },
+    { key: 'related', label: t('related', locale) },
   ];
   const activeTabIndex = detailTabs.findIndex((t) => t.key === activeTab);
   const switchTab = (key: DetailTab) => {
@@ -364,7 +371,7 @@ export default function ActivityDetailPage() {
       <button
         onClick={() => navigate(`/activity/${activity.account?.id || 'new'}?edit=${activity.id}`)}
         className="p-2 rounded-full hover:bg-muted/50 transition-colors"
-        aria-label={locale === 'zh-Hans' ? '编辑' : 'Edit activity'}
+        aria-label={t('editActivity', locale)}
       >
         <Edit className="w-5 h-5 text-foreground" />
       </button>
@@ -477,7 +484,7 @@ export default function ActivityDetailPage() {
           (activity.account || activity.contact || activity.opportunity) ? (
           <GlassCard className="space-y-3">
             <h2 className="text-sm font-semibold text-foreground uppercase tracking-wide">
-              {locale === 'zh-Hans' ? '关联上下文' : 'Related Context'}
+              {t('relatedContext', locale)}
             </h2>
 
             {/* Combined Context Grid */}
@@ -528,7 +535,7 @@ export default function ActivityDetailPage() {
               {activity.contacts && activity.contacts.length > 0 ? (
                 <div className="space-y-2">
                   <p className="text-xs font-medium text-muted-foreground">
-                    {locale === 'zh-Hans' ? `参会人 (${activity.contacts.length})` : `Attendees (${activity.contacts.length})`}
+                    {t('attendeesCount', locale, { count: activity.contacts.length })}
                   </p>
                   {activity.contacts.map((att) => (
                     <div
@@ -547,7 +554,7 @@ export default function ActivityDetailPage() {
                           <ArrowRight className="w-3.5 h-3.5 text-accent-foreground flex-shrink-0" />
                         </div>
                         <p className="text-xs text-muted-foreground mt-0.5">
-                          {att.email || (locale === 'zh-Hans' ? '联系人' : 'Contact')}
+                          {att.email || t('contact', locale)}
                         </p>
                       </div>
                     </div>
@@ -569,7 +576,7 @@ export default function ActivityDetailPage() {
                       <ArrowRight className="w-3.5 h-3.5 text-accent-foreground flex-shrink-0" />
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      {locale === 'zh-Hans' ? '联系人' : 'Contact'}
+                      {t('contact', locale)}
                     </p>
                   </div>
                 </div>
@@ -622,7 +629,7 @@ export default function ActivityDetailPage() {
                       <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
                         <Clock className="w-3 h-3" />
                         <span>
-                          {locale === 'zh-Hans' ? '预计成交: ' : 'Expected close: '}
+                          {t('expectedCloseColon', locale)}
                           {new Date(fullOpportunity.expectedclosedate).toLocaleDateString()}
                         </span>
                       </div>
@@ -634,7 +641,7 @@ export default function ActivityDetailPage() {
           </GlassCard>
           ) : (
             <GlassCard className="py-10 text-center text-sm text-muted-foreground">
-              {locale === 'zh-Hans' ? '暂无关联的客户、联系人或商机' : 'No related account, contact, or opportunity'}
+              {t('noRelatedRecords', locale)}
             </GlassCard>
           )
         )}
@@ -646,7 +653,7 @@ export default function ActivityDetailPage() {
         {activity.notes && (
           <GlassCard className="space-y-4">
             <h2 className="text-sm font-semibold text-foreground uppercase tracking-wide">
-              {locale === 'zh-Hans' ? '详情' : 'Details'}
+              {t('details', locale)}
             </h2>
 
             {/* Notes */}
@@ -654,7 +661,7 @@ export default function ActivityDetailPage() {
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <FileText className="w-4 h-4 text-muted-foreground" />
-                  <p className="text-xs text-muted-foreground">{locale === 'zh-Hans' ? '备注' : 'Notes'}</p>
+                  <p className="text-xs text-muted-foreground">{t('notes', locale)}</p>
                 </div>
                 {/<html[\s>]/i.test(activity.notes) ? (
                   <iframe
@@ -685,7 +692,7 @@ export default function ActivityDetailPage() {
         {savedAttachments.length > 0 && (
           <GlassCard className="space-y-3">
             <h2 className="text-sm font-semibold text-foreground uppercase tracking-wide">
-              {locale === 'zh-Hans' ? `附件 (${savedAttachments.length})` : `Attachments (${savedAttachments.length})`}
+              {t('attachmentsCount', locale, { count: savedAttachments.length })}
             </h2>
             <div className="flex gap-2 flex-wrap">
               {savedAttachments.map((att) => (
@@ -723,7 +730,7 @@ export default function ActivityDetailPage() {
         {/* Empty details fallback */}
         {!activity.notes && savedAttachments.length === 0 && (
           <GlassCard className="py-10 text-center text-sm text-muted-foreground">
-            {locale === 'zh-Hans' ? '暂无详情备注或附件' : 'No notes or attachments'}
+            {t('noNotesOrAttachments', locale)}
           </GlassCard>
         )}
           </>
@@ -757,8 +764,8 @@ export default function ActivityDetailPage() {
             id: 'complete',
             icon: CheckCircle,
             label: updateActivity.isPending
-              ? (locale === 'zh-Hans' ? '完成中…' : 'Completing…')
-              : (locale === 'zh-Hans' ? '完成' : 'Complete'),
+              ? t('completing', locale)
+              : t('complete', locale),
             onClick: handleMarkComplete,
             disabled: updateActivity.isPending,
             busy: updateActivity.isPending,

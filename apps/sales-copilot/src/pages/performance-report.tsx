@@ -20,7 +20,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useActivityList } from '@/generated/hooks/use-activity';
 import { useAccountList } from '@/generated/hooks/use-account';
-import type { Opportunity } from '@/generated/models/opportunity-model';import type { Activity } from '@/generated/models/activity-model';import type { Account } from '@/generated/models/account-model';import { getLocale } from '@/lib/i18n';
+import type { Opportunity } from '@/generated/models/opportunity-model';import type { Activity } from '@/generated/models/activity-model';import type { Account } from '@/generated/models/account-model';import { getLocale, t } from '@/lib/i18n';
 import { useFirstMount } from '@/hooks/use-first-mount';
 
 const containerVariants = {
@@ -140,10 +140,10 @@ export default function PerformanceReportPage() {
             className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
             <ChevronLeft className="w-5 h-5" />
-            {locale === 'zh-Hans' ? '返回' : 'Back'}
+            {t('back', locale)}
           </button>
           <h1 className="text-base font-semibold text-foreground">
-            {locale === 'zh-Hans' ? '业绩报表' : 'Performance Report'}
+            {t('performanceReport', locale)}
           </h1>
           <div className="w-16" /> {/* Spacer for centering */}
         </div>
@@ -164,10 +164,10 @@ export default function PerformanceReportPage() {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-lg font-bold text-foreground">
-                {locale === 'zh-Hans' ? '本月业绩' : 'This Month'}
+                {t('thisMonth', locale)}
               </h2>
               <p className="text-sm text-muted-foreground">
-                {locale === 'zh-Hans' ? '目标: ' : 'Target: '}
+                {t('targetColon', locale)}
                 {formatCurrency(monthlyTarget)}
               </p>
             </div>
@@ -179,7 +179,7 @@ export default function PerformanceReportPage() {
               <div className="flex items-center gap-2 mb-1">
                 <DollarSign className="w-4 h-4 text-emerald-500" />
                 <span className="text-xs text-muted-foreground">
-                  {locale === 'zh-Hans' ? '已完成' : 'Achieved'}
+                  {t('achieved', locale)}
                 </span>
               </div>
               <p className="text-xl font-bold text-foreground">
@@ -190,7 +190,7 @@ export default function PerformanceReportPage() {
               <div className="flex items-center gap-2 mb-1">
                 <Target className="w-4 h-4 text-amber-500" />
                 <span className="text-xs text-muted-foreground">
-                  {locale === 'zh-Hans' ? '管道中' : 'In Pipeline'}
+                  {t('inPipeline', locale)}
                 </span>
               </div>
               <p className="text-xl font-bold text-foreground">
@@ -207,7 +207,7 @@ export default function PerformanceReportPage() {
               {wonDeals.length}
             </p>
             <p className="text-[10px] text-muted-foreground">
-              {locale === 'zh-Hans' ? '成交' : 'Won'}
+              {t('won', locale)}
             </p>
           </div>
           <div className="glass-card p-3 text-center" style={{ borderRadius: 14 }}>
@@ -215,19 +215,19 @@ export default function PerformanceReportPage() {
               {lostDeals.length}
             </p>
             <p className="text-[10px] text-muted-foreground">
-              {locale === 'zh-Hans' ? '流失' : 'Lost'}
+              {t('lost', locale)}
             </p>
           </div>
           <div className="glass-card p-3 text-center" style={{ borderRadius: 14 }}>
             <p className="text-2xl font-bold text-foreground">{winRate}%</p>
             <p className="text-[10px] text-muted-foreground">
-              {locale === 'zh-Hans' ? '胜率' : 'Win Rate'}
+              {t('winRate', locale)}
             </p>
           </div>
           <div className="glass-card p-3 text-center" style={{ borderRadius: 14 }}>
             <p className="text-2xl font-bold text-foreground">{activeDeals.length}</p>
             <p className="text-[10px] text-muted-foreground">
-              {locale === 'zh-Hans' ? '进行中' : 'Active'}
+              {t('active', locale)}
             </p>
           </div>
         </motion.div>
@@ -237,13 +237,13 @@ export default function PerformanceReportPage() {
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList className="w-full grid grid-cols-3 bg-muted/50">
               <TabsTrigger value="overview">
-                {locale === 'zh-Hans' ? '概览' : 'Overview'}
+                {t('overview', locale)}
               </TabsTrigger>
               <TabsTrigger value="deals">
-                {locale === 'zh-Hans' ? '商机' : 'Deals'}
+                {t('deals', locale)}
               </TabsTrigger>
               <TabsTrigger value="activity">
-                {locale === 'zh-Hans' ? '活动' : 'Activity'}
+                {t('activityTab', locale)}
               </TabsTrigger>
             </TabsList>
 
@@ -254,7 +254,7 @@ export default function PerformanceReportPage() {
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-sm font-medium text-foreground flex items-center gap-2">
                     <Zap className="w-4 h-4 text-violet-500" />
-                    {locale === 'zh-Hans' ? '活动完成度' : 'Activity Progress'}
+                    {t('activityProgress', locale)}
                   </h3>
                   <Badge variant="outline">
                     {activities.length}/{activityTarget}
@@ -273,10 +273,10 @@ export default function PerformanceReportPage() {
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
                   {activityPercent >= 100
-                    ? (locale === 'zh-Hans' ? '🎉 目标达成!' : '🎉 Target achieved!')
+                    ? t('targetAchieved', locale)
                     : activityPercent >= 70
-                    ? (locale === 'zh-Hans' ? '接近目标，继续加油!' : 'Almost there, keep going!')
-                    : (locale === 'zh-Hans' ? '需要更多活动来达成目标' : 'More activities needed to reach target')}
+                    ? t('almostThere', locale)
+                    : t('moreActivitiesNeeded', locale)}
                 </p>
               </div>
 
@@ -285,14 +285,14 @@ export default function PerformanceReportPage() {
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-sm font-medium text-foreground flex items-center gap-2">
                     <Users className="w-4 h-4 text-emerald-500" />
-                    {locale === 'zh-Hans' ? '客户覆盖' : 'Client Coverage'}
+                    {t('clientCoverage', locale)}
                   </h3>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="text-center">
                     <p className="text-2xl font-bold text-foreground">{accounts.length}</p>
                     <p className="text-xs text-muted-foreground">
-                      {locale === 'zh-Hans' ? '总客户数' : 'Total Clients'}
+                      {t('totalClients', locale)}
                     </p>
                   </div>
                   <div className="text-center">
@@ -300,7 +300,7 @@ export default function PerformanceReportPage() {
                       {opportunities.length > 0 ? Math.round((wonDeals.length / opportunities.length) * 100) : 0}%
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      {locale === 'zh-Hans' ? '转化率' : 'Conversion'}
+                      {t('conversion', locale)}
                     </p>
                   </div>
                 </div>
@@ -313,7 +313,7 @@ export default function PerformanceReportPage() {
                 <div className="text-center py-8">
                   <Target className="w-12 h-12 mx-auto mb-3 text-muted-foreground/40" />
                   <p className="text-muted-foreground text-sm">
-                    {locale === 'zh-Hans' ? '暂无商机数据' : 'No deal data'}
+                    {t('noDealData', locale)}
                   </p>
                 </div>
               ) : (
@@ -322,7 +322,7 @@ export default function PerformanceReportPage() {
                   {wonDeals.length > 0 && (
                     <div>
                       <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
-                        {locale === 'zh-Hans' ? '已成交' : 'Won'} ({wonDeals.length})
+                        {t('wonClosed', locale)} ({wonDeals.length})
                       </h4>
                       {wonDeals.slice(0, 3).map((opp: Opportunity) => (
                         <div
@@ -348,7 +348,7 @@ export default function PerformanceReportPage() {
                   {activeDeals.length > 0 && (
                     <div>
                       <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
-                        {locale === 'zh-Hans' ? '进行中' : 'Active'} ({activeDeals.length})
+                        {t('active', locale)} ({activeDeals.length})
                       </h4>
                       {activeDeals.slice(0, 3).map((opp: Opportunity) => (
                         <div
@@ -382,24 +382,24 @@ export default function PerformanceReportPage() {
             <TabsContent value="activity" className="mt-4 space-y-4">
               <div className="glass-card p-4" style={{ borderRadius: 16 }}>
                 <h3 className="text-sm font-medium text-foreground mb-3">
-                  {locale === 'zh-Hans' ? '活动统计' : 'Activity Summary'}
+                  {t('activitySummary', locale)}
                 </h3>
                 <div className="space-y-3">
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">
-                      {locale === 'zh-Hans' ? '总活动数' : 'Total Activities'}
+                      {t('totalActivities', locale)}
                     </span>
                     <span className="font-medium text-foreground">{activities.length}</span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">
-                      {locale === 'zh-Hans' ? '本周目标' : 'Weekly Target'}
+                      {t('weeklyTarget', locale)}
                     </span>
                     <span className="font-medium text-foreground">{activityTarget}</span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">
-                      {locale === 'zh-Hans' ? '完成率' : 'Completion'}
+                      {t('completion', locale)}
                     </span>
                     <span className={cn(
                       'font-medium',
@@ -418,7 +418,7 @@ export default function PerformanceReportPage() {
                 onClick={() => navigate('/activity-capture')}
               >
                 <Zap className="w-4 h-4" />
-                {locale === 'zh-Hans' ? '记录新活动' : 'Log New Activity'}
+                {t('logNewActivity', locale)}
               </Button>
             </TabsContent>
           </Tabs>

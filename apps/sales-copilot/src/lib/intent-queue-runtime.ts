@@ -22,6 +22,7 @@ import {
   buildEffectiveArgs,
   currentIntent,
   dropFirstResolution,
+  ensureRequiredSubjectResolution,
   findIntent,
   insertSubIntentAfterCursor,
   mergeIntentArgs,
@@ -32,7 +33,12 @@ import {
   type QueueIntent,
 } from './intent-queue';
 import { type ResolutionItem, getMatchThresholds } from './agent-utils';
+import { getFunctionSubject } from './function-registry';
+import { isElicitableUpdate, hasConcreteUpdateValue, updatableFields, enumOptions, fieldKind, fieldLabel } from './field-elicitation';
 import { ATTACHMENT_IDS_KEY } from './attachment-assign';
+import { generateProposal } from './propose-changes';
+import { applyProposal, type ChangeProposal } from './change-proposal';
+import { getLocale, LOCALE_META } from './i18n';
 
 // ---------- card-message shapes (shared with copilot-context) ----------
 // Kept loose (Record<string, unknown>) here to avoid an import cycle; the
@@ -40,7 +46,7 @@ import { ATTACHMENT_IDS_KEY } from './attachment-assign';
 
 export type CardMessage = Record<string, unknown> & {
   id: string;
-  type: 'agent' | 'form-card' | 'match-selection' | 'awaiting-clarification';
+  type: 'agent' | 'form-card' | 'match-selection' | 'awaiting-clarification' | 'param-picker' | 'proposal-card';
   content: string;
   timestamp: number;
   queueId: string;
@@ -389,18 +395,14 @@ async function stepCurrent(queue: IntentQueue, deps: RuntimeDeps): Promise<Inten
 
   // Narrate step start the first time we touch this intent.
   q = emitAnnounce(q, cur, deps);
-  cur = currentIntent(q)!;
 
-  // 1) Resolve every pending resolution serially. runOneResolution returns
-  //    an updated queue with EITHER the head resolution consumed (drop +
-  //    context merged) OR status flipped to 'awaiting-user' (card rendered).
-  while (cur.resolutions.length > 0) {
-    q = await runOneResolution(q, cur, cur.resolutions[0], deps);
-    const next = currentIntent(q);
-    if (!next) return q;
-    if (next.status === 'awaiting-user') return q;
-    cur = next;
+  // 1) Resolve every pending resolution serially (name→id matches, etc.).
+  {
+    const r = await drainResolutions(q, deps);
+    q = r.q;
+    if (r.awaiting) return q;
   }
+  cur = currentIntent(q)!;
 
   // 2) Implicit per-step fuzzy-match for additional-intent name fields
   //    (parity with old processAdditionalIntents behaviour for draftActivity / Opp / Contact
@@ -408,8 +410,97 @@ async function stepCurrent(queue: IntentQueue, deps: RuntimeDeps): Promise<Inten
   q = await implicitNameResolution(q, cur, deps);
   cur = currentIntent(q)!;
 
+  // 2.5) Missing-subject gate: action tools (updateOpportunity, …) declare a
+  //      required subject entity. If it can't be resolved from args/context,
+  //      append a required resolution so the user picks/searches the record via
+  //      the existing match-selection card — instead of hard-failing in the
+  //      handler. buildEffectiveArgs already folded in page/context ids, so this
+  //      fires ONLY when the subject is genuinely unknown.
+  q = ensureRequiredSubjectResolution(q, cur);
+  {
+    const r = await drainResolutions(q, deps);
+    q = r.q;
+    if (r.awaiting) return q;
+  }
+  cur = currentIntent(q)!;
+
+  // 2.6) Missing-parameter gate: an update tool whose subject is resolved but
+  //      which carries no concrete value elicits the field/value via chips
+  //      (enum) or an input (scalar) instead of hard-failing in the handler.
+  {
+    const r = await ensureRequiredParams(q, cur, deps);
+    q = r.q;
+    if (r.awaiting) return q;
+  }
+  cur = currentIntent(q)!;
+
   // 3) Execute the function.
   return await executeIntent(q, cur, deps);
+}
+
+/** Subject entity's display name (for the param-picker title). */
+function subjectLabelFor(intent: QueueIntent, queue: IntentQueue): string | undefined {
+  const subj = getFunctionSubject(intent.function);
+  if (!subj) return undefined;
+  const args = buildEffectiveArgs(intent, queue.resolvedContext);
+  const name = args[`${subj}Name`];
+  return typeof name === 'string' && name ? name : undefined;
+}
+
+/**
+ * Missing-parameter gate. When an elicitable update tool has a resolved subject
+ * but no concrete value, render a param-picker card (chooseField) and pause so
+ * the user selects what to change — instead of the handler hard-failing.
+ */
+async function ensureRequiredParams(
+  queue: IntentQueue,
+  intent: QueueIntent,
+  deps: RuntimeDeps,
+): Promise<{ q: IntentQueue; awaiting: boolean }> {
+  const fn = intent.function;
+  if (!isElicitableUpdate(fn)) return { q: queue, awaiting: false };
+  const args = buildEffectiveArgs(intent, queue.resolvedContext);
+  if (hasConcreteUpdateValue(fn, args)) return { q: queue, awaiting: false };
+  const fields = updatableFields(fn, deps.locale);
+  if (fields.length === 0) return { q: queue, awaiting: false };
+
+  const isZh = deps.locale === 'zh-Hans';
+  const messageId = `card-${queue.id}-${intent.id}-param-${Date.now()}`;
+  deps.pushMessage({
+    id: messageId,
+    type: 'param-picker',
+    content: isZh ? '请选择要修改的内容' : 'Choose what to change',
+    timestamp: Date.now(),
+    queueId: queue.id,
+    queueIntentId: intent.id,
+    paramPicker: {
+      function: fn,
+      arguments: args,
+      subjectLabel: subjectLabelFor(intent, queue),
+      mode: 'chooseField',
+      options: fields.map((f) => ({ value: f.name, label: f.label })),
+    },
+  });
+  return { q: patchIntent(queue, intent.id, { status: 'awaiting-user', messageId }), awaiting: true };
+}
+
+/**
+ * Resolve the current intent's pending resolutions serially. Returns the updated
+ * queue and whether it stopped because a card is awaiting user input.
+ */
+async function drainResolutions(
+  queue: IntentQueue,
+  deps: RuntimeDeps,
+): Promise<{ q: IntentQueue; awaiting: boolean }> {
+  let q = queue;
+  let cur = currentIntent(q);
+  while (cur && cur.resolutions.length > 0) {
+    q = await runOneResolution(q, cur, cur.resolutions[0], deps);
+    cur = currentIntent(q);
+    if (!cur) return { q, awaiting: false };
+    if (cur.status === 'awaiting-user') return { q, awaiting: true };
+  }
+  return { q, awaiting: false };
 }
 
 /**
@@ -417,7 +508,7 @@ async function stepCurrent(queue: IntentQueue, deps: RuntimeDeps): Promise<Inten
  * Returns the updated queue. Inspect the head intent's status afterward:
  *   - status === 'awaiting-user' → card rendered, caller should stop.
  *   - resolutions length decreased → auto-resolved, caller may loop.
- *   - else (no high-conf, non-draft) → resolution silently dropped.
+ *   - else (no high-conf, non-draft, non-required) → resolution silently dropped.
  */
 async function runOneResolution(
   queue: IntentQueue,
@@ -428,8 +519,8 @@ async function runOneResolution(
   const { entityType, query, scopeBy } = resolution;
 
   // Activity duplicate-check is not useful for sales workflows — reps frequently
-  // visit the same account/topic. Skip it silently.
-  if (entityType === 'activity') {
+  // visit the same account/topic. Skip it silently (unless it's a required subject).
+  if (entityType === 'activity' && !resolution.required) {
     return dropFirstResolution(queue, intent.id);
   }
 
@@ -439,6 +530,7 @@ async function runOneResolution(
   const fnName =
     entityType === 'account' ? 'fuzzyMatchAccount'
     : entityType === 'contact' ? 'fuzzyMatchContact'
+    : entityType === 'activity' ? 'fuzzyMatchActivity'
     : 'fuzzyMatchOpportunity';
 
   try {
@@ -449,6 +541,10 @@ async function runOneResolution(
     );
 
     if (!matchRes.success || !matchRes.data) {
+      // A required subject can't be silently dropped — surface a picker/prompt.
+      if (resolution.required) {
+        return renderAwaitingClarificationCard(queue, intent, resolution, { matches: [] }, deps);
+      }
       return dropFirstResolution(queue, intent.id);
     }
 
@@ -456,19 +552,37 @@ async function runOneResolution(
       matches: Array<{ id: string; name: string; score: number; matchType: string; accountId?: string; accountName?: string }>;
       confidence: 'high' | 'medium' | 'low' | 'none';
       exactMatch?: { id: string; name: string; score: number; accountId?: string; accountName?: string };
+      listMode?: boolean;
     };
 
     const highConf = data.matches.filter((m) => m.score >= getMatchThresholds().high);
-    const singleAuto = highConf.length === 1 && highConf[0].score > 90;
+
+    // Auto-resolve when there's a single unambiguous option:
+    //   - a single high-confidence fuzzy match (name query), or
+    //   - a required subject whose pick-list has exactly one candidate
+    //     ("update the opportunity" and only one opportunity exists).
+    const singleAuto =
+      (highConf.length === 1 && highConf[0].score > 90) ||
+      (resolution.required === true && data.listMode === true && data.matches.length === 1);
 
     if (singleAuto) {
-      const top = highConf[0];
+      const top = resolution.required && data.listMode && data.matches.length === 1 ? data.matches[0] : highConf[0];
       const ctx = buildResolvedPatch(entityType, top);
       let next = mergeResolvedContext(queue, ctx);
       next = mergeIntentArgs(next, intent.id, ctx);
       next = dropFirstResolution(next, intent.id);
       console.log('[IntentQueueRuntime] auto-resolved', entityType, '→', top.name);
       return next;
+    }
+
+    // Required subject (missing-id gate): the user MUST choose. Render the picker
+    // whenever there is any candidate (list mode or low-conf name match); never
+    // silently drop — that is what used to make "update the opportunity" fail.
+    if (resolution.required) {
+      if (data.matches.length > 0) {
+        return renderMatchSelectionCard(queue, intent, resolution, data, deps);
+      }
+      return renderAwaitingClarificationCard(queue, intent, resolution, data, deps);
     }
 
     if (highConf.length >= 1) {
@@ -483,6 +597,9 @@ async function runOneResolution(
     return dropFirstResolution(queue, intent.id);
   } catch (err) {
     console.warn('[IntentQueueRuntime] fuzzy match failed:', err);
+    if (resolution.required) {
+      return renderAwaitingClarificationCard(queue, intent, resolution, { matches: [] }, deps);
+    }
     return dropFirstResolution(queue, intent.id);
   }
 }
@@ -589,10 +706,12 @@ function renderMatchSelectionCard(
     matches: Array<{ id: string; name: string; score: number; matchType: string; accountId?: string; accountName?: string }>;
     confidence: 'high' | 'medium' | 'low' | 'none';
     exactMatch?: { id: string; name: string; score: number; accountId?: string; accountName?: string };
+    listMode?: boolean;
   },
   deps: RuntimeDeps,
 ): IntentQueue {
   const isZh = deps.locale === 'zh-Hans';
+  const isListMode = data.listMode === true;
   const highConf = data.matches.filter((m) => m.score >= getMatchThresholds().high);
   const lowConf = data.matches.filter((m) => m.score < getMatchThresholds().high && m.score >= 20);
   const messageId = `card-${queue.id}-${intent.id}-match-${Date.now()}`;
@@ -600,21 +719,27 @@ function renderMatchSelectionCard(
     : resolution.entityType === 'contact' ? '联系人'
     : resolution.entityType === 'activity' ? '活动'
     : '商机';
+  // List mode (missing-subject picker): show ALL candidates, no confidence tiers.
+  const primaryMatches = isListMode ? data.matches : highConf;
+  const secondaryMatches = isListMode ? [] : lowConf;
 
   deps.pushMessage({
     id: messageId,
     type: 'match-selection',
-    content: isZh
-      ? `找到 ${highConf.length} 个${entityZh}匹配，请选择一个：`
-      : `Found ${highConf.length} matching ${resolution.entityType}(s). Please pick one:`,
+    content: isListMode
+      ? (isZh ? `请选择要操作的${entityZh}：` : `Select a ${resolution.entityType}:`)
+      : (isZh
+        ? `找到 ${highConf.length} 个${entityZh}匹配，请选择一个：`
+        : `Found ${highConf.length} matching ${resolution.entityType}(s). Please pick one:`),
     timestamp: Date.now(),
     queueId: queue.id,
     queueIntentId: intent.id,
     matchSelection: {
       entityType: resolution.entityType,
       query: resolution.query,
-      matches: highConf,
-      lowConfidenceMatches: lowConf,
+      matches: primaryMatches,
+      lowConfidenceMatches: secondaryMatches,
+      listMode: isListMode,
       confidence: data.confidence,
       pendingIntent: {
         function: intent.function,
@@ -688,6 +813,13 @@ async function executeIntent(
 ): Promise<IntentQueue> {
   const isZh = deps.locale === 'zh-Hans';
   const effectiveArgs = buildEffectiveArgs(intent, queue.resolvedContext);
+
+  // proposeChanges = the "想一下 / think" step: reason over prior records → a
+  // change proposal rendered as a confirm card. Nothing is written until the
+  // user confirms (per confirm-scope A: composite/destructive ops are gated).
+  if (intent.function === 'proposeChanges') {
+    return await renderProposalCard(queue, intent, deps);
+  }
 
   if (intent.function.startsWith('draft')) {
     // Render a form-card and wait for Save / Cancel.
@@ -779,6 +911,71 @@ async function executeIntent(
     q = advanceCursor(q);
     return await runQueue(q, deps);
   }
+}
+
+/** Dump every prior step's result records (as JSON text) so the reason step can
+ *  see the concrete records — including their ids — to propose changes over.
+ *  Mirrors the text channel emitSummary uses for summarizeDAGResults. */
+function collectPriorRecordsText(queue: IntentQueue, upto: QueueIntent): string {
+  const idx = queue.intents.findIndex((i) => i.id === upto.id);
+  const end = idx < 0 ? queue.intents.length : idx;
+  const chunks: string[] = [];
+  for (let i = 0; i < end; i++) {
+    const data = (queue.intents[i].result as { data?: unknown } | undefined)?.data;
+    if (data != null) chunks.push(JSON.stringify(data, null, 0).slice(0, 4000));
+  }
+  return chunks.join('\n\n');
+}
+
+/** proposeChanges step: reason over prior records → render a confirm card (or end
+ *  gracefully when there is nothing to change). No write happens here. */
+async function renderProposalCard(
+  queue: IntentQueue,
+  intent: QueueIntent,
+  deps: RuntimeDeps,
+): Promise<IntentQueue> {
+  const isZh = deps.locale === 'zh-Hans';
+  const effectiveArgs = buildEffectiveArgs(intent, queue.resolvedContext);
+  const goal = (typeof effectiveArgs.goal === 'string' && effectiveArgs.goal.trim())
+    ? (effectiveArgs.goal as string)
+    : (queue.userMessage || '');
+  const recordsText = collectPriorRecordsText(queue, intent);
+  const announceId = `announce-${queue.id}-${intent.id}`;
+
+  let outcome: Awaited<ReturnType<typeof generateProposal>>;
+  try {
+    outcome = await generateProposal({ goal, recordsText, language: LOCALE_META[getLocale()].englishName });
+  } catch (e) {
+    outcome = { proposal: null, error: e instanceof Error ? e.message : String(e) };
+  }
+
+  // No usable proposal, or the model judged there is nothing to change.
+  if (!outcome.proposal || outcome.proposal.writes.length === 0) {
+    const msg = outcome.proposal
+      ? (outcome.proposal.summary || (isZh ? '没有需要合并/修改的内容。' : 'Nothing to merge or change.'))
+      : (isZh ? '我没能形成一个可执行的修改方案。' : "I couldn't form an actionable change.");
+    deps.patchMessage(announceId, { announceDetail: isZh ? '无改动' : 'No change', announceStatus: 'completed' });
+    deps.pushMessage({
+      id: `complete-${queue.id}-${intent.id}-${Date.now()}`,
+      type: 'agent', content: msg, timestamp: Date.now(), queueId: queue.id, queueIntentId: intent.id,
+    });
+    let q = patchIntent(queue, intent.id, { status: 'confirmed', result: { data: null, count: 0 } });
+    q = advanceCursor(q);
+    return await runQueue(q, deps);
+  }
+
+  // Render the confirm card and wait for Confirm / Cancel.
+  const messageId = `card-${queue.id}-${intent.id}-proposal-${Date.now()}`;
+  deps.pushMessage({
+    id: messageId,
+    type: 'proposal-card',
+    content: '',
+    timestamp: Date.now(),
+    queueId: queue.id,
+    queueIntentId: intent.id,
+    proposalCard: { proposal: outcome.proposal, status: 'pending' },
+  });
+  return patchIntent(queue, intent.id, { status: 'executing', messageId });
 }
 
 async function renderFormCard(
@@ -902,6 +1099,18 @@ export async function handleSave(
   }
 
   emitResult(q, intent, 'created', payload.recordName, deps);
+
+  // A sub-intent spawned to create an entity for a parent must hand control BACK
+  // to that parent (it sits BEHIND the cursor and is 'queued'). advanceCursor only
+  // scans forward, so advancing here would skip the parent — the parent activity/
+  // opportunity would be silently forgotten (the "created account but never made
+  // the activity" bug). Point the cursor at the parent so it executes next.
+  if (intent.parentId) {
+    const parentIdx = q.intents.findIndex((i) => i.id === intent.parentId);
+    if (parentIdx >= 0 && q.intents[parentIdx].status === 'queued') {
+      return await runQueue({ ...q, cursor: parentIdx }, deps);
+    }
+  }
   q = advanceCursor(q);
   return await runQueue(q, deps);
 }
@@ -914,8 +1123,108 @@ export async function handleCancel(
 ): Promise<IntentQueue> {
   const intent = findIntent(queue, intentId);
   let q = patchIntent(queue, intentId, { status: 'cancelled' });
-  if (intent) emitResult(q, intent, 'cancelled', undefined, deps);
+  if (intent) {
+    emitResult(q, intent, 'cancelled', undefined, deps);
+    // Unlock the card message so the composer is no longer blocked. Match /
+    // awaiting cards gate on resolutionState; form cards gate on formCard.status
+    // (set separately by the card), so patching resolutionState is safe for both.
+    if (intent.messageId) {
+      const isZh = deps.locale === 'zh-Hans';
+      deps.patchMessage(intent.messageId, { resolutionState: 'resolved', resolutionResult: isZh ? '已取消' : 'Cancelled' });
+    }
+  }
   q = advanceCursor(q);
+  return await runQueue(q, deps);
+}
+
+/** User confirmed a change proposal → apply its writes (update/delete) in order,
+ *  then advance. This is the ONLY path that runs a proposal's destructive writes. */
+export async function handleProposalConfirm(
+  queue: IntentQueue,
+  intentId: string,
+  proposal: ChangeProposal,
+  deps: RuntimeDeps,
+): Promise<IntentQueue> {
+  const isZh = deps.locale === 'zh-Hans';
+  const intent = findIntent(queue, intentId);
+  const exec = (fn: string, args: Record<string, unknown>) =>
+    executeFunction(fn, args, { userId: deps.userId, userEmail: deps.userEmail, locale: deps.locale })
+      .then((r) => ({ success: r.success, error: r.error }));
+  const res = await applyProposal(proposal, exec);
+
+  // Writes touched activities (and possibly their accounts).
+  deps.invalidate(['activity-list', 'account-list']);
+
+  if (intent?.messageId) {
+    deps.patchMessage(intent.messageId, {
+      proposalCard: { proposal, status: res.ok ? 'applied' : 'failed' },
+      resolutionState: 'resolved',
+      resolutionResult: res.ok ? (isZh ? '已应用' : 'Applied') : (isZh ? '部分失败' : 'Partly failed'),
+    });
+  }
+
+  const doneMsg = res.ok
+    ? (isZh ? `已完成：${proposal.summary || '修改已应用'}` : `Done: ${proposal.summary || 'changes applied'}`)
+    : (isZh ? `应用中断：完成 ${res.done}/${res.total} 项（${res.error ?? ''}）` : `Stopped: applied ${res.done}/${res.total} (${res.error ?? ''})`);
+  deps.pushMessage({
+    id: `complete-${queue.id}-${intentId}-${Date.now()}`,
+    type: 'agent', content: doneMsg, timestamp: Date.now(), queueId: queue.id, queueIntentId: intentId,
+  });
+  deps.toast(res.ok ? 'success' : 'error', doneMsg);
+
+  let q = patchIntent(queue, intentId, { status: res.ok ? 'confirmed' : 'failed', result: { data: proposal, count: res.done } });
+  q = advanceCursor(q);
+  return await runQueue(q, deps);
+}
+
+/** User picked WHICH field to change on a param-picker card (chooseField → chooseValue). */
+export async function handleParamFieldPick(
+  queue: IntentQueue,
+  intentId: string,
+  field: string,
+  deps: RuntimeDeps,
+): Promise<IntentQueue> {
+  const intent = findIntent(queue, intentId);
+  if (!intent || !intent.messageId) return queue;
+  const fn = intent.function;
+  const kind = fieldKind(fn, field);
+  deps.patchMessage(intent.messageId, {
+    paramPicker: {
+      function: fn,
+      arguments: buildEffectiveArgs(intent, queue.resolvedContext),
+      subjectLabel: subjectLabelFor(intent, queue),
+      mode: 'chooseValue',
+      field,
+      fieldLabel: fieldLabel(field, deps.locale),
+      fieldKind: kind,
+      options: kind === 'enum' ? enumOptions(fn, field, deps.locale) : [],
+    },
+  });
+  return queue; // still awaiting-user; the value step resumes the queue
+}
+
+/** User chose the new VALUE on a param-picker card → inject into args + resume. */
+export async function handleParamValuePick(
+  queue: IntentQueue,
+  intentId: string,
+  field: string,
+  rawValue: string,
+  deps: RuntimeDeps,
+): Promise<IntentQueue> {
+  const intent = findIntent(queue, intentId);
+  if (!intent) return queue;
+  const fn = intent.function;
+  const kind = fieldKind(fn, field);
+  const value: unknown = kind === 'number' ? Number(rawValue) : rawValue;
+  let q = mergeIntentArgs(queue, intentId, { [field]: value });
+  if (intent.messageId) {
+    const label = fieldLabel(field, deps.locale);
+    const shown = kind === 'enum'
+      ? (enumOptions(fn, field, deps.locale).find((o) => o.value === rawValue)?.label ?? rawValue)
+      : rawValue;
+    deps.patchMessage(intent.messageId, { resolutionState: 'resolved', resolutionResult: `${label}: ${shown}` });
+  }
+  q = patchIntent(q, intentId, { status: 'queued' });
   return await runQueue(q, deps);
 }
 

@@ -6,9 +6,10 @@
  * only contains the dispatcher + the generic LLM-backed skill fallback.
  */
 
-import { availableFunctions } from './function-registry';
+import { availableFunctions, coerceArgs } from './function-registry';
 import { agentError, toDevLog } from '@/lib/errors';
 import { getHandler, type FunctionCallResult } from './functions/handler-registry';
+import type { Locale } from '@/lib/i18n';
 // Register all domain handlers (query, draft, etc.)
 import './functions';
 
@@ -36,6 +37,14 @@ export async function executeFunction(
 ): Promise<import('./functions/handler-registry').FunctionCallResult> {
   console.log('[FN] ENTER executeFunction, name=' + functionName + ', args=' + JSON.stringify(args));
 
+  // Normalize LLM tool-call args against the function's declared input contract
+  // (see coerceArgs in function-registry). This absorbs "argument type drift"
+  // — e.g. an array sent where a scalar string is declared — at the single
+  // dispatch boundary, so every handler receives correctly-typed values instead
+  // of casting `unknown` and crashing on `x.toLowerCase()`. Coerce-not-block:
+  // malformed args never abort the call.
+  args = coerceArgs(functionName, args);
+
   // ---- Registry dispatch ----
   const registeredHandler = getHandler(functionName);
   if (registeredHandler) {
@@ -46,9 +55,14 @@ export async function executeFunction(
   try {
     const skillDef = availableFunctions.find((f) => f.name === functionName);
     if (skillDef?.llmBacked && skillDef.promptTemplate) {
-      const locale = (context.locale || 'en') as 'zh-Hans' | 'en';
+      // Prompt templates are authored in zh/en only. Pick zh for Chinese and the
+      // en template as the structural base for every other locale, then pin the
+      // OUTPUT language explicitly so de/fr/es get localized content too.
+      const { outputLanguageDirective } = await import('@/lib/i18n');
+      const locale = (context.locale || 'en-US') as Locale;
       const isZh = locale === 'zh-Hans';
-      const systemPrompt = isZh ? skillDef.promptTemplate['zh-Hans'] : skillDef.promptTemplate['en-US'];
+      const basePrompt = isZh ? skillDef.promptTemplate['zh-Hans'] : skillDef.promptTemplate['en-US'];
+      const systemPrompt = `${basePrompt}\n\n${outputLanguageDirective(locale)}`;
       const userContent = args.data as string || args.visitData as string || JSON.stringify(args);
 
           // Append extra context if provided (e.g. existingOpportunities for analyzeOpportunity)

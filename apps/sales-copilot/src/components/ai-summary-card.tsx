@@ -7,7 +7,7 @@ import { MarkdownContent } from './markdown-content';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import type { AISummary } from '@/generated/models/ai-summary-model';
-import { getLocale } from '@/lib/i18n';
+import { getLocale, t } from '@/lib/i18n';
 
 interface AISummaryCardProps {
   summary: AISummary | null;
@@ -69,10 +69,10 @@ export function AISummaryCard({
           <div className="flex-1">
             <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-primary" />
-              {locale === 'zh-Hans' ? 'AI 正在分析...' : 'AI Analyzing...'}
+              {t('aiAnalyzing', locale)}
             </h3>
             <p className="text-xs text-muted-foreground mt-1">
-              {locale === 'zh-Hans' ? '正在生成智能洞察，请稍候' : 'Generating insights, please wait...'}
+              {t('generatingInsightsWait', locale)}
             </p>
           </div>
         </div>
@@ -90,10 +90,10 @@ export function AISummaryCard({
           </div>
           <div className="flex-1">
             <h3 className="text-base font-semibold text-foreground">
-              {locale === 'zh-Hans' ? 'AI 洞察' : 'AI Insights'}
+              {t('aiInsights', locale)}
             </h3>
             <p className="text-xs text-muted-foreground mt-1">
-              {locale === 'zh-Hans' ? '更新记录后将生成 AI 分析' : 'AI analysis will be generated after updates'}
+              {t('aiAnalysisAfterUpdate', locale)}
             </p>
           </div>
           {onRefresh && (
@@ -116,7 +116,7 @@ export function AISummaryCard({
           </div>
           <div className="flex-1">
             <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
-              {locale === 'zh-Hans' ? 'AI 分析失败' : 'AI Analysis Failed'}
+              {t('aiAnalysisFailed', locale)}
             </h3>
             <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
               {summary.summary}
@@ -154,12 +154,12 @@ export function AISummaryCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h3 className="text-base font-semibold text-foreground">
-              {locale === 'zh-Hans' ? 'AI 洞察' : 'AI Insights'}
+              {t('aiInsights', locale)}
             </h3>
             {isExpired && (
               <Badge variant="outline" className="text-[10px] gap-1 text-amber-600 border-amber-200 dark:border-amber-900">
                 <Clock className="w-3 h-3" />
-                {locale === 'zh-Hans' ? '已过期' : 'Expired'}
+                {t('expiredLabel', locale)}
               </Badge>
             )}
           </div>
@@ -211,7 +211,7 @@ export function AISummaryCard({
               {summary.actionItems && (
                 <div>
                   <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
-                    {locale === 'zh-Hans' ? '建议行动' : 'Suggested Actions'}
+                    {t('suggestedActions', locale)}
                   </h4>
                   <MarkdownContent
                     content={summary.actionItems || ''}

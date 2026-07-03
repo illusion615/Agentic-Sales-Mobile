@@ -145,6 +145,10 @@ function buildOrchestratorPrompt(
 
   return `${heading}
 
+# Fidelity (CRITICAL — data integrity)
+- Keep the user's OWN wording for proper nouns (account names, contact names, departments/科室, job titles, products). Do NOT swap in a different or similar-sounding term (e.g. 设备科 must never become 检验科). The user's shorthand/abbreviation is fine — copy it as-is; matching to real records happens later.
+- Extract ONLY what the user actually stated. NEVER invent purposes, agendas, background, amounts, dates, or any detail the user did not give. Leave an optional field empty rather than fabricating a plausible-sounding value.
+
 # Skeleton (must be preserved one-to-one)
 ${skeletonLines}
 
@@ -159,7 +163,7 @@ ${describeBoundEntities(frame)}
 - "arguments" must obey the parameter schema of the chosen skill.
 - For queryCopilotStudio / externalKnowledgeQuery: "query" is REQUIRED — use the intent summary as the query text.
 - For Activity steps: temporal=past → temporalMode="completed"; temporal=future → temporalMode="planned".
-- For draftActivity: "type" is REQUIRED. Infer from context: 拜访/visit/went to/现场 → "visit", 电话/call/phoned/rang → "call", 会议/meeting/met with/讨论会 → "meeting", 邮件/email/sent mail → "email", otherwise → "other".
+- For draftActivity: "type" is REQUIRED. Infer from context: 拜访/visit/went to/现场 → "visit", 电话/call/phoned/rang → "call", 会议/meeting/met with/讨论会 → "meeting", 邮件/email/sent mail → "email", otherwise → "meeting".
 - For queryActivities: always set date filters. "today" → dateRange="today" OR scheduledDate=YYYY-MM-DD. "this week" → dateRange="7days" OR dateFrom/dateTo. "completed today" → dateRange="today" + status="completed". "pending" → status="draft" or "confirmed".
 - For queryOpportunities: "active/pipeline" → stage != won/lost. "at risk" → minConfidence=0 maxConfidence=49.
 

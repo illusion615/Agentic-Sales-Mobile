@@ -10,6 +10,7 @@ import { getCopilotConfig, saveCopilotConfig } from '@/services/copilot-service'
 import { getContext } from '@microsoft/power-apps/app';
 import { MicrosoftCopilotStudioService } from '@/generated/services/MicrosoftCopilotStudioService';
 import { registerHandlers, type FunctionHandler } from './handler-registry';
+import { localeBcp47, type Locale } from '@/lib/i18n';
 
 const queryCopilotStudio: FunctionHandler = async (args, ctx) => {
   const query = (args.query as string) || (ctx.conversationHistory?.filter(m => m.role === 'user').pop()?.content) || '';
@@ -160,7 +161,7 @@ const suggestPlan: FunctionHandler = async (args, ctx) => {
     if (key in dayLoad) dayLoad[key] += 1;
   }
   const weekdayName = (iso: string) =>
-    new Date(iso + 'T00:00:00').toLocaleDateString(ctx.locale === 'zh-Hans' ? 'zh-CN' : 'en-US', { weekday: 'short' });
+    new Date(iso + 'T00:00:00').toLocaleDateString(localeBcp47(ctx.locale as Locale), { weekday: 'short' });
   const scheduleLoadStr = windowDates
     .map((d) => `${d} (${weekdayName(d)}): ${dayLoad[d]} booked`)
     .join('; ');

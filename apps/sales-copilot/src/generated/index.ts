@@ -31,6 +31,7 @@ export * as Msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2
 export * as Msdyn_aimodelsModel from './models/Msdyn_aimodelsModel';
 export * as PhonecallsModel from './models/PhonecallsModel';
 export * as PowerAppsFlow_LLMModel from './models/PowerAppsFlow_LLMModel';
+export * as SkillsModel from './models/SkillsModel';
 export * as SystemusersModel from './models/SystemusersModel';
 export * as accountModel from './models/account-model';
 export * as activityModel from './models/activity-model';
@@ -73,6 +74,7 @@ export * from './services/Msdyn_aibdptcustomprompt228202450236pmfa03a8f2db274165
 export * from './services/Msdyn_aimodelsService';
 export * from './services/PhonecallsService';
 export * from './services/PowerAppsFlow_LLMService';
+export * from './services/SkillsService';
 export * from './services/SystemusersService';
 export * from './services/_adapter-utils';
 export * from './services/account-service';

@@ -16,12 +16,50 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { Search, Check, Building2, User, TrendingUp, AlertCircle, Plus, SkipForward, ChevronDown, ChevronUp, CheckCircle2, Phone, Mail } from 'lucide-react';
+import { Search, Check, Building2, User, TrendingUp, AlertCircle, Plus, SkipForward, ChevronDown, ChevronUp, ChevronLeft, CheckCircle2, Phone, Mail, Calendar, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-import { getLocale, type Locale } from '@/lib/i18n';
+import { getLocale, t, pickLabel, type Locale } from '@/lib/i18n';
 import { useCopilot } from '@/contexts/copilot-context';
+import { formatCurrency } from '@/lib/format-currency';
+
+// Opportunity metadata rendering — kept consistent with the Opportunities list
+// (same stage colors) so the picker row shows account / stage / status / revenue
+// / expected close date to help the user pick the right record.
+const OPP_STAGE_DOT: Record<string, string> = {
+  prospecting: 'bg-[#6366F1]',
+  qualification: 'bg-[#0D8F8C]',
+  proposal: 'bg-primary',
+  negotiation: 'bg-[#F59E0B]',
+  won: 'bg-[#10B981]',
+  lost: 'bg-muted-foreground',
+};
+
+const OPP_STAGE_LABELS: Record<string, { zh: string; en: string }> = {
+  prospecting: { zh: '潜在', en: 'Prospecting' },
+  qualification: { zh: '资格确认', en: 'Qualification' },
+  proposal: { zh: '方案', en: 'Proposal' },
+  negotiation: { zh: '谈判', en: 'Negotiation' },
+  won: { zh: '赢单', en: 'Won' },
+  lost: { zh: '输单', en: 'Lost' },
+};
+
+function oppStageLabel(stage: string, locale: Locale): string {
+  const m = OPP_STAGE_LABELS[stage];
+  return m ? (locale === 'zh-Hans' ? m.zh : m.en) : stage;
+}
+
+function oppStatusLabel(stage: string, locale: Locale): string {
+  const isClosed = stage === 'won' || stage === 'lost';
+  return isClosed ? (locale === 'zh-Hans' ? '已关闭' : 'Closed') : (locale === 'zh-Hans' ? '进行中' : 'Open');
+}
+
+function formatShortDate(dateStr: string, locale: Locale): string {
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString(locale === 'zh-Hans' ? 'zh-CN' : 'en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+}
 
 type MatchRecord = {
   id: string;
@@ -32,6 +70,8 @@ type MatchRecord = {
   accountId?: string;
   accountName?: string;
   stage?: string;
+  amount?: number;
+  expectedCloseDate?: string;
   title?: string;
   phone?: string;
   email?: string;
@@ -104,6 +144,7 @@ interface MatchSelectionCardProps {
     matches: MatchRecord[];
     lowConfidenceMatches?: MatchRecord[];
     confidence: 'high' | 'medium' | 'low' | 'none';
+    listMode?: boolean;
     pendingAction?: string;
     pendingIntent?: {
       function: string;
@@ -119,6 +160,8 @@ interface MatchSelectionCardProps {
   onCreateEntity?: (pendingIntent: { function: string; arguments: Record<string, unknown>; additionalActions?: Array<{ function: string; arguments: Record<string, unknown>; reason?: string }> }, entityKind: 'contact' | 'account' | 'opportunity' | 'activity', queryName: string) => void;
   onSkip?: (pendingIntent: { function: string; arguments: Record<string, unknown> }, entityKind: 'contact' | 'account' | 'opportunity' | 'activity') => void;
   onSearchOther?: (newQuery: string, entityType: 'account' | 'contact' | 'opportunity' | 'activity', pendingIntent: { function: string; arguments: Record<string, unknown> }) => void;
+  /** Abort the whole action and unlock the composer (dead-loop escape). */
+  onCancel?: () => void;
 }
 
 export function MatchSelectionCard({
@@ -131,6 +174,7 @@ export function MatchSelectionCard({
   onCreateEntity,
   onSkip,
   onSearchOther,
+  onCancel,
 }: MatchSelectionCardProps) {
   const navigate = useNavigate();
   const locale: Locale = getLocale();
@@ -142,8 +186,10 @@ export function MatchSelectionCard({
   const { closePanel } = useCopilot();
 
   const isResolved = resolved || isProcessing;
-  const highMatches = matchSelection.matches.filter((m) => m.score >= 70);
-  const lowMatches = matchSelection.lowConfidenceMatches ?? [];
+  const isListMode = !!matchSelection.listMode;
+  // List mode (missing-subject picker): show every candidate as a plain row.
+  const highMatches = isListMode ? matchSelection.matches : matchSelection.matches.filter((m) => m.score >= 70);
+  const lowMatches = isListMode ? [] : (matchSelection.lowConfidenceMatches ?? []);
   const hasHighMatches = highMatches.length > 0;
   const hasAnyMatches = hasHighMatches || lowMatches.length > 0;
 
@@ -184,27 +230,26 @@ export function MatchSelectionCard({
   };
 
   const getEntityLabel = () => {
-    const labels: Record<string, { zh: string; en: string }> = {
-      account: { zh: '客户', en: 'Account' },
-      contact: { zh: '联系人', en: 'Contact' },
-      opportunity: { zh: '商机', en: 'Opportunity' },
-      activity: { zh: '活动', en: 'Activity' },
+    const labels: Record<string, { zh: string; en: string; de: string; fr: string; es: string }> = {
+      account: { zh: '客户', en: 'Account', de: 'Konto', fr: 'Compte', es: 'Cuenta' },
+      contact: { zh: '联系人', en: 'Contact', de: 'Kontakt', fr: 'Contact', es: 'Contacto' },
+      opportunity: { zh: '商机', en: 'Opportunity', de: 'Verkaufschance', fr: 'Opportunité', es: 'Oportunidad' },
+      activity: { zh: '活动', en: 'Activity', de: 'Aktivität', fr: 'Activité', es: 'Actividad' },
     };
-    return locale === 'zh-Hans'
-      ? labels[matchSelection.entityType]?.zh || matchSelection.entityType
-      : labels[matchSelection.entityType]?.en || matchSelection.entityType;
+    const m = labels[matchSelection.entityType];
+    return m ? pickLabel(m, locale) : matchSelection.entityType;
   };
 
   // (Reason text lives in `buildMatchReasonText` and is rendered above the
   // card by `copilot-panel.tsx`. No in-card copy remains.)
 
   const getMatchTypeLabel = (matchType: 'exact' | 'contains' | 'fuzzy') => {
-    const labels: Record<string, { zh: string; en: string }> = {
-      exact: { zh: '精确匹配', en: 'Exact' },
-      contains: { zh: '部分匹配', en: 'Contains' },
-      fuzzy: { zh: '模糊匹配', en: 'Fuzzy' },
+    const labels: Record<string, { zh: string; en: string; de: string; fr: string; es: string }> = {
+      exact: { zh: '精确匹配', en: 'Exact', de: 'Exakt', fr: 'Exact', es: 'Exacto' },
+      contains: { zh: '部分匹配', en: 'Contains', de: 'Enthält', fr: 'Contient', es: 'Contiene' },
+      fuzzy: { zh: '模糊匹配', en: 'Fuzzy', de: 'Unscharf', fr: 'Approximatif', es: 'Aproximado' },
     };
-    return locale === 'zh-Hans' ? labels[matchType]?.zh : labels[matchType]?.en;
+    return pickLabel(labels[matchType], locale);
   };
 
   const getConfidenceColor = () => {
@@ -256,6 +301,12 @@ export function MatchSelectionCard({
     onCreateEntity(pendingIntent, entityKind, matchSelection.query);
   };
 
+  const handleCancelClick = () => {
+    if (isResolved || !onCancel) return;
+    setIsProcessing(true);
+    onCancel();
+  };
+
   const handleSkip = () => {
     if (!pendingIntent || !onSkip || !entityKind) return;
     setIsProcessing(true);
@@ -286,7 +337,7 @@ export function MatchSelectionCard({
         <CheckCircle2 className="w-3.5 h-3.5 text-primary flex-shrink-0" />
         <EntityIcon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
         <span className="text-xs text-foreground truncate">
-          {resolutionResult || (locale === 'zh-Hans' ? '已处理' : 'Resolved')}
+          {resolutionResult || (t('resolvedLabel', locale))}
         </span>
         <span className="text-[10px] text-muted-foreground flex-shrink-0">
           · {getEntityLabel()}
@@ -315,14 +366,20 @@ export function MatchSelectionCard({
       )}
     >
       <div className="flex items-center gap-3 flex-1 min-w-0">
-        <div className={cn(
-          'w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium shrink-0',
-          match.score >= 90 ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
-          match.score >= 70 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
-          'bg-muted text-muted-foreground',
-        )}>
-          {Math.round(match.score)}
-        </div>
+        {isListMode ? (
+          <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 bg-muted text-muted-foreground">
+            <EntityIcon className="w-4 h-4" />
+          </div>
+        ) : (
+          <div className={cn(
+            'w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium shrink-0',
+            match.score >= 90 ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+            match.score >= 70 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
+            'bg-muted text-muted-foreground',
+          )}>
+            {Math.round(match.score)}
+          </div>
+        )}
         {matchSelection.entityType === 'contact' ? (
           <div className="min-w-0">
             <p className="text-sm font-medium text-foreground truncate">{match.name}</p>
@@ -344,6 +401,36 @@ export function MatchSelectionCard({
               </p>
             )}
           </div>
+        ) : matchSelection.entityType === 'opportunity' ? (
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground truncate">{match.name}</p>
+            {match.accountName && (
+              <p className="text-xs text-muted-foreground truncate">{match.accountName}</p>
+            )}
+            <div className="flex items-center gap-x-1.5 gap-y-0.5 flex-wrap text-[11px] text-muted-foreground mt-0.5">
+              <span className="flex items-center gap-1">
+                <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', OPP_STAGE_DOT[match.stage ?? ''] ?? 'bg-muted-foreground')} />
+                {oppStageLabel(match.stage ?? '', locale)}
+              </span>
+              <span className="opacity-40">·</span>
+              <span>{oppStatusLabel(match.stage ?? '', locale)}</span>
+              {typeof match.amount === 'number' && match.amount > 0 && (
+                <>
+                  <span className="opacity-40">·</span>
+                  <span className="text-foreground/70 font-medium">{formatCurrency(match.amount)}</span>
+                </>
+              )}
+              {match.expectedCloseDate && (
+                <>
+                  <span className="opacity-40">·</span>
+                  <span className="flex items-center gap-0.5">
+                    <Calendar className="w-3 h-3 shrink-0" />
+                    {formatShortDate(match.expectedCloseDate, locale)}
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
         ) : (
           <div className="min-w-0">
             <p className="text-sm font-medium text-foreground truncate">{match.name}</p>
@@ -354,9 +441,11 @@ export function MatchSelectionCard({
         )}
       </div>
       <div className="flex items-center gap-2 shrink-0">
-        <span className="text-xs text-muted-foreground">
-          {getMatchTypeLabel(match.matchType)}
-        </span>
+        {!isListMode && (
+          <span className="text-xs text-muted-foreground">
+            {getMatchTypeLabel(match.matchType)}
+          </span>
+        )}
         {selectedId === match.id && (
           <Check className="w-4 h-4 text-primary" />
         )}
@@ -388,12 +477,12 @@ export function MatchSelectionCard({
         <div className="flex-1">
           <h4 className="font-medium text-sm text-foreground">
             {hasHighMatches
-              ? (locale === 'zh-Hans' ? `选择${getEntityLabel()}` : `Select ${getEntityLabel()}`)
-              : (locale === 'zh-Hans' ? `未找到匹配的${getEntityLabel()}` : `No matching ${getEntityLabel().toLowerCase()} found`)
+              ? (t('selectEntity', locale, { entity: getEntityLabel() }))
+              : (t('noMatchingEntity', locale, { entity: getEntityLabel() }))
             }
           </h4>
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-            {hasHighMatches && (
+            {!isListMode && hasHighMatches && (
               <span className={cn('text-xs px-1.5 py-0.5 rounded', getConfidenceColor())}>
                 {locale === 'zh-Hans'
                   ? matchSelection.confidence === 'high' ? '高置信度'
@@ -403,7 +492,11 @@ export function MatchSelectionCard({
               </span>
             )}
             <span className="text-xs text-muted-foreground">
-              {hasHighMatches
+              {isListMode
+                ? (locale === 'zh-Hans'
+                    ? `共 ${highMatches.length} 个候选，或搜索`
+                    : `${highMatches.length} option${highMatches.length === 1 ? '' : 's'}, or search`)
+                : hasHighMatches
                 ? (locale === 'zh-Hans'
                     ? `找到 ${highMatches.length} 个高置信度匹配`
                     : `Found ${highMatches.length} high-confidence match${highMatches.length === 1 ? '' : 'es'}`)
@@ -461,23 +554,26 @@ export function MatchSelectionCard({
         </div>
       )}
 
-      {/* Action area: Create / Search other / Skip */}
-      {!resolved && hasDraftIntent && entityKind && (
+      {/* Action area: Create / Search other / Skip. Create+Skip only for draft
+          intents; Search is available in list mode too (missing-subject picker). */}
+      {!resolved && (hasDraftIntent || isListMode) && entityKind && (
         <div className={cn(
           'mt-4 pt-3 border-t border-border/50 space-y-2',
         )}>
-          <Button
-            variant="default"
-            size="sm"
-            className="w-full gap-2"
-            onClick={handleCreateNew}
-            disabled={isResolved || !onCreateEntity}
-          >
-            <Plus className="w-4 h-4" />
-            {locale === 'zh-Hans'
-              ? `新建${getEntityLabel()}`
-              : `Create new ${getEntityLabel().toLowerCase()}`}
-          </Button>
+          {hasDraftIntent && (
+            <Button
+              variant="default"
+              size="sm"
+              className="w-full gap-2"
+              onClick={handleCreateNew}
+              disabled={isResolved || !onCreateEntity}
+            >
+              <Plus className="w-4 h-4" />
+              {locale === 'zh-Hans'
+                ? `新建${getEntityLabel()}`
+                : `Create new ${getEntityLabel().toLowerCase()}`}
+            </Button>
+          )}
 
           {!showSearchInput ? (
             <Button
@@ -488,10 +584,20 @@ export function MatchSelectionCard({
               disabled={isResolved || !onSearchOther}
             >
               <Search className="w-4 h-4" />
-              {locale === 'zh-Hans' ? '搜索其他' : 'Search other'}
+              {t('searchOther', locale)}
             </Button>
           ) : (
             <div className="flex gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="shrink-0 px-2"
+                onClick={() => { setShowSearchInput(false); setSearchValue(''); }}
+                disabled={isResolved}
+                aria-label={locale === 'zh-Hans' ? '返回' : 'Back'}
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </Button>
               <Input
                 autoFocus
                 value={searchValue}
@@ -500,7 +606,7 @@ export function MatchSelectionCard({
                   if (e.key === 'Enter') { e.preventDefault(); handleSearchSubmit(); }
                   else if (e.key === 'Escape') { setShowSearchInput(false); setSearchValue(''); }
                 }}
-                placeholder={locale === 'zh-Hans' ? `输入${getEntityLabel()}名称` : `Enter ${getEntityLabel().toLowerCase()} name`}
+                placeholder={t('enterEntityName', locale, { entity: getEntityLabel() })}
                 disabled={isResolved}
                 className="flex-1 h-9 text-sm"
               />
@@ -509,12 +615,12 @@ export function MatchSelectionCard({
                 onClick={handleSearchSubmit}
                 disabled={isResolved || !searchValue.trim()}
               >
-                {locale === 'zh-Hans' ? '搜索' : 'Go'}
+                {t('searchGo', locale)}
               </Button>
             </div>
           )}
 
-          {skipAllowed && (
+          {hasDraftIntent && skipAllowed && (
             <Button
               variant="ghost"
               size="sm"
@@ -524,17 +630,32 @@ export function MatchSelectionCard({
             >
               <SkipForward className="w-4 h-4" />
               {entityKind === 'activity'
-                ? (locale === 'zh-Hans' ? '取消草稿' : 'Cancel draft')
-                : (locale === 'zh-Hans' ? '跳过' : 'Skip')}
+                ? (t('cancelDraft', locale))
+                : (t('skip', locale))}
             </Button>
           )}
         </div>
       )}
 
+      {/* Cancel / dismiss — ALWAYS available while unresolved so a blocking card
+          (which locks the composer) can never trap the user in a dead loop. */}
+      {!resolved && onCancel && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full mt-2 text-muted-foreground hover:text-foreground"
+          onClick={handleCancelClick}
+          disabled={isResolved}
+        >
+          <X className="w-4 h-4 mr-1" />
+          {t('cancel', locale)}
+        </Button>
+      )}
+
       {/* Status hint */}
       {isProcessing && (
         <p className="text-xs text-primary mt-3 text-center animate-pulse">
-          {locale === 'zh-Hans' ? '正在处理...' : 'Processing...'}
+          {t('processing', locale)}
         </p>
       )}
     </motion.div>

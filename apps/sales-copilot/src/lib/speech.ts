@@ -68,3 +68,65 @@ export function ensureVoicesReady(timeoutMs = 1500): Promise<SpeechSynthesisVoic
   return voicesReadyPromise;
 }
 
+// ---------------------------------------------------------------------------
+// Mobile gesture unlock ("priming").
+//
+// iOS Safari / WebView and some Android WebViews block speechSynthesis.speak()
+// unless it is reached from a real user gesture. The block is per page-load:
+// once ONE gesture-initiated speak fires, the engine stays unlocked for the
+// rest of the session and later async speaks (after await / setTimeout) work.
+//
+// primeSpeech() fires a silent, throwaway utterance. Call it SYNCHRONOUSLY as
+// the very first thing inside a click handler — before any await / network /
+// ensureVoicesReady — so the engine is unlocked even when the real audio is
+// produced later. This is why the Copilot bubble (which spoke synchronously)
+// always worked while the Insight player (which spoke after awaits) did not.
+// ---------------------------------------------------------------------------
+let speechPrimed = false;
+
+export function primeSpeech(): void {
+  if (!hasSpeechSynthesis) return;
+  try {
+    const u = new SpeechSynthesisUtterance(' ');
+    u.volume = 0; // silent — never heard by the user
+    u.rate = 10;  // finish instantly
+    window.speechSynthesis.speak(u);
+    speechPrimed = true;
+  } catch {
+    /* engine restricted (e.g. iframe Permissions-Policy) — ignore */
+  }
+}
+
+export function isSpeechPrimed(): boolean {
+  return speechPrimed;
+}
+
+/** Strip common Markdown so TTS reads clean prose instead of symbols. */
+export function stripMarkdown(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, '') // fenced code blocks
+    .replace(/`[^`]+`/g, '')        // inline code
+    .replace(/\*\*([^*]+)\*\*/g, '$1') // bold
+    .replace(/\*([^*]+)\*/g, '$1')     // italic
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // links -> link text
+    .replace(/#{1,6}\s+/g, '')      // headings
+    .trim();
+}
+
+/**
+ * Split text into natural TTS segments so the browser inserts breathing room
+ * between thoughts. Prefers authored paragraph breaks (blank lines); falls back
+ * to sentence boundaries when the text is a single block.
+ */
+export function splitIntoSegments(text: string): string[] {
+  const paragraphs = text
+    .split(/\n\n+/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+  if (paragraphs.length > 1) return paragraphs;
+  return text
+    .split(/(?<=[。！？.!?])/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+

@@ -28,4 +28,14 @@ describe('normalizeStage (stage alias mapping)', () => {
     expect(normalizeStage('negotiation')).toBe('negotiation');
     expect(normalizeStage('SomethingElse')).toBe('somethingelse');
   });
+
+  it('coerces non-string input instead of crashing (LLM sent an array/number)', () => {
+    // Regression (2026-07-01): "opportunities in negotiation and proposal stages"
+    // made the LLM pass stage as an array, and normalizeStage(raw).trim() threw
+    // "raw.trim is not a function".
+    expect(() => normalizeStage(undefined as unknown as string)).not.toThrow();
+    expect(() => normalizeStage(['negotiation', 'proposal'] as unknown as string)).not.toThrow();
+    expect(normalizeStage(undefined as unknown as string)).toBe('');
+    expect(normalizeStage(null as unknown as string)).toBe('');
+  });
 });

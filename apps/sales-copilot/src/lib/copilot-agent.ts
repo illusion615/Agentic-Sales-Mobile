@@ -12,8 +12,8 @@
  */
 
 import { invokeFlowForLLM } from '@/services/power-automate-service';
-import { getLocale } from '@/lib/i18n';
-import { getDisplayName, getFunctionListForPrompt } from './function-registry';
+import { getLocale, outputLanguageDirective, type Locale } from '@/lib/i18n';
+import { getDisplayName, getFunctionListForPrompt, getFunctionSubject } from './function-registry';
 import { executeFunction } from './function-executor';
 import { 
   parseAndValidateIntent,
@@ -294,7 +294,8 @@ async function processMessageInner(
   onProgress?: (progress: ThinkingProgress) => void
 ): Promise<AgentResponse> {
   const startTime = Date.now();
-  const isZh = (context.locale || getLocale()) === 'zh-Hans';
+  const locale = (context.locale || getLocale()) as Locale;
+  const isZh = locale === 'zh-Hans';
 
   // Check circuit breaker before making LLM call
   if (isCircuitBreakerOpen()) {
@@ -532,9 +533,10 @@ async function processMessageInner(
         if (isConversational) {
           console.log('[CopilotAgent] Chat lane — generating a conversational reply');
           if (onProgress) onProgress({ stage: 'generating', status: 'active' });
-          const chatSystem = isZh
+          const chatSystem = (isZh
             ? '你是一位友好、专业的销售助手。用户刚刚说了一句寒暄、感谢或闲聊。用一到两句话自然地回应，保持温暖且简洁。如果合适，可以轻描淡写地提示你能帮忙查询客户、商机、活动或安排跟进——但不要生硬推销，也不要罗列功能清单。'
-            : 'You are a friendly, professional sales assistant. The user just made small talk, a greeting, or said thanks. Reply naturally in one or two sentences — warm and concise. If it fits, lightly mention you can help look up accounts, opportunities, activities, or plan follow-ups — but do not hard-sell or list features.';
+            : 'You are a friendly, professional sales assistant. The user just made small talk, a greeting, or said thanks. Reply naturally in one or two sentences — warm and concise. If it fits, lightly mention you can help look up accounts, opportunities, activities, or plan follow-ups — but do not hard-sell or list features.')
+            + `\n\n${outputLanguageDirective(locale)}`;
           let chatContent = '';
           try {
             const chatResp = await invokeFlowForLLM({
@@ -664,7 +666,11 @@ async function processMessageInner(
     intent.function.startsWith('draft') ||
     (intent.additionalActions?.length ?? 0) > 0 ||
     intent.requiresMatching === true ||
-    (intent.resolutions?.length ?? 0) > 0;
+    (intent.resolutions?.length ?? 0) > 0 ||
+    // Action tools with a required subject (updateOpportunity/Account/Contact/Activity)
+    // ALWAYS route to the queue so the missing-subject gate can prompt a picker
+    // instead of the handler hard-failing. Mirrors shouldUseQueue.
+    getFunctionSubject(intent.function) !== undefined;
   if (willUseQueue) {
     console.log('[CopilotAgent] Deferring execution to the IntentQueue (single executor) — no agent-side run');
     return {
@@ -1223,11 +1229,12 @@ Please respond to the user in a friendly manner based on the error. Important ru
    - "I couldn't find this record. Would you like to search for it?"
 4. Keep it concise and friendly, 2-3 sentences
 5. You must respond in English`;
-    
+    const errorAnalysisPromptLocalized = `${errorAnalysisPrompt}\n\n${outputLanguageDirective(locale)}`;
+
     try {
       const errorAnalysisResponse = await invokeFlowForLLM({
         messages: [
-          { role: 'system', content: errorAnalysisPrompt },
+          { role: 'system', content: errorAnalysisPromptLocalized },
           { role: 'user', content: `请分析这个错误并给出友好的回复: ${errorMsg}` },
         ],
       });
@@ -1437,6 +1444,10 @@ Important rules:
 4. You must respond in English
 5. If data is empty, kindly inform the user`;
 
+  // The two templates above are zh/en only. Pin the actual output language so
+  // de/fr/es users get replies in their language instead of English.
+  const responseSystemPromptLocalized = `${responseSystemPrompt}\n\n${outputLanguageDirective(locale)}`;
+
   const responseUserPrompt = isZh
     ? `用户问题: ${userMessage}
 
@@ -1461,7 +1472,7 @@ Please provide a brief summary and analysis, do not list individual records.`;
   try {
     finalResponse = await invokeFlowForLLM({
       messages: [
-        { role: 'system', content: responseSystemPrompt },
+        { role: 'system', content: responseSystemPromptLocalized },
         { role: 'user', content: responseUserPrompt },
       ],
     });

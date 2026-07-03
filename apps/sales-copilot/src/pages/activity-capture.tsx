@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom';
 import { motion } from 'motion/react';
 import {
@@ -12,7 +12,6 @@ import {
   Building2,
   FileText,
   Target,
-  ArrowRight,
   Sparkles,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -20,7 +19,7 @@ import { cn } from '@/lib/utils';
 import { useUser } from '@/hooks/use-user';
 import { useAccountList } from '@/generated/hooks/use-account';
 import { useCreateActivity, useActivity, useUpdateActivity } from '@/generated/hooks/use-activity';
-import { useOpportunityList, useCreateOpportunity, useUpdateOpportunity } from '@/generated/hooks/use-opportunity';
+import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useContactList } from '@/generated/hooks/use-contact';
 import { useWithAISummaryTrigger } from '@/hooks/use-ai-summary-trigger';
 import { touchAccountLastContacted } from '@/lib/account-touch';
@@ -69,12 +68,10 @@ export default function ActivityCapturePage() {
     isLoading: isLoadingActivity,
     error: activityError,
   } = useActivity(editActivityId || '');
-  const { data: opportunities = [], refetch: refetchOpportunities } = useOpportunityList();
+  const { data: opportunities = [] } = useOpportunityList();
   const { data: contacts = [] } = useContactList();
   const createActivity = useCreateActivity();
   const updateActivity = useUpdateActivity();
-  const createOpportunity = useCreateOpportunity();
-  const updateOpportunity = useUpdateOpportunity();
   const { triggerForEntity } = useWithAISummaryTrigger();
 
   // Find account by param
@@ -100,17 +97,13 @@ export default function ActivityCapturePage() {
     visitDate: new Date().toISOString().split('T')[0],
     visitType: 'client-visit',
     result: '',
-    nextStep: '',
-    opportunityIntent: '',
   });
 
-  // Parse contact and nextStep from notes (stored as structured text)
-  const parseNotesData = (notes: string | undefined): { result: string; contactName: string; nextStep: string; opportunityIntent: string } => {
-    if (!notes) return { result: '', contactName: '', nextStep: '', opportunityIntent: '' };
+  // Parse contact from notes (stored as structured text)
+  const parseNotesData = (notes: string | undefined): { result: string; contactName: string } => {
+    if (!notes) return { result: '', contactName: '' };
     
     const contactMatch = notes.match(/Contact:\s*(.+?)(?:\n|$)/);
-    const nextStepMatch = notes.match(/Next Step:\s*(.+?)(?:\n|$)/);
-    const opportunityMatch = notes.match(/Opportunity:\s*(.+?)(?:\n|$)/);
     
     // Extract the main result (before the metadata section)
     const resultEnd = notes.indexOf('\n\nContact:');
@@ -119,8 +112,6 @@ export default function ActivityCapturePage() {
     return {
       result: result.trim(),
       contactName: contactMatch?.[1]?.trim() || '',
-      nextStep: nextStepMatch?.[1]?.trim() || '',
-      opportunityIntent: opportunityMatch?.[1]?.trim() || '',
     };
   };
 
@@ -139,8 +130,6 @@ export default function ActivityCapturePage() {
         visitDate: (draftData.scheduledDate as string)?.split('T')[0] || new Date().toISOString().split('T')[0],
         visitType: (draftData.type as string) || 'client-visit',
         result: (draftData.result as string) || '',
-        nextStep: (draftData.nextStep as string) || '',
-        opportunityIntent: (draftData.opportunityIntent as string) || '',
       });
       setIsAIFilled(true); // Mark as AI-filled since it came from Copilot
       return;
@@ -160,8 +149,6 @@ export default function ActivityCapturePage() {
         visitDate: existingActivity.scheduleddate ? existingActivity.scheduleddate.split('T')[0] : new Date().toISOString().split('T')[0],
         visitType: 'client-visit',
         result: parsedNotes.result,
-        nextStep: parsedNotes.nextStep,
-        opportunityIntent: parsedNotes.opportunityIntent || existingActivity.opportunity?.name1 || '',
       });
     } else if (account?.name1 && accountId) {
       // Priority 3: Account from URL param
@@ -194,12 +181,12 @@ export default function ActivityCapturePage() {
     copilot.setPageContext({
       currentPage: 'Activity Capture / New Visit',
       summary: locale === 'zh-Hans'
-        ? `正在为客户 ${account?.name1 || '未选择'} 创建拜访记录。用户可以用自然语言描述拜访内容，然后由 AI 提取信息填充表单。`
-        : `Creating visit record for account ${account?.name1 || 'not selected'}. User can describe the visit in natural language, and AI will extract info to fill the form.`,
+        ? `正在为客户 ${account?.name1 || '未选择'} 创建拜访记录。`
+        : `Creating visit record for account ${account?.name1 || 'not selected'}.`,
       pageData: {
         accountId,
         accountName: account?.name1,
-        formFields: ['title', 'accountName', 'contactName', 'visitDate', 'result', 'nextStep', 'opportunityIntent'],
+        formFields: ['title', 'accountName', 'contactName', 'visitDate', 'result'],
       },
     });
 
@@ -207,90 +194,19 @@ export default function ActivityCapturePage() {
     return () => {
       copilot.setInputPlaceholder('');
       copilot.setPageContext(null);
-      copilot.setFormFillCallback(null);
     };
-  }, [copilot.setInputPlaceholder, copilot.setPageContext, copilot.setFormFillCallback, locale, account?.name1, accountId]);
-
-  // Form fill callback - called when agent extracts activity data
-  const handleFormFill = useCallback((data: Record<string, unknown>) => {
-    console.log('[ActivityCapture] Form fill received:', data);
-    setFormData((prev) => ({
-      ...prev,
-      title: (data.title as string) || prev.title,
-      accountName: (data.accountName as string) || prev.accountName,
-      contactName: (data.contactName as string) || prev.contactName,
-      visitDate: (data.visitDate as string) || prev.visitDate,
-      result: (data.result as string) || prev.result,
-      nextStep: (data.nextStep as string) || prev.nextStep,
-      opportunityIntent: (data.opportunityIntent as string) || prev.opportunityIntent,
-    }));
-    setIsAIFilled(true);
-    toast.success(
-      locale === 'zh-Hans' 
-        ? 'AI 已填充表单，请检查并确认' 
-        : 'AI filled the form, please review and confirm'
-    );
-  }, [locale]);
-
-  // Register the form fill callback
-  useEffect(() => {
-    copilot.setFormFillCallback(handleFormFill);
-  }, [copilot.setFormFillCallback, handleFormFill]);
-
-  // Analyze opportunity from activity data using AI
-  const analyzeOpportunity = async (activityData: typeof formData): Promise<{
-    hasOpportunity: boolean;
-    opportunityName?: string;
-    totalAmount?: number;
-    stage?: string;
-    confidence?: number;
-    expectedCloseDate?: string;
-    matchingOpportunityId?: string;
-  } | null> => {
-    try {
-      const existingOppsContext = opportunities
-        .filter((opp) => opp.account?.id === accountId || opp.account?.name1 === activityData.accountName)
-        .map((opp) => ({ id: opp.id, name: opp.name1, amount: opp.totalamount, stage: opp.stage }));
-
-      const visitData = locale === 'zh-Hans'
-        ? `客户：${activityData.accountName}\n联系人：${activityData.contactName}\n拜访结果：${activityData.result}\n下一步：${activityData.nextStep}\n商机意向：${activityData.opportunityIntent}`
-        : `Account: ${activityData.accountName}\nContact: ${activityData.contactName}\nResult: ${activityData.result}\nNext step: ${activityData.nextStep}\nOpportunity intent: ${activityData.opportunityIntent}`;
-
-      const { executeFunction } = await import('@/lib/function-executor');
-      const result = await executeFunction('analyzeOpportunity', {
-        visitData,
-        existingOpportunities: JSON.stringify(existingOppsContext),
-      }, { locale });
-
-      if (!result.success || !result.data) {
-        console.error('[ActivityCapture] AI analysis failed:', result.error);
-        return null;
-      }
-      return result.data as {
-        hasOpportunity: boolean;
-        opportunityName?: string;
-        totalAmount?: number;
-        stage?: string;
-        confidence?: number;
-        expectedCloseDate?: string;
-        matchingOpportunityId?: string;
-      };
-    } catch (error) {
-      console.error('[ActivityCapture] AI opportunity analysis error:', error);
-      return null;
-    }
-  };
+  }, [copilot.setInputPlaceholder, copilot.setPageContext, locale, account?.name1, accountId]);
 
   // Submit form (create or update)
   const handleSubmit = async () => {
     if (!formData.result.trim()) {
-      toast.error(locale === 'zh-Hans' ? '请填写拜访结果' : 'Please enter visit result');
+      toast.error(t('enterVisitResult', locale));
       return;
     }
 
     // In edit mode, ensure activity exists
     if (isEditMode && !activityId) {
-      toast.error(locale === 'zh-Hans' ? '活动记录未找到' : 'Activity record not found');
+      toast.error(t('activityRecordNotFound', locale));
       return;
     }
 
@@ -298,7 +214,7 @@ export default function ActivityCapturePage() {
 
     try {
       const title = formData.title || `${t('newVisitTitle', locale)} - ${formData.accountName || account?.name1 || 'Unknown'}`;
-      const notes = `${formData.result}\n\nContact: ${formData.contactName}\nNext Step: ${formData.nextStep}\nOpportunity: ${formData.opportunityIntent}`;
+      const notes = `${formData.result}\n\nContact: ${formData.contactName}`;
       
       // Determine account and opportunity to save
       const targetAccount = formData.accountId
@@ -334,7 +250,7 @@ export default function ActivityCapturePage() {
         if (targetAccount?.id) {
           await touchAccountLastContacted(targetAccount.id, new Date(formData.visitDate).toISOString());
         }
-        toast.success(locale === 'zh-Hans' ? '活动已更新' : 'Activity updated');
+        toast.success(t('activityUpdated', locale));
       } else {
         // Create new activity
         await createActivity.mutateAsync({
@@ -354,70 +270,7 @@ export default function ActivityCapturePage() {
         if (targetAccount?.id) {
           await touchAccountLastContacted(targetAccount.id, new Date(formData.visitDate).toISOString());
         }
-        toast.success(locale === 'zh-Hans' ? '活动已保存' : 'Activity saved');
-      }
-
-      // Analyze for potential opportunities (only for new activities)
-      if (!isEditMode && copilotEnabled) {
-        toast.info(locale === 'zh-Hans' ? '正在分析潜在商机...' : 'Analyzing potential opportunities...');
-        
-        const oppAnalysis = await analyzeOpportunity(formData);
-        
-        if (oppAnalysis?.hasOpportunity) {
-          const stageKeyMap: Record<string, string> = {
-            prospecting: 'prospecting',
-            qualification: 'qualification',
-            proposal: 'proposal',
-            negotiation: 'negotiation',
-            won: 'won',
-            lost: 'lost',
-          };
-
-          if (oppAnalysis.matchingOpportunityId) {
-            // Update existing opportunity
-            const existingOpp = opportunities.find((o) => o.id === oppAnalysis.matchingOpportunityId);
-            if (existingOpp) {
-              await updateOpportunity.mutateAsync({
-                id: oppAnalysis.matchingOpportunityId,
-                changedFields: {
-                  lastaction: formData.result,
-                  confidence: oppAnalysis.confidence,
-                  ...(oppAnalysis.stage && { stage: stageKeyMap[oppAnalysis.stage] as 'prospecting' | 'qualification' | 'proposal' | 'negotiation' | 'won' | 'lost' }),
-                  ...(oppAnalysis.expectedCloseDate && { expectedclosedate: oppAnalysis.expectedCloseDate }),
-                },
-              });
-              toast.success(
-                locale === 'zh-Hans'
-                  ? `已更新商机：${existingOpp.name1}`
-                  : `Updated opportunity: ${existingOpp.name1}`
-              );
-            }
-          } else if (!formData.opportunityId) {
-            // Only create new opportunity if none was selected
-            const targetAccount = formData.accountId
-              ? accounts.find((a) => a.id === formData.accountId)
-              : accounts.find((a) => a.id === accountId);
-            if (targetAccount) {
-              await createOpportunity.mutateAsync({
-                name1: oppAnalysis.opportunityName || `${formData.accountName} - ${formData.opportunityIntent || 'New Opportunity'}`,
-                // Set account lookup - required field
-                account: { id: targetAccount.id, name1: targetAccount.name1 },
-                totalamount: oppAnalysis.totalAmount || 0,
-                stage: (stageKeyMap[oppAnalysis.stage || 'prospecting'] || 'prospecting') as 'prospecting' | 'qualification' | 'proposal' | 'negotiation' | 'won' | 'lost',
-                confidence: oppAnalysis.confidence || 50,
-                ownerid: user?.objectId || '',
-                lastaction: formData.result,
-                ...(oppAnalysis.expectedCloseDate && { expectedclosedate: oppAnalysis.expectedCloseDate }),
-              });
-              toast.success(
-                locale === 'zh-Hans'
-                  ? `已创建新商机：${oppAnalysis.opportunityName || formData.opportunityIntent}`
-                  : `Created new opportunity: ${oppAnalysis.opportunityName || formData.opportunityIntent}`
-              );
-              await refetchOpportunities();
-            }
-          }
-        }
+        toast.success(t('activitySaved', locale));
       }
 
       // Navigate back - use the canonical activity ID
@@ -437,7 +290,7 @@ export default function ActivityCapturePage() {
 
   // Page title based on mode
   const pageTitle = isEditMode
-    ? (locale === 'zh-Hans' ? '编辑活动' : 'Edit Activity')
+    ? (t('editActivityTitle', locale))
     : t('newVisitTitle', locale);
 
   // Show loading state in edit mode while waiting for activity data
@@ -453,7 +306,7 @@ export default function ActivityCapturePage() {
             >
               <ArrowLeft className="w-5 h-5 text-foreground" />
             </button>
-            <h1 className="text-title text-foreground">{locale === 'zh-Hans' ? '加载中...' : 'Loading...'}</h1>
+            <h1 className="text-title text-foreground">{t('loading', locale)}</h1>
             <div className="w-10" />
           </div>
         </header>
@@ -477,18 +330,18 @@ export default function ActivityCapturePage() {
             >
               <ArrowLeft className="w-5 h-5 text-foreground" />
             </button>
-            <h1 className="text-title text-foreground">{locale === 'zh-Hans' ? '未找到' : 'Not Found'}</h1>
+            <h1 className="text-title text-foreground">{t('notFound', locale)}</h1>
             <div className="w-10" />
           </div>
         </header>
         <main className="flex-1 pt-14 flex flex-col items-center justify-center text-center px-4">
-          <p className="text-lg font-medium text-foreground">{locale === 'zh-Hans' ? '活动记录未找到' : 'Activity not found'}</p>
-          <p className="text-sm text-muted-foreground mt-2">{locale === 'zh-Hans' ? '该记录可能已被删除' : 'This record may have been deleted'}</p>
+          <p className="text-lg font-medium text-foreground">{t('activityNotFound', locale)}</p>
+          <p className="text-sm text-muted-foreground mt-2">{t('recordMayBeDeleted', locale)}</p>
           <button
             onClick={() => navigate('/activities')}
             className="mt-4 px-4 py-2 rounded-lg bg-primary text-primary-foreground"
           >
-            {locale === 'zh-Hans' ? '返回活动列表' : 'Back to Activities'}
+            {t('backToActivities', locale)}
           </button>
         </main>
       </div>
@@ -530,23 +383,16 @@ export default function ActivityCapturePage() {
       {/* Content */}
       <main className="flex-1 pt-14 pb-32 px-4 overflow-y-auto">
         <div className="space-y-4 py-4">
-          {/* AI Assistant indicator */}
-          {copilotEnabled && (
+          {/* AI Assistant indicator - only when the form was pre-filled from a Copilot draft */}
+          {copilotEnabled && isAIFilled && (
             <motion.div
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
-              className={cn(
-                "flex items-center gap-2 px-3 py-2 rounded-lg text-sm",
-                isAIFilled 
-                  ? "bg-emerald-500/10 border border-emerald-500/30" 
-                  : "bg-primary/10 border border-primary/30"
-              )}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-emerald-500/10 border border-emerald-500/30"
             >
-              <Sparkles className={cn("w-4 h-4", isAIFilled ? "text-emerald-500" : "text-primary")} />
-              <span className={cn(isAIFilled ? "text-emerald-700 dark:text-emerald-300" : "text-primary")}>
-                {isAIFilled
-                  ? (locale === 'zh-Hans' ? 'AI 已填充，请检查并修改' : 'AI filled - review and edit')
-                  : (locale === 'zh-Hans' ? '在下方 Copilot 输入框描述拜访内容，AI 将自动填充表单' : 'Describe your visit in the Copilot input below, AI will fill the form')}
+              <Sparkles className="w-4 h-4 text-emerald-500" />
+              <span className="text-emerald-700 dark:text-emerald-300">
+                {t('aiFilledReview', locale)}
               </span>
             </motion.div>
           )}
@@ -561,7 +407,7 @@ export default function ActivityCapturePage() {
             <div className="space-y-2">
               <label className="flex items-center gap-2 text-helper text-muted-foreground">
                 <FileText className="w-4 h-4" />
-                {locale === 'zh-Hans' ? '标题' : 'Title'}
+                {t('fieldTitle', locale)}
               </label>
               <input
                 type="text"
@@ -573,7 +419,7 @@ export default function ActivityCapturePage() {
                   "w-full px-3 py-2.5 rounded-lg bg-muted/50 border text-foreground placeholder:text-muted-foreground/50 outline-none focus:border-primary/50 transition-colors",
                   isAIFilled && formData.title ? "border-emerald-500/50" : "border-border/30"
                 )}
-                placeholder={locale === 'zh-Hans' ? '拜访标题（可选）' : 'Visit title (optional)'}
+                placeholder={t('visitTitleOptional', locale)}
               />
             </div>
 
@@ -605,10 +451,10 @@ export default function ActivityCapturePage() {
                     isAIFilled && formData.accountId ? "border-emerald-500/50" : "border-border/30"
                   )}
                 >
-                  <SelectValue placeholder={locale === 'zh-Hans' ? '选择客户' : 'Select account'} />
+                  <SelectValue placeholder={t('formSelectAccount', locale)} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">{filteredContacts.length === 0 ? (locale === 'zh-Hans' ? '暂无联系人数据' : 'No contacts available') : (locale === 'zh-Hans' ? '不选择' : 'None')}</SelectItem>
+                  <SelectItem value="none">{filteredContacts.length === 0 ? (t('noContactsAvailable', locale)) : (t('dontSelect', locale))}</SelectItem>
                   {accounts.filter((a) => a.id).map((acc) => (
                     <SelectItem key={acc.id} value={acc.id}>
                       {acc.name1}
@@ -641,10 +487,10 @@ export default function ActivityCapturePage() {
                     isAIFilled && formData.contactId ? "border-emerald-500/50" : "border-border/30"
                   )}
                 >
-                  <SelectValue placeholder={locale === 'zh-Hans' ? '选择联系人' : 'Select contact'} />
+                  <SelectValue placeholder={t('selectContact', locale)} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">{filteredContacts.length === 0 ? (locale === 'zh-Hans' ? '暂无联系人数据' : 'No contacts available') : (locale === 'zh-Hans' ? '不选择' : 'None')}</SelectItem>
+                  <SelectItem value="none">{filteredContacts.length === 0 ? (t('noContactsAvailable', locale)) : (t('dontSelect', locale))}</SelectItem>
                   {filteredContacts.filter((c) => c.id).map((contact) => (
                     <SelectItem key={contact.id} value={contact.id}>
                       <div className="flex flex-col items-start text-left">
@@ -661,7 +507,7 @@ export default function ActivityCapturePage() {
             <div className="space-y-2">
               <label className="flex items-center gap-2 text-helper text-muted-foreground">
                 <Target className="w-4 h-4" />
-                {locale === 'zh-Hans' ? '关联商机' : 'Related Opportunity'}
+                {t('relatedOpportunity', locale)}
               </label>
               <Select
                 value={formData.opportunityId || 'none'}
@@ -680,10 +526,10 @@ export default function ActivityCapturePage() {
                     isAIFilled && formData.opportunityId ? "border-emerald-500/50" : "border-border/30"
                   )}
                 >
-                  <SelectValue placeholder={locale === 'zh-Hans' ? '选择商机（可选）' : 'Select opportunity (optional)'} />
+                  <SelectValue placeholder={t('formSelectOpportunity', locale)} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">{filteredOpportunities.length === 0 ? (locale === 'zh-Hans' ? '暂无商机数据' : 'No opportunities available') : (locale === 'zh-Hans' ? '不选择' : 'None')}</SelectItem>
+                  <SelectItem value="none">{filteredOpportunities.length === 0 ? (t('noOpportunitiesAvailable', locale)) : (t('dontSelect', locale))}</SelectItem>
                   {filteredOpportunities.filter((o) => o.id).map((opp) => (
                     <SelectItem key={opp.id} value={opp.id}>
                       <div className="flex flex-col items-start text-left">
@@ -730,51 +576,9 @@ export default function ActivityCapturePage() {
                   "w-full min-h-[140px] px-3 py-2.5 rounded-lg bg-muted/50 border text-foreground placeholder:text-muted-foreground/50 outline-none focus:border-primary/50 transition-colors resize-none",
                   isAIFilled && formData.result ? "border-emerald-500/50" : "border-border/30"
                 )}
-                placeholder={locale === 'zh-Hans' ? '拜访结果和讨论要点' : 'Visit outcome and key discussion points'}
+                placeholder={t('visitOutcomePlaceholder', locale)}
               />
             </div>
-
-            {/* Next Step */}
-            <div className="space-y-2">
-              <label className="flex items-center gap-2 text-helper text-muted-foreground">
-                <ArrowRight className="w-4 h-4" />
-                {t('nextStep', locale)}
-              </label>
-              <input
-                type="text"
-                value={formData.nextStep}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  setFormData((prev) => ({ ...prev, nextStep: e.target.value }))
-                }
-                className={cn(
-                  "w-full px-3 py-2.5 rounded-lg bg-muted/50 border text-foreground placeholder:text-muted-foreground/50 outline-none focus:border-primary/50 transition-colors",
-                  isAIFilled && formData.nextStep ? "border-emerald-500/50" : "border-border/30"
-                )}
-                placeholder={locale === 'zh-Hans' ? '下一步行动' : 'Next action'}
-              />
-            </div>
-
-            {/* Opportunity Intent (text input for new opportunities) */}
-            {!formData.opportunityId && (
-              <div className="space-y-2">
-                <label className="flex items-center gap-2 text-helper text-muted-foreground">
-                  <Target className="w-4 h-4" />
-                  {t('opportunityIntent', locale)}
-                </label>
-                <input
-                  type="text"
-                  value={formData.opportunityIntent}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                    setFormData((prev) => ({ ...prev, opportunityIntent: e.target.value }))
-                  }
-                  className={cn(
-                    "w-full px-3 py-2.5 rounded-lg bg-muted/50 border text-foreground placeholder:text-muted-foreground/50 outline-none focus:border-primary/50 transition-colors",
-                    isAIFilled && formData.opportunityIntent ? "border-emerald-500/50" : "border-border/30"
-                  )}
-                  placeholder={locale === 'zh-Hans' ? '商机/意向（AI可自动创建商机）' : 'Opportunity/Intent (AI can auto-create)'}
-                />
-              </div>
-            )}
 
             {/* Action Buttons */}
             <div className="flex gap-3 pt-2">
@@ -782,7 +586,7 @@ export default function ActivityCapturePage() {
                 onClick={handleDiscard}
                 className="flex-1 py-3 rounded-xl text-body font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors border border-border/30"
               >
-                {locale === 'zh-Hans' ? '取消' : 'Cancel'}
+                {t('cancel', locale)}
               </button>
               <button
                 onClick={handleSubmit}
@@ -794,7 +598,7 @@ export default function ActivityCapturePage() {
                 ) : (
                   <Check className="w-4 h-4" />
                 )}
-                {locale === 'zh-Hans' ? '保存拜访记录' : 'Save Visit Log'}
+                {t('saveVisitLog', locale)}
               </button>
             </div>
           </motion.div>

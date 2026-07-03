@@ -5,11 +5,13 @@ import { useSettingsReady } from '@/contexts/settings-context';
 import { 
   clearCopilotConversation,
 } from '@/services/copilot-service';
-import { getLocale, getSimulateStreaming, type Locale } from '@/lib/i18n';
+import { getLocale, getSimulateStreaming, t, type Locale } from '@/lib/i18n';
 import { toast } from 'sonner';
 import { type ThinkingProgress, type AgentResponse, type IntentResult, type ThinkingStep } from '@/lib/copilot-agent';
 import { emptyState, hydrateConversationState, commitConversationState, buildStateSnapshot, recordConversationState, type ConversationState, type FocusPageContext, type EntityType } from '@/lib/conversation-state';
 import { buildQueueFromIntent, findIntentByMessageId, type IntentQueue } from '@/lib/intent-queue';
+import { getFunctionSubject } from '@/lib/function-registry';
+import type { ChangeProposal } from '@/lib/change-proposal';
 import type * as QR from '@/lib/intent-queue-runtime';
 
 // Lazy-load the queue runtime — it pulls in function-executor.ts which is heavy.
@@ -159,7 +161,7 @@ export type { ThinkingStep } from '@/lib/copilot-agent';
 
 export interface ChatMessage {
   id: string;
-  type: 'user' | 'agent' | 'stage-card' | 'form-card' | 'batch-form-card' | 'match-selection' | 'clarification' | 'awaiting-clarification';
+  type: 'user' | 'agent' | 'stage-card' | 'form-card' | 'batch-form-card' | 'match-selection' | 'clarification' | 'awaiting-clarification' | 'param-picker' | 'proposal-card';
   role?: 'user' | 'assistant';
   content: string;
   /** IntentQueue id this message belongs to (queue-driven flows). */
@@ -229,6 +231,9 @@ export interface ChatMessage {
       title?: string;
       phone?: string;
       email?: string;
+      stage?: string;
+      amount?: number;
+      expectedCloseDate?: string;
     }>;
     // Low-confidence matches (<70) for the "Show more" collapsible
     lowConfidenceMatches?: Array<{
@@ -242,8 +247,14 @@ export interface ChatMessage {
       title?: string;
       phone?: string;
       email?: string;
+      stage?: string;
+      amount?: number;
+      expectedCloseDate?: string;
     }>;
     confidence: 'high' | 'medium' | 'low' | 'none';
+    // List mode: this card is a missing-subject picker (no name query) — the UI
+    // renders all `matches` as a plain pick list with a search box, no scores.
+    listMode?: boolean;
     pendingAction?: string;
     // Pending intent to execute after user selects a match
     pendingIntent?: {
@@ -271,6 +282,28 @@ export interface ChatMessage {
       }>;
       allowFreeInput?: boolean;
     }>;
+  };
+
+  // Parameter elicitation card (missing-parameter gate): when an update tool
+  // resolves its subject but has no concrete value, ask what to change / to what
+  // value via the RIGHT control (enum → chips, scalar → input). Blocks like a
+  // match card (resolutionState gates it).
+  paramPicker?: {
+    function: string;
+    arguments: Record<string, unknown>;
+    subjectLabel?: string;
+    mode: 'chooseField' | 'chooseValue';
+    field?: string;
+    fieldLabel?: string;
+    fieldKind?: 'enum' | 'text' | 'number' | 'date';
+    options?: Array<{ value: string; label: string }>;
+  };
+
+  // Change-proposal card (composite / destructive ops, e.g. merge duplicates):
+  // holds a proposed set of writes; blocks until the user confirms or cancels.
+  proposalCard?: {
+    proposal: ChangeProposal;
+    status: 'pending' | 'applied' | 'cancelled' | 'failed';
   };
 
   // Additional intents inferred from user input (multi-intent support)
@@ -328,9 +361,6 @@ export interface ChatMessage {
   announceStatus?: 'completed' | 'failed';
 }
 
-// Form fill callback type
-export type FormFillCallback = (data: Record<string, unknown>) => void;
-
 /**
  * §8: a "blocking card" requires user confirmation before the conversation can
  * continue (draft form, batch draft, match selection, awaiting clarification).
@@ -358,6 +388,14 @@ export function isUnresolvedBlockingCard(m: ChatMessage): boolean {
   }
   // Clarification question card — unresolved until answered.
   if (m.clarification) {
+    return m.resolutionState !== 'resolved';
+  }
+  // Parameter elicitation card — unresolved until a value is chosen.
+  if (m.paramPicker) {
+    return m.resolutionState !== 'resolved';
+  }
+  // Change-proposal card — unresolved until the user confirms or cancels.
+  if (m.proposalCard) {
     return m.resolutionState !== 'resolved';
   }
   return false;
@@ -403,10 +441,6 @@ interface CopilotContextValue {
   // Dynamic input placeholder
   inputPlaceholder: string;
   setInputPlaceholder: (placeholder: string) => void;
-  
-  // Form fill callback for agent to populate page forms
-  formFillCallback: FormFillCallback | null;
-  setFormFillCallback: (callback: FormFillCallback | null) => void;
   
   // Conversation management
   startNewConversation: () => Promise<void>;
@@ -500,6 +534,12 @@ interface CopilotContextValue {
     opportunityName?: string;
   }) => Promise<void>;
   formCardCancelled: (messageId: string) => Promise<void>;
+  // Missing-parameter gate: user picked which field to change / the new value on the param-picker card.
+  paramFieldPicked: (messageId: string, field: string) => Promise<void>;
+  paramValuePicked: (messageId: string, field: string, value: string) => Promise<void>;
+  // Change-proposal card: user confirmed / cancelled the proposed writes.
+  proposalConfirmed: (messageId: string) => Promise<void>;
+  proposalCancelled: (messageId: string) => Promise<void>;
 }
 
 export interface PageContext {
@@ -648,6 +688,9 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     if (intent.additionalActions && intent.additionalActions.length > 0) return true;
     if (intent.requiresMatching) return true;
     if (intent.resolutions && intent.resolutions.length > 0) return true;
+    // Subject-bearing action tools (updates) route to the queue for the
+    // missing-subject gate. Mirrors willUseQueue in copilot-agent.
+    if (getFunctionSubject(intent.function)) return true;
     return false;
   }, []);
 
@@ -839,7 +882,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           id: `msg-${Date.now()}-extra-${i}`,
           type: 'form-card',
           role: 'assistant',
-          content: action.reason || (locale === 'zh-Hans' ? '从对话中推断' : 'Inferred from conversation'),
+          content: action.reason || t('inferredFromConv', locale),
           functionCalled: action.function,
           functionDisplayName: fnDisplay,
           timestamp: new Date().toISOString(),
@@ -883,9 +926,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           id: `msg-${Date.now()}-resumed-form`,
           type: 'form-card',
           role: 'assistant',
-          content: locale === 'zh-Hans'
-            ? '联系人已新建，请确认以下信息'
-            : 'Contact created. Please confirm the following information',
+          content: t('contactCreatedConfirm', locale),
           functionCalled: parked.function,
           functionDisplayName: fnDisplay,
           timestamp: new Date().toISOString(),
@@ -908,9 +949,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           id: `msg-${Date.now()}-resume-err`,
           type: 'agent',
           role: 'assistant',
-          content: locale === 'zh-Hans'
-            ? `❌ 新建联系人后恢复活动创建失败: ${fnResult.error}`
-            : `❌ Failed to resume activity after contact create: ${fnResult.error}`,
+          content: t('contactCreateResumeFailed', locale, { error: fnResult.error ?? '' }),
           agentName: 'System',
           timestamp: new Date().toISOString(),
         }]);
@@ -945,8 +984,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         { userId: user?.objectId, userEmail: user?.userPrincipalName },
       );
       const fnDisplay = getDisplayName(parked.function, locale === 'zh-Hans' ? 'zh-Hans' : 'en-US');
-      const kindZh = expectedKind === 'account' ? '客户' : '商机';
-      const kindEn = expectedKind === 'account' ? 'Account' : 'Opportunity';
+      const kindLabel = expectedKind === 'account' ? t('account', locale) : t('opportunity', locale);
 
       if (fnResult.success && fnResult.data) {
         const formData = fnResult.data as { type: string; isNew: boolean; data: Record<string, unknown> };
@@ -954,9 +992,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           id: `msg-${Date.now()}-resumed-form`,
           type: 'form-card',
           role: 'assistant',
-          content: locale === 'zh-Hans'
-            ? `${kindZh}已新建，请确认以下信息`
-            : `${kindEn} created. Please confirm the following information`,
+          content: t('kindCreatedConfirm', locale, { kind: kindLabel }),
           functionCalled: parked.function,
           functionDisplayName: fnDisplay,
           timestamp: new Date().toISOString(),
@@ -974,9 +1010,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           id: `msg-${Date.now()}-resume-err`,
           type: 'agent',
           role: 'assistant',
-          content: locale === 'zh-Hans'
-            ? `❌ 新建${kindZh}后恢复操作失败: ${fnResult.error}`
-            : `❌ Failed to resume after ${expectedKind} create: ${fnResult.error}`,
+          content: t('kindCreateResumeFailed', locale, { kind: kindLabel, error: fnResult.error ?? '' }),
           agentName: 'System',
           timestamp: new Date().toISOString(),
         }]);
@@ -1085,7 +1119,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         { 
           stage: 'executing', 
           status: 'active', 
-          label: locale === 'zh-Hans' ? `正在准备${displayText}...` : `Preparing ${displayText}...` 
+          label: t('preparingX', locale, { x: displayText }) 
         },
       ],
     };
@@ -1122,12 +1156,12 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           return {
             ...msg,
             type: 'form-card' as const,
-            content: locale === 'zh-Hans' ? '请确认以下信息' : 'Please confirm the following information',
+            content: t('confirmFollowing', locale),
             functionCalled: actionFunction,
             functionDisplayName: fnDisplayName,
             isThinking: false,
             thinkingSteps: [
-              { stage: 'executing' as const, status: 'completed' as const, label: locale === 'zh-Hans' ? `${fnDisplayName}：已准备表单` : `${fnDisplayName}: Form ready` },
+              { stage: 'executing' as const, status: 'completed' as const, label: t('formReady', locale, { fn: fnDisplayName }) },
             ],
             formCard: {
               type: formCardResult.type as 'activity' | 'opportunity' | 'account' | 'contact',
@@ -1171,18 +1205,14 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     }
   }, [user, locale]);
   
-  // Form fill callback for agent to populate page forms
-  const formFillCallbackRef = useRef<FormFillCallback | null>(null);
-  const setFormFillCallback = useCallback((callback: FormFillCallback | null) => {
-    formFillCallbackRef.current = callback;
-  }, []);
-  
   // Refs for copilot UI state
   const typingMessageIdRef = useRef<string | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const streamingRafRef = useRef<number | null>(null);
   const sendAbortRef = useRef<AbortController | null>(null);
+  const streamTargetTicks = 40;
+  const streamTickIntervalMs = 50;
 
   // Cancel the current send — aborts pending LLM calls, stops streaming, resets UI.
   const cancelSend = useCallback(() => {
@@ -1207,7 +1237,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           ...msg,
           isThinking: false,
           isStreaming: false,
-          content: msg.content || (locale === 'zh-Hans' ? '已取消' : 'Cancelled'),
+          content: msg.content || t('cancelled2', locale),
         };
       }
       return msg;
@@ -1231,8 +1261,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     
     const totalChars = fullContent.length;
     // Linear reveal: fixed chars per tick, no ease-out stalling
-    const charsPerTick = Math.max(3, Math.ceil(totalChars / 80)); // ~80 ticks total
-    const tickInterval = 30; // 30ms per tick → ~2.4s total
+    const charsPerTick = Math.max(6, Math.ceil(totalChars / streamTargetTicks));
+    const tickInterval = streamTickIntervalMs;
     let revealedIndex = 0;
     
     // Start with empty content, then gradually reveal
@@ -1381,10 +1411,10 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         const pendingResolution = lastForGate.awaitingClarification.pendingResolutions[0];
         const pendingKind = pendingResolution.kind;
         const queryName = pendingResolution.query;
-        const kindLabelZh = pendingKind === 'contact' ? '联系人' : pendingKind === 'account' ? '客户' : '商机';
+        const kindLabel = pendingKind === 'contact' ? t('kindContact', locale) : pendingKind === 'account' ? t('kindAccount', locale) : t('kindOpportunity', locale);
         const gateResultText = isCreate
-          ? (locale === 'zh-Hans' ? `新建${kindLabelZh}：${queryName}` : `Created new ${pendingKind}: ${queryName}`)
-          : (locale === 'zh-Hans' ? `已跳过${kindLabelZh}关联` : `Skipped ${pendingKind} link`);
+          ? t('createdNewKind', locale, { kind: kindLabel, name: queryName })
+          : t('skippedKindLink', locale, { kind: kindLabel });
         setMessages((prev) => prev.map((m) =>
           m.id === blockedId
             ? { ...m, resolutionState: 'resolved' as const, resolutionResult: gateResultText }
@@ -1405,11 +1435,9 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             id: `msg-${Date.now()}-contact-draft`,
             type: 'form-card',
             role: 'assistant',
-            content: locale === 'zh-Hans'
-              ? '新建联系人，保存后将自动关联到本次活动'
-              : 'Create a new contact — it will be linked to this activity automatically after save',
+            content: t('newContactBody', locale),
             functionCalled: 'createContact',
-            functionDisplayName: locale === 'zh-Hans' ? '新建联系人' : 'New Contact',
+            functionDisplayName: t('newContact', locale),
             timestamp: new Date().toISOString(),
             formCard: {
               type: 'contact',
@@ -1438,15 +1466,11 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           const isAccount = pendingKind === 'account';
           const draftFn = isAccount ? 'createAccount' : 'createOpportunity';
           const draftLabel = isAccount
-            ? (locale === 'zh-Hans' ? '新建客户' : 'New Account')
-            : (locale === 'zh-Hans' ? '新建商机' : 'New Opportunity');
+            ? t('newAccount', locale)
+            : t('newOpportunity', locale);
           const draftBody = isAccount
-            ? (locale === 'zh-Hans'
-                ? '新建客户，保存后将自动关联到本次操作'
-                : 'Create a new account — it will be linked automatically after save')
-            : (locale === 'zh-Hans'
-                ? '新建商机，保存后将自动关联到本次操作'
-                : 'Create a new opportunity — it will be linked automatically after save');
+            ? t('newAccountBody', locale)
+            : t('newOpportunityBody', locale);
           const draftData: Record<string, unknown> = isAccount
             ? { name: queryName }
             : {
@@ -1566,7 +1590,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           timestamp: new Date().toISOString(),
           isThinking: true,
           thinkingSteps: [
-            { stage: 'intent', status: 'active', label: locale === 'zh-Hans' ? '理解意图...' : 'Understanding...' },
+            { stage: 'intent', status: 'active', label: t('understanding', locale) },
           ],
         };
         setMessages((prev) => [...prev, thinkingMessage]);
@@ -1613,10 +1637,10 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                     ...newSteps[stepIndex],
                     status: 'active',
                     label: progress.stage === 'intent'
-                      ? (locale === 'zh-Hans' ? '理解意图...' : 'Understanding...')
+                      ? t('understanding', locale)
                       : progress.stage === 'executing'
-                      ? (locale === 'zh-Hans' ? `执行: ${progress.functionDisplayName || ''}` : `Executing: ${progress.functionDisplayName || ''}`)
-                      : (locale === 'zh-Hans' ? '生成回复...' : 'Generating response...'),
+                      ? t('executingFn', locale, { fn: progress.functionDisplayName || '' })
+                      : t('generatingResponse', locale),
                   };
                 } else if (progress.status === 'completed') {
                   newSteps[stepIndex] = {
@@ -1625,25 +1649,25 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                     // For intent stage, keep simple completion label instead of showing intent detail
                     // to avoid duplication with executing stage's function name
                     label: progress.stage === 'intent'
-                      ? (locale === 'zh-Hans' ? '已理解' : 'Understood')
+                      ? t('understood', locale)
                       : progress.stage === 'executing'
-                      ? (progress.functionDisplayName || (locale === 'zh-Hans' ? '已执行' : 'Executed'))
-                      : (locale === 'zh-Hans' ? '已完成' : 'Completed'),
+                      ? (progress.functionDisplayName || t('executed', locale))
+                      : t('completed', locale),
                   };
                 }
               } else {
                 // Step doesn't exist yet, add it
                 const newLabel = progress.status === 'active'
                   ? (progress.stage === 'intent'
-                      ? (locale === 'zh-Hans' ? '理解意图...' : 'Understanding...')
+                      ? t('understanding', locale)
                       : progress.stage === 'executing'
-                      ? (locale === 'zh-Hans' ? `执行: ${progress.functionDisplayName || ''}` : `Executing: ${progress.functionDisplayName || ''}`)
-                      : (locale === 'zh-Hans' ? '生成回复...' : 'Generating response...'))
+                      ? t('executingFn', locale, { fn: progress.functionDisplayName || '' })
+                      : t('generatingResponse', locale))
                   : (progress.stage === 'intent'
-                      ? (locale === 'zh-Hans' ? '已理解' : 'Understood')
+                      ? t('understood', locale)
                       : progress.stage === 'executing'
-                      ? (progress.functionDisplayName || (locale === 'zh-Hans' ? '已执行' : 'Executed'))
-                      : (locale === 'zh-Hans' ? '已完成' : 'Completed'));
+                      ? (progress.functionDisplayName || t('executed', locale))
+                      : t('completed', locale));
                 newSteps.push({
                   stage: progress.stage,
                   status: progress.status,
@@ -1773,14 +1797,14 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             let acTaskGroupId: string | undefined;
             if (overviewAc && overviewAc.length > 1 && intentIdxAc !== undefined) {
               acTaskGroupId = `task-${intentIdxAc}`;
-              const announceForAc = buildAnnounceMessage(intentIdxAc, overviewAc, isZhAc);
+              const announceForAc = buildAnnounceMessage(intentIdxAc, overviewAc, locale);
               let didInsertAnnounceAc = false;
               setMessages((prev) => {
                 const idx = prev.findIndex((m) => m.id === thinkingMsgId);
                 if (idx < 0) return prev;
                 const inserts: ChatMessage[] = [];
                 if (!hasMessageAfterLastUser(prev, (m) => m.taskRole === 'overview')) {
-                  inserts.push(buildOverviewMessage(overviewAc, isZhAc));
+                  inserts.push(buildOverviewMessage(overviewAc, locale));
                 }
                 if (announceForAc && !hasMessageAfterLastUser(prev, (m) => m.taskRole === 'announce' && m.taskGroupId === `task-${intentIdxAc}`)) {
                   inserts.push(announceForAc);
@@ -1892,14 +1916,14 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             let currentTaskGroupId: string | undefined;
             if (overview && overview.length > 1 && intentIdx !== undefined) {
               currentTaskGroupId = `task-${intentIdx}`;
-              const announceForIntent = buildAnnounceMessage(intentIdx, overview, isZhLocale);
+              const announceForIntent = buildAnnounceMessage(intentIdx, overview, locale);
               let didInsertAnnounce = false;
               setMessages((prev) => {
                 const idx = prev.findIndex((m) => m.id === thinkingMsgId);
                 if (idx < 0) return prev;
                 const inserts: ChatMessage[] = [];
                 if (!hasMessageAfterLastUser(prev, (m) => m.taskRole === 'overview')) {
-                  inserts.push(buildOverviewMessage(overview, isZhLocale));
+                  inserts.push(buildOverviewMessage(overview, locale));
                 }
                 if (announceForIntent && !hasMessageAfterLastUser(prev, (m) => m.taskRole === 'announce' && m.taskGroupId === `task-${intentIdx}`)) {
                   inserts.push(announceForIntent);
@@ -1929,8 +1953,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                 ...msg,
                 type: 'match-selection' as const,
                 content: matchResult.confidence === 'high' && !matchResult.needsConfirmation
-                  ? (locale === 'zh-Hans' ? `找到匹配: ${matchResult.exactMatch?.name}` : `Found match: ${matchResult.exactMatch?.name}`)
-                  : (locale === 'zh-Hans' ? '请选择一个匹配项：' : 'Please select a match:'),
+                  ? t('foundMatch', locale, { name: matchResult.exactMatch?.name ?? '' })
+                  : t('selectMatch', locale),
                 functionCalled: response.functionCalled,
                 functionDisplayName: response.functionDisplayName,
                 isThinking: false,
@@ -2033,8 +2057,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
               // Smooth linear streaming
               const fullContent = response.content;
               const totalChars = fullContent.length;
-              const charsPerTick = Math.max(3, Math.ceil(totalChars / 80));
-              const tickInterval = 30;
+              const charsPerTick = Math.max(6, Math.ceil(totalChars / streamTargetTicks));
+              const tickInterval = streamTickIntervalMs;
               let revIdx = 0;
               
               const animateStream = () => {
@@ -2072,7 +2096,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                   // Ensure we have content - if empty, show a generic confirmation
                   const displayContent = response.content && response.content.trim().length > 0
                     ? response.content
-                    : (locale === 'zh-Hans' ? '操作已完成。' : 'Done.');
+                    : t('done2', locale);
 
                   return {
                     ...msg,
@@ -2323,7 +2347,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           ) {
             const startIdx = (prevIntentIndex ?? -1) + 1;
             for (let stepIdx = startIdx; stepIdx <= itemIntentIndex; stepIdx++) {
-              const announce = buildAnnounceMessage(stepIdx, overviewFromStream, isZhCascade);
+              const announce = buildAnnounceMessage(stepIdx, overviewFromStream, locale);
               if (announce) {
                 setMessages((prev) => {
                   // Phase D: fold any prior task's substeps before the next announce.
@@ -2418,10 +2442,10 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
               arguments: { ...updatedArguments },
               ...(remainingAfter.length > 0 ? { remainingResolutions: remainingAfter } : {}),
             };
-            const entityLabel = item.entityType === 'account' ? (locale === 'zh-Hans' ? '客户' : 'account') :
-                                item.entityType === 'contact' ? (locale === 'zh-Hans' ? '联系人' : 'contact') :
-                                item.entityType === 'activity' ? (locale === 'zh-Hans' ? '活动' : 'activity') :
-                                (locale === 'zh-Hans' ? '商机' : 'opportunity');
+            const entityLabel = item.entityType === 'account' ? t('kindAccount', locale) :
+                                item.entityType === 'contact' ? t('kindContact', locale) :
+                                item.entityType === 'activity' ? t('kindActivity', locale) :
+                                t('kindOpportunity', locale);
             setMessages((prev) => prev.map((msg) => {
               if (msg.id !== thinkingMsgId) return msg;
               return {
@@ -2432,7 +2456,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                   : `Found ${highConf.length} matching ${entityLabel}(s). Please select:`,
                 isThinking: false,
                 thinkingSteps: [
-                  { stage: 'matching' as const, status: 'completed' as const, label: locale === 'zh-Hans' ? `继续解析「${item.query}」` : `Continuing resolution for "${item.query}"` },
+                  { stage: 'matching' as const, status: 'completed' as const, label: t('continuingResolution', locale, { query: item.query }) },
                 ],
                 matchSelection: {
                   entityType: item.entityType,
@@ -2463,9 +2487,9 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           }));
           const pendingKind: 'contact' | 'account' | 'opportunity' =
             item.entityType === 'activity' ? 'opportunity' : (item.entityType as 'contact' | 'account' | 'opportunity');
-          const kindLabel = pendingKind === 'contact' ? (locale === 'zh-Hans' ? '联系人' : 'contact') :
-                            pendingKind === 'account' ? (locale === 'zh-Hans' ? '客户' : 'account') :
-                            (locale === 'zh-Hans' ? '商机' : 'opportunity');
+          const kindLabel = pendingKind === 'contact' ? t('kindContact', locale) :
+                            pendingKind === 'account' ? t('kindAccount', locale) :
+                            t('kindOpportunity', locale);
           const ac: AwaitingClarification = {
             kind: 'awaiting-clarification',
             pendingResolutions: [{
@@ -2492,7 +2516,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                 : `No ${kindLabel} matches "${item.query}". Reply "create" to create one, another name to retry, or "skip" to omit.`,
               isThinking: false,
               thinkingSteps: [
-                { stage: 'matching' as const, status: 'completed' as const, label: locale === 'zh-Hans' ? `未找到「${item.query}」匹配` : `No match for "${item.query}"` },
+                { stage: 'matching' as const, status: 'completed' as const, label: t('noMatchFor', locale, { query: item.query }) },
               ],
               awaitingClarification: ac,
               resolutionState: 'blocked' as const,
@@ -2525,7 +2549,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                 : `Linked to existing activity "${selectedRecord.name}" — no duplicate created.`,
               isThinking: false,
               thinkingSteps: [
-                { stage: 'executing' as const, status: 'completed' as const, label: locale === 'zh-Hans' ? `关联现有活动` : `Linked existing activity` },
+                { stage: 'executing' as const, status: 'completed' as const, label: t('linkedActivity', locale) },
               ],
             };
           }));
@@ -2544,12 +2568,12 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             return {
               ...msg,
               type: 'form-card' as const,
-              content: locale === 'zh-Hans' ? '请确认以下信息' : 'Please confirm the following information',
+              content: t('confirmFollowing', locale),
               functionCalled: pendingIntent.function,
               functionDisplayName: fnDisplayName,
               isThinking: false,
               thinkingSteps: [
-                { stage: 'executing' as const, status: 'completed' as const, label: locale === 'zh-Hans' ? `${fnDisplayName}：已准备表单` : `${fnDisplayName}: Form ready` },
+                { stage: 'executing' as const, status: 'completed' as const, label: t('formReady', locale, { fn: fnDisplayName }) },
               ],
               formCard: {
                 type: formCardResult.type as 'activity' | 'opportunity' | 'account' | 'contact',
@@ -2636,8 +2660,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                 stage: progress.stage,
                 status: progress.status,
                 label: progress.functionDisplayName || (progress.stage === 'executing'
-                  ? (locale === 'zh-Hans' ? '执行中...' : 'Executing...')
-                  : (locale === 'zh-Hans' ? '生成回复...' : 'Generating response...')),
+                  ? t('executingShort', locale)
+                  : t('generatingResponse', locale)),
               });
             }
             
@@ -2688,7 +2712,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             if (msg.id !== thinkingMsgId) return msg;
             return {
               ...msg,
-              content: response.content || (locale === 'zh-Hans' ? '已完成' : 'Done'),
+              content: response.content || t('doneShort', locale),
               functionCalled: response.functionCalled || pendingIntent.function,
               functionDisplayName: response.functionDisplayName || fnDisplayName,
               isThinking: false,
@@ -2758,7 +2782,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         { 
           stage: 'executing', 
           status: 'active', 
-          label: locale === 'zh-Hans' ? '正在创建新记录...' : 'Creating new record...' 
+          label: t('creatingRecord', locale) 
         },
       ],
     };
@@ -2784,12 +2808,12 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           return {
             ...msg,
             type: 'form-card' as const,
-            content: locale === 'zh-Hans' ? '请确认以下信息' : 'Please confirm the following information',
+            content: t('confirmFollowing', locale),
             functionCalled: pendingIntent.function,
             functionDisplayName: fnDisplayName,
             isThinking: false,
             thinkingSteps: [
-              { stage: 'executing' as const, status: 'completed' as const, label: locale === 'zh-Hans' ? `${fnDisplayName}：已准备表单` : `${fnDisplayName}: Form ready` },
+              { stage: 'executing' as const, status: 'completed' as const, label: t('formReady', locale, { fn: fnDisplayName }) },
             ],
             formCard: {
               type: formCardResult.type as 'activity' | 'opportunity' | 'account' | 'contact',
@@ -2900,11 +2924,9 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         id: `msg-${Date.now()}-contact-draft`,
         type: 'form-card',
         role: 'assistant',
-        content: locale === 'zh-Hans'
-          ? '新建联系人，保存后将自动关联到本次活动'
-          : 'Create a new contact — it will be linked to this activity automatically after save',
+        content: t('newContactBody', locale),
         functionCalled: 'createContact',
-        functionDisplayName: locale === 'zh-Hans' ? '新建联系人' : 'New Contact',
+        functionDisplayName: t('newContact', locale),
         timestamp: new Date().toISOString(),
         formCard: {
           type: 'contact',
@@ -2934,15 +2956,11 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       const isAccount = entityKind === 'account';
       const draftFn = isAccount ? 'createAccount' : 'createOpportunity';
       const draftLabel = isAccount
-        ? (locale === 'zh-Hans' ? '新建客户' : 'New Account')
-        : (locale === 'zh-Hans' ? '新建商机' : 'New Opportunity');
+        ? t('newAccount', locale)
+        : t('newOpportunity', locale);
       const draftBody = isAccount
-        ? (locale === 'zh-Hans'
-            ? '新建客户，保存后将自动关联到本次操作'
-            : 'Create a new account — it will be linked automatically after save')
-        : (locale === 'zh-Hans'
-            ? '新建商机，保存后将自动关联到本次操作'
-            : 'Create a new opportunity — it will be linked automatically after save');
+        ? t('newAccountBody', locale)
+        : t('newOpportunityBody', locale);
       const draftData: Record<string, unknown> = isAccount
         ? { name: queryName }
         : {
@@ -3003,7 +3021,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           id: `msg-${Date.now()}-form`,
           type: 'form-card',
           role: 'assistant',
-          content: locale === 'zh-Hans' ? '请确认以下信息' : 'Please confirm the following information',
+          content: t('confirmFollowing', locale),
           functionCalled: pendingIntent.function,
           functionDisplayName: fnDisplay,
           timestamp: new Date().toISOString(),
@@ -3019,7 +3037,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           id: `msg-${Date.now()}-err`,
           type: 'agent',
           role: 'assistant',
-          content: locale === 'zh-Hans' ? `❌ 操作失败: ${fnResult.error}` : `❌ Error: ${fnResult.error}`,
+          content: t('operationFailed', locale, { error: fnResult.error ?? '' }),
           agentName: 'System',
           timestamp: new Date().toISOString(),
         }]);
@@ -3255,6 +3273,53 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     }
   }, [buildRuntimeDeps, bumpQueue]);
 
+  // Missing-parameter gate resume handlers (queue intercept → runtime).
+  const paramFieldPicked = useCallback(async (messageId: string, field: string): Promise<void> => {
+    const msg = messagesRef.current.find((m) => m.id === messageId);
+    const intentId = msg?.queueIntentId;
+    const q = queueRef.current;
+    if (intentId && q && findIntentByMessageId(q, messageId)) {
+      const after = await (await loadQR()).handleParamFieldPick(q, intentId, field, buildRuntimeDeps());
+      queueRef.current = after;
+      bumpQueue();
+    }
+  }, [buildRuntimeDeps, bumpQueue]);
+
+  const paramValuePicked = useCallback(async (messageId: string, field: string, value: string): Promise<void> => {
+    const msg = messagesRef.current.find((m) => m.id === messageId);
+    const intentId = msg?.queueIntentId;
+    const q = queueRef.current;
+    if (intentId && q && findIntentByMessageId(q, messageId)) {
+      const after = await (await loadQR()).handleParamValuePick(q, intentId, field, value, buildRuntimeDeps());
+      queueRef.current = after;
+      bumpQueue();
+    }
+  }, [buildRuntimeDeps, bumpQueue]);
+
+  // Change-proposal card resume handlers (queue intercept → runtime).
+  const proposalConfirmed = useCallback(async (messageId: string): Promise<void> => {
+    const msg = messagesRef.current.find((m) => m.id === messageId);
+    const intentId = msg?.queueIntentId;
+    const proposal = msg?.proposalCard?.proposal;
+    const q = queueRef.current;
+    if (intentId && proposal && q && findIntentByMessageId(q, messageId)) {
+      const after = await (await loadQR()).handleProposalConfirm(q, intentId, proposal, buildRuntimeDeps());
+      queueRef.current = after;
+      bumpQueue();
+    }
+  }, [buildRuntimeDeps, bumpQueue]);
+
+  const proposalCancelled = useCallback(async (messageId: string): Promise<void> => {
+    const msg = messagesRef.current.find((m) => m.id === messageId);
+    const intentId = msg?.queueIntentId;
+    const q = queueRef.current;
+    if (intentId && q && findIntentByMessageId(q, messageId)) {
+      const after = await (await loadQR()).handleCancel(q, intentId, buildRuntimeDeps());
+      queueRef.current = after;
+      bumpQueue();
+    }
+  }, [buildRuntimeDeps, bumpQueue]);
+
   const value: CopilotContextValue = useMemo(() => ({
     isOpen,
     isFullScreen,
@@ -3279,8 +3344,6 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     setPageContext,
     inputPlaceholder,
     setInputPlaceholder,
-    formFillCallback: formFillCallbackRef.current,
-    setFormFillCallback,
     startNewConversation,
     extractVisitData,
     continuePendingAction,
@@ -3300,6 +3363,10 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     completeParkedIntentWithNewOpportunity,
     formCardSaved,
     formCardCancelled,
+    paramFieldPicked,
+    paramValuePicked,
+    proposalConfirmed,
+    proposalCancelled,
   }), [
     isOpen,
     isFullScreen,
@@ -3319,7 +3386,6 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     setPageContext,
     inputPlaceholder,
     setInputPlaceholder,
-    setFormFillCallback,
     startNewConversation,
     extractVisitData,
     continuePendingAction,
@@ -3338,6 +3404,10 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     completeParkedIntentWithNewOpportunity,
     formCardSaved,
     formCardCancelled,
+    paramFieldPicked,
+    paramValuePicked,
+    proposalConfirmed,
+    proposalCancelled,
   ]);
 
   return (

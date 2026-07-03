@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Lightbulb, ChevronRight, Check, X, MapPin, Phone, Calendar, Mail, CheckSquare, Building2, Users, TrendingUp, CalendarClock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { getLocale, type Locale } from '@/lib/i18n';
+import { getLocale, t, pickLabel, localeBcp47, type Locale } from '@/lib/i18n';
 import { useCopilot } from '@/contexts/copilot-context';
 import { useCreateActivity } from '@/generated/hooks/use-activity';
 import { useCreateOpportunity } from '@/generated/hooks/use-opportunity';
@@ -46,11 +46,11 @@ const EntityTypeIcons: Record<string, React.ComponentType<{ className?: string }
   contact: Users,
 };
 
-const EntityTypeLabels: Record<string, { zh: string; en: string }> = {
-  activity: { zh: '活动', en: 'Activity' },
-  opportunity: { zh: '商机', en: 'Opportunity' },
-  account: { zh: '客户', en: 'Account' },
-  contact: { zh: '联系人', en: 'Contact' },
+const EntityTypeLabels: Record<string, { zh: string; en: string; de: string; fr: string; es: string }> = {
+  activity: { zh: '活动', en: 'Activity', de: 'Aktivität', fr: 'Activité', es: 'Actividad' },
+  opportunity: { zh: '商机', en: 'Opportunity', de: 'Verkaufschance', fr: 'Opportunité', es: 'Oportunidad' },
+  account: { zh: '客户', en: 'Account', de: 'Konto', fr: 'Compte', es: 'Cuenta' },
+  contact: { zh: '联系人', en: 'Contact', de: 'Kontakt', fr: 'Contact', es: 'Contacto' },
 };
 
 export function AdditionalIntentsCard({ messageId, additionalIntents }: AdditionalIntentsCardProps) {
@@ -229,15 +229,15 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
     const data = form.data;
     switch (form.type) {
       case 'activity':
-        return (data.subject as string) || (data.title as string) || (locale === 'zh-Hans' ? '新活动' : 'New Activity');
+        return (data.subject as string) || (data.title as string) || (t('newRecordActivity', locale));
       case 'opportunity':
-        return (data.name as string) || (data.title as string) || (locale === 'zh-Hans' ? '新商机' : 'New Opportunity');
+        return (data.name as string) || (data.title as string) || (t('newRecordOpportunity', locale));
       case 'account':
-        return (data.name as string) || (locale === 'zh-Hans' ? '新客户' : 'New Account');
+        return (data.name as string) || (t('newRecordAccount', locale));
       case 'contact':
-        return (data.fullName as string) || (data.name as string) || (locale === 'zh-Hans' ? '新联系人' : 'New Contact');
+        return (data.fullName as string) || (data.name as string) || (t('newRecordContact', locale));
       default:
-        return locale === 'zh-Hans' ? '新记录' : 'New Record';
+        return t('newRecordGeneric', locale);
     }
   };
   
@@ -246,14 +246,14 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
     switch (form.type) {
       case 'activity': {
         const actType = data.type as string;
-        const typeLabel = actType === 'visit' ? (locale === 'zh-Hans' ? '拜访' : 'Visit')
-          : actType === 'call' ? (locale === 'zh-Hans' ? '电话' : 'Call')
-          : actType === 'meeting' ? (locale === 'zh-Hans' ? '会议' : 'Meeting')
-          : actType === 'email' ? (locale === 'zh-Hans' ? '邮件' : 'Email')
-          : (locale === 'zh-Hans' ? '其他' : 'Other');
+        const typeLabel = actType === 'visit' ? (t('typeVisit', locale))
+          : actType === 'call' ? (t('typeCall', locale))
+          : actType === 'meeting' ? (t('typeMeeting', locale))
+          : actType === 'email' ? (t('typeEmail', locale))
+          : (t('typeOther', locale));
         const scheduledDate = effectiveDate(form, index);
         if (scheduledDate) {
-          return `${typeLabel} · ${new Date(scheduledDate).toLocaleDateString(locale === 'zh-Hans' ? 'zh-CN' : 'en-US')}`;
+          return `${typeLabel} · ${new Date(scheduledDate).toLocaleDateString(localeBcp47(locale))}`;
         }
         return typeLabel;
       }
@@ -291,7 +291,7 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
         </div>
         <div className="flex-1">
           <p className="text-sm font-medium text-foreground">
-            {additionalIntents.message || (locale === 'zh-Hans' ? '我还发现了以下可能需要记录的内容：' : 'I also found these items you might want to record:')}
+            {additionalIntents.message || (t('additionalIntentsIntro', locale))}
           </p>
         </div>
       </div>
@@ -359,17 +359,17 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
                           ? 'bg-muted text-muted-foreground'
                           : 'bg-primary/10 text-primary'
                       )}>
-                        {EntityTypeLabels[form.type][locale === 'zh-Hans' ? 'zh' : 'en']}
+                        {pickLabel(EntityTypeLabels[form.type], locale)}
                       </span>
                       {/* Status indicator inline */}
                       {status === 'confirmed' && (
                         <span className="text-xs text-green-600 inline-flex items-center gap-0.5">
-                          {locale === 'zh-Hans' ? '已创建' : 'Created'}
+                          {t('createdLabel', locale)}
                           {isNavigable && (
                             <>
                               <span className="text-muted-foreground mx-0.5">·</span>
                               <span className="text-primary">
-                                {locale === 'zh-Hans' ? '查看详情' : 'View detail'}
+                                {t('viewDetails', locale)}
                               </span>
                               <ChevronRight className="w-3 h-3 text-primary" />
                             </>
@@ -378,7 +378,7 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
                       )}
                       {status === 'skipped' && (
                         <span className="text-xs text-muted-foreground">
-                          {locale === 'zh-Hans' ? '已跳过' : 'Skipped'}
+                          {t('skippedLabel', locale)}
                         </span>
                       )}
                     </div>
@@ -416,19 +416,19 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
                           className="h-8 w-full justify-start text-xs text-muted-foreground hover:text-foreground"
                         >
                           <CalendarClock className="w-3.5 h-3.5 mr-1.5" />
-                          {locale === 'zh-Hans' ? '安排时间' : 'Schedule'}
+                          {t('scheduleLabel', locale)}
                           <span className="ml-auto text-foreground">
                             {effectiveDate(form, idx)
-                              ? new Date(effectiveDate(form, idx) as string).toLocaleDateString(locale === 'zh-Hans' ? 'zh-CN' : 'en-US')
+                              ? new Date(effectiveDate(form, idx) as string).toLocaleDateString(localeBcp47(locale))
                               : ''}
                           </span>
                         </Button>
                         {scheduleOpen === idx && (
                           <div className="flex flex-wrap gap-1.5 mt-2">
                             {[
-                              { key: 'today', label: locale === 'zh-Hans' ? '今天' : 'Today', offset: 0 },
-                              { key: 'tomorrow', label: locale === 'zh-Hans' ? '明天' : 'Tomorrow', offset: 1 },
-                              { key: 'dayafter', label: locale === 'zh-Hans' ? '后天' : 'Day after', offset: 2 },
+                              { key: 'today', label: t('today', locale), offset: 0 },
+                              { key: 'tomorrow', label: t('tomorrow', locale), offset: 1 },
+                              { key: 'dayafter', label: t('dayAfter', locale), offset: 2 },
                             ].map((opt) => {
                               const d = new Date();
                               d.setDate(d.getDate() + opt.offset);
@@ -451,7 +451,7 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
                               );
                             })}
                             <label className="px-2.5 py-1 rounded-full text-xs border border-border bg-card text-muted-foreground hover:border-primary/50 cursor-pointer inline-flex items-center">
-                              {locale === 'zh-Hans' ? '自定义' : 'Custom'}
+                              {t('custom', locale)}
                               <input
                                 type="date"
                                 className="sr-only"
@@ -474,7 +474,7 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
                         className="flex-1 h-8 text-muted-foreground"
                       >
                         <X className="w-3.5 h-3.5 mr-1" />
-                        {locale === 'zh-Hans' ? '跳过' : 'Skip'}
+                        {t('skip', locale)}
                       </Button>
                       <Button
                         size="sm"
@@ -487,7 +487,7 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
                         ) : (
                           <>
                             <Check className="w-3.5 h-3.5 mr-1" />
-                            {locale === 'zh-Hans' ? '确认创建' : 'Confirm'}
+                            {t('confirmCreate', locale)}
                           </>
                         )}
                       </Button>
@@ -507,7 +507,7 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
           animate={{ opacity: 1 }}
           className="text-xs text-muted-foreground mt-3 pl-10"
         >
-          {locale === 'zh-Hans' ? '所有发现的项目已处理完毕' : 'All discovered items have been processed'}
+          {t('allItemsProcessed', locale)}
         </motion.p>
       )}
     </motion.div>

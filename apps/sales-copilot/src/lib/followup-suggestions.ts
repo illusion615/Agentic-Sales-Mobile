@@ -14,6 +14,7 @@
  */
 
 import type { Locale } from '@/lib/i18n';
+import { LOCALE_META } from '@/lib/i18n';
 import type { SuggestionPill } from '@/lib/contextual-suggestions';
 import { invokeFlowForLLM } from '@/services/power-automate-service';
 
@@ -40,7 +41,7 @@ function buildPrompt(opts: {
   const zh = isZh(opts.locale);
   const langRule = zh
     ? '- Write the <label> and <request> in Simplified Chinese.'
-    : '- Write the <label> and <request> in English.';
+    : `- Write the <label> and <request> in ${LOCALE_META[opts.locale]?.englishName ?? 'English'}.`;
   const fnLine = opts.lastFunctionCalled
     ? `\nLast action performed: ${opts.lastFunctionCalled}`
     : '';

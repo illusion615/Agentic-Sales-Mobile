@@ -20,6 +20,11 @@ export const ResolutionItemSchema = z.object({
   // Phase B: which intent (0-based head, 1+ for additionalActions) this resolution belongs to.
   // Carried through so the Context-side cascade can emit per-task announces on boundary change.
   intentIndex: z.number().int().nonnegative().optional(),
+  // Missing-subject gate: this is a REQUIRED subject for an action tool (e.g.
+  // updateOpportunity needs an opportunity). Unlike optional name→id matches, a
+  // required resolution must NOT be silently dropped — a no/low-confidence result
+  // still renders the picker so the user selects or searches the record.
+  required: z.boolean().optional(),
 });
 export type ResolutionItem = z.infer<typeof ResolutionItemSchema>;
 

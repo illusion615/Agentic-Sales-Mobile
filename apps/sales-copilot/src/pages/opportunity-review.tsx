@@ -5,7 +5,7 @@ import { ArrowLeft, MoreHorizontal, AlertTriangle, TrendingUp, TrendingDown, Min
 import { cn } from '@/lib/utils';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useUser } from '@/hooks/use-user';
-import { getLocale, type Locale } from '@/lib/i18n';
+import { getLocale, t, pickLabel, type Locale } from '@/lib/i18n';
 import { useFirstMount } from '@/hooks/use-first-mount';
 import type { Opportunity } from '@/generated/models/opportunity-model';
 
@@ -22,13 +22,13 @@ const itemVariants = {
   show: { opacity: 1, y: 0 },
 } as const;
 
-const stageConfig: Record<string, { zh: string; en: string; color: string; bgLight: string }> = {
-  prospecting: { zh: '探索', en: 'Prospecting', color: 'bg-blue-500', bgLight: 'bg-blue-500/20' },
-  qualification: { zh: '资质', en: 'Qualification', color: 'bg-cyan-500', bgLight: 'bg-cyan-500/20' },
-  proposal: { zh: '方案', en: 'Proposal', color: 'bg-amber-500', bgLight: 'bg-amber-500/20' },
-  negotiation: { zh: '谈判', en: 'Negotiation', color: 'bg-purple-500', bgLight: 'bg-purple-500/20' },
-  won: { zh: '赢单', en: 'Won', color: 'bg-green-500', bgLight: 'bg-green-500/20' },
-  lost: { zh: '丢单', en: 'Lost', color: 'bg-red-500', bgLight: 'bg-red-500/20' },
+const stageConfig: Record<string, { zh: string; en: string; de: string; fr: string; es: string; color: string; bgLight: string }> = {
+  prospecting: { zh: '探索', en: 'Prospecting', de: 'Akquise', fr: 'Prospection', es: 'Prospección', color: 'bg-blue-500', bgLight: 'bg-blue-500/20' },
+  qualification: { zh: '资质', en: 'Qualification', de: 'Qualifizierung', fr: 'Qualification', es: 'Calificación', color: 'bg-cyan-500', bgLight: 'bg-cyan-500/20' },
+  proposal: { zh: '方案', en: 'Proposal', de: 'Angebot', fr: 'Proposition', es: 'Propuesta', color: 'bg-amber-500', bgLight: 'bg-amber-500/20' },
+  negotiation: { zh: '谈判', en: 'Negotiation', de: 'Verhandlung', fr: 'Négociation', es: 'Negociación', color: 'bg-purple-500', bgLight: 'bg-purple-500/20' },
+  won: { zh: '赢单', en: 'Won', de: 'Gewonnen', fr: 'Gagné', es: 'Ganada', color: 'bg-green-500', bgLight: 'bg-green-500/20' },
+  lost: { zh: '丢单', en: 'Lost', de: 'Verloren', fr: 'Perdu', es: 'Perdida', color: 'bg-red-500', bgLight: 'bg-red-500/20' },
 };
 
 function isClosedStage(stage: string): boolean {
@@ -44,10 +44,10 @@ function getDaysUntil(dateStr: string): number {
 }
 
 function formatDaysUntil(days: number, locale: Locale): string {
-  if (days < 0) return locale === 'zh-Hans' ? `逾期 ${Math.abs(days)} 天` : `${Math.abs(days)}d overdue`;
-  if (days === 0) return locale === 'zh-Hans' ? '今天' : 'Today';
-  if (days === 1) return locale === 'zh-Hans' ? '明天' : 'Tomorrow';
-  return locale === 'zh-Hans' ? `${days} 天后` : `in ${days}d`;
+  if (days < 0) return t('overdueDays', locale, { days: Math.abs(days) });
+  if (days === 0) return t('today', locale);
+  if (days === 1) return t('tomorrow', locale);
+  return t('inDays', locale, { days });
 }
 
 /** Determines if an opportunity needs urgent attention */
@@ -152,7 +152,7 @@ export default function OpportunityReviewPage() {
         if (Array.isArray(parsed) && parsed.length > 0) {
           setAiSlides(parsed);
           setCurrentSlide(0);
-          localStorage.setItem(AI_SUMMARY_CACHE_KEY, JSON.stringify({ ts: Date.now(), slides: parsed }));
+          localStorage.setItem(AI_SUMMARY_CACHE_KEY, JSON.stringify({ ts: Date.now(), slides: parsed, locale }));
         } else {
           console.warn('[OppReview] AI summary: unexpected data shape');
         }
@@ -166,21 +166,22 @@ export default function OpportunityReviewPage() {
     }
   }, [activeOpps, locale]);
 
-  // Load cached summary or auto-generate
+  // Load cached summary or auto-generate. Cache is locale-scoped: insights in a
+  // different language are ignored so switching language regenerates them.
   useEffect(() => {
     if (activeOpps.length === 0) return;
     try {
       const cached = localStorage.getItem(AI_SUMMARY_CACHE_KEY);
       if (cached) {
-        const { ts, slides } = JSON.parse(cached);
-        if (Date.now() - ts < AI_SUMMARY_TTL && slides?.length > 0) {
+        const { ts, slides, locale: cachedLocale } = JSON.parse(cached);
+        if (Date.now() - ts < AI_SUMMARY_TTL && slides?.length > 0 && cachedLocale === locale) {
           setAiSlides(slides);
           return;
         }
       }
     } catch { /* ignore */ }
     generateAISummary();
-  }, [activeOpps.length > 0]); // only trigger once data arrives
+  }, [activeOpps.length > 0, locale]); // regenerate when data arrives or language changes
 
   // Carousel scroll sync
   const handleCarouselScroll = () => {
@@ -243,7 +244,7 @@ export default function OpportunityReviewPage() {
         {/* Row 2: Stage + Confidence + Trend + Days */}
         <div className="flex items-center gap-2 flex-wrap">
           <span className={cn('px-2 py-0.5 rounded-full text-[10px] font-medium text-white', stage.color)}>
-            {locale === 'zh-Hans' ? stage.zh : stage.en}
+            {pickLabel(stage, locale)}
           </span>
           <span className="flex items-center gap-1 text-helper text-muted-foreground">
             {opp.confidence ?? 0}%
@@ -252,7 +253,7 @@ export default function OpportunityReviewPage() {
           {isAtRisk && (
             <span className="flex items-center gap-1 text-amber-500 text-helper font-medium">
               <AlertTriangle className="w-3 h-3" />
-              {locale === 'zh-Hans' ? '风险' : 'Risk'}
+              {t('riskLabel', locale)}
             </span>
           )}
           {daysUntil !== null && (
@@ -278,7 +279,7 @@ export default function OpportunityReviewPage() {
         {/* Row 4: Last Action (if any) */}
         {opp.lastaction && (
           <p className="text-[11px] text-muted-foreground mt-1.5 line-clamp-1 italic">
-            {locale === 'zh-Hans' ? '最近：' : 'Last: '}{opp.lastaction}
+            {t('lastColon', locale)}{opp.lastaction}
           </p>
         )}
       </motion.div>
@@ -298,7 +299,7 @@ export default function OpportunityReviewPage() {
             <ArrowLeft className="w-5 h-5 text-foreground" />
           </button>
           <h1 className="text-title text-foreground">
-            {locale === 'zh-Hans' ? '商机审阅' : 'Opportunity Review'}
+            {t('opportunityReview', locale)}
           </h1>
           <button
             className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-muted active:bg-muted/80 transition-colors"
@@ -322,7 +323,7 @@ export default function OpportunityReviewPage() {
             <div className="flex items-center justify-between mb-3">
               <div>
                 <p className="text-helper text-muted-foreground">
-                  {locale === 'zh-Hans' ? '活跃 Pipeline' : 'Active Pipeline'}
+                  {t('activePipeline', locale)}
                 </p>
                 <p className="text-[1.25rem] font-bold text-foreground">
                   {formatCurrency(totalPipeline)}
@@ -332,7 +333,7 @@ export default function OpportunityReviewPage() {
                 <div>
                   <p className="text-title font-bold text-foreground">{activeOpps.length}</p>
                   <p className="text-[10px] text-muted-foreground">
-                    {locale === 'zh-Hans' ? '商机' : 'Opps'}
+                    {t('oppsShort', locale)}
                   </p>
                 </div>
                 <div>
@@ -340,13 +341,13 @@ export default function OpportunityReviewPage() {
                     {atRiskCount}
                   </p>
                   <p className="text-[10px] text-muted-foreground">
-                    {locale === 'zh-Hans' ? '风险' : 'At Risk'}
+                    {t('atRiskShort', locale)}
                   </p>
                 </div>
                 <div>
                   <p className="text-title font-bold text-foreground">{actionRequired.length}</p>
                   <p className="text-[10px] text-muted-foreground">
-                    {locale === 'zh-Hans' ? '待处理' : 'Action'}
+                    {t('actionShort', locale)}
                   </p>
                 </div>
               </div>
@@ -373,7 +374,7 @@ export default function OpportunityReviewPage() {
                     return (
                       <span key={stage} className="flex items-center gap-1 text-[10px] text-muted-foreground">
                         <span className={cn('w-2 h-2 rounded-full', cfg.color)} />
-                        {locale === 'zh-Hans' ? cfg.zh : cfg.en} {count}
+                        {pickLabel(cfg, locale)} {count}
                       </span>
                     );
                   })}
@@ -388,7 +389,7 @@ export default function OpportunityReviewPage() {
               <div className="flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-primary" />
                 <span className="text-helper font-medium text-foreground">
-                  {locale === 'zh-Hans' ? 'AI 摘要' : 'AI Summary'}
+                  {t('aiSummaryLabel', locale)}
                 </span>
               </div>
               <button
@@ -397,7 +398,7 @@ export default function OpportunityReviewPage() {
                 className="flex items-center gap-1 text-[11px] text-primary hover:text-primary/80 disabled:opacity-50"
               >
                 {aiLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                {locale === 'zh-Hans' ? '刷新' : 'Refresh'}
+                {t('refresh', locale)}
               </button>
             </div>
 
@@ -405,7 +406,7 @@ export default function OpportunityReviewPage() {
               <div className="glass-card p-6 flex items-center justify-center gap-2">
                 <Loader2 className="w-4 h-4 animate-spin text-primary" />
                 <span className="text-helper text-muted-foreground">
-                  {locale === 'zh-Hans' ? '正在分析 Pipeline...' : 'Analyzing pipeline...'}
+                  {t('analyzingPipeline', locale)}
                 </span>
               </div>
             ) : aiSlides.length > 0 ? (
@@ -482,7 +483,7 @@ export default function OpportunityReviewPage() {
           {activeOpps.length === 0 && (
             <motion.div variants={itemVariants} className="text-center py-12 px-4">
               <p className="text-body text-muted-foreground">
-                {locale === 'zh-Hans' ? '暂无活跃商机' : 'No active opportunities'}
+                {t('noActiveOpps', locale)}
               </p>
             </motion.div>
           )}

@@ -73,7 +73,15 @@ const updateOpportunity: FunctionHandler = async (args) => {
       const n = (args.accountName as string).toLowerCase();
       targetAccount = accounts.find((a: Account) => a.name1?.toLowerCase().includes(n));
     }
-    if (targetAccount) oppChanges.account = { id: targetAccount.id, name1: targetAccount.name1 };
+    // Only re-parent when the account actually changes. The subject pick / page
+    // context often injects the opportunity's OWN account id, which must not
+    // cause a spurious no-op account write ("Updated: account").
+    if (targetAccount) {
+      const currentOpp = await OpportunityService.get(targetId);
+      if (currentOpp?.account?.id !== targetAccount.id) {
+        oppChanges.account = { id: targetAccount.id, name1: targetAccount.name1 };
+      }
+    }
   }
   if (oppChanges.stage === 'won' || oppChanges.stage === 'lost') {
     oppChanges.closedon = (args.closedon as string) || new Date().toISOString();

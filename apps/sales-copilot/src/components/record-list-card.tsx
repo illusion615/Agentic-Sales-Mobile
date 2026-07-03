@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronDown, ChevronUp, Building2, Target, Calendar, ArrowRight, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { getLocale, getCopilotListDefaultView, getCopilotListTopN } from '@/lib/i18n';
+import { getLocale, getCopilotListDefaultView, getCopilotListTopN, t } from '@/lib/i18n';
 import { useCopilot } from '@/contexts/copilot-context';
 import { useCopilotSideDocked } from '@/components/global-copilot';
 import { prefetchForEntityType } from '@/lib/prefetch';
@@ -101,7 +101,7 @@ export function RecordListCard({ type, records, title }: RecordListCardProps) {
         <div className="flex items-center gap-2 text-muted-foreground">
           <Icon className="h-4 w-4" />
           <span className="text-sm">
-            {isZh ? '没有找到相关记录' : 'No records found'}
+            {t('noRecordsFound', locale)}
           </span>
         </div>
       </div>
@@ -157,9 +157,7 @@ export function RecordListCard({ type, records, title }: RecordListCardProps) {
               onClick={() => setShowAll(true)}
               className="w-full p-3 text-xs text-primary hover:bg-primary/5 transition-colors border-t border-border/30"
             >
-              {isZh
-                ? `还有 ${remainingCount} 条数据，点击展开全部`
-                : `${remainingCount} more record${remainingCount > 1 ? 's' : ''}. Tap to show all`}
+              {t('moreRecordsTapAll', locale, { n: remainingCount })}
             </button>
           )}
         </div>

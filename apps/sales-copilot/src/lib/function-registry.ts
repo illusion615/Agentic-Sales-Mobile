@@ -8,8 +8,8 @@ export interface FunctionParameter {
   type: string;
   description: string;
   enum?: string[];
-  /** For type: 'array' — describes the element type. */
-  items?: { type: string };
+  /** For type: 'array' — describes the element type (and its allowed values). */
+  items?: { type: string; enum?: string[] };
 }
 
 /**
@@ -43,6 +43,13 @@ export interface FunctionDefinition {
    * parse error rather than silently passing through a mismatched payload.
    */
   outputSchema?: ZodTypeAny;
+  /**
+   * Action tools that mutate ONE existing record declare their required subject
+   * entity here. The intent runtime gates on it: if the subject can't be resolved
+   * from args/context, it launches fuzzy match so the user can pick/search the
+   * record — instead of the handler hard-failing on a missing id.
+   */
+  subject?: 'account' | 'contact' | 'opportunity' | 'activity';
 }
 
 /**
@@ -134,7 +141,7 @@ export const availableFunctions: FunctionDefinition[] = [
       properties: {
         accountId: { type: 'string', description: 'Filter by account ID / 按客户ID筛选' },
         accountName: { type: 'string', description: 'Filter by account name (fuzzy matched) / 按客户名称筛选（模糊匹配）' },
-        stage: { type: 'string', description: 'Filter by stage / 按阶段筛选', enum: ['prospecting', 'qualification', 'proposal', 'negotiation', 'won', 'lost'] },
+        stage: { type: 'array', items: { type: 'string', enum: ['prospecting', 'qualification', 'proposal', 'negotiation', 'won', 'lost'] }, description: 'Filter by one or more stages / 按一个或多个阶段筛选（可多选，如 negotiation + proposal）' },
         closingWithinDays: { type: 'number', description: 'Only opportunities closing within N days / 仅返回N天内到期的商机' },
         minAmount: { type: 'number', description: 'Minimum deal amount / 最低金额' },
         sortBy: { type: 'string', description: 'Sort field / 排序字段', enum: ['amount', 'closeDate', 'stage', 'name'] },
@@ -151,7 +158,7 @@ export const availableFunctions: FunctionDefinition[] = [
       properties: {
         accountId: { type: 'string', description: 'Filter by account ID / 按客户ID筛选' },
         accountName: { type: 'string', description: 'Filter by account name (fuzzy matched) / 按客户名称筛选（模糊匹配）' },
-        type: { type: 'string', description: 'Filter by activity type / 按类型筛选', enum: ['visit', 'call', 'meeting', 'email', 'other'] },
+        type: { type: 'string', description: 'Filter by activity type / 按类型筛选', enum: ['visit', 'call', 'meeting', 'email'] },
         dateRange: { type: 'string', description: 'Date range: "today", "7days", "30days", "all" / 日期范围', enum: ['today', '7days', '30days', 'all'] },
         scheduledDate: { type: 'string', description: 'Exact date in YYYY-MM-DD format / 精确日期（YYYY-MM-DD 格式）' },
         dateFrom: { type: 'string', description: 'Start date YYYY-MM-DD for range queries / 范围起始日期' },
@@ -178,6 +185,19 @@ export const availableFunctions: FunctionDefinition[] = [
     },
   },
 
+  // ===== Composite / transform (read → propose → confirm → apply) =====
+  {
+    name: 'proposeChanges',
+    displayName: { 'zh-Hans': '提出修改方案', 'en-US': 'Propose Changes' },
+    description: 'Compose concrete changes over EXISTING records and ask the user to confirm BEFORE applying. Use for merge-duplicates, deduplicate, reconcile, or "compare these records then update/delete" requests. It reads the records produced by prior steps, proposes the exact update/delete operations, and shows a confirm card — nothing is written until the user confirms. 用于合并重复/去重/对比后修改这类需要先读记录、再提出改动并让用户确认的复合操作。',
+    parameters: {
+      type: 'object',
+      properties: {
+        goal: { type: 'string', description: "The user's request in their own words, e.g. '合并这两条重复的拜访' / what to accomplish over the in-scope records" },
+      },
+      required: ['goal'],
+    },
+  },
 
   // ===== Draft/Create Functions (return form cards) =====
   {
@@ -191,14 +211,14 @@ export const availableFunctions: FunctionDefinition[] = [
           type: 'string', 
           description: '活动标题：必须具体且有意义，包含关键信息（如客户名称、讨论主题、产品名称）。例如："Royal London Hospital - BeneVision N22 Demo"、"Liverpool Heart & Chest 报价跟进"、"Charité ICU 监护系统需求讨论"。禁止使用泛泛的标题如"客户拜访"、"电话沟通"、"会议"等。Activity title: Must be specific and meaningful, including key info (account name, topic, product). Examples: "Royal London Hospital - BeneVision N22 Demo", "Liverpool pricing follow-up". Never use generic titles like "Customer Visit" or "Phone Call".'
         },
-        type: { type: 'string', description: '活动类型', enum: ['visit', 'call', 'meeting', 'email', 'other'] },
+        type: { type: 'string', description: '活动类型', enum: ['visit', 'call', 'meeting', 'email'] },
         accountId: { type: 'string', description: '客户ID（如果已知）/ Account ID (if known)' },
         accountName: { type: 'string', description: '客户/公司名称' },
         contactName: { type: 'string', description: '联系人姓名（单个；对于会议/拜访的多个参会人请用 contactNames）/ Contact name (single; for multiple meeting/visit attendees use contactNames)' },
         contactNames: { type: 'array', items: { type: 'string' }, description: '会议/拜访的多个参会人姓名列表。当用户提到和多人开会/拜访时，把每个人的姓名都放进来。例如"和张经理、李医生开会" -> ["张经理","李医生"]。Multiple attendee names for a meeting/visit.' },
         contactTitle: { type: 'string', description: '联系人职位/科室 / Contact job title or department' },
         scheduledDate: { type: 'string', description: '日期，ISO格式 YYYY-MM-DD' },
-        result: { type: 'string', description: '活动详情（写入 description 字段）。对已发生的活动：填写结果 / 讨论要点。对未来计划的活动：填写目的 / 议程 / 背景，使日后打开该任务时能仅凭此字段回忆起上下文（如"跟进 Lisa 提出的 RFP 报价，确认内部评审进度"）。Activity details (stored in the description column). For past activities: outcome / discussion points. For planned future activities: purpose / agenda / background so the task is self-explanatory later (e.g. "Follow up on Lisa\'s RFP quote, confirm internal-review progress").' },
+        result: { type: 'string', description: '活动详情（写入 description 字段）。只填写用户明确说过的结果 / 讨论要点 / 目的。用户没有提供详情时必须留空，严禁编造目的、议程或背景。Activity details (stored in the description column). Include ONLY what the user explicitly stated (outcome / discussion points / stated purpose). If the user gave no details, leave this EMPTY — never invent a purpose, agenda, or background.' },
         opportunityId: { type: 'string', description: '关联商机ID（如果已知）/ Related opportunity ID (if known)' },
         opportunityName: { type: 'string', description: '关联商机名称' },
         notes: { type: 'string', description: '备注 - 将所有不能映射到其他字段的有价值信息都放到这里（如：公司历史、特殊资质、重要背景、合作伙伴关系等）/ Notes - Put ALL valuable information that cannot be mapped to other structured fields here (e.g., company history, certifications, important background, partnerships, etc.)' },
@@ -265,6 +285,7 @@ export const availableFunctions: FunctionDefinition[] = [
   {
     name: 'updateAccount',
     displayName: { 'zh-Hans': '更新客户', 'en-US': 'Update Account' },
+    subject: 'account',
     description: '更新现有客户的信息。当用户说"更新客户XXX"、"修改客户信息"、"把这个客户的XX改成XX"时调用。Update existing account information. Use when user says "update account", "modify account", "change this account\'s XX to XX".',
     parameters: {
       type: 'object',
@@ -286,12 +307,15 @@ export const availableFunctions: FunctionDefinition[] = [
   {
     name: 'updateOpportunity',
     displayName: { 'zh-Hans': '更新商机', 'en-US': 'Update Opportunity' },
+    subject: 'opportunity',
     description: '更新现有商机的信息。当用户说"更新商机"、"修改商机金额"、"把这个商机的金额改成XX"、"商机金额调整为XX"时调用。注意：当用户在商机详情页或刚查询完商机后说"更新金额"等，应从页面上下文获取 opportunityId。Update existing opportunity information. Use when user says "update opportunity", "change amount to XX", "adjust revenue".',
     parameters: {
       type: 'object',
       properties: {
         opportunityId: { type: 'string', description: '商机ID / Opportunity ID (required for update)' },
         opportunityName: { type: 'string', description: '商机名称（用于查找匹配）/ Opportunity name (for matching)' },
+        accountId: { type: 'string', description: '关联客户ID / Related account ID' },
+        accountName: { type: 'string', description: '关联客户名称（模糊匹配）/ Related account name (fuzzy matched)' },
         name: { type: 'string', description: '新的商机名称 / New opportunity name' },
         amount: { type: 'number', description: '新的金额 / New amount (e.g., 300000 for 300k, 2000000 for 2M)' },
         stage: { type: 'string', description: '新的阶段 / New stage', enum: ['prospecting', 'qualification', 'proposal', 'negotiation', 'won', 'lost'] },
@@ -305,6 +329,7 @@ export const availableFunctions: FunctionDefinition[] = [
   {
     name: 'updateActivity',
     displayName: { 'zh-Hans': '更新活动', 'en-US': 'Update Activity' },
+    subject: 'activity',
     description: '更新现有活动记录：修改日期/标题/备注/状态，以及**添加或移除会议/拜访的与会人**。当用户说"更新活动"、"把活动日期改成XX"、"把张三加到这个会议"、"add Robert to this meeting"、"把李四从会议中移除"时调用。Update an existing activity — including adding/removing meeting attendees.',
     parameters: {
       type: 'object',
@@ -312,10 +337,15 @@ export const availableFunctions: FunctionDefinition[] = [
         activityId: { type: 'string', description: '活动ID / Activity ID (required for update)' },
         activityTitle: { type: 'string', description: '活动标题（用于查找匹配）/ Activity title (for matching)' },
         title: { type: 'string', description: '新的活动标题 / New activity title' },
-        type: { type: 'string', description: '新的活动类型 / New activity type', enum: ['visit', 'call', 'meeting', 'email', 'other'] },
+        type: { type: 'string', description: '新的活动类型 / New activity type', enum: ['visit', 'call', 'meeting', 'email'] },
         scheduledDate: { type: 'string', description: '新的日期 YYYY-MM-DD / New scheduled date' },
         result: { type: 'string', description: '新的结果 / New result' },
         notes: { type: 'string', description: '新的备注 / New notes' },
+        status: { type: 'string', description: '新的状态 / New status', enum: ['open', 'completed', 'canceled'] },
+        opportunityId: { type: 'string', description: '关联商机ID / Related opportunity ID' },
+        opportunityName: { type: 'string', description: '关联商机名称（模糊匹配）/ Related opportunity name (fuzzy matched)' },
+        accountId: { type: 'string', description: '关联客户ID / Related account ID' },
+        accountName: { type: 'string', description: '关联客户名称（模糊匹配）/ Related account name (fuzzy matched)' },
         addAttendeeNames: { type: 'array', items: { type: 'string' }, description: '要添加到会议/拜访的与会人姓名列表。当用户说"把张三加到这个会议"、"add Robert to this meeting"时填入。Names of contacts to ADD as attendees of a meeting/visit.' },
         removeAttendeeNames: { type: 'array', items: { type: 'string' }, description: '要从会议/拜访中移除的与会人姓名列表。当用户说"把李四从会议中去掉"、"remove John from the meeting"时填入。Names of contacts to REMOVE from a meeting/visit.' },
       },
@@ -325,6 +355,7 @@ export const availableFunctions: FunctionDefinition[] = [
   {
     name: 'updateContact',
     displayName: { 'zh-Hans': '更新联系人', 'en-US': 'Update Contact' },
+    subject: 'contact',
     description: '更新现有联系人信息。当用户说"更新联系人"、"修改联系人电话"、"把这个联系人的邮箱改成XX"时调用。Update existing contact information.',
     parameters: {
       type: 'object',
@@ -609,4 +640,127 @@ export function getDisplayName(functionName: string, locale: 'zh-Hans' | 'en-US'
     return func.displayName[locale] || func.displayName['en-US'] || functionName;
   }
   return functionName;
+}
+
+/**
+ * The required subject entity for an action tool (updateOpportunity → 'opportunity'),
+ * or undefined for tools that don't mutate a single existing record. Drives the
+ * runtime's missing-subject gate.
+ */
+export function getFunctionSubject(
+  functionName: string,
+): 'account' | 'contact' | 'opportunity' | 'activity' | undefined {
+  return availableFunctions.find((f) => f.name === functionName)?.subject;
+}
+
+// ===== Argument coercion (input contract) =====
+// The JSON `parameters` block is only advisory to the LLM — at runtime the model
+// may emit an array where a string is declared ("negotiation and proposal" →
+// ['negotiation','proposal']), a numeric string for a number, etc. Handlers then
+// crash on `x.toLowerCase()` / silently misbehave ("LLM argument type drift").
+//
+// This is the INPUT mirror of `outputSchema`: the executor coerces raw args
+// against a schema DERIVED from each function's own `parameters` before dispatch,
+// so the fix lives at one boundary (the dispatcher) driven by the single source
+// of truth (the declared contract) — not scattered per-handler defensive casts.
+//
+// Coercion is conservative: only fields declared scalar string/number/boolean or
+// array-of-string are normalized; object / complex / undeclared args pass through
+// untouched so structured payloads (attendees, stringified data) are never harmed.
+
+const ARG_SPLIT_RE = /[,;、，]/;
+
+/** Any value → scalar string (or undefined when empty). A scalar field given an
+ *  array collapses to its first non-empty element; objects are dropped (never
+ *  fed to string handlers). */
+const zScalarString = z.unknown().transform((v) => {
+  if (v == null) return undefined;
+  if (Array.isArray(v)) {
+    const first = v.find((x) => x != null && String(x).trim() !== '');
+    return first == null ? undefined : String(first);
+  }
+  if (typeof v === 'object') return undefined;
+  const s = String(v);
+  return s.trim() === '' ? undefined : s;
+});
+
+/** Any value → finite number (or undefined). Accepts numeric strings; arrays use
+ *  their first element. */
+const zScalarNumber = z.unknown().transform((v) => {
+  if (v == null || v === '') return undefined;
+  const raw = Array.isArray(v) ? v[0] : v;
+  const n = typeof raw === 'number' ? raw : Number(raw);
+  return Number.isFinite(n) ? n : undefined;
+});
+
+/** Any value → boolean. */
+const zScalarBoolean = z.unknown().transform((v) => {
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'string') { const s = v.trim().toLowerCase(); return s === 'true' || s === '1' || s === 'yes'; }
+  return Boolean(v);
+});
+
+/** string | array → string[] (multi-value fields). Splits comma/CJK separators so
+ *  a "negotiation, proposal" string and a ['negotiation','proposal'] array both
+ *  normalize to a clean list. */
+const zStringArray = z.unknown().transform((v) => {
+  const raw = Array.isArray(v) ? v : v == null || v === '' ? [] : [v];
+  return raw
+    .flatMap((x) => (x == null ? [] : String(x).split(ARG_SPLIT_RE)))
+    .map((s) => s.trim())
+    .filter(Boolean);
+});
+
+function coercerForParam(p: FunctionParameter): ZodTypeAny | null {
+  switch (p.type) {
+    case 'string': return zScalarString;
+    case 'number':
+    case 'integer': return zScalarNumber;
+    case 'boolean': return zScalarBoolean;
+    // Only arrays of scalars are coerced; object arrays / unspecified items are
+    // left untouched to avoid corrupting structured args.
+    case 'array': return p.items?.type === 'string' ? zStringArray : null;
+    default: return null; // object / unknown → passthrough
+  }
+}
+
+const _argsCoercerCache = new Map<string, ZodTypeAny | null>();
+
+/**
+ * Build (memoized) a coercing schema for a function's args, derived from its
+ * declared `parameters`. Returns null when no field is coercible. Unknown keys
+ * pass through untouched.
+ */
+export function getArgsCoercer(functionName: string): ZodTypeAny | null {
+  const cached = _argsCoercerCache.get(functionName);
+  if (cached !== undefined) return cached;
+  const def = availableFunctions.find((f) => f.name === functionName);
+  let schema: ZodTypeAny | null = null;
+  const props = def?.parameters?.properties;
+  if (props) {
+    const shape: Record<string, ZodTypeAny> = {};
+    for (const [key, p] of Object.entries(props)) {
+      const c = coercerForParam(p);
+      if (c) shape[key] = c.optional();
+    }
+    if (Object.keys(shape).length > 0) schema = z.object(shape).passthrough();
+  }
+  _argsCoercerCache.set(functionName, schema);
+  return schema;
+}
+
+/**
+ * Coerce raw LLM tool-call args against the derived input contract.
+ * Coerce-not-block: a malformed arg must never abort the call, so any parse
+ * failure returns the original args. Fields that coerce to `undefined` are
+ * stripped so handler `|| default` fallbacks still apply.
+ */
+export function coerceArgs(functionName: string, args: Record<string, unknown>): Record<string, unknown> {
+  const schema = getArgsCoercer(functionName);
+  if (!schema) return args;
+  const parsed = schema.safeParse(args);
+  if (!parsed.success) return args;
+  const out = parsed.data as Record<string, unknown>;
+  for (const k of Object.keys(out)) if (out[k] === undefined) delete out[k];
+  return out;
 }

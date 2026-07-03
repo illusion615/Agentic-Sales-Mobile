@@ -69,7 +69,7 @@ export class OpportunityService {
       (p) => Crf5c_opportunity1sService.create(p as any),
       (o) => Crf5c_opportunity1sService.getAll(o),
       dvPayload, 'crf5c_opportunity1id', 'Opportunity',
-      `crf5c_name1 eq '${record.name1}'`,
+      `crf5c_name eq '${(record.name1 ?? '').replace(/'/g, "''")}'`,
       fromDv,
     );
   }

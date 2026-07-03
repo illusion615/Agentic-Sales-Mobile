@@ -8,6 +8,7 @@
  */
 import { motion } from 'motion/react';
 import { cn } from '@/lib/utils';
+import { getLocale, t } from '@/lib/i18n';
 
 interface TaskAnnounceBubbleProps {
   index: number;   // 1-based
@@ -18,9 +19,8 @@ interface TaskAnnounceBubbleProps {
   onToggle?: () => void;
 }
 
-export function TaskAnnounceBubble({ index, total, label, locale }: TaskAnnounceBubbleProps) {
-  const isZh = locale === 'zh-Hans';
-  const indexLabel = isZh ? `第 ${index}/${total} 步` : `Step ${index}/${total}`;
+export function TaskAnnounceBubble({ index, total, label }: TaskAnnounceBubbleProps) {
+  const indexLabel = t('stepLabel', getLocale(), { index, total });
   return (
     <motion.div
       initial={{ opacity: 0 }}

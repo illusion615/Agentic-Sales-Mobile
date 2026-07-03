@@ -18,6 +18,18 @@ const fuzzyMatchAccount: FunctionHandler = async (args) => {
   const contextStr = (args.context as string || '');
   const accounts = await AccountService.getAll();
 
+  // List mode: no query → return candidates for the missing-subject gate picker.
+  // No fabricated scores; the card renders a plain pick list.
+  if (!query.trim()) {
+    const matches = accounts
+      .slice(0, 8)
+      .map((a: Account) => ({
+        id: a.id, name: a.name1 || '', industry: a.industry,
+        score: 0, matchType: 'fuzzy' as const,
+      }));
+    return { success: true, data: { matches, confidence: 'none' as const, listMode: true, needsConfirmation: true, exactMatch: null } };
+  }
+
   const matches = accounts
     .map((a: Account) => {
       const name = a.name1 || '';
@@ -45,6 +57,20 @@ const fuzzyMatchContact: FunctionHandler = async (args) => {
   const query = (args.query as string || '');
   const accountId = args.accountId as string | undefined;
   const contacts = await ContactService.getAll();
+
+  // List mode: no query → return candidates for the missing-subject gate picker.
+  if (!query.trim()) {
+    const matches = contacts
+      .filter((c: Contact) => !accountId || c.account?.id === accountId)
+      .slice(0, 8)
+      .map((c: Contact) => ({
+        id: c.id, name: c.fullname || '', title: c.title,
+        phone: c.phone, email: c.email,
+        accountName: c.account?.name1, accountId: c.account?.id,
+        score: 0, matchType: 'fuzzy' as const,
+      }));
+    return { success: true, data: { matches, confidence: 'none' as const, listMode: true, needsConfirmation: true, exactMatch: null } };
+  }
 
   const matches = contacts
     .filter((c: Contact) => !accountId || c.account?.id === accountId)
@@ -76,6 +102,20 @@ const fuzzyMatchOpportunity: FunctionHandler = async (args) => {
   const accountId = args.accountId as string | undefined;
   const opportunities = await OpportunityService.getAll();
 
+  // List mode: no query → return candidates for the missing-subject gate picker.
+  if (!query.trim()) {
+    const matches = opportunities
+      .filter((o: Opportunity) => !accountId || o.account?.id === accountId)
+      .slice(0, 8)
+      .map((o: Opportunity) => ({
+        id: o.id, name: o.name1 || '', accountName: o.account?.name1,
+        amount: o.totalamount, stage: o.stage,
+        expectedCloseDate: o.expectedclosedate,
+        score: 0, matchType: 'fuzzy' as const,
+      }));
+    return { success: true, data: { matches, confidence: 'none' as const, listMode: true, needsConfirmation: true, exactMatch: null } };
+  }
+
   const matches = opportunities
     .filter((o: Opportunity) => !accountId || o.account?.id === accountId)
     .map((o: Opportunity) => {
@@ -84,6 +124,7 @@ const fuzzyMatchOpportunity: FunctionHandler = async (args) => {
       return {
         id: o.id, name: o.name1 || '', accountName: o.account?.name1,
         amount: o.totalamount, stage: o.stage,
+        expectedCloseDate: o.expectedclosedate,
         score: enhancedScore.score, matchType: enhancedScore.matchType,
       };
     })
@@ -104,7 +145,17 @@ const fuzzyMatchActivity: FunctionHandler = async (args) => {
   const query = args.query as string;
   const accountIdArg = args.accountId as string | undefined;
   const dateRange = args.dateRange as string | undefined;
-  if (!query) return { success: false, error: '缺少 query 参数' };
+
+  // List mode: no query → return recent candidates for the missing-subject picker.
+  if (!query || !query.trim()) {
+    let base = await ActivityService.getAll();
+    if (accountIdArg) base = base.filter((a: Activity) => a.account?.id === accountIdArg);
+    const matches = base.slice(0, 8).map((a: Activity) => ({
+      id: a.id, name: a.title || '', accountName: a.account?.name1,
+      score: 0, matchType: 'fuzzy' as const,
+    }));
+    return { success: true, data: { matches, confidence: 'none' as const, listMode: true, needsConfirmation: true, exactMatch: null } };
+  }
 
   let allActivities = await ActivityService.getAll();
   if (accountIdArg) allActivities = allActivities.filter((a: Activity) => a.account?.id === accountIdArg);

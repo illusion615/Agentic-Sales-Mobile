@@ -61,7 +61,7 @@ import type { Opportunity } from '@/generated/models/opportunity-model';
 import type { Activity } from '@/generated/models/activity-model';
 import type { Contact } from '@/generated/models/contact-model';
 import { toast } from 'sonner';
-import { getLocale } from '@/lib/i18n';
+import { getLocale, t } from '@/lib/i18n';
 import { useCopilot } from '@/contexts/copilot-context';
 import { PullToRefresh } from '@/components/pull-to-refresh';
 
@@ -169,7 +169,7 @@ export default function ClientDetailPage() {
   }, [queryClient, id]);
 
   // AI Summary hooks
-  const { summary: aiSummary, isLoading: isLoadingAISummary, isGenerating, isExpired, isFailed, refetch: refetchAISummary } = useEntityAISummary('account', id || '');
+  const { summary: aiSummary, isLoading: isLoadingAISummary, isGenerating, isExpired, isFailed, localeMismatch, refetch: refetchAISummary } = useEntityAISummary('account', id || '');
   const { triggerForEntity, isTriggering } = useWithAISummaryTrigger();
 
   // Initialize edit form when account loads
@@ -210,6 +210,13 @@ export default function ClientDetailPage() {
       setIsRefreshingAI(false);
     }, 500);
   }, [account, opportunities, activities, contacts, triggerForEntity, refetchAISummary]);
+
+  // Regenerate the insight when the user switched language since it was generated.
+  useEffect(() => {
+    if (localeMismatch && account && !isGenerating && !isTriggering && !isRefreshingAI) {
+      handleRefreshAISummary();
+    }
+  }, [localeMismatch, account, isGenerating, isTriggering, isRefreshingAI, handleRefreshAISummary]);
 
   // Calculate stats
   const totalPipelineValue = opportunities.reduce(
@@ -318,7 +325,7 @@ export default function ClientDetailPage() {
 
   if (isLoadingAccount) {
     return (
-      <MobileLayout title={locale === 'zh-Hans' ? '客户详情' : 'Account Details'}>
+      <MobileLayout title={t('accountDetailsTitle', locale)}>
         <div className="px-4 pb-40 space-y-4 mt-4">
           {/* Header card skeleton */}
           <div className="glass-card p-4 animate-pulse" style={{ borderRadius: 20 }}>
@@ -355,11 +362,11 @@ export default function ClientDetailPage() {
     }
     
     return (
-      <MobileLayout title={locale === 'zh-Hans' ? '客户' : 'Client'}>
+      <MobileLayout title={t('clientTitle', locale)}>
         <Empty className="py-20">
           <EmptyHeader>
             <Building2 className="w-16 h-16 mx-auto mb-4 text-muted-foreground/40" />
-            <EmptyTitle>{locale === 'zh-Hans' ? '找不到客户' : 'Client not found'}</EmptyTitle>
+            <EmptyTitle>{t('clientNotFound', locale)}</EmptyTitle>
             <EmptyDescription>
               {locale === 'zh-Hans' 
                 ? '该记录可能已被删除，或此 ID 不属于客户表' 
@@ -367,7 +374,7 @@ export default function ClientDetailPage() {
             </EmptyDescription>
           </EmptyHeader>
           <Button variant="outline" className="mt-4" onClick={() => navigate('/accounts')}>
-            {locale === 'zh-Hans' ? '返回客户列表' : 'Back to Clients'}
+            {t('backToClients', locale)}
           </Button>
         </Empty>
       </MobileLayout>
@@ -418,7 +425,7 @@ export default function ClientDetailPage() {
       <button
         onClick={() => setIsEditMode(true)}
         className="p-2 rounded-full hover:bg-muted/50 transition-colors"
-        aria-label={locale === 'zh-Hans' ? '编辑' : 'Edit client'}
+        aria-label={t('editClient', locale)}
       >
         <Edit className="w-5 h-5 text-foreground" />
       </button>
@@ -832,7 +839,7 @@ export default function ClientDetailPage() {
           {
             id: 'new-activity',
             icon: Plus,
-            label: locale === 'zh-Hans' ? '新建活动' : 'New Activity',
+            label: t('newActivity', locale),
             onClick: () => navigate(`/activity/${id}`),
           },
         ]}

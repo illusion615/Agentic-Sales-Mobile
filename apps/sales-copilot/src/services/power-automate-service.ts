@@ -18,9 +18,6 @@ import { getClient } from '@microsoft/power-apps/data';
 import { dataSourcesInfo } from '../../.power/schemas/appschemas/dataSourcesInfo';
 import { getTextPromptOpName } from './prompt-resolver';
 import { Msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75cService as TextPromptService } from '@/generated/services/Msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75cService';
-import { Msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323Service as JsonPromptService } from '@/generated/services/Msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323Service';
-import { Msdyn_aibdptcustomprompt228202435537pmbd0d86826d054e2ba9efc694a371f6fbService as DagPromptService } from '@/generated/services/Msdyn_aibdptcustomprompt228202435537pmbd0d86826d054e2ba9efc694a371f6fbService';
-import { Msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7Service as JsonGenericPromptService } from '@/generated/services/Msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7Service';
 
 export interface FlowLLMResponse {
   success: boolean;
@@ -118,29 +115,18 @@ export async function invokeFlowForLLM(
 
     console.log('[AI Tool] Invoking prompt via generated service, format:', responseFormat, 'prompt length:', text.length);
 
-    // Call via generated Dataverse operation services (from `power-apps add-dataverse-api`)
+    // Single Text prompt for every format: the runtime-resolved op name keeps
+    // working across environments, and structured formats are repaired
+    // client-side below via jsonrepair. (Legacy json/dag/json-generic AI Builder
+    // prompts were removed; only SalesCopilotCorePrompt remains.)
     let result: { success: boolean; data?: Record<string, unknown> | null; error?: { message?: string } };
-    switch (responseFormat) {
-      case 'json':
-        result = await JsonPromptService.msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323(text);
-        break;
-      case 'dag':
-        result = await DagPromptService.msdyn_aibdptcustomprompt228202435537pmbd0d86826d054e2ba9efc694a371f6fb(text);
-        break;
-      case 'json-generic':
-        result = await JsonGenericPromptService.msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7('', text);
-        break;
-      default: { // 'text' — main path, uses the runtime-resolved operation name
-        const opName = getTextPromptOpName();
-        result = await invokeTextPromptByOpName(opName, text);
-        // If a resolved (non build-time) name fails, fall back to the generated
-        // service so we are never worse off than before the dynamic resolver.
-        if (!result.success) {
-          console.warn('[AI Tool] dynamic prompt op failed, retrying with build-time service:', opName);
-          result = await TextPromptService.msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75c(text);
-        }
-        break;
-      }
+    const opName = getTextPromptOpName();
+    result = await invokeTextPromptByOpName(opName, text);
+    // If a resolved (non build-time) name fails, fall back to the generated
+    // service so we are never worse off than before the dynamic resolver.
+    if (!result.success) {
+      console.warn('[AI Tool] dynamic prompt op failed, retrying with build-time service:', opName);
+      result = await TextPromptService.msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75c(text);
     }
 
     const latencyMs = Date.now() - startTime;

@@ -28,7 +28,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { Activity as DataverseActivity } from '@/generated/models/activity-model';
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
 import { useCopilot } from '@/contexts/copilot-context';
-import { getLocale } from '@/lib/i18n';
+import { getLocale, t } from '@/lib/i18n';
 import { getWeekStartDay } from '@/lib/i18n';
 import { PullToRefresh } from '@/components/pull-to-refresh';
 import { format } from 'date-fns/format';
@@ -151,7 +151,7 @@ function ActivityItem({ activity, showOverdue = false }: { activity: DataverseAc
             {overdue && (
               <span className="flex items-center gap-0.5 text-[9px] font-medium text-red-500">
                 <AlertTriangle className="w-2.5 h-2.5" />
-                {daysOver}d {locale === 'zh-Hans' ? '逾期' : 'overdue'}
+                {daysOver}d {t('overdueShort', locale)}
               </span>
             )}
           </div>
@@ -356,8 +356,8 @@ export default function ActivitiesPage() {
           {viewMode === 'week' && (
             <div className="flex rounded-lg overflow-hidden border border-border/60 w-full">
               {([
-                { key: 'calendar' as const, icon: Calendar, label: locale === 'zh-Hans' ? '日历' : 'Calendar' },
-                { key: 'report' as const, icon: FileText, label: locale === 'zh-Hans' ? '周报' : 'Report' },
+                { key: 'calendar' as const, icon: Calendar, label: t('calendarLabel', locale) },
+                { key: 'report' as const, icon: FileText, label: t('reportTab', locale) },
               ]).map(({ key, icon: PaneIcon, label }) => (
                 <button
                   key={key}
@@ -512,7 +512,7 @@ export default function ActivitiesPage() {
                               <div className="flex items-center gap-1.5 px-1">
                                 <TrendingUp className="w-3 h-3 text-primary" />
                                 <span className="text-[11px] font-semibold text-foreground">
-                                  {locale === 'zh-Hans' ? `待办 (${selectedDayPending.length})` : `To Do (${selectedDayPending.length})`}
+                                  {t('toDoCount', locale, { count: selectedDayPending.length })}
                                 </span>
                               </div>
                               {selectedDayPending.map((a) => (
@@ -532,7 +532,7 @@ export default function ActivitiesPage() {
                               >
                                 <CheckCircle2 className="w-3 h-3 text-green-500" />
                                 <span className="text-[11px] font-semibold text-muted-foreground">
-                                  {locale === 'zh-Hans' ? `已完成 (${selectedDayCompleted.length})` : `Done (${selectedDayCompleted.length})`}
+                                  {t('doneCount', locale, { count: selectedDayCompleted.length })}
                                 </span>
                                 <ChevronRight className={cn('w-3 h-3 text-muted-foreground ml-auto transition-transform', showCompleted && 'rotate-90')} />
                               </button>
