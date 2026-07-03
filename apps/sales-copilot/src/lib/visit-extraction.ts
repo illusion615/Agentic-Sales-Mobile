@@ -30,9 +30,7 @@ export async function extractVisitDataFromText(
   if (!isCopilotStudioAvailable()) return null;
 
   try {
-    const extractionPrompt = locale === 'zh-Hans'
-      ? `请从以下拜访描述中提取信息，以JSON格式返回：客户名称(accountName)、联系人(contactName)、拜访日期(visitDate)、拜访类型(visitType)、摘要(summary)、结果(outcome)、后续计划(nextSteps)、商机信号(opportunitySignal)、置信度(confidence)。描述：${text}`
-      : `Please extract information from the following visit description and return in JSON format: account name (accountName), contact (contactName), visit date (visitDate), visit type (visitType), summary, outcome, next steps (nextSteps), opportunity signal (opportunitySignal), confidence (0-100). Description: ${text}`;
+    const extractionPrompt = `Please extract information from the following visit description and return in JSON format: account name (accountName), contact (contactName), visit date (visitDate), visit type (visitType), summary, outcome, next steps (nextSteps), opportunity signal (opportunitySignal), confidence (0-100). Description: ${text}`;
 
     const result = await executeFunction(
       'queryCopilotStudio',

@@ -102,21 +102,6 @@ export function buildWeeklyReportPrompt(
 
   const range = weekRangeLabel(weekStart, weekEnd, locale);
 
-  if (locale === 'zh-Hans') {
-    return `根据下面这一周（${range}）的活动列表，生成一份简洁的销售周报。共 ${totalCount} 个活动，已完成 ${completedCount} 个。
-
-活动列表：
-${lines || '（本周暂无活动）'}
-
-请用纯 Markdown 输出，包含以下小节（用 ### 标题）：
-### 本周概况
-### 关键成果
-### 未完成与逾期
-### 下周建议
-
-要求：提到具体客户/商机名称；条目用无序列表；不要输出 JSON 或代码块；语气专业简洁。`;
-  }
-
   return `Using the activity list for this week (${range}), write a concise sales weekly report. ${totalCount} activities total, ${completedCount} completed.
 
 Activities:

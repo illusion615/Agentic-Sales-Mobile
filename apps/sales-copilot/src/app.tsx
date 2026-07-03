@@ -1,5 +1,8 @@
 import { useEffect, lazy, Suspense } from 'react';
-import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+// MemoryRouter (not HashRouter): the Power Apps mobile player mishandles the URL
+// hash and hangs on load. MemoryRouter keeps all routing state in memory and
+// never touches window.location, which is the correct model for an embedded app.
+import { MemoryRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { Provider as JotaiProvider } from 'jotai';
 import { Loader2 } from 'lucide-react';

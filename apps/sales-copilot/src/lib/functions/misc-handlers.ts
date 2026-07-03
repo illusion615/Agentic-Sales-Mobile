@@ -10,7 +10,7 @@ import { getCopilotConfig, saveCopilotConfig } from '@/services/copilot-service'
 import { getContext } from '@microsoft/power-apps/app';
 import { MicrosoftCopilotStudioService } from '@/generated/services/MicrosoftCopilotStudioService';
 import { registerHandlers, type FunctionHandler } from './handler-registry';
-import { localeBcp47, type Locale } from '@/lib/i18n';
+import { localeBcp47, outputLanguageDirective, type Locale } from '@/lib/i18n';
 
 const queryCopilotStudio: FunctionHandler = async (args, ctx) => {
   const query = (args.query as string) || (ctx.conversationHistory?.filter(m => m.role === 'user').pop()?.content) || '';
@@ -116,7 +116,11 @@ const suggestPlan: FunctionHandler = async (args, ctx) => {
   // today-only tasks is not a plan. Users can still reschedule per-card.
   const today = new Date();
   const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
-  const isoDay = (d: Date) => d.toISOString().split('T')[0];
+  // Local calendar date, NOT UTC toISOString(): for users ahead of UTC the UTC
+  // date can still be "yesterday", which mislabelled "today" in the plan and
+  // shifted the whole window by a day. Use the wall-clock local date.
+  const isoDay = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const targetDate = args.targetDate as string || isoDay(tomorrow);
   const period = args.period as string || 'week';
   const focus = args.focus as string || '';
@@ -175,9 +179,7 @@ const suggestPlan: FunctionHandler = async (args, ctx) => {
   const isZh = (ctx.locale || 'en') === 'zh-Hans';
   const firstDate = windowDates[0];
   const lastDate = windowDates[windowDates.length - 1];
-  const systemPrompt = isZh
-    ? `你是一个资深销售教练。今天是 ${isoDay(today)}（${weekdayName(isoDay(today))}）。请基于以下数据，为销售代表在 ${firstDate} 到 ${lastDate} 这个区间内规划工作计划。\n\n排程要求（重要）：\n- 生成最多 ${maxTasks} 个具体、可操作的任务，并把它们**分散到区间内的不同日期**，不要全部排在同一天。\n- 排期依据：(1) 商机紧迫度——expectedclosedate 越近、金额越大、信心度越低或有 blocker 的，越要尽早安排；(2) 日程负载——优先安排到 booked 数量较少的日期，避免与已有活动冲突。\n- 每天的现有日程负载见下方 [Schedule load]。已经很满的日期尽量少排或不排。\n- 每个任务的 notes 必须用一句话解释**为什么排这一天**（结合商机进度/紧迫度/日程空档），例如"协和招标 6/12 截止，且本周三日程较空，故安排周二谈判会议"。\n\n优先级：到期商机跟进 > 长期未联系客户回访 > 高价值商机推进 > 例行维护${focus ? `\n- 重点方向：${focus}` : ''}\n\n返回严格按以下 JSON：\n{"suggestions":[{"title":"具体标题","type":"visit|call|meeting|email|other","accountName":"客户名称","scheduledDate":"YYYY-MM-DD","notes":"包含排程理由的业务说明"}]}\n\n所有字段必填，scheduledDate 必须落在 ${firstDate} 到 ${lastDate} 之间，notes 必须包含排程理由。只返回 JSON，不要 markdown。`
-    : `You are a senior sales coach. Today is ${isoDay(today)} (${weekdayName(isoDay(today))}). Plan tasks for the rep across the window ${firstDate} to ${lastDate}.\n\nScheduling requirements (important):\n- Generate up to ${maxTasks} specific, actionable tasks and **spread them across different dates** in the window — do NOT pile everything on one day.\n- Date assignment is based on: (1) opportunity urgency — sooner expectedclosedate, larger amount, lower confidence, or named blocker → schedule earlier; (2) schedule load — prefer days with fewer booked activities to avoid conflicts.\n- The current per-day load is in [Schedule load] below. Avoid days that are already busy.\n- Each task's notes MUST include one sentence explaining **why that date** (tying it to deal progress / urgency / an open slot), e.g. "Peking Union tender closes 6/12 and Wed is light, so the negotiation meeting is set for Tue".\n\nPriority: urgent opportunity follow-ups > long-overdue client revisits > high-value pipeline progression > routine maintenance${focus ? `\n- Focus area: ${focus}` : ''}\n\nReturn strictly: {"suggestions":[{"title":"...","type":"visit|call|meeting|email|other","accountName":"...","scheduledDate":"YYYY-MM-DD","notes":"business note that includes the scheduling rationale"}]}\n\nAll fields required. scheduledDate MUST fall within ${firstDate}..${lastDate}. notes MUST include the scheduling rationale. Return only JSON, no markdown.`;
+  const systemPrompt = `You are a senior sales coach. Today is ${isoDay(today)} (${weekdayName(isoDay(today))}). Plan tasks for the rep across the window ${firstDate} to ${lastDate}.\n\nScheduling requirements (important):\n- Generate up to ${maxTasks} specific, actionable tasks and **spread them across different dates** in the window — do NOT pile everything on one day.\n- Date assignment is based on: (1) opportunity urgency — sooner expectedclosedate, larger amount, lower confidence, or named blocker → schedule earlier; (2) schedule load — prefer days with fewer booked activities to avoid conflicts.\n- The current per-day load is in [Schedule load] below. Avoid days that are already busy.\n- Each task's notes MUST include one sentence explaining **why that date** (tying it to deal progress / urgency / an open slot), e.g. "Peking Union tender closes 6/12 and Wed is light, so the negotiation meeting is set for Tue".\n\nPriority: urgent opportunity follow-ups > long-overdue client revisits > high-value pipeline progression > routine maintenance${focus ? `\n- Focus area: ${focus}` : ''}\n\nReturn strictly: {"suggestions":[{"title":"...","type":"visit|call|meeting|email|other","accountName":"...","scheduledDate":"YYYY-MM-DD","notes":"business note that includes the scheduling rationale"}]}\n\nAll fields required. scheduledDate MUST fall within ${firstDate}..${lastDate}. notes MUST include the scheduling rationale. Return only JSON, no markdown.\n\n${outputLanguageDirective((ctx.locale || 'en-US') as Locale)}`;
 
   const dataPayload = `Pipeline (${activeOpps.length} active opportunities):\n${JSON.stringify(activeOpps.map((o) => ({
     name: o.name1, account: o.account?.name1, amount: o.totalamount,

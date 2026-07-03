@@ -55,14 +55,11 @@ export async function executeFunction(
   try {
     const skillDef = availableFunctions.find((f) => f.name === functionName);
     if (skillDef?.llmBacked && skillDef.promptTemplate) {
-      // Prompt templates are authored in zh/en only. Pick zh for Chinese and the
-      // en template as the structural base for every other locale, then pin the
-      // OUTPUT language explicitly so de/fr/es get localized content too.
+      // Prompts are authored in ENGLISH only; the output-language directive pins the
+      // reply to the user's selected locale (zh/en/de/fr/es).
       const { outputLanguageDirective } = await import('@/lib/i18n');
       const locale = (context.locale || 'en-US') as Locale;
-      const isZh = locale === 'zh-Hans';
-      const basePrompt = isZh ? skillDef.promptTemplate['zh-Hans'] : skillDef.promptTemplate['en-US'];
-      const systemPrompt = `${basePrompt}\n\n${outputLanguageDirective(locale)}`;
+      const systemPrompt = `${skillDef.promptTemplate}\n\n${outputLanguageDirective(locale)}`;
       const userContent = args.data as string || args.visitData as string || JSON.stringify(args);
 
           // Append extra context if provided (e.g. existingOpportunities for analyzeOpportunity)

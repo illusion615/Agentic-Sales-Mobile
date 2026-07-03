@@ -92,18 +92,17 @@ import { executeFunction } from '@/lib/function-executor';
 const NARRATE_TIMEOUT_MS = 6000;
 
 function buildPrompt(input: TaskNarrationInput): string {
-  const isZh = input.locale === 'zh-Hans';
   const priorBlock = input.prior.length === 0
-    ? (isZh ? '（无）' : '(none)')
+    ? '(none)'
     : input.prior
         .map((p, i) => `${i + 1}. ${p.label} → ${p.outcome}`)
         .join('\n');
   return [
-    isZh ? `任务进度：${input.taskIndex}/${input.total}` : `Task progress: ${input.taskIndex} of ${input.total}`,
-    isZh ? `下一步原始标题：${input.label}` : `Next task raw label: ${input.label}`,
-    isZh ? `技能函数：${input.fnName}` : `Skill function: ${input.fnName}`,
+    `Task progress: ${input.taskIndex} of ${input.total}`,
+    `Next task raw label: ${input.label}`,
+    `Skill function: ${input.fnName}`,
     '',
-    isZh ? '前序任务结果：' : 'Prior task outcomes:',
+    'Prior task outcomes:',
     priorBlock,
   ].join('\n');
 }

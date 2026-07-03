@@ -176,6 +176,7 @@ Do NOT split intents when:
 - Preparation, follow-up, or implicit sub-tasks of a scheduled activity are part of that activity, not separate intents. "Meet tomorrow and prepare for it" = 1 intent (the meeting).
 - Descriptions of what a customer wants, needs, or is buying are part of the Opportunity intent itself, not separate Product or Activity intents. The Opportunity's summary should absorb these details.
 - The user asks for ONE report/briefing/summary that lists multiple sections (e.g. "generate a daily report: 1) summary 2) wins 3) pending 4) tomorrow's plan"). The sections are the structure of the SAME Report intent, not separate intents. Do not split per section. Do not promote a section title like "tomorrow's plan" into an Activity+Plan intent — inside a report request it means "summarize what to do tomorrow", not "schedule a concrete activity".
+- Sorting, ranking, filtering, scoping, period, or limit qualifiers on a Find or Report ("sort by priority", "rank them", "most urgent first", "按优先级排序", "top 5", "只看华东的", "today", "this week") are ARGUMENTS of that ONE query intent (they map to sortBy / filters / dateRange) — NOT separate intents. They only ORDER or NARROW the SAME result set. NEVER spin a qualifier off into a separate Analyze / "prioritize" intent, and NEVER let it flip a concrete Find (e.g. today's scheduled visits) into Analyze / pipeline planning. Ranking is applied when presenting the found records.
 
 Language-agnostic: judge by meaning, not by keywords. The user may write in any language or mix languages. Tense and time are inferred from meaning.
 
@@ -184,6 +185,7 @@ The conversation history is provided as prior chat turns. When the user's messag
 
 # Sales objects (each intent picks exactly one)
 - Account     — a customer organization (hospital, company, distributor)
+    WRONG (Account): "which customers do I need to visit today", "who am I calling this week", "今天要拜访哪些客户" → these ask for customers/contacts filtered by WHEN you interact with them, and the schedule lives on ACTIVITIES. Classify as Activity, Find (the answer comes from that day/period's activities, which name the customers), NEVER Account.
 - Contact     — a person (doctor, buyer, decision maker)
 - Opportunity — a deal, project, tender, or buying interest. Customer demand and what they want to buy belongs here.
 - Activity    — a sales touch that happens at a point in time (visit, call, meeting, email, demo, product introduction delivered to the customer). Anything where the salesperson is interacting with or delivering something to the customer or to internal colleagues at a specific time.
@@ -209,7 +211,7 @@ The conversation history is provided as prior chat turns. When the user's messag
     CORRECT: "the RFP is on internal review now"                    → Opportunity, Update  (status/stage of an existing opportunity changed)
     CORRECT: "we moved the London deal to negotiation"             → Opportunity, Update  (stage of an existing opportunity changed)
 - Recommend  — ask the assistant to recommend a PRODUCT (features, specs, which model fits). salesObject MUST be Product.
-- Analyze    — ask the assistant for strategic advice, next-step suggestions, deal coaching, meeting preparation, follow-up strategy, account prioritization, day/week planning brainstorm ("plan my tomorrow", "plan my visits for this week", "plan my calls for next week", "suggest tasks for next week"), or any request that needs CRM data synthesis + reasoning. Use for ANY "suggest / advise / analyze / coach / prepare / prioritize / plan my day" intent that is NOT about product knowledge. KEY: "plan my <activity-type plural> for <period>" (plan my visits/calls/meetings for this week) is ALWAYS Analyze (the assistant proposes a multi-task schedule), NOT Draft/Plan of a single activity.
+- Analyze     — ask the assistant for strategic advice, next-step suggestions, deal coaching, meeting preparation, follow-up strategy, account prioritization, day/week planning brainstorm ("plan my tomorrow", "plan my visits for this week", "plan my calls for next week", "suggest tasks for next week"), or any request that needs CRM data synthesis + reasoning. Use for ANY "suggest / advise / analyze / coach / prepare / prioritize / plan my day" intent that is NOT about product knowledge. KEY: "plan my <activity-type plural> for <period>" (plan my visits/calls/meetings for this week) is ALWAYS Analyze (the assistant proposes a multi-task schedule), NOT Draft/Plan of a single activity. BOUNDARY: Analyze GENERATES NEW advice/tasks that do not exist yet. Retrieving existing records and ordering them is NOT Analyze — "which customers am I visiting today, by priority" retrieves today's scheduled activities (Find) and merely orders them; the ranking is presentation, not a second intent. Treat prioritization as Analyze ONLY when NO concrete existing schedule is being listed (e.g. "which accounts should I focus on this week").
 - Knowledge  — ask a factual product or industry knowledge question (specs, warranty, regulations)
 - Report     — ask for a status overview, summary, or statistics about any entity type (accounts, pipeline, activities, territory, engagement)
 - Chat       — pure greeting / thanks / smalltalk
@@ -325,6 +327,16 @@ User: "plan my visits for this week"
 Expected intents: 1
   [0] Activity, Analyze, none — brainstorm this week's visits                    label {zh:"规划本周拜访",en:"Plan my visits"}
 Note: "visits" is PLURAL over a PERIOD ("this week") — the user wants the assistant to PROPOSE a multi-task schedule, not create one visit. This is Analyze → suggestPlan, NEVER Draft/Plan a single activity. Same for "plan my calls/meetings for <period>".
+
+User: "我今天需要拜访哪些客户" (which customers do I need to visit today)
+Expected intents: 1
+  [0] Activity, Find, none — today's scheduled visits (which customers to see today)   label {zh:"今日拜访",en:"Today's visits"}
+Note: "which customers/contacts I visit/call/meet today (or this week / tomorrow)" is a QUERY over ACTIVITIES — the schedule lives on activities, so the answer comes from that day's ACTIVITIES (which name the customers), NEVER a full list of all accounts. Classify as Activity, Find — never Account/Contact. Contrast: "plan my visits for this week" = Analyze (brainstorm a schedule); "which customers today" = Find over existing scheduled activities.
+
+User: "我今天要拜访哪些客户？给我按优先级排序" (which customers today, ranked by priority)
+Expected intents: 1
+  [0] Activity, Find, none — today's scheduled visits, ordered by priority          label {zh:"今日拜访",en:"Today's visits"}
+Note: "给我按优先级排序 / sort by priority" only ORDERS the SAME today's-visits result — it does NOT add a second Account/Activity "Analyze / prioritize" intent, and it does NOT turn this into suggestPlan pipeline planning. Still exactly ONE Activity, Find; the ranking is applied when presenting the found activities. Contrast: "which accounts should I focus on this week" (no concrete schedule queried) = Account, Analyze.
 
 User: "let's set up a Q&A meeting next Tuesday with the customer"
 Expected intents: 1

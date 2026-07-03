@@ -533,9 +533,7 @@ async function processMessageInner(
         if (isConversational) {
           console.log('[CopilotAgent] Chat lane — generating a conversational reply');
           if (onProgress) onProgress({ stage: 'generating', status: 'active' });
-          const chatSystem = (isZh
-            ? '你是一位友好、专业的销售助手。用户刚刚说了一句寒暄、感谢或闲聊。用一到两句话自然地回应，保持温暖且简洁。如果合适，可以轻描淡写地提示你能帮忙查询客户、商机、活动或安排跟进——但不要生硬推销，也不要罗列功能清单。'
-            : 'You are a friendly, professional sales assistant. The user just made small talk, a greeting, or said thanks. Reply naturally in one or two sentences — warm and concise. If it fits, lightly mention you can help look up accounts, opportunities, activities, or plan follow-ups — but do not hard-sell or list features.')
+          const chatSystem = 'You are a friendly, professional sales assistant. The user just made small talk, a greeting, or said thanks. Reply naturally in one or two sentences — warm and concise. If it fits, lightly mention you can help look up accounts, opportunities, activities, or plan follow-ups — but do not hard-sell or list features.'
             + `\n\n${outputLanguageDirective(locale)}`;
           let chatContent = '';
           try {
@@ -1192,26 +1190,7 @@ async function processMessageInner(
       onProgress({ stage: 'generating', status: 'active' });
     }
     
-    const errorAnalysisPrompt = isZh
-      ? `你是一个友好的销售助手。用户请求执行时出现了错误，请分析错误并给出友好的回复。
-
-用户问题: ${userMessage}
-尝试调用的函数: ${intent.function}
-传入的参数: ${JSON.stringify(intent.arguments || {})}
-错误信息: ${errorMsg}
-
-请根据错误信息，用友好的语气回复用户。重要规则:
-1. 不要暴露技术细节如"recordId"、"data source"等内部术语
-2. 如果是记录ID无效（如 "recordId is not valid"），说明可能是因为：
-   - 用户提到的客户/商机/活动名称不存在或已被删除
-   - 需要用户澄清确认要查询的具体记录
-3. 给出具体的下一步建议，例如：
-   - "您可以告诉我客户的完整名称吗？"
-   - "请问您要查询哪个商机的详情？"
-   - "我找不到这条记录，您可以搜索一下看看吗？"
-4. 保持简洁友好，2-3句话
-5. 必须使用中文回复`
-      : `You are a friendly sales assistant. An error occurred while executing the user's request. Please analyze the error and provide a helpful response.
+    const errorAnalysisPrompt = `You are a friendly sales assistant. An error occurred while executing the user's request. Please analyze the error and provide a helpful response.
 
 User question: ${userMessage}
 Function attempted: ${intent.function}
@@ -1227,15 +1206,14 @@ Please respond to the user in a friendly manner based on the error. Important ru
    - "Could you tell me the full name of the account?"
    - "Which opportunity would you like to see details for?"
    - "I couldn't find this record. Would you like to search for it?"
-4. Keep it concise and friendly, 2-3 sentences
-5. You must respond in English`;
+4. Keep it concise and friendly, 2-3 sentences`;
     const errorAnalysisPromptLocalized = `${errorAnalysisPrompt}\n\n${outputLanguageDirective(locale)}`;
 
     try {
       const errorAnalysisResponse = await invokeFlowForLLM({
         messages: [
           { role: 'system', content: errorAnalysisPromptLocalized },
-          { role: 'user', content: `请分析这个错误并给出友好的回复: ${errorMsg}` },
+          { role: 'user', content: `Analyze this error and provide a friendly reply: ${errorMsg}` },
         ],
       });
       
@@ -1416,48 +1394,23 @@ Please respond to the user in a friendly manner based on the error. Important ru
     onProgress({ stage: 'generating', status: 'active' });
   }
 
-  const responseSystemPrompt = isZh
-    ? `你是一个资深销售教练。根据函数执行结果和用户的具体问题，用自然语言回复用户。
-
-重要规则:
-1. 不要逐条列出具体记录 - 详细列表会以卡片形式单独展示给用户
-2. 根据用户意图调整回复风格:
-   - 如果用户在查询记录（Find）: 给出数量统计 + 关键分布洞察（金额/行业/阶段/时间）
-   - 如果用户在要求分析/建议（Analyze/Recommend）: 给出具体的、可操作的销售建议，例如：哪些商机应该优先跟进、建议的下一步动作、潜在风险提醒、关键时间节点
-   - 如果用户在查看摘要（Report）: 给出关键指标 + 趋势 + 需要关注的异常
-3. 回复长度根据内容复杂度灵活调整:
-   - 简单查询: 2-3句
-   - 分析建议: 可以3-5句，用要点列举关键行动项
-4. 必须使用中文回复
-5. 如果数据为空，友好地告知用户`
-    : `You are a senior sales coach. Based on the function execution result and the user's specific question, respond in natural language.
+  const responseSystemPrompt = `You are a senior sales coach. Based on the function execution result and the user's specific question, respond in natural language.
 
 Important rules:
-1. Do NOT list individual records - detailed list will be shown separately as cards to the user
-2. Adjust response style based on user intent:
-   - If user is querying records (Find): provide count statistics + key distribution insights (amount/industry/stage/time)
-   - If user is asking for analysis/advice (Analyze/Recommend): provide specific, actionable sales advice, such as: which opportunities to prioritize, suggested next actions, risk alerts, key deadlines
-   - If user is viewing summary (Report): provide key metrics + trends + anomalies to watch
-3. Adjust response length based on content complexity:
-   - Simple queries: 2-3 sentences
-   - Analysis/advice: 3-5 sentences, use bullet points for key action items
-4. You must respond in English
-5. If data is empty, kindly inform the user`;
+1. Do NOT list individual records — the detailed list is shown separately as cards.
+2. Adjust style to the user's intent:
+   - Find (querying records): a count + key distribution insights (amount/industry/stage/time).
+   - Analyze/Recommend (advice): specific, actionable advice — which opportunities to prioritize, next actions, risk alerts, key deadlines.
+   - Report (summary): key metrics + trends + anomalies to watch.
+3. Adjust length to complexity: simple query 2-3 sentences; analysis 3-5 sentences with bullet points for action items.
+4. If data is empty, kindly tell the user.
+5. Answer the user's ACTUAL question using ONLY the returned data. Never assert a relationship the data does not support (e.g. if the data is a plain account list with no dates, do NOT claim they are "today's visits").`;
 
-  // The two templates above are zh/en only. Pin the actual output language so
-  // de/fr/es users get replies in their language instead of English.
+  // Prompt is English (accuracy); the reply language is set by the output-language
+  // directive so it follows the user's selected locale (zh/en/de/fr/es).
   const responseSystemPromptLocalized = `${responseSystemPrompt}\n\n${outputLanguageDirective(locale)}`;
 
-  const responseUserPrompt = isZh
-    ? `用户问题: ${userMessage}
-
-调用了函数: ${intent.function}
-记录数量: ${Array.isArray(functionResult.data) ? functionResult.data.length : 1}
-执行结果摘要:
-${JSON.stringify(functionResult.data, null, 2).slice(0, 4000)}
-
-请提供简短的摘要和分析，不要列出具体记录。`
-    : `User question: ${userMessage}
+  const responseUserPrompt = `User question: ${userMessage}
 
 Called function: ${intent.function}
 Record count: ${Array.isArray(functionResult.data) ? functionResult.data.length : 1}

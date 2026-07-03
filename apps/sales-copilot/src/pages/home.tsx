@@ -1290,30 +1290,7 @@ export default function HomeDashboard() {
       
       if (agentFramework === 'local-agent') {
         // Use local agent with BYOM to generate insights directly
-        const systemPrompt = locale === 'zh-Hans'
-          ? `你是一个销售助手，负责分析销售数据并生成有价值的业务洞察。
-
-【最重要规则 - 必须严格遵守】
-- 只能使用下方数据中明确列出的客户名、商机名、活动名
-- 绝对禁止编造、杜撰任何不存在于下方数据中的名称
-- 如果某类数据显示"暂无"或空，则不要生成相关洞察
-- 如果风险客户为0个，不要提及任何风险客户
-
-请用中文回复。
-
-=== 今日待办事项 (${kpiData.agendaItems.length}项) ===
-${todayAgendaDetails || '暂无待办'}
-
-=== 季度业绩 ===
-${quarterlyPerformanceDetails}
-
-=== 风险客户 (${kpiData.clientsAtRisk}个需要关注，判定标准：超过14天未联系) ===
-${atRiskClientsDetails || '暂无风险客户'}
-
-=== 其他统计 ===
-- 客户覆盖率：本周已联系 ${kpiData.clientsTouchedThisWeek}/${kpiData.totalClients} 个客户
-- 活动完成度：${kpiData.activitiesThisWeek}/${kpiData.weeklyTarget}`
-          : `You are a sales assistant that analyzes sales data and generates actionable business insights.
+        const systemPrompt = `You are a sales assistant that analyzes sales data and generates actionable business insights.
 
 [MOST CRITICAL RULE - MUST STRICTLY FOLLOW]
 - ONLY use client names, opportunity names, and activity names that are EXPLICITLY listed in the data below
@@ -1334,9 +1311,7 @@ ${atRiskClientsDetails || 'No at-risk clients'}
 - Client coverage: ${kpiData.clientsTouchedThisWeek}/${kpiData.totalClients} clients contacted this week
 - Activity progress: ${kpiData.activitiesThisWeek}/${kpiData.weeklyTarget}`;
         
-        const userPrompt = locale === 'zh-Hans'
-          ? '请给我今日的业务洞察简报，包括：1）最需要优先处理的事项；2）需要重点跟进的商机；3）需要主动联系的风险客户。每个洞察要具体到客户名和商机名。'
-          : 'Give me today\'s business insight briefing, including: 1) Top priority items to address; 2) Key opportunities to follow up; 3) At-risk clients to proactively contact. Be specific with client and opportunity names.';
+        const userPrompt = 'Give me today\'s business insight briefing, including: 1) Top priority items to address; 2) Key opportunities to follow up; 3) At-risk clients to proactively contact. Be specific with client and opportunity names.';
         
         // Update status for generating response
         setInsightRefreshStatus(t('generatingInsights', locale));
@@ -1360,21 +1335,7 @@ ${atRiskClientsDetails || 'No at-risk clients'}
       // Step 1: Generate insight bullet points for cards
       // Generate insights with rationale in JSON format
       // Build raw data string directly for insight generation (avoid LLM fabrication)
-      const rawDataForInsights = locale === 'zh-Hans'
-        ? `=== 今日待办事项 (${kpiData.agendaItems.length}项) ===
-${todayAgendaDetails || '暂无待办'}
-
-=== 季度业绩 ===
-${quarterlyPerformanceDetails}
-
-=== 风险客户 (${kpiData.clientsAtRisk}个需要关注，判定标准：超过14天未联系) ===
-${atRiskClientsDetails || '暂无风险客户'}
-
-=== 其他统计 ===
-- 本周即将成交：${kpiData.closingThisWeek}个商机
-- 客户覆盖率：本周已联系 ${kpiData.clientsTouchedThisWeek}/${kpiData.totalClients} 个客户
-- 活动完成度：${kpiData.activitiesThisWeek}/${kpiData.weeklyTarget}`
-        : `=== Today's Agenda (${kpiData.agendaItems.length} items) ===
+      const rawDataForInsights = `=== Today's Agenda (${kpiData.agendaItems.length} items) ===
 ${todayAgendaDetails || 'No agenda items'}
 
 === Quarterly Performance ===
@@ -1388,40 +1349,7 @@ ${atRiskClientsDetails || 'No at-risk clients'}
 - Client coverage: ${kpiData.clientsTouchedThisWeek}/${kpiData.totalClients} clients contacted this week
 - Activity progress: ${kpiData.activitiesThisWeek}/${kpiData.weeklyTarget}`;
 
-      const insightSystemPrompt = locale === 'zh-Hans'
-        ? `你是一位资深销售教练（Senior Sales Coach），不是数据复述机器。基于以下业务数据，生成 5-6 条有教练价值的洞察。
-
-【角色要求 - 核心】
-- 你的价值在于"诊断 + 处方"，不是"归纳 + 复述"
-- 每条洞察都要回答三个问题：是什么(What) → 为什么(Why，根因) → 怎么做(How，具体动作)
-- 绝不能只说"客户有风险""需要关注""建议跟进"这类空话——必须说清风险到底是什么、根源在哪、第一步该做什么
-
-【数据真实性 - 必须严格遵守】
-- 只能使用下方"业务数据"中明确列出的客户名、商机名、活动名和数字
-- 绝对禁止编造任何不存在于数据中的名称或数字
-- 风险客户数据已标注原因（如"X 天未联系"），必须在 rationale 中引用这个具体原因
-- 如果某类数据为空（显示"暂无"或为0），不要生成相关洞察
-
-每条洞察必须包含：
-1. insight: 一句话点明问题或机会（不超过20字），要具体不要笼统
-2. rationale: 教练式分析（120-200字），必须包含：
-   - 【根因】用数据说清"为什么"——例如风险客户要写明"已 X 天未联系，超过 14 天预警线"，业绩要写明差距金额和占比
-   - 【影响】这个问题不处理会导致什么后果（流失、错失成交窗口、目标缺口等）
-   - 【行动】给出 1-2 个今天就能执行的具体步骤（打电话/发邮件/安排拜访/准备什么材料），点名具体客户或商机
-3. type: 洞察类型（followup/closing/risk/revisit/performance/opportunity/client/activity）
-
-【反面示例 - 禁止这样写】
-- ✗ "Rush University 等客户有风险，需要重点关注"（没说风险是什么、为什么、怎么做）
-【正面示例 - 应该这样写】
-- ✓ "Rush University 已 21 天无接触，远超 14 天预警线，关系正在冷却。建议今天先发一封带价值点的邮件重启对话，本周内约一次 15 分钟电话了解其当前采购计划是否有变。"
-
-返回JSON数组格式：
-[
-  {"insight": "洞察要点", "rationale": "根因+影响+具体行动", "type": "类型"}
-]
-
-只返回JSON数组，不要其他文字。`
-        : `You are a Senior Sales Coach, not a data-summarizing machine. Based on the following business data, generate 5-6 coaching-grade insights.
+      const insightSystemPrompt = `You are a Senior Sales Coach, not a data-summarizing machine. Based on the following business data, generate 5-6 coaching-grade insights.
 
 [ROLE - CORE]
 - Your value is "diagnosis + prescription", not "summary + restatement"
@@ -1506,25 +1434,6 @@ Return only the JSON array, no other text.`;
       // Build the insight list as a string first
       const insightListText = insightLines.map((line: string, i: number) => (i + 1) + '. ' + line).join('\n');
       
-      const briefTranscriptPromptZh = `你是一个专业的销售助理，正在为销售人员播报今日的业务简报。请基于以下业务洞察内容，生成一段完整、流畅、自然的语音播报稿。
-
-要求：
-1. 以友好专业的语气开场，简短问候后直接进入正题
-2. 依次介绍每个洞察点，使用口语化的过渡词连接
-3. 提到具体的客户名称、商机名称、金额等关键信息
-4. 每个洞察点给出明确的行动建议
-5. 结尾简短有力，鼓励销售人员行动
-6. 整段播报控制在 1-2 分钟内朗读完成
-7. 不要使用 markdown 格式，返回纯文本
-8. 【重要】在每个洞察点之间用空行分隔，形成自然段落，便于朗读时停顿
-9. 【重要】每个段落结尾用句号，段落之间留空行
-
-业务洞察内容：
-${insightListText}
-
-原始业务数据摘要：
-${agentResponse}`;
-      
       const briefTranscriptPromptEn = `You are a professional sales assistant delivering today's business briefing. Based on the business insights below, generate a complete, fluent, natural voice briefing script.
 
 Requirements:
@@ -1544,10 +1453,10 @@ ${insightListText}
 Original business data summary:
 ${agentResponse}`;
       
-      const briefTranscriptPrompt = locale === 'zh-Hans' ? briefTranscriptPromptZh : briefTranscriptPromptEn;
+      const briefTranscriptPrompt = briefTranscriptPromptEn;
       
       const briefTranscriptResult = await generateVoiceSummary(
-        locale === 'zh-Hans' ? '请生成今日业务简报的语音播报稿' : 'Generate today\'s business briefing voice script',
+        'Generate today\'s business briefing voice script',
         locale,
         briefTranscriptPrompt,
       );

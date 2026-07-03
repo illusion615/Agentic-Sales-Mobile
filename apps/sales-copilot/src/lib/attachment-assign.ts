@@ -57,13 +57,10 @@ async function llmAssign(
   userMessage: string,
   locale: string,
 ): Promise<number[]> {
-  const isZh = locale === 'zh-Hans';
   const activityList = slots.map((s, i) => `${i}: ${s.label}`).join('\n');
   const fileList = attachments.map((a, i) => `${i}: ${a.name} (${a.type})`).join('\n');
 
-  const system = isZh
-    ? '你是一个销售助手。用户在一条消息里记录了多个活动并附带了若干文件。根据用户消息、活动标题和文件名，把每个文件分配给最相关的活动。只返回 JSON。'
-    : 'You are a sales assistant. In one message the user logged several activities and attached files. Using the message, activity titles, and file names, assign each file to its most relevant activity. Return JSON only.';
+  const system = 'You are a sales assistant. In one message the user logged several activities and attached files. Using the message, activity titles, and file names, assign each file to its most relevant activity. Return JSON only.';
   const user = [
     `User message:\n${userMessage}`,
     `Activities (index: label):\n${activityList}`,

@@ -132,9 +132,7 @@ function buildOrchestratorPrompt(
   skillsText: string,
   locale: 'zh-Hans' | 'en'
 ): string {
-  const heading = locale === 'zh-Hans'
-    ? `你是销售助手的执行规划器。Frame 阶段已经把用户消息拆成了若干 intent，每个 intent 都给出了 salesObject / cognitiveTask / 时态 / 摘要 / 依赖关系。你的工作只有一件：为每个 intent 生成对应的 step.arguments，把整个 DAG 填完整。不要重新分类，也不要拆并 intent。`
-    : `You are the execution planner for a sales assistant. The Frame stage has already split the user's message into intents and given each one a salesObject / cognitiveTask / temporal / summary / relatesTo. Your only job is to fill in step.arguments for each intent and assemble the DAG. Do not reclassify, merge, or split intents.`;
+  const heading = `You are the execution planner for a sales assistant. The Frame stage has already split the user's message into intents and given each one a salesObject / cognitiveTask / temporal / summary / relatesTo. Your only job is to fill in step.arguments for each intent and assemble the DAG. Do not reclassify, merge, or split intents.`;
 
   const skeletonLines = skeleton.map((s) => {
     const intent = s.intent;

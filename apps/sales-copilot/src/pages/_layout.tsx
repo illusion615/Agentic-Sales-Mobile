@@ -5,8 +5,11 @@ import { CopilotProvider } from '@/contexts/copilot-context';
 import { SettingsProvider } from '@/contexts/settings-context';
 import { ActionDockProvider } from '@/contexts/action-dock-context';
 import { FeedbackHost } from '@/components/feedback/feedback-host';
+import { useTrackNavDepth } from '@/lib/nav-depth';
 
 function LayoutInner() {
+  // Track in-app navigation depth (MemoryRouter doesn't write window.history).
+  useTrackNavDepth();
   const { docked, side } = useCopilotSideDocked();
 
   // Non-docked (mobile/float): simple container, pages handle their own scrolling.

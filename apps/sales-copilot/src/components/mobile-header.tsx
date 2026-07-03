@@ -1,6 +1,8 @@
 import { ArrowLeft, Home, MoreHorizontal } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useAtomValue } from 'jotai';
 import { cn } from '@/lib/utils';
+import { navDepthAtom } from '@/lib/nav-depth';
 import { ReactNode } from 'react';
 
 interface MobileHeaderProps {
@@ -23,16 +25,17 @@ export function MobileHeader({
   const navigate = useNavigate();
   const location = useLocation();
   
+  const navDepth = useAtomValue(navDepthAtom);
+
   const isHomePage = location.pathname === '/';
   const shouldShowBack = showBack && !isHomePage;
   // Show Home shortcut when navigation depth > 1 (user would need multiple backs)
-  const historyIdx = window.history.state?.idx ?? 0;
-  const showHomeShortcut = shouldShowBack && historyIdx > 1;
+  const showHomeShortcut = shouldShowBack && navDepth > 1;
 
   const handleBack = () => {
     if (onBack) {
       onBack();
-    } else if (window.history.state && window.history.state.idx > 0) {
+    } else if (navDepth > 0) {
       navigate(-1);
     } else {
       navigate('/');
