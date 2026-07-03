@@ -565,11 +565,21 @@ Ground every statement in the returned data ONLY: never invent records, names, a
   {
     name: 'analyzeResults',
     displayName: { 'zh-Hans': '结果分析', 'en-US': 'Analyze Results' },
-    description: 'Reason over records already fetched by a prior query step to answer the user — rank, prioritize, compare, or summarize — grounded strictly in those records.',
+    description: 'Reason over records already fetched by a prior query step. Either answer grounded in those records, or request ONE more grounded query when they cannot answer.',
     llmBacked: true,
-    responseFormat: 'text',
-    outputSchema: z.string().min(1),
-    promptTemplate: `You are a sales assistant. A prior step fetched real CRM records (provided below). Answer the user's request by reasoning ONLY over those records — rank, prioritize, compare, filter, or summarize as asked. Reference specific record names and values from the data. NEVER invent records, names, amounts, or dates, and never introduce an item that is not in the provided records. If the records are empty or do not cover the request, say so plainly rather than guessing. Be concise and actionable; do not dump the full raw list (it is shown separately as cards).`,
+    responseFormat: 'json-generic',
+    outputSchema: z.object({
+      answer: z.string().optional(),
+      followupQuery: z.object({
+        function: z.string(),
+        arguments: z.record(z.unknown()).optional(),
+        reason: z.string().optional(),
+      }).optional(),
+    }).passthrough(),
+    promptTemplate: `You are a sales assistant. A prior step fetched real CRM records (provided below). Return EXACTLY ONE JSON object, choosing one shape:
+- Answer now (when the fetched records already contain what's needed): {"answer":"<concise, grounded answer that ranks/prioritizes/compares/summarizes as the user asked; cite specific record names and values; do not dump the full raw list>"}
+- Fetch ONE more thing first (when the fetched records LACK what the user asked for but a related entity WOULD contain it): {"followupQuery":{"function":"queryAccounts|queryOpportunities|queryActivities|queryContacts","arguments":{<concrete filters taken from the fetched records, e.g. {"accountName":"<a name present in the data>"}>},"reason":"<why one more query is needed>"}}
+Decide by what the question needs: if only account rows were fetched but the user asks about that account's deals, activity, or overall health, request the matching follow-up (queryOpportunities / queryActivities by that accountName) INSTEAD of replying that the data is insufficient. Prefer answering only when the current records already suffice. NEVER invent records, names, amounts, or dates — ground strictly in the provided records. If even a follow-up cannot help, answer plainly that the data does not cover it.`,
     parameters: {
       type: 'object',
       properties: {

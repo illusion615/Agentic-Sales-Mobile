@@ -985,10 +985,11 @@ async function renderProposalCard(
   return patchIntent(queue, intent.id, { status: 'executing', messageId });
 }
 
-/** analyzeResults step: reason over the records fetched by prior query steps and
- *  emit a grounded natural-language answer. Read-only — no write, no card. This
- *  is the "想一下" for read/analysis intents (query → think), so it also marks the
- *  queue summary as emitted to avoid a duplicate aggregate summary. */
+/** analyzeResults step: the read/analysis "想一下". It reasons over the records
+ *  prior query steps fetched and EITHER emits a grounded answer, OR (observe→
+ *  decide) asks for ONE more grounded query when the current records cannot
+ *  answer — in which case we spawn that query + a re-analysis, bounded by a hop
+ *  budget to prevent loops. Read-only; no write, no card. */
 async function renderAnalysis(
   queue: IntentQueue,
   intent: QueueIntent,
@@ -999,24 +1000,68 @@ async function renderAnalysis(
   const goal = (typeof effectiveArgs.goal === 'string' && effectiveArgs.goal.trim())
     ? (effectiveArgs.goal as string)
     : (queue.userMessage || '');
+  const hop = typeof effectiveArgs._hop === 'number' ? (effectiveArgs._hop as number) : 0;
   const recordsText = collectPriorRecordsText(queue, intent);
   const announceId = `announce-${queue.id}-${intent.id}`;
+  const MAX_HOPS = 1;
+  const finalHop = hop >= MAX_HOPS;
+  const QUERY_FNS = new Set(['queryAccounts', 'queryOpportunities', 'queryActivities', 'queryContacts']);
 
-  let answer = '';
+  type AnalyzeOut = { answer?: string; followupQuery?: { function?: string; arguments?: Record<string, unknown>; reason?: string } };
+  let parsed: AnalyzeOut | null = null;
   if (recordsText.trim()) {
     try {
       const res = await executeFunction(
         'analyzeResults',
-        { data: `User request: ${goal}\n\nFetched records (JSON):\n${recordsText}` },
+        { data: `User request: ${goal}\n\nFetched records (JSON):\n${recordsText}${finalHop ? '\n\n(Final step: you MUST return an {"answer"} grounded in the records above now — do NOT request a follow-up.)' : ''}` },
         { locale: deps.locale },
       );
-      if (res.success && typeof res.data === 'string') answer = res.data.trim();
+      if (res.success && res.data && typeof res.data === 'object') {
+        parsed = res.data as AnalyzeOut;
+      }
     } catch (e) {
       console.error('[QueueRuntime] analyzeResults failed:', e);
     }
   }
-  if (!answer) answer = isZh ? '没有可供分析的数据。' : 'No data available to analyze.';
 
+  // observe→decide: the think step may request ONE more grounded query when the
+  // fetched records cannot answer. Bounded by MAX_HOPS so it can never loop.
+  const fu = parsed?.followupQuery;
+  const wantsFollowup = !!fu
+    && typeof fu.function === 'string'
+    && QUERY_FNS.has(fu.function)
+    && hop < MAX_HOPS
+    && !(parsed?.answer && parsed.answer.trim());
+  if (wantsFollowup && fu) {
+    deps.patchMessage(announceId, {
+      announceDetail: isZh ? '需要补充数据' : 'Fetching more',
+      announceStatus: 'completed',
+    });
+    let q = patchIntent(queue, intent.id, { status: 'confirmed', result: { data: null, count: 0 } });
+    // Insert re-analysis FIRST, then the follow-up query, both after the cursor.
+    // insertSubIntentAfterCursor puts each at cursor+1, so the net order becomes
+    // [ follow-up query, re-analysis ] — query runs, then analysis re-reads the
+    // combined records. Re-analysis carries hop+1 to bound the loop.
+    ({ queue: q } = insertSubIntentAfterCursor(q, intent.id, {
+      function: 'analyzeResults',
+      arguments: { _hop: hop + 1, goal },
+      userFacingLabel: { zh: '分析结果', en: 'Analyze results' },
+      resolutions: [],
+    }));
+    ({ queue: q } = insertSubIntentAfterCursor(q, intent.id, {
+      function: fu.function as string,
+      arguments: { ...(fu.arguments || {}) },
+      reason: fu.reason,
+      userFacingLabel: { zh: '补充查询', en: 'Follow-up query' },
+      resolutions: [],
+    }));
+    q = advanceCursor(q);
+    return await runQueue(q, deps);
+  }
+
+  const answer = (parsed?.answer && parsed.answer.trim())
+    ? parsed.answer.trim()
+    : (isZh ? '没有可供分析的数据。' : 'No data available to analyze.');
   deps.patchMessage(announceId, { announceDetail: isZh ? '已分析' : 'Analyzed', announceStatus: 'completed' });
   deps.pushMessage({
     id: `complete-${queue.id}-${intent.id}-${Date.now()}`,
