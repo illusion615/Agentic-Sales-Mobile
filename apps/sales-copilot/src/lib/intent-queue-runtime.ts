@@ -94,6 +94,7 @@ function labelFor(intent: QueueIntent, isZh: boolean): string {
     updateOpportunity: ['更新商机', 'Update opportunity'],
     updateAccount: ['更新客户', 'Update account'],
     updateContact: ['更新联系人', 'Update contact'],
+    analyzeResults: ['分析结果', 'Analyze results'],
   };
   const [zh, en] = map[intent.function] ?? [intent.function, intent.function];
   return isZh ? zh : en;
@@ -821,6 +822,12 @@ async function executeIntent(
     return await renderProposalCard(queue, intent, deps);
   }
 
+  // analyzeResults = read-only "想一下 / think" step: reason over the records a
+  // prior query step fetched → a grounded answer. Nothing is written.
+  if (intent.function === 'analyzeResults') {
+    return await renderAnalysis(queue, intent, deps);
+  }
+
   if (intent.function.startsWith('draft')) {
     // Render a form-card and wait for Save / Cancel.
     return await renderFormCard(queue, intent, effectiveArgs, deps);
@@ -976,6 +983,51 @@ async function renderProposalCard(
     proposalCard: { proposal: outcome.proposal, status: 'pending' },
   });
   return patchIntent(queue, intent.id, { status: 'executing', messageId });
+}
+
+/** analyzeResults step: reason over the records fetched by prior query steps and
+ *  emit a grounded natural-language answer. Read-only — no write, no card. This
+ *  is the "想一下" for read/analysis intents (query → think), so it also marks the
+ *  queue summary as emitted to avoid a duplicate aggregate summary. */
+async function renderAnalysis(
+  queue: IntentQueue,
+  intent: QueueIntent,
+  deps: RuntimeDeps,
+): Promise<IntentQueue> {
+  const isZh = deps.locale === 'zh-Hans';
+  const effectiveArgs = buildEffectiveArgs(intent, queue.resolvedContext);
+  const goal = (typeof effectiveArgs.goal === 'string' && effectiveArgs.goal.trim())
+    ? (effectiveArgs.goal as string)
+    : (queue.userMessage || '');
+  const recordsText = collectPriorRecordsText(queue, intent);
+  const announceId = `announce-${queue.id}-${intent.id}`;
+
+  let answer = '';
+  if (recordsText.trim()) {
+    try {
+      const res = await executeFunction(
+        'analyzeResults',
+        { data: `User request: ${goal}\n\nFetched records (JSON):\n${recordsText}` },
+        { locale: deps.locale },
+      );
+      if (res.success && typeof res.data === 'string') answer = res.data.trim();
+    } catch (e) {
+      console.error('[QueueRuntime] analyzeResults failed:', e);
+    }
+  }
+  if (!answer) answer = isZh ? '没有可供分析的数据。' : 'No data available to analyze.';
+
+  deps.patchMessage(announceId, { announceDetail: isZh ? '已分析' : 'Analyzed', announceStatus: 'completed' });
+  deps.pushMessage({
+    id: `complete-${queue.id}-${intent.id}-${Date.now()}`,
+    type: 'agent', content: answer, timestamp: Date.now(), queueId: queue.id, queueIntentId: intent.id,
+  });
+  let q = patchIntent(queue, intent.id, { status: 'confirmed', result: { data: null, count: 0 } });
+  q = advanceCursor(q);
+  // This step IS the final answer for the read intent — suppress the generic
+  // multi-step aggregate summary so the turn does not double-answer.
+  q = { ...q, summaryEmitted: true };
+  return await runQueue(q, deps);
 }
 
 async function renderFormCard(

@@ -164,6 +164,24 @@ export function frameToIntent(pipeline: PipelineResult): TranslatedIntent | null
     primaryArgs = { ...(single.arguments as Record<string, unknown>) };
   }
 
+  // Correct-architecture routing (query → think): a single read intent whose
+  // job is to ANALYZE or REPORT over records is answered by a grounded
+  // "think over the fetched records" step (analyzeResults), not by the model
+  // free-forming from a bare query. We append a dependent analyzeResults step so
+  // the plan becomes query → grounded-think. Activity-Analyze is left alone —
+  // that is task BRAINSTORM (suggestPlan), which legitimately proposes NEW tasks.
+  const routeFrameIntents = pipeline.frame.intents as IntentItem[] | undefined;
+  const soleReadIntent = routeFrameIntents && routeFrameIntents.length === 1 ? routeFrameIntents[0] : undefined;
+  if (
+    soleReadIntent &&
+    (soleReadIntent.cognitiveTask === 'Analyze' || soleReadIntent.cognitiveTask === 'Report') &&
+    soleReadIntent.salesObject !== 'Activity' &&
+    extras.length === 0 &&
+    /^query/.test(primaryFn)
+  ) {
+    extras = [{ function: 'analyzeResults', arguments: {} }];
+  }
+
   const headUseCtx = isDagPlan(plan) ? (plan as DagPlan).steps.sort((a, b) => a.seq - b.seq)[0]?.usePageContext : undefined;
   const slot = stepToIntentSlot(primaryFn, primaryArgs, headUseCtx);
   const headResolutions = deriveResolutions(slot.function, slot.arguments, 0) ?? [];

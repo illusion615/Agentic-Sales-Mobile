@@ -563,6 +563,22 @@ Ground every statement in the returned data ONLY: never invent records, names, a
     },
   },
   {
+    name: 'analyzeResults',
+    displayName: { 'zh-Hans': '结果分析', 'en-US': 'Analyze Results' },
+    description: 'Reason over records already fetched by a prior query step to answer the user — rank, prioritize, compare, or summarize — grounded strictly in those records.',
+    llmBacked: true,
+    responseFormat: 'text',
+    outputSchema: z.string().min(1),
+    promptTemplate: `You are a sales assistant. A prior step fetched real CRM records (provided below). Answer the user's request by reasoning ONLY over those records — rank, prioritize, compare, filter, or summarize as asked. Reference specific record names and values from the data. NEVER invent records, names, amounts, or dates, and never introduce an item that is not in the provided records. If the records are empty or do not cover the request, say so plainly rather than guessing. Be concise and actionable; do not dump the full raw list (it is shown separately as cards).`,
+    parameters: {
+      type: 'object',
+      properties: {
+        data: { type: 'string', description: 'User request plus the fetched records (JSON) to reason over' },
+      },
+      required: ['data'],
+    },
+  },
+  {
     name: 'generateVoiceSummary',
     displayName: { 'zh-Hans': '语音摘要', 'en-US': 'Voice Summary' },
     description: 'Summarize content into a brief voice announcement suitable for TTS playback.',

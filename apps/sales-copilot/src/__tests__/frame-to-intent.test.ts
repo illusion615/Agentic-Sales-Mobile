@@ -137,3 +137,53 @@ describe('frameToIntent', () => {
     expect(out.multiIntentAnalysis?.summary).toMatch(/intents from frame/);
   });
 });
+
+describe('frameToIntent — query→think routing (analyzeResults)', () => {
+  function makeReadPipeline(
+    fn: string,
+    frameIntent: { salesObject: string; cognitiveTask: string },
+  ): PipelineResult {
+    const frame = {
+      intents: [frameIntent],
+      explicitNames: [],
+      reasoning: '',
+      confidence: 80,
+    } as unknown as PipelineResult['frame'];
+    return {
+      frame,
+      frameLatencyMs: 0,
+      skillsCount: 0,
+      plan: { function: fn, arguments: {} },
+      planLatencyMs: 0,
+      totalLatencyMs: 0,
+    };
+  }
+
+  it('appends a grounded analyzeResults think step for a single Analyze query', () => {
+    const out = frameToIntent(makeReadPipeline('queryAccounts', { salesObject: 'Account', cognitiveTask: 'Analyze' }))!;
+    expect(out.function).toBe('queryAccounts');
+    expect(out.additionalActions?.map((a) => a.function)).toEqual(['analyzeResults']);
+    // Required or the dispatcher drops the extra (see traps).
+    expect(out.multiIntentAnalysis?.hasMultipleIntents).toBe(true);
+  });
+
+  it('appends analyzeResults for a single Report query', () => {
+    const out = frameToIntent(makeReadPipeline('queryOpportunities', { salesObject: 'Opportunity', cognitiveTask: 'Report' }))!;
+    expect(out.additionalActions?.map((a) => a.function)).toEqual(['analyzeResults']);
+  });
+
+  it('does NOT append analyzeResults for a plain Find query', () => {
+    const out = frameToIntent(makeReadPipeline('queryActivities', { salesObject: 'Activity', cognitiveTask: 'Find' }))!;
+    expect(out.additionalActions).toBeUndefined();
+  });
+
+  it('leaves Activity Analyze (brainstorm) alone so the suggestPlan path is preserved', () => {
+    const out = frameToIntent(makeReadPipeline('queryActivities', { salesObject: 'Activity', cognitiveTask: 'Analyze' }))!;
+    expect(out.additionalActions).toBeUndefined();
+  });
+
+  it('does not append analyzeResults when the read did not resolve to a query (e.g. suggestPlan)', () => {
+    const out = frameToIntent(makeReadPipeline('suggestPlan', { salesObject: 'Activity', cognitiveTask: 'Analyze' }))!;
+    expect(out.additionalActions).toBeUndefined();
+  });
+});
