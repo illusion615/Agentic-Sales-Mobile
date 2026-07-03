@@ -39,6 +39,8 @@ export interface ChartBucket {
   amount: number;
   /** true for the folded "Other" (Top-N tail) bucket */
   isOther?: boolean;
+  /** for the Other bucket: the individual groups that were folded into it */
+  subGroups?: ChartBucket[];
   records: BucketRecord[];
 }
 
@@ -258,6 +260,7 @@ export function buildChartCard(
         count: tail.reduce((s, b) => s + b.count, 0),
         amount: tail.reduce((s, b) => s + b.amount, 0),
         isOther: true,
+        subGroups: tail,
         records: tail.flatMap((b) => b.records),
       });
       buckets = head;
