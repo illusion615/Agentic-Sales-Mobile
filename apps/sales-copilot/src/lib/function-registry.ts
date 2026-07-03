@@ -575,11 +575,20 @@ Ground every statement in the returned data ONLY: never invent records, names, a
         arguments: z.record(z.unknown()).optional(),
         reason: z.string().optional(),
       }).optional(),
+      chart: z.object({
+        type: z.enum(['bar', 'donut']),
+        dimension: z.string(),
+        metric: z.enum(['amount', 'count']),
+        title: z.string().optional(),
+      }).optional(),
     }).passthrough(),
     promptTemplate: `You are a sales assistant. A prior step fetched real CRM records (provided below). Return EXACTLY ONE JSON object, choosing one shape:
 - Answer now (when the fetched records already contain what's needed): {"answer":"<a grounded answer formatted for EASY READING — never one dense wall-of-text paragraph. Open with a one-line takeaway, then organize the details as Markdown: '## ' section headings and '- ' bullet points grouped sensibly (e.g. by stage / priority / account), with key names and amounts in **bold**. Keep a trivial answer to a sentence or two. Be selective — surface what matters, do not dump every raw record>"}
 - Fetch ONE more thing first (when the fetched records LACK what the user asked for but a related entity WOULD contain it): {"followupQuery":{"function":"queryAccounts|queryOpportunities|queryActivities|queryContacts","arguments":{<concrete filters taken from the fetched records, e.g. {"accountName":"<a name present in the data>"}>},"reason":"<why one more query is needed>"}}
-Decide by what the question needs: if only account rows were fetched but the user asks about that account's deals, activity, or overall health, request the matching follow-up (queryOpportunities / queryActivities by that accountName) INSTEAD of replying that the data is insufficient. Prefer answering only when the current records already suffice. NEVER invent records, names, amounts, or dates — ground strictly in the provided records. If even a follow-up cannot help, answer plainly that the data does not cover it.`,
+Decide by what the question needs: if only account rows were fetched but the user asks about that account's deals, activity, or overall health, request the matching follow-up (queryOpportunities / queryActivities by that accountName) INSTEAD of replying that the data is insufficient. Prefer answering only when the current records already suffice. NEVER invent records, names, amounts, or dates — ground strictly in the provided records. If even a follow-up cannot help, answer plainly that the data does not cover it.
+CHART — when the user asks to break down / analyze / distribute / compare / rank a SET of records across a dimension (e.g. "by account", "by stage", "by month", "by owner", "which accounts have the most ..."), you MUST include a "chart" field ALONGSIDE the "answer". Never describe a chart in prose and never write a "Summary Chart" text section — emit the structured field instead. Shape: {"chart":{"type":"bar"|"donut","dimension":"<the field the user grouped by; match their words: by account -> account, by stage -> stage, by month -> month, by owner -> owner; must be a real field on the records>","metric":"amount"|"count","title":"<short, e.g. Opportunities by account>"}}. Use "bar" to rank or compare groups; "donut" for share-of-total with 6 or fewer groups. Use "amount" only when the records carry money (e.g. opportunities' totalamount); otherwise "count". Omit "chart" only for a single record, a yes/no, or a purely qualitative answer. NEVER put numbers or record lists inside "chart" — the app computes them from the real records; you only choose dimension, metric and type.
+Example: {"answer":"Here is your pipeline by account. Royal London Hospital leads by value.","chart":{"type":"bar","dimension":"account","metric":"amount","title":"Opportunities by account"}}
+When you include a chart, keep "answer" to a brief 1-2 line takeaway — the chart and its tap-to-drill-down already show the per-group detail, so do NOT also enumerate every record in the answer.`,
     parameters: {
       type: 'object',
       properties: {

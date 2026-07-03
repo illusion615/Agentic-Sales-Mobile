@@ -39,7 +39,7 @@ import { ATTACHMENT_IDS_KEY } from './attachment-assign';
 import { generateProposal } from './propose-changes';
 import { applyProposal, type ChangeProposal } from './change-proposal';
 import { getLocale, LOCALE_META } from './i18n';
-import { aggregateOpportunitiesByStage, looksLikeOpportunities } from './pipeline-chart';
+import { buildChartCard, inferChartFromRequest, type ChartSpec } from './chart-aggregation';
 
 // ---------- card-message shapes (shared with copilot-context) ----------
 // Kept loose (Record<string, unknown>) here to avoid an import cycle; the
@@ -1022,7 +1022,7 @@ async function renderAnalysis(
   const finalHop = hop >= MAX_HOPS;
   const QUERY_FNS = new Set(['queryAccounts', 'queryOpportunities', 'queryActivities', 'queryContacts']);
 
-  type AnalyzeOut = { answer?: string; followupQuery?: { function?: string; arguments?: Record<string, unknown>; reason?: string } };
+  type AnalyzeOut = { answer?: string; followupQuery?: { function?: string; arguments?: Record<string, unknown>; reason?: string }; chart?: { type?: 'bar' | 'donut'; dimension?: string; metric?: 'amount' | 'count'; title?: string } };
   let parsed: AnalyzeOut | null = null;
   if (recordsText.trim()) {
     try {
@@ -1082,14 +1082,28 @@ async function renderAnalysis(
     id: `complete-${queue.id}-${intent.id}-${Date.now()}`,
     type: 'agent', content: answer, timestamp: Date.now(), queueId: queue.id, queueIntentId: intent.id,
   });
-  // Chart segment (prototype): when the analyzed records are opportunities spread
-  // across >=2 stages, render an interactive pipeline chart alongside the grounded
-  // text. Numbers come from the real records (grounding); each bar keeps its member
-  // opportunities so the user can drill straight down into them.
-  const priorRecords = collectPriorRecords(queue, intent);
-  if (looksLikeOpportunities(priorRecords)) {
-    const buckets = aggregateOpportunitiesByStage(priorRecords, isZh ? 'zh-Hans' : 'en');
-    if (buckets.length >= 2) {
+  // The agent MAY emit an explicit chart spec; if it doesn't, infer one from the
+  // user's own phrasing ("by account", "by month", ...) or fall back to the stage
+  // pipeline for a general opportunity breakdown. buildChartCard then grounds it
+  // against the real records and returns null when nothing is chartable.
+  const c = parsed?.chart;
+  let spec: ChartSpec | null = null;
+  if (c?.type && c.dimension && c.metric) {
+    spec = {
+      type: c.type === 'donut' ? 'donut' : 'bar',
+      dimension: c.dimension,
+      metric: c.metric === 'amount' ? 'amount' : 'count',
+      title: c.title,
+    };
+  } else {
+    spec = inferChartFromRequest(goal);
+    if (!spec && /pipeline|overview|break ?down|distribut|summary|analy|管道|概览|概覽|分布|阶段|階段|分析/i.test(goal)) {
+      spec = { type: 'bar', dimension: 'stage', metric: 'amount' };
+    }
+  }
+  if (spec) {
+    const card = buildChartCard(collectPriorRecords(queue, intent), spec, isZh ? 'zh-Hans' : 'en');
+    if (card) {
       deps.pushMessage({
         id: `chart-${queue.id}-${intent.id}-${Date.now()}`,
         type: 'chart-card',
@@ -1097,7 +1111,7 @@ async function renderAnalysis(
         timestamp: Date.now(),
         queueId: queue.id,
         queueIntentId: intent.id,
-        chartCard: { title: isZh ? '按阶段的商机分布' : 'Opportunities by stage', metric: 'amount', buckets },
+        chartCard: card,
       });
     }
   }

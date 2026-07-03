@@ -306,14 +306,10 @@ export interface ChatMessage {
     status: 'pending' | 'applied' | 'cancelled' | 'failed';
   };
 
-  // Interactive pipeline chart segment (grounded quantitative analysis). The
-  // runtime supplies buckets aggregated from real records; a fixed renderer
-  // draws the bars and wires tap -> drill-down into member records.
-  chartCard?: {
-    title: string;
-    metric: 'amount' | 'count';
-    buckets: import('@/lib/pipeline-chart').StageBucket[];
-  };
+  // Interactive chart segment (grounded quantitative analysis). The agent picks
+  // the dimension / metric / type; the runtime grounds it into buckets from real
+  // records, and a fixed renderer draws it + wires tap -> drill-down.
+  chartCard?: import('@/lib/chart-aggregation').ChartCardData;
 
   // Additional intents inferred from user input (multi-intent support)
   additionalIntents?: {
