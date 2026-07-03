@@ -1,4 +1,4 @@
-import { useRef, useEffect, useLayoutEffect, useCallback, useState } from 'react';
+import { useRef, useEffect, useLayoutEffect, useCallback, useState, lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence, useDragControls, type PanInfo } from 'motion/react';
 import { ArrowUp, SquarePen, X, Copy, Volume2, VolumeX, Loader2, Square, Play, Pause, Paperclip, RotateCcw, Mic, ScrollText } from 'lucide-react';
@@ -12,6 +12,8 @@ import { FormCard } from '@/components/form-card';
 import { BatchFormCard } from '@/components/batch-form-card';
 import { ParamPickerCard } from '@/components/param-picker-card';
 import { ProposalCard } from '@/components/proposal-card';
+// Chart pulls in recharts (~heavy) — load it only when a chart actually renders.
+const ChartCard = lazy(() => import('@/components/chart-card').then((m) => ({ default: m.ChartCard })));
 import { MatchSelectionCard, buildMatchReasonText } from '@/components/match-selection-card';
 import { MarkdownContent } from '@/components/markdown-content';
 import { RecordListCard } from '@/components/record-list-card';
@@ -835,6 +837,18 @@ export function CopilotPanel() {
                       onCancel={() => proposalCancelled(message.id)}
                     />
                   </div>
+                </div>
+              )}
+
+              {/* Interactive pipeline chart (grounded quantitative analysis + drill-down) */}
+              {message.type === 'chart-card' && message.chartCard && (
+                <div className="max-w-full">
+                  <Suspense fallback={<div className="h-[200px] rounded-2xl border bg-card animate-pulse" />}>
+                    <ChartCard
+                      chartCard={message.chartCard}
+                      locale={getLocale() === 'zh-Hans' ? 'zh-Hans' : 'en'}
+                    />
+                  </Suspense>
                 </div>
               )}
 

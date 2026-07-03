@@ -161,7 +161,7 @@ export type { ThinkingStep } from '@/lib/copilot-agent';
 
 export interface ChatMessage {
   id: string;
-  type: 'user' | 'agent' | 'stage-card' | 'form-card' | 'batch-form-card' | 'match-selection' | 'clarification' | 'awaiting-clarification' | 'param-picker' | 'proposal-card';
+  type: 'user' | 'agent' | 'stage-card' | 'form-card' | 'batch-form-card' | 'match-selection' | 'clarification' | 'awaiting-clarification' | 'param-picker' | 'proposal-card' | 'chart-card';
   role?: 'user' | 'assistant';
   content: string;
   /** IntentQueue id this message belongs to (queue-driven flows). */
@@ -304,6 +304,15 @@ export interface ChatMessage {
   proposalCard?: {
     proposal: ChangeProposal;
     status: 'pending' | 'applied' | 'cancelled' | 'failed';
+  };
+
+  // Interactive pipeline chart segment (grounded quantitative analysis). The
+  // runtime supplies buckets aggregated from real records; a fixed renderer
+  // draws the bars and wires tap -> drill-down into member records.
+  chartCard?: {
+    title: string;
+    metric: 'amount' | 'count';
+    buckets: import('@/lib/pipeline-chart').StageBucket[];
   };
 
   // Additional intents inferred from user input (multi-intent support)

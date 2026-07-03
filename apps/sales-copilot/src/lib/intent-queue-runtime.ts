@@ -39,6 +39,7 @@ import { ATTACHMENT_IDS_KEY } from './attachment-assign';
 import { generateProposal } from './propose-changes';
 import { applyProposal, type ChangeProposal } from './change-proposal';
 import { getLocale, LOCALE_META } from './i18n';
+import { aggregateOpportunitiesByStage, looksLikeOpportunities } from './pipeline-chart';
 
 // ---------- card-message shapes (shared with copilot-context) ----------
 // Kept loose (Record<string, unknown>) here to avoid an import cycle; the
@@ -46,7 +47,7 @@ import { getLocale, LOCALE_META } from './i18n';
 
 export type CardMessage = Record<string, unknown> & {
   id: string;
-  type: 'agent' | 'form-card' | 'match-selection' | 'awaiting-clarification' | 'param-picker' | 'proposal-card';
+  type: 'agent' | 'form-card' | 'match-selection' | 'awaiting-clarification' | 'param-picker' | 'proposal-card' | 'chart-card';
   content: string;
   timestamp: number;
   queueId: string;
@@ -934,6 +935,20 @@ function collectPriorRecordsText(queue: IntentQueue, upto: QueueIntent): string 
   return chunks.join('\n\n');
 }
 
+/** Structured companion to collectPriorRecordsText: the flattened record objects
+ *  from prior steps' results, used to build grounded chart segments. */
+function collectPriorRecords(queue: IntentQueue, upto: QueueIntent): unknown[] {
+  const idx = queue.intents.findIndex((i) => i.id === upto.id);
+  const end = idx < 0 ? queue.intents.length : idx;
+  const out: unknown[] = [];
+  for (let i = 0; i < end; i++) {
+    const data = (queue.intents[i].result as { data?: unknown } | undefined)?.data;
+    if (Array.isArray(data)) out.push(...data);
+    else if (data != null) out.push(data);
+  }
+  return out;
+}
+
 /** proposeChanges step: reason over prior records → render a confirm card (or end
  *  gracefully when there is nothing to change). No write happens here. */
 async function renderProposalCard(
@@ -1067,6 +1082,25 @@ async function renderAnalysis(
     id: `complete-${queue.id}-${intent.id}-${Date.now()}`,
     type: 'agent', content: answer, timestamp: Date.now(), queueId: queue.id, queueIntentId: intent.id,
   });
+  // Chart segment (prototype): when the analyzed records are opportunities spread
+  // across >=2 stages, render an interactive pipeline chart alongside the grounded
+  // text. Numbers come from the real records (grounding); each bar keeps its member
+  // opportunities so the user can drill straight down into them.
+  const priorRecords = collectPriorRecords(queue, intent);
+  if (looksLikeOpportunities(priorRecords)) {
+    const buckets = aggregateOpportunitiesByStage(priorRecords, isZh ? 'zh-Hans' : 'en');
+    if (buckets.length >= 2) {
+      deps.pushMessage({
+        id: `chart-${queue.id}-${intent.id}-${Date.now()}`,
+        type: 'chart-card',
+        content: '',
+        timestamp: Date.now(),
+        queueId: queue.id,
+        queueIntentId: intent.id,
+        chartCard: { title: isZh ? '按阶段的商机分布' : 'Opportunities by stage', metric: 'amount', buckets },
+      });
+    }
+  }
   let q = patchIntent(queue, intent.id, { status: 'confirmed', result: { data: null, count: 0 } });
   q = advanceCursor(q);
   // This step IS the final answer for the read intent — suppress the generic
