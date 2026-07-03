@@ -1,9 +1,34 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BarChart, Bar, XAxis, YAxis, Cell, ResponsiveContainer, Tooltip, PieChart, Pie } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Cell, ResponsiveContainer, Tooltip, PieChart, Pie, LineChart, Line } from 'recharts';
 import { ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatCompactAmount, entityRoute, type ChartCardData } from '@/lib/chart-aggregation';
+
+const FALLBACK_PALETTE = ['#008a7a', '#2d6cdf', '#17a899', '#4e84ea', '#006d61', '#1f57bd'];
+const OTHER_COLOR = '#94a3b8';
+
+/** Read the current color theme's palette (primary/accent shades) as resolved
+ *  hex — theme-consistent AND legacy-WebView safe (no CSS vars reach the SVG). */
+function readThemePalette(): string[] {
+  if (typeof document === 'undefined') return FALLBACK_PALETTE;
+  const cs = getComputedStyle(document.documentElement);
+  const g = (n: string) => cs.getPropertyValue(n).trim();
+  const vars = ['--theme-primary', '--theme-accent', '--theme-primary-light', '--theme-accent-light', '--theme-primary-dark', '--theme-accent-dark'];
+  const out = vars.map(g).filter((c) => /^#|^rgb/.test(c));
+  return out.length >= 2 ? out : FALLBACK_PALETTE;
+}
+
+/** Theme palette that re-reads when the user switches color theme. */
+function useThemePalette(): string[] {
+  const [pal, setPal] = useState<string[]>(() => readThemePalette());
+  useEffect(() => {
+    const handler = () => setPal(readThemePalette());
+    window.addEventListener('colortheme-changed', handler);
+    return () => window.removeEventListener('colortheme-changed', handler);
+  }, []);
+  return pal;
+}
 
 interface ChartCardProps {
   chartCard: ChartCardData;
@@ -12,29 +37,36 @@ interface ChartCardProps {
 
 /**
  * Interactive chart segment. The agent supplies only the DATA (grounded buckets)
- * and the rendering choice (bar / donut); this fixed renderer draws it and wires
- * the closed loop:
- *   tap a bar / slice -> inline-expand that group's member records
+ * and the rendering choice (bar / donut / line); this fixed renderer draws it in
+ * the user's current theme colors and wires the closed loop:
+ *   tap a bar / slice / point -> inline-expand that group's member records
  *   tap a record -> navigate to its detail page (route by entity kind).
  */
 export function ChartCard({ chartCard, locale }: ChartCardProps) {
   const navigate = useNavigate();
+  const palette = useThemePalette();
   const [expanded, setExpanded] = useState<string | null>(null);
   const isZh = locale === 'zh-Hans';
   const metric = chartCard.metric;
   const isDonut = chartCard.type === 'donut';
+  const isLine = chartCard.type === 'line';
 
   const fmt = (v: number) => (metric === 'amount' ? formatCompactAmount(v) : String(v));
   const metricLabel = metric === 'amount' ? (isZh ? '金额' : 'Amount') : (isZh ? '数量' : 'Count');
+  const colorAt = (i: number, isOther?: boolean) => (isOther ? OTHER_COLOR : palette[i % palette.length]);
+  const lineColor = palette[0] ?? FALLBACK_PALETTE[0];
 
-  const data = chartCard.buckets.map((b) => ({
+  const data = chartCard.buckets.map((b, i) => ({
     key: b.key,
     name: b.label,
     value: metric === 'amount' ? b.amount : b.count,
-    color: b.color,
+    color: colorAt(i, b.isOther),
   }));
 
   const expandedBucket = chartCard.buckets.find((b) => b.key === expanded) ?? null;
+  const expandedColor = expandedBucket
+    ? colorAt(chartCard.buckets.indexOf(expandedBucket), expandedBucket.isOther)
+    : OTHER_COLOR;
   const toggle = (key: string | undefined) => {
     if (!key) return;
     setExpanded((cur) => (cur === key ? null : key));
@@ -53,21 +85,23 @@ export function ChartCard({ chartCard, locale }: ChartCardProps) {
           {isDonut ? (
             <PieChart margin={{ top: 4, right: 4, left: 4, bottom: 4 }}>
               <Tooltip formatter={(v) => [fmt(Number(v)), metricLabel]} />
-              <Pie
-                data={data}
-                dataKey="value"
-                nameKey="name"
-                innerRadius={48}
-                outerRadius={82}
-                paddingAngle={1}
-                cursor="pointer"
-                onClick={(d) => toggle(pickKey(d))}
-              >
+              <Pie data={data} dataKey="value" nameKey="name" innerRadius={48} outerRadius={82} paddingAngle={1} cursor="pointer" onClick={(d) => toggle(pickKey(d))}>
                 {data.map((b) => (
                   <Cell key={b.key} fill={b.color} fillOpacity={expanded && expanded !== b.key ? 0.35 : 1} />
                 ))}
               </Pie>
             </PieChart>
+          ) : isLine ? (
+            <LineChart
+              data={data}
+              margin={{ top: 8, right: 12, left: 0, bottom: 4 }}
+              onClick={(s) => { const nm = (s as { activeLabel?: string })?.activeLabel; const b = chartCard.buckets.find((x) => x.label === nm); toggle(b?.key); }}
+            >
+              <XAxis dataKey="name" tick={{ fontSize: 10 }} interval="preserveStartEnd" axisLine={false} tickLine={false} />
+              <YAxis tickFormatter={(v) => fmt(Number(v))} tick={{ fontSize: 11 }} width={40} axisLine={false} tickLine={false} />
+              <Tooltip formatter={(v) => [fmt(Number(v)), metricLabel]} />
+              <Line type="monotone" dataKey="value" stroke={lineColor} strokeWidth={2} dot={{ r: 3, fill: lineColor }} activeDot={{ r: 5 }} />
+            </LineChart>
           ) : (
             <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
               <XAxis
@@ -93,14 +127,14 @@ export function ChartCard({ chartCard, locale }: ChartCardProps) {
       {/* Donut has no axis labels — render a compact, tappable legend. */}
       {isDonut && (
         <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1">
-          {chartCard.buckets.map((b) => (
+          {chartCard.buckets.map((b, i) => (
             <button
               key={b.key}
               type="button"
               onClick={() => toggle(b.key)}
               className={cn('flex items-center gap-1.5 text-[11px]', expanded && expanded !== b.key && 'opacity-50')}
             >
-              <span className="inline-block h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: b.color }} />
+              <span className="inline-block h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: colorAt(i, b.isOther) }} />
               <span className="truncate max-w-[120px]">{b.label}</span>
               <span className="text-muted-foreground">{fmt(metric === 'amount' ? b.amount : b.count)}</span>
             </button>
@@ -115,7 +149,7 @@ export function ChartCard({ chartCard, locale }: ChartCardProps) {
       {expandedBucket && (
         <div className="mt-2 border-t pt-2">
           <div className="flex items-center gap-2 text-xs font-medium mb-1.5">
-            <span className="inline-block h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: expandedBucket.color }} />
+            <span className="inline-block h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: expandedColor }} />
             <span>{expandedBucket.label}</span>
             <span className="text-muted-foreground font-normal">
               {expandedBucket.count}{metric === 'amount' ? ` · ${formatCompactAmount(expandedBucket.amount)}` : ''}

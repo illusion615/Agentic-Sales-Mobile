@@ -10,7 +10,7 @@
  */
 
 export type EntityKind = 'opportunity' | 'account' | 'activity' | 'contact';
-export type ChartType = 'bar' | 'donut';
+export type ChartType = 'bar' | 'donut' | 'line';
 export type ChartMetric = 'amount' | 'count';
 
 /** What the agent emits: the DATA + rendering choice only — no numbers, no markup. */
@@ -37,8 +37,8 @@ export interface ChartBucket {
   count: number;
   /** sum of amount across the bucket's records */
   amount: number;
-  /** inline hex fill (no CSS vars — legacy WebView safe) */
-  color: string;
+  /** true for the folded "Other" (Top-N tail) bucket */
+  isOther?: boolean;
   records: BucketRecord[];
 }
 
@@ -59,14 +59,6 @@ const STAGE_LABEL: Record<string, { zh: string; en: string }> = {
   won: { zh: '赢单', en: 'Won' },
   lost: { zh: '输单', en: 'Lost' },
 };
-
-const STAGE_COLOR: Record<string, string> = {
-  prospecting: '#94a3b8', qualification: '#60a5fa', proposal: '#818cf8',
-  negotiation: '#f59e0b', won: '#22c55e', lost: '#ef4444',
-};
-
-/** Categorical palette for non-stage dimensions. */
-const PALETTE = ['#60a5fa', '#f59e0b', '#22c55e', '#a78bfa', '#f472b6', '#2dd4bf', '#fb7185', '#38bdf8', '#facc15', '#94a3b8'];
 
 const OTHER_KEY = '__other__';
 const MAX_BUCKETS = 10;
@@ -198,7 +190,9 @@ export function inferChartFromRequest(text: string): ChartSpec | null {
   }
   if (!dim) return null;
   const metric: ChartMetric = /how many|count|number of|# of/.test(t) || /数量|多少|个数|個數/.test(raw) ? 'count' : 'amount';
-  const type: ChartType = /share|proportion|percent|composition|make ?up/.test(t) || /占比|比例|构成|構成/.test(raw) ? 'donut' : 'bar';
+  const isTrend = /trend|over time|timeline|monthly/.test(t) || /趋势|趨勢|走势|走勢|按月|每月|月度/.test(raw) || dim === 'month';
+  const isShare = /share|proportion|percent|composition|make ?up/.test(t) || /占比|比例|构成|構成/.test(raw);
+  const type: ChartType = isTrend ? 'line' : isShare ? 'donut' : 'bar';
   return { type, dimension: dim, metric };
 }
 
@@ -213,7 +207,9 @@ export function buildChartCard(
   locale: 'zh-Hans' | 'en',
 ): ChartCardData | null {
   if (!records.length) return null;
-  const isStage = /^(stage|stagekey|pipeline)$/.test(spec.dimension.trim().toLowerCase());
+  const dim = spec.dimension.trim().toLowerCase();
+  const isStage = /^(stage|stagekey|pipeline)$/.test(dim);
+  const isTime = dim === 'month' || dim === 'closemonth' || dim === 'time' || dim.includes('date') || spec.type === 'line';
 
   const map = new Map<string, ChartBucket>();
   for (const raw of records) {
@@ -222,7 +218,7 @@ export function buildChartCard(
     const dv = dimensionOf(o, spec.dimension, locale);
     if (!dv) continue;
     if (!map.has(dv.key)) {
-      map.set(dv.key, { key: dv.key, label: dv.label, count: 0, amount: 0, color: '#818cf8', records: [] });
+      map.set(dv.key, { key: dv.key, label: dv.label, count: 0, amount: 0, records: [] });
     }
     const b = map.get(dv.key)!;
     b.count += 1;
@@ -247,6 +243,9 @@ export function buildChartCard(
   if (isStage) {
     const ord = (k: string) => (STAGE_ORDER.indexOf(k) < 0 ? 99 : STAGE_ORDER.indexOf(k));
     buckets.sort((a, b) => ord(a.key) - ord(b.key));
+  } else if (isTime) {
+    // Chronological order; keep every period (a trend needs the full timeline).
+    buckets.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
   } else {
     buckets.sort((a, b) => val(b) - val(a));
     // Cap to Top-N, folding the tail into an "Other" bucket (keeps drill-down).
@@ -258,22 +257,17 @@ export function buildChartCard(
         label: locale === 'zh-Hans' ? '其它' : 'Other',
         count: tail.reduce((s, b) => s + b.count, 0),
         amount: tail.reduce((s, b) => s + b.amount, 0),
-        color: '#cbd5e1',
+        isOther: true,
         records: tail.flatMap((b) => b.records),
       });
       buckets = head;
     }
   }
 
-  buckets.forEach((b, i) => {
-    b.color = b.key === OTHER_KEY ? '#cbd5e1'
-      : isStage && STAGE_COLOR[b.key] ? STAGE_COLOR[b.key]
-      : PALETTE[i % PALETTE.length];
-  });
-
+  const type: ChartType = spec.type === 'donut' ? 'donut' : spec.type === 'line' ? 'line' : 'bar';
   return {
     title: (spec.title && spec.title.trim()) || dimensionTitle(spec.dimension, locale),
-    type: spec.type === 'donut' ? 'donut' : 'bar',
+    type,
     metric,
     buckets,
   };

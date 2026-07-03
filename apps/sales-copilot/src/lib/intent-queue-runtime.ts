@@ -949,6 +949,29 @@ function collectPriorRecords(queue: IntentQueue, upto: QueueIntent): unknown[] {
   return out;
 }
 
+/** When a chart accompanies the answer, its tap-to-drill-down already presents the
+ *  per-group breakdown — so strip enumerated lists / headings from the answer and
+ *  keep only the insight prose, preventing a text wall that duplicates the chart. */
+function stripBreakdownProse(md: string): string {
+  const lines = md.split('\n');
+  const kept = lines.filter((ln) => {
+    const t = ln.trim();
+    if (!t) return false;
+    if (/^#{1,6}\s/.test(t)) return false;   // headings
+    if (/^[-*+]\s/.test(t)) return false;    // bullet items
+    if (/^\d+[.)]\s/.test(t)) return false;  // numbered items
+    if (/^>\s/.test(t)) return false;        // block quotes
+    return true;
+  });
+  let out = kept.join('\n\n').trim();
+  if (out.length < 20) {
+    // The whole answer was a list — keep the first line's plain text as the takeaway.
+    const first = lines.map((l) => l.replace(/^[#>\-*+\d.)\s]+/, '').trim()).find((l) => l.length > 0);
+    out = first || md.trim();
+  }
+  return out;
+}
+
 /** proposeChanges step: reason over prior records → render a confirm card (or end
  *  gracefully when there is nothing to change). No write happens here. */
 async function renderProposalCard(
@@ -1022,7 +1045,7 @@ async function renderAnalysis(
   const finalHop = hop >= MAX_HOPS;
   const QUERY_FNS = new Set(['queryAccounts', 'queryOpportunities', 'queryActivities', 'queryContacts']);
 
-  type AnalyzeOut = { answer?: string; followupQuery?: { function?: string; arguments?: Record<string, unknown>; reason?: string }; chart?: { type?: 'bar' | 'donut'; dimension?: string; metric?: 'amount' | 'count'; title?: string } };
+  type AnalyzeOut = { answer?: string; followupQuery?: { function?: string; arguments?: Record<string, unknown>; reason?: string }; chart?: { type?: 'bar' | 'donut' | 'line'; dimension?: string; metric?: 'amount' | 'count'; title?: string } };
   let parsed: AnalyzeOut | null = null;
   if (recordsText.trim()) {
     try {
@@ -1074,23 +1097,20 @@ async function renderAnalysis(
     return await runQueue(q, deps);
   }
 
-  const answer = (parsed?.answer && parsed.answer.trim())
+  let answer = (parsed?.answer && parsed.answer.trim())
     ? parsed.answer.trim()
     : (isZh ? '没有可供分析的数据。' : 'No data available to analyze.');
-  deps.patchMessage(announceId, { announceDetail: isZh ? '已分析' : 'Analyzed', announceStatus: 'completed' });
-  deps.pushMessage({
-    id: `complete-${queue.id}-${intent.id}-${Date.now()}`,
-    type: 'agent', content: answer, timestamp: Date.now(), queueId: queue.id, queueIntentId: intent.id,
-  });
-  // The agent MAY emit an explicit chart spec; if it doesn't, infer one from the
-  // user's own phrasing ("by account", "by month", ...) or fall back to the stage
-  // pipeline for a general opportunity breakdown. buildChartCard then grounds it
-  // against the real records and returns null when nothing is chartable.
+
+  // Decide the chart BEFORE emitting the answer: the agent MAY emit an explicit
+  // chart spec; if it doesn't, infer one from the user's own phrasing ("by account",
+  // "by month", ...) or fall back to the stage pipeline for a general opportunity
+  // breakdown. buildChartCard grounds it against the real records (null when nothing
+  // is chartable).
   const c = parsed?.chart;
   let spec: ChartSpec | null = null;
   if (c?.type && c.dimension && c.metric) {
     spec = {
-      type: c.type === 'donut' ? 'donut' : 'bar',
+      type: c.type === 'donut' ? 'donut' : c.type === 'line' ? 'line' : 'bar',
       dimension: c.dimension,
       metric: c.metric === 'amount' ? 'amount' : 'count',
       title: c.title,
@@ -1101,19 +1121,26 @@ async function renderAnalysis(
       spec = { type: 'bar', dimension: 'stage', metric: 'amount' };
     }
   }
-  if (spec) {
-    const card = buildChartCard(collectPriorRecords(queue, intent), spec, isZh ? 'zh-Hans' : 'en');
-    if (card) {
-      deps.pushMessage({
-        id: `chart-${queue.id}-${intent.id}-${Date.now()}`,
-        type: 'chart-card',
-        content: '',
-        timestamp: Date.now(),
-        queueId: queue.id,
-        queueIntentId: intent.id,
-        chartCard: card,
-      });
-    }
+  const card = spec ? buildChartCard(collectPriorRecords(queue, intent), spec, isZh ? 'zh-Hans' : 'en') : null;
+  // With a chart, keep the text to insight only — the chart + drill-down already
+  // show every group and record, so drop any enumerated list the model still wrote.
+  if (card) answer = stripBreakdownProse(answer);
+
+  deps.patchMessage(announceId, { announceDetail: isZh ? '已分析' : 'Analyzed', announceStatus: 'completed' });
+  deps.pushMessage({
+    id: `complete-${queue.id}-${intent.id}-${Date.now()}`,
+    type: 'agent', content: answer, timestamp: Date.now(), queueId: queue.id, queueIntentId: intent.id,
+  });
+  if (card) {
+    deps.pushMessage({
+      id: `chart-${queue.id}-${intent.id}-${Date.now()}`,
+      type: 'chart-card',
+      content: '',
+      timestamp: Date.now(),
+      queueId: queue.id,
+      queueIntentId: intent.id,
+      chartCard: card,
+    });
   }
   let q = patchIntent(queue, intent.id, { status: 'confirmed', result: { data: null, count: 0 } });
   q = advanceCursor(q);
