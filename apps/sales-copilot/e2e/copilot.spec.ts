@@ -41,7 +41,7 @@ async function sendMessage(page: Page, message: string): Promise<string> {
   
   // Wait for the thinking indicator to appear and then disappear
   // (indicates the agent is processing and has finished)
-  const thinkingIndicator = page.locator('[data-testid="thinking"], .animate-pulse, text=/理解|Understanding|生成|Generating/i').first();
+  const thinkingIndicator = page.locator('[data-testid="thinking"], .animate-pulse, text=/思考|Thinking|生成|Generating/i').first();
   
   // Wait for response: look for the latest assistant message
   // The response appears as the last message with role=assistant
