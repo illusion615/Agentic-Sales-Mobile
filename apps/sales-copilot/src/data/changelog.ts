@@ -61,6 +61,11 @@ export const CHANGELOG: ChangelogEntry[] = [
         en: 'Log visits while offline — they upload automatically once you reconnect.',
       },
       {
+        kind: 'feature',
+        zh: '每次更新后自动显示「What\'s New」，一眼看到本次更新带来的新变化。',
+        en: 'A "What\'s New" summary appears after each update so you can see what changed at a glance.',
+      },
+      {
         kind: 'improvement',
         zh: '随时清楚显示当前是在线还是离线。',
         en: 'Always see at a glance whether you are online or offline.',
@@ -71,9 +76,19 @@ export const CHANGELOG: ChangelogEntry[] = [
         en: 'The app opens faster.',
       },
       {
+        kind: 'improvement',
+        zh: '成功、失败等操作会播放你在设置里选择的反馈动画。',
+        en: 'Success, failure and other actions now play the feedback animation you picked in Settings.',
+      },
+      {
         kind: 'fix',
         zh: '网络不稳定时不再卡在加载界面。',
         en: 'No more getting stuck on the loading screen when the connection is flaky.',
+      },
+      {
+        kind: 'fix',
+        zh: '离线时不再反复弹出错误提示。',
+        en: 'No more repeated error popups while offline.',
       },
     ],
   },
