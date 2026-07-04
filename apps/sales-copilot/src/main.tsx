@@ -33,10 +33,17 @@ console.log(`%c[SalesCopilot] build ${BUILD_ID}`, 'color:#6366f1;font-weight:bol
 // Capped so a slow/unavailable IndexedDB can never delay first paint by more
 // than ~800ms. When online, react-query then background-refetches stale data.
 async function bootstrap() {
-  await Promise.race([
-    restoreQueryCache(queryClient),
-    new Promise((r) => setTimeout(r, 800)),
-  ]);
+  // Cache restore is strictly best-effort. Wrap the await so that NOTHING it
+  // does — a rejection, a slow/again-unavailable IndexedDB — can ever abort or
+  // delay first paint beyond the 800ms cap. First render must always happen.
+  try {
+    await Promise.race([
+      restoreQueryCache(queryClient),
+      new Promise((r) => setTimeout(r, 800)),
+    ]);
+  } catch {
+    /* ignore — open the app without a warm cache */
+  }
 
   createRoot(document.getElementById('root')!).render(
     <StrictMode>

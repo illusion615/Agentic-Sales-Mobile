@@ -38,6 +38,9 @@ export function useCreateCopilotConversation() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (data: Omit<CopilotConversation, "id">) => CopilotConversationService.create(data),
+    // Background best-effort write (copilot conversation log): its failures must
+    // NOT raise a global error toast (see query-client mutationCache.onError).
+    meta: { suppressGlobalToast: true },
     onSuccess: () => {
       client.invalidateQueries({ queryKey: ["copilotConversation-list"] });
     },
@@ -58,6 +61,9 @@ export function useUpdateCopilotConversation() {
       id: string;
       changedFields: Partial<Omit<CopilotConversation, "id">>;
     }) => CopilotConversationService.update(id, changedFields),
+    // Background best-effort write (copilot conversation log): its failures must
+    // NOT raise a global error toast (see query-client mutationCache.onError).
+    meta: { suppressGlobalToast: true },
     onSuccess: (_data, variables) => {
       client.invalidateQueries({ queryKey: ["copilotConversation-list"] });
       client.invalidateQueries({ queryKey: ["copilotConversation", variables.id] });

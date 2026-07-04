@@ -839,6 +839,10 @@ export default function HomeDashboard() {
   // Write Dataverse conversation logs from the local session, but never hydrate UI from them.
   useEffect(() => {
     if (!userId) return;
+    // Skip the background conversation-log persist while offline: the write is
+    // doomed (Dataverse unreachable) and would spam failed requests + toasts.
+    // isOffline is in the dep list, so this re-runs on reconnect to flush.
+    if (isOffline) return;
 
     const logMessages = toCopilotConversationLogMessages(chatMessages);
     if (logMessages.length === 0) return;
@@ -897,7 +901,7 @@ export default function HomeDashboard() {
       cancelled = true;
       clearTimeout(saveTimer);
     };
-  }, [chatMessages, createConversation, currentConversationId, updateConversation, userId]);
+  }, [chatMessages, createConversation, currentConversationId, updateConversation, userId, isOffline]);
 
   // Note: Removed auto-expand behavior - user should manually open Copilot panel
   // Connection status indicator shows whether Copilot is configured (gray/orange/green)
