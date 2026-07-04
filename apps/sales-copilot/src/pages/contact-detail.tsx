@@ -51,7 +51,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useAccountList } from '@/generated/hooks/use-account';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useActivityList } from '@/generated/hooks/use-activity';
-import type { Opportunity } from '@/generated/models/opportunity-model';import type { Activity } from '@/generated/models/activity-model';import type { Account } from '@/generated/models/account-model';import { toast } from 'sonner';
+import type { Opportunity } from '@/generated/models/opportunity-model';import type { Activity } from '@/generated/models/activity-model';import type { Account } from '@/generated/models/account-model';import { toast } from '@/lib/toast-utils';
 import { getLocale, t } from '@/lib/i18n';
 import { useCopilot } from '@/contexts/copilot-context';
 import { PullToRefresh } from '@/components/pull-to-refresh';

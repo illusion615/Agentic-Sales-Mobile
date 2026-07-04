@@ -15,7 +15,7 @@ import {
   Mail,
   MapPin,
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast-utils';
 import { cn } from '@/lib/utils';
 import { useUser } from '@/hooks/use-user';
 import { useActivity, useUpdateActivity } from '@/generated/hooks/use-activity';

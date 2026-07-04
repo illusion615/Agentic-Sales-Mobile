@@ -1,4 +1,4 @@
-import { withRetry } from '@/lib/retry';
+import { withRetry, withTimeout } from '@/lib/retry';
 
 /**
  * Shared adapter utilities for mapping between
@@ -6,6 +6,23 @@ import { withRetry } from '@/lib/retry';
  */
 
 const CHOICE_BASE = 995340000;
+
+/**
+ * Hard ceiling for a single Dataverse list read. Normal `$batch` reads settle
+ * in well under a second; this only trips when the SDK promise hangs (network
+ * or DNS dropped mid-flight), so it never affects healthy requests. Without it,
+ * a hung read keeps the owning react-query in `isLoading` forever and freezes
+ * any UI gated on that query.
+ */
+export const DATAVERSE_READ_TIMEOUT_MS = 20_000;
+
+/**
+ * Wrap a Dataverse read with the standard read timeout so a hung SDK promise
+ * becomes a normal rejection instead of a permanent pending state.
+ */
+export function withReadTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  return withTimeout(promise, DATAVERSE_READ_TIMEOUT_MS, label);
+}
 
 /**
  * Guard for mutation/read ops: refuse to forward an empty id to the generated

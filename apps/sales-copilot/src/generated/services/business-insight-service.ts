@@ -10,7 +10,7 @@ import {
   BusinessInsightTypeKeyToLabel,
   type BusinessInsight,
 } from '../models/business-insight-model';
-import { labelToDv, dvNum, numToDv, mapOptions, dvChoice, requireCreated, requireId } from './_adapter-utils';
+import { labelToDv, dvNum, numToDv, mapOptions, dvChoice, requireCreated, requireId, withReadTimeout } from './_adapter-utils';
 
 const FIELD_MAP: Record<string, string> = {
   id: 'crf5c_businessinsightid',
@@ -97,7 +97,10 @@ export class BusinessInsightService {
   }
 
   static async getAll(options?: IGetAllOptions): Promise<BusinessInsight[]> {
-    const result = await Crf5c_businessinsightsService.getAll(mapOptions(options, FIELD_MAP) as any);
+    const result = await withReadTimeout(
+      Crf5c_businessinsightsService.getAll(mapOptions(options, FIELD_MAP) as any),
+      'BusinessInsight.getAll',
+    );
     if (!result.success) throw result.error;
     return (result.data ?? []).map(fromDv);
   }

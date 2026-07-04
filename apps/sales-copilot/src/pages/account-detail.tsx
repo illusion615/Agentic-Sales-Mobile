@@ -60,7 +60,7 @@ import { useEntityAISummary, useWithAISummaryTrigger } from '@/hooks/use-ai-summ
 import type { Opportunity } from '@/generated/models/opportunity-model';
 import type { Activity } from '@/generated/models/activity-model';
 import type { Contact } from '@/generated/models/contact-model';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast-utils';
 import { getLocale, t } from '@/lib/i18n';
 import { useCopilot } from '@/contexts/copilot-context';
 import { PullToRefresh } from '@/components/pull-to-refresh';

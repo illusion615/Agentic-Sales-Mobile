@@ -6,10 +6,14 @@ import { SettingsProvider } from '@/contexts/settings-context';
 import { ActionDockProvider } from '@/contexts/action-dock-context';
 import { FeedbackHost } from '@/components/feedback/feedback-host';
 import { useTrackNavDepth } from '@/lib/nav-depth';
+import { useOutboxSync } from '@/lib/use-outbox-sync';
+import { WhatsNew } from '@/components/whats-new';
 
 function LayoutInner() {
   // Track in-app navigation depth (MemoryRouter doesn't write window.history).
   useTrackNavDepth();
+  // Replay any offline-queued activity creates once we're back online.
+  useOutboxSync();
   const { docked, side } = useCopilotSideDocked();
 
   // Non-docked (mobile/float): simple container, pages handle their own scrolling.
@@ -44,6 +48,7 @@ export default function Layout() {
       <CopilotProvider>
         <ActionDockProvider>
           <LayoutInner />
+          <WhatsNew />
         </ActionDockProvider>
       </CopilotProvider>
     </SettingsProvider>

@@ -14,11 +14,13 @@ import {
   Target,
   Sparkles,
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast-utils';
 import { cn } from '@/lib/utils';
 import { useUser } from '@/hooks/use-user';
 import { useAccountList } from '@/generated/hooks/use-account';
 import { useCreateActivity, useActivity, useUpdateActivity } from '@/generated/hooks/use-activity';
+import { useEffectiveOffline } from '@/lib/connectivity';
+import { enqueueActivity, type ActivityCreatePayload } from '@/lib/activity-outbox';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useContactList } from '@/generated/hooks/use-contact';
 import { useWithAISummaryTrigger } from '@/hooks/use-ai-summary-trigger';
@@ -81,7 +83,7 @@ export default function ActivityCapturePage() {
   const activityId = existingActivity?.id;
 
   // State
-  const [isOffline] = useState(false);
+  const isOffline = useEffectiveOffline();
   const [isProcessing, setIsProcessing] = useState(false);
   const [isAIFilled, setIsAIFilled] = useState(false);
 
@@ -230,8 +232,29 @@ export default function ActivityCapturePage() {
         ? contacts.find((c) => c.id === formData.contactId)
         : null;
       
+      // Build the create payload once — it can go to Dataverse or, when offline,
+      // to the append-only outbox for later automatic sync.
+      const createPayload: ActivityCreatePayload = {
+        title,
+        type: 'visit',
+        status: 'open',
+        ownerid: user?.objectId || '',
+        scheduleddate: new Date(formData.visitDate).toISOString(),
+        notes,
+        ...(targetAccount ? { account: { id: targetAccount.id, name1: targetAccount.name1 } } : {}),
+        ...(targetContact ? { contact: { id: targetContact.id, fullname: targetContact.fullname } } : {}),
+        ...(targetOpportunity ? { opportunity: { id: targetOpportunity.id, name1: targetOpportunity.name1 } } : {}),
+      };
+
       // Save activity
       if (isEditMode && activityId) {
+        // Editing an existing record is blocked offline: it would risk a conflict
+        // when it later syncs. Only brand-new activities can be queued offline.
+        if (isOffline) {
+          toast.error(t('offlineEditBlocked', locale));
+          setIsProcessing(false);
+          return;
+        }
         // Update existing activity - include account, contact, and opportunity
         await updateActivity.mutateAsync({
           id: activityId,
@@ -251,22 +274,15 @@ export default function ActivityCapturePage() {
           await touchAccountLastContacted(targetAccount.id, new Date(formData.visitDate).toISOString());
         }
         toast.success(t('activityUpdated', locale));
+      } else if (isOffline) {
+        // Offline: queue the create for automatic sync on reconnect. The account
+        // "last contacted" touch is a server edit, so it is skipped here and will
+        // reflect naturally once the queued activity syncs.
+        await enqueueActivity(createPayload);
+        toast.success(t('offlineSavedActivity', locale));
       } else {
         // Create new activity
-        await createActivity.mutateAsync({
-          title,
-          type: 'visit', // visit
-          status: 'open',
-          ownerid: user?.objectId || '',
-          scheduleddate: new Date(formData.visitDate).toISOString(),
-          notes,
-          // Set account lookup if selected
-          ...(targetAccount ? { account: { id: targetAccount.id, name1: targetAccount.name1 } } : {}),
-          // Set contact lookup if selected
-          ...(targetContact ? { contact: { id: targetContact.id, fullname: targetContact.fullname } } : {}),
-          // Set opportunity lookup if selected
-          ...(targetOpportunity ? { opportunity: { id: targetOpportunity.id, name1: targetOpportunity.name1 } } : {}),
-        });
+        await createActivity.mutateAsync(createPayload);
         if (targetAccount?.id) {
           await touchAccountLastContacted(targetAccount.id, new Date(formData.visitDate).toISOString());
         }
@@ -590,7 +606,7 @@ export default function ActivityCapturePage() {
               </button>
               <button
                 onClick={handleSubmit}
-                disabled={isProcessing}
+                disabled={isProcessing || (isOffline && isEditMode)}
                 className="flex-1 py-3 rounded-xl accent-gradient text-body font-semibold text-white shadow-lg shadow-primary/30 flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 {isProcessing ? (

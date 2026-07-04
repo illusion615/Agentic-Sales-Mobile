@@ -17,6 +17,7 @@ import {
   FileText,
 } from 'lucide-react';
 import { MobileLayout } from '@/components/mobile-layout';
+import { usePendingActivities } from '@/lib/activity-outbox';
 import { FloatingQuickActions } from '@/components/floating-quick-actions';
 import { GlassCard } from '@/components/glass-card';
 import { WeeklyReportCard, type WeeklyReportActivity } from '@/components/weekly-report-card';
@@ -178,6 +179,7 @@ export default function ActivitiesPage() {
   // toggle so switching dates no longer auto-expands it and steals focus (D21).
   const [weekPane, setWeekPane] = useState<'calendar' | 'report'>('calendar');
   const locale = getLocale();
+  const pendingActivities = usePendingActivities();
 
   const copilot = useCopilot();
   const dragStartX = useRef<number>(0);
@@ -351,6 +353,20 @@ export default function ActivitiesPage() {
     >
       <PullToRefresh onRefresh={handleRefresh} className="flex-1 overflow-y-auto pb-40">
         <div className="py-4 space-y-3">
+          {/* Offline outbox: activities created while offline, awaiting sync. */}
+          {pendingActivities.length > 0 && (
+            <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 space-y-1.5">
+              <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
+                <Clock className="w-4 h-4" />
+                <span className="text-xs font-semibold">{t('pendingSync', locale)} · {pendingActivities.length}</span>
+              </div>
+              <div className="space-y-0.5">
+                {pendingActivities.map((p) => (
+                  <p key={p.tempId} className="text-xs text-foreground/70 truncate">{p.payload.title}</p>
+                ))}
+              </div>
+            </div>
+          )}
           {/* Calendar ⇄ Weekly Report toggle (D21) — top of page, full width.
               Default Calendar; the report no longer auto-expands on date switch. */}
           {viewMode === 'week' && (

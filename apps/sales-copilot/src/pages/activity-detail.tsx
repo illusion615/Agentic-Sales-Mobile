@@ -31,7 +31,7 @@ import { useContactList } from '@/generated/hooks/use-contact';
 import { useAccountList } from '@/generated/hooks/use-account';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import type { Contact } from '@/generated/models/contact-model';import type { Account } from '@/generated/models/account-model';import type { Opportunity, OpportunityStageKeyToLabel as OpportunityStageKeyToLabelType } from '@/generated/models/opportunity-model';import { useEntityAISummary, useWithAISummaryTrigger } from '@/hooks/use-ai-summary-trigger';
-import type { Activity as DataverseActivity } from '@/generated/models/activity-model';import { toast } from 'sonner';
+import type { Activity as DataverseActivity } from '@/generated/models/activity-model';import { toast } from '@/lib/toast-utils';
 import {
   AlertDialog,
   AlertDialogAction,

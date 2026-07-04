@@ -13,7 +13,7 @@ import { getCopilotConfig } from '@/services/copilot-service';
 import { getPromptResolutionStatus, PROMPT_RESOLUTION_EVENT } from '@/services/prompt-resolver';
 import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, setSelectedVoice, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getDebugMode, setDebugMode, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, getCopilotDockLayout, setCopilotDockLayout, copilotDockLayoutLabels, getWeekStartDay, setWeekStartDay, getCopilotFullscreenDefault, setCopilotFullscreenDefault, getCompactDraftForms, setCompactDraftForms, getAgendaDefaultExpanded, setAgendaDefaultExpanded, getCopilotListDefaultView, setCopilotListDefaultView, getCopilotListTopN, setCopilotListTopN, SUPPORTED_LOCALES, LOCALE_META, speechLang, localeLangPrefix, pickLabel, type Locale, type VoiceOption, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget, type CopilotDockLayout, type WeekStartDay, type CopilotListDefaultView } from '@/lib/i18n';
 import { useNavigate } from 'react-router-dom';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast-utils';
 import { useSpeechPlayer } from '@/hooks/use-speech-player';
 import {
   getFeedbackEnabled,
@@ -28,6 +28,7 @@ import {
   type FeedbackStyleId,
 } from '@/lib/feedback';
 import { startOnboarding } from '@/lib/onboarding';
+import { openWhatsNew } from '@/components/whats-new';
 import {
   Select,
   SelectContent,
@@ -499,16 +500,6 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                   />
                 }
               />
-              <SettingsItem
-                icon={Compass}
-                label={t('appTour', locale)}
-                onClick={() => {
-                  if (onClose) onClose();
-                  // Let the home screen mount so spotlight anchors are present.
-                  window.setTimeout(() => startOnboarding(locale), 500);
-                }}
-                rightElement={<ChevronRight className="w-4 h-4 text-muted-foreground" />}
-              />
             </div>
           </motion.div>
 
@@ -936,19 +927,40 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
               <button
                 onClick={() => {
                   if (onClose) onClose();
-                  navigate('/debug/code-review');
+                  // Let the home screen mount so spotlight anchors are present.
+                  window.setTimeout(() => startOnboarding(locale), 500);
                 }}
                 className="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-muted/50 transition-colors"
               >
                 <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                  <FileCode className="w-5 h-5 text-primary" />
+                  <Compass className="w-5 h-5 text-primary" />
                 </div>
                 <div className="flex-1 text-left">
                   <p className="text-sm font-medium text-foreground">
-                    {t('codeReviewReport', locale)}
+                    {t('appTour', locale)}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {t('codeReviewDesc', locale)}
+                    {t('replayWalkthrough', locale)}
+                  </p>
+                </div>
+                <ChevronRight className="w-5 h-5 text-muted-foreground" />
+              </button>
+              <button
+                onClick={() => {
+                  if (onClose) onClose();
+                  window.setTimeout(() => openWhatsNew(), 250);
+                }}
+                className="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-muted/50 transition-colors"
+              >
+                <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                  <Sparkles className="w-5 h-5 text-primary" />
+                </div>
+                <div className="flex-1 text-left">
+                  <p className="text-sm font-medium text-foreground">
+                    {t('whatsNewTitle', locale)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {t('whatsNewDesc', locale)}
                   </p>
                 </div>
                 <ChevronRight className="w-5 h-5 text-muted-foreground" />

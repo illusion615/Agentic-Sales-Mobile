@@ -51,3 +51,34 @@ export async function withRetry<T>(
   }
   throw lastError;
 }
+
+/**
+ * Reject if `promise` does not settle within `ms`.
+ *
+ * The Power Apps Dataverse SDK returns a promise that can stay *pending* when
+ * the network or DNS drops mid-flight (the underlying `$batch` XHR neither
+ * resolves nor rejects). A react-query whose queryFn awaits such a promise
+ * never leaves `isLoading`, so any UI gated on it (e.g. the home KPI cards)
+ * spins forever. Racing the call against a timeout converts that silent hang
+ * into a normal rejection, so react-query can settle into an error state and
+ * later refetch on reconnect.
+ */
+export async function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  label = 'operation',
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      const err = new Error(`${label} timed out after ${ms}ms`) as Error & { agentErrorType: string };
+      err.agentErrorType = 'timeout';
+      reject(err);
+    }, ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}

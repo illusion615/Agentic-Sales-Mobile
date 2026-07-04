@@ -219,5 +219,30 @@ export function showRecordingComplete(locale?: Locale): void {
 // Export toast message keys for type safety
 export type { ToastMessageKey };
 
-// Re-export raw toast for advanced use cases
-export { toast };
+// Re-export a feedback-augmented toast. Importing `toast` from this module
+// (instead of from 'sonner') makes success / error / warning ALSO play the
+// user's chosen Scenario Feedback animation (Settings > Scenario Feedback);
+// every other sonner method (info, message, promise, custom, loading,
+// dismiss, ...) and the plain toast(...) call pass through unchanged. Gating
+// lives in fireFeedback (master switch + per-scenario style + reduced-motion),
+// so it is a no-op until the user opts a scenario in.
+const appToast = new Proxy(toast, {
+  get(target, prop, receiver) {
+    const value = Reflect.get(target, prop, receiver);
+    if (
+      typeof value === 'function' &&
+      (prop === 'success' || prop === 'error' || prop === 'warning')
+    ) {
+      const scenario: 'success' | 'failure' | 'warning' =
+        prop === 'success' ? 'success' : prop === 'error' ? 'failure' : 'warning';
+      return (...args: unknown[]) => {
+        const result = (value as (...a: unknown[]) => unknown).apply(target, args);
+        fireFeedback(scenario);
+        return result;
+      };
+    }
+    return value;
+  },
+});
+
+export { appToast as toast };

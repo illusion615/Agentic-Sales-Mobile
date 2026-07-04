@@ -17,7 +17,7 @@ import {
   ChevronRight,
   RotateCcw,
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast-utils';
 import { format } from 'date-fns/format';
 import { cn } from '@/lib/utils';
 import { useUser } from '@/hooks/use-user';

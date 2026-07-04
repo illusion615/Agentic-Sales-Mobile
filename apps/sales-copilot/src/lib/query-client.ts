@@ -1,5 +1,6 @@
 import { QueryClient, QueryCache, MutationCache } from '@tanstack/react-query';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast-utils';
+import { t, getLocale } from '@/lib/i18n';
 
 // Global error handler for queries
 const queryCache = new QueryCache({
@@ -36,6 +37,18 @@ const mutationCache = new MutationCache({
     }
 
     const errorMessage = extractMessage(error);
+
+    // Connectivity failure (offline or backend unreachable): show a friendly
+    // "you're offline" message instead of a raw network error. Offline the app is
+    // a read-only viewer; the one sanctioned offline write (manual activity
+    // create) is queued via its own outbox, never through this mutation path.
+    if (
+      (typeof navigator !== 'undefined' && !navigator.onLine) ||
+      /Failed to fetch|NetworkError|Network error|ERR_NAME_NOT_RESOLVED|timed out|Load failed/i.test(errorMessage)
+    ) {
+      toast.error(t('offlineWriteBlocked', getLocale()));
+      return;
+    }
 
     // ResourceNotFound errors - show friendly message
     if (errorMessage.includes('ResourceNotFound') || errorMessage.includes('does not exist')) {
@@ -89,10 +102,14 @@ export const queryClient = new QueryClient({
   mutationCache,
   defaultOptions: {
     queries: {
-      // Stale time: how long data is considered fresh (5 minutes)
+      // Stale time: how long data is considered fresh (5 minutes). After this,
+      // an online mount/reconnect triggers a background refetch (the "sync" half
+      // of local-first: cached data shows instantly, fresh data replaces it).
       staleTime: 5 * 60 * 1000,
-      // Cache time: how long data stays in cache when unused (10 minutes)
-      gcTime: 10 * 60 * 1000,
+      // Cache/GC time: kept long so hydrated (persisted) queries are not evicted
+      // from memory during a session — the IndexedDB persister (query-persist.ts)
+      // is the durable store across reloads.
+      gcTime: 7 * 24 * 60 * 60 * 1000,
       // Disable retries
       retry: false,
       // Don't refetch on window focus by default
@@ -105,6 +122,13 @@ export const queryClient = new QueryClient({
     mutations: {
       // Disable retries for mutations
       retry: false,
+      // Fail writes immediately when offline instead of react-query's default
+      // "pause while offline, auto-resume on reconnect". Auto-resume would replay
+      // stale offline edits against records that may have changed server-side —
+      // the exact conflict we want to avoid. Offline writes therefore fail fast;
+      // the only sanctioned offline write (manual activity create) goes through
+      // its own explicit, append-only outbox, not this path.
+      networkMode: 'always',
       // Don't throw to allow graceful handling
       throwOnError: false,
     },

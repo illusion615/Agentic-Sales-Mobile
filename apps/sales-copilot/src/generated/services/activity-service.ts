@@ -11,7 +11,7 @@ import { AppointmentEntityService, PhonecallEntityService, EmailEntityService } 
 import type { ActivityEntityBase } from '../models/ActivityEntityModel';
 import type { IGetAllOptions } from '../models/CommonModels';
 import type { Activity, ActivityType } from '../models/activity-model';
-import { requireId } from './_adapter-utils';
+import { requireId, withReadTimeout } from './_adapter-utils';
 import { fetchActivityParticipants, fetchPrimaryActivityContact } from '@/lib/activity-party';
 
 /** Participation only applies to appointment-backed activities. */
@@ -297,9 +297,9 @@ export class ActivityService {
   /** Get all activities — queries all three tables in parallel and merges. */
   static async getAll(options?: IGetAllOptions): Promise<Activity[]> {
     const [appts, calls, emails] = await Promise.all([
-      AppointmentEntityService.getAll(options).catch(() => ({ success: true, data: [] as ActivityEntityBase[] })),
-      PhonecallEntityService.getAll(options).catch(() => ({ success: true, data: [] as ActivityEntityBase[] })),
-      EmailEntityService.getAll(options).catch(() => ({ success: true, data: [] as ActivityEntityBase[] })),
+      withReadTimeout(AppointmentEntityService.getAll(options), 'Activity.appointments').catch(() => ({ success: true, data: [] as ActivityEntityBase[] })),
+      withReadTimeout(PhonecallEntityService.getAll(options), 'Activity.phonecalls').catch(() => ({ success: true, data: [] as ActivityEntityBase[] })),
+      withReadTimeout(EmailEntityService.getAll(options), 'Activity.emails').catch(() => ({ success: true, data: [] as ActivityEntityBase[] })),
     ]);
 
     const all: Activity[] = [

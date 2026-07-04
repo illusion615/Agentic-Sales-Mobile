@@ -2,7 +2,7 @@
  * Retry utility tests — withRetry exponential backoff + jitter.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { withRetry } from '@/lib/retry';
+import { withRetry, withTimeout } from '@/lib/retry';
 
 describe('withRetry', () => {
   it('resolves on first success', async () => {
@@ -50,3 +50,29 @@ describe('withRetry', () => {
     expect(fn).toHaveBeenCalledTimes(3);
   });
 });
+
+describe('withTimeout', () => {
+  it('resolves with the value when the promise settles in time', async () => {
+    const result = await withTimeout(Promise.resolve('ok'), 1000, 'test');
+    expect(result).toBe('ok');
+  });
+
+  it('rejects with a timeout error when the promise never settles', async () => {
+    const never = new Promise<string>(() => {});
+    await expect(withTimeout(never, 20, 'Account.getAll')).rejects.toThrow(/Account\.getAll timed out after 20ms/);
+  });
+
+  it('tags the timeout error with agentErrorType', async () => {
+    const never = new Promise<string>(() => {});
+    await withTimeout(never, 20, 'op').catch((err: Error & { agentErrorType?: string }) => {
+      expect(err.agentErrorType).toBe('timeout');
+    });
+    expect.assertions(1);
+  });
+
+  it('passes through the original rejection when it happens before the timeout', async () => {
+    const failing = Promise.reject(new Error('boom'));
+    await expect(withTimeout(failing, 1000, 'op')).rejects.toThrow('boom');
+  });
+});
+

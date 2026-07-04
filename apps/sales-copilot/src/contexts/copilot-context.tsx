@@ -6,7 +6,8 @@ import {
   clearCopilotConversation,
 } from '@/services/copilot-service';
 import { getLocale, getSimulateStreaming, t, type Locale } from '@/lib/i18n';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast-utils';
+import { isDataverseReachable } from '@/lib/connectivity';
 import { type ThinkingProgress, type AgentResponse, type IntentResult, type ThinkingStep } from '@/lib/copilot-agent';
 import { emptyState, hydrateConversationState, commitConversationState, buildStateSnapshot, recordConversationState, type ConversationState, type FocusPageContext, type EntityType } from '@/lib/conversation-state';
 import { buildQueueFromIntent, findIntentByMessageId, type IntentQueue } from '@/lib/intent-queue';
@@ -1347,6 +1348,16 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
 
   const sendMessage = useCallback(async (text: string, attachments?: CopilotAttachment[]) => {
     if (!text.trim()) return;
+
+    // Offline gate (root): the copilot's LLM call rides on the Dataverse
+    // connection, so it is unusable when the browser is offline OR the backend
+    // is unreachable. Refuse to send and tell the user rather than firing a
+    // request that would hang or fail. Single choke point for every entry path
+    // (composer, suggestion pills, quick actions).
+    if ((typeof navigator !== 'undefined' && !navigator.onLine) || !isDataverseReachable()) {
+      toast.error(t('offlineNoAsk', locale));
+      return;
+    }
 
     // Register composer attachment blobs in the session store and project to
     // lightweight meta carried on the user message + (later) the activity intent.

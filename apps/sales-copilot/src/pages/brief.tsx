@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { ChevronLeft, MoreHorizontal, FileText, Play, Pause, Mic, WifiOff, Volume2 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast-utils';
 import { cn } from '@/lib/utils';
 import { useUser } from '@/hooks/use-user';
 import { useBriefingList, useUpdateBriefing } from '@/generated/hooks/use-briefing';

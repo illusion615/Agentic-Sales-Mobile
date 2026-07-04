@@ -21,9 +21,10 @@ import { AdditionalIntentsCard } from '@/components/additional-intents-card';
 import { PipelineViewer } from '@/components/frame-viewer';
 import { TaskAnnounceBubble } from '@/components/task-announce-bubble';
 import { MessageAttachments } from '@/components/message-attachments';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast-utils';
 import { useActionDock } from '@/contexts/action-dock-context';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useEffectiveOffline } from '@/lib/connectivity';
 import { newAttachmentId, type CopilotAttachment } from '@/lib/attachments';
 import { useDynamicSuggestions } from '@/hooks/use-dynamic-suggestions';
 
@@ -139,6 +140,11 @@ export function CopilotPanel() {
   // the card is the only input entry and there is no "follow-up vs new command"
   // ambiguity. Query-result lists do NOT lock. Derived from the live messages.
   const inputLocked = messages.some(isUnresolvedBlockingCard);
+  // Offline (no network OR Dataverse unreachable): the copilot's LLM rides on
+  // the backend connection, so lock the whole composer and explain why, turning
+  // the panel into a read-only surface until connectivity returns.
+  const offline = useEffectiveOffline();
+  const composerLocked = inputLocked || offline;
   // When the user taps the disabled composer, guide them to the blocking card.
   // If the panel is collapsed we first EXPAND it so the card is visible (the
   // card — not the composer — is where the user acts); then pulse + scroll to it.
@@ -1270,11 +1276,11 @@ export function CopilotPanel() {
         {/* Attachment button — opens the native picker directly (no popup menu) */}
         <button
           type="button"
-          onClick={() => { if (inputLocked) { guideToBlockingCard(); return; } fileInputRef.current?.click(); }}
-          disabled={inputLocked}
+          onClick={() => { if (offline) return; if (inputLocked) { guideToBlockingCard(); return; } fileInputRef.current?.click(); }}
+          disabled={composerLocked}
           className={cn(
             'w-10 h-10 flex items-center justify-center rounded-full transition-colors shrink-0',
-            inputLocked
+            composerLocked
               ? 'text-muted-foreground/40 cursor-not-allowed'
               : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
           )}
@@ -1295,13 +1301,15 @@ export function CopilotPanel() {
           onCompositionEnd={handleCompositionEnd}
           onFocus={handleInputFocus}
           onPointerDown={(e: React.PointerEvent) => { if (inputLocked) { e.preventDefault(); guideToBlockingCard(); } }}
-          disabled={inputLocked}
-          placeholder={inputLocked
+          disabled={composerLocked}
+          placeholder={offline
+            ? t('offlineNoAsk', locale)
+            : inputLocked
             ? t('completeCardAbove', locale)
             : t('askCopilotPlaceholder', locale)}
           className={cn(
             'flex-1 bg-transparent border-0 outline-none text-sm text-foreground placeholder:text-muted-foreground resize-none leading-5 py-2 self-end',
-            inputLocked && 'cursor-not-allowed opacity-60'
+            composerLocked && 'cursor-not-allowed opacity-60'
           )}
         />
 
@@ -1315,13 +1323,14 @@ export function CopilotPanel() {
           >
             <Square className="w-4 h-4 fill-current" />
           </button>
-        ) : inputLocked ? (
+        ) : composerLocked ? (
           <button
             type="button"
-            onClick={guideToBlockingCard}
+            onClick={offline ? undefined : guideToBlockingCard}
+            disabled={offline}
             className="w-10 h-10 flex items-center justify-center rounded-full text-muted-foreground/40 cursor-not-allowed shrink-0"
-            aria-label={t('completeCardAbove', locale)}
-            title={t('completeCardAbove', locale)}
+            aria-label={offline ? t('offlineNoAsk', locale) : t('completeCardAbove', locale)}
+            title={offline ? t('offlineNoAsk', locale) : t('completeCardAbove', locale)}
           >
             <Mic className="w-5 h-5" />
           </button>

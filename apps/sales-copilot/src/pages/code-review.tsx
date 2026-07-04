@@ -4,7 +4,7 @@ import { ArrowLeft, FileCode, Clock, CheckCircle2, AlertTriangle, XCircle, Refre
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast-utils';
 import { getLocale } from '@/lib/i18n';
 import { useFirstMount } from '@/hooks/use-first-mount';
 

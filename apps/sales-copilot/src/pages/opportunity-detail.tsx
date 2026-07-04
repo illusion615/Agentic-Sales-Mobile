@@ -44,7 +44,7 @@ import { useAccount } from '@/generated/hooks/use-account';
 import { useActivityList } from '@/generated/hooks/use-activity';
 import { useEntityAISummary, useWithAISummaryTrigger } from '@/hooks/use-ai-summary-trigger';
 import {  } from '@/generated/models/opportunity-model';
-import type { Activity } from '@/generated/models/activity-model';import { toast } from 'sonner';
+import type { Activity } from '@/generated/models/activity-model';import { toast } from '@/lib/toast-utils';
 import { getLocale, t } from '@/lib/i18n';
 import { FloatingQuickActions } from '@/components/floating-quick-actions';
 import { useCopilot } from '@/contexts/copilot-context';

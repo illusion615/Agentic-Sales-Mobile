@@ -1,10 +1,11 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence, useDragControls, type PanInfo } from 'motion/react';
-import { Settings, Sparkles, Eye, Radio, Mic, WifiOff, ArrowUp, SquarePen, Maximize2, X, Square, Copy, Forward, ThumbsDown, ChevronRight, ChevronDown, Play, Pause, Loader2, Volume2, VolumeX, Bell, RefreshCw, SkipForward, SkipBack, BookOpen } from 'lucide-react';
-import { toast } from 'sonner';
+import { Settings, Sparkles, Eye, Radio, Mic, ArrowUp, SquarePen, Maximize2, X, Square, Copy, Forward, ThumbsDown, ChevronRight, ChevronDown, Play, Pause, Loader2, Volume2, VolumeX, Bell, RefreshCw, SkipForward, SkipBack, BookOpen } from 'lucide-react';
+import { toast } from '@/lib/toast-utils';
 import { cn } from '@/lib/utils';
 import { useUser } from '@/hooks/use-user';
+import { useEffectiveOffline } from '@/lib/connectivity';
 import { useActivityList, useUpdateActivity } from '@/generated/hooks/use-activity';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useAccountList } from '@/generated/hooks/use-account';
@@ -323,7 +324,10 @@ function StageCard({ stageCard, onClick }: { stageCard: NonNullable<ChatMessage[
 export default function HomeDashboard() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [isOffline] = useState(false);
+  // "Effectively offline" = no network OR the Dataverse backend is unreachable.
+  // Drives the settings-icon status badge; react-query's refetchOnReconnect then
+  // refreshes automatically once connectivity returns.
+  const isOffline = useEffectiveOffline();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Use shared copilot context instead of local state
@@ -1770,21 +1774,6 @@ ${agentResponse}`;
   return (
     <div className="h-full flex flex-col overflow-hidden bg-scm-gradient">
 
-      {/* Offline Banner */}
-      <AnimatePresence>
-        {isOffline && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="bg-amber-500/90 text-amber-950 px-4 py-2 flex items-center justify-center gap-2 text-helper font-medium safe-area-top"
-          >
-            <WifiOff className="w-4 h-4" />
-            <span>{t('offline', locale)}</span>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* Main Content */}
       <main
         ref={mainContentRef}
@@ -1934,11 +1923,24 @@ ${agentResponse}`;
                 aria-label="Settings"
               >
                 <Settings className="w-5 h-5 text-foreground" />
-                {/* Connection Status Indicator - only show when NOT connected */}
-                {!isCopilotConfigured && (
-                  <span 
+                {/* Status dot: offline (amber) > Copilot not configured (gray) >
+                    connected (green). "Offline" means no network OR the Dataverse
+                    backend is unreachable; green only shows when the core reads
+                    actually succeed. Exactly one dot, with a hover tooltip. */}
+                {isOffline ? (
+                  <span
+                    className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-amber-500 rounded-full border-2 border-background animate-pulse"
+                    title={t('offline', locale)}
+                  />
+                ) : !isCopilotConfigured ? (
+                  <span
                     className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-muted-foreground/50 rounded-full border-2 border-background"
                     title={t('notConfigured', locale)}
+                  />
+                ) : (
+                  <span
+                    className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-background"
+                    title={t('connected', locale)}
                   />
                 )}
               </button>
