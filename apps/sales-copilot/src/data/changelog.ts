@@ -46,6 +46,43 @@ export interface ChangelogEntry {
 /** Newest first. The first entry is the current release. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.6.0',
+    date: '2026-07-06',
+    title: { zh: '更聪明的客户洞察', en: 'Smarter account insights' },
+    items: [
+      {
+        kind: 'feature',
+        zh: '客户洞察升级为「市场洞察」和「销售洞察」两部分：市场洞察汇总客观的行业动态、新闻与风险；销售洞察在此基础上结合你的商机与活动，给出可执行的销售建议。',
+        en: 'Account insights are now split into Market Insight and Sales Insight — Market Insight gathers objective industry news, trends, and risks, while Sales Insight turns those facts, plus your pipeline and activities, into actionable selling guidance.',
+      },
+      {
+        kind: 'improvement',
+        zh: '客户页顶部新增一句话公司简介，快速了解这家企业。',
+        en: 'A concise company profile now appears at the top of each account page.',
+      },
+      {
+        kind: 'improvement',
+        zh: '洞察中引用的信息来源可直接点击，打开原始报道。',
+        en: 'Sources cited in insights are now clickable and open the original article.',
+      },
+      {
+        kind: 'improvement',
+        zh: '行业等字段显示为易读名称，不再是代码。',
+        en: 'Industry and similar fields now show readable names instead of internal codes.',
+      },
+      {
+        kind: 'improvement',
+        zh: 'AI 生成内容的排版更整洁规范，列表、表格与编号显示更清晰。',
+        en: 'AI-generated content is cleaner and easier to read, with properly formatted lists, tables, and numbering.',
+      },
+      {
+        kind: 'fix',
+        zh: '修复销售洞察中行动项编号显示异常的问题。',
+        en: 'Fixed action-item numbering in Sales Insight.',
+      },
+    ],
+  },
+  {
     version: '1.5.0',
     date: '2026-07-04',
     title: { zh: '离线也能用', en: 'Now works offline' },

@@ -39,3 +39,9 @@ pnpm build > /tmp/build.log 2>&1 &
 - Adapter services in `src/generated/services/` use `mapOptions()` with `FIELD_MAP` for field name translation.
 - Owner filtering uses `_ownerid_value` (Dataverse systemuserid), resolved via `useUser` hook from `systemusers` table.
 - `pac code add-data-source` is BROKEN for Dataverse — use `npx power-apps add-data-source` instead.
+
+## Markdown Rendering (MANDATORY — single source of truth)
+- **All Markdown in the app is rendered ONLY through `MarkdownContent`** (`src/components/markdown-content.tsx`), built on `react-markdown` + `remark-gfm` + `rehype-sanitize` (CommonMark + GFM, HTML escaped, URLs sanitized — safe for untrusted LLM output).
+- **NEVER hand-roll another Markdown parser, a parallel renderer, or a one-off regex/string formatter** for AI/LLM output anywhere (pages, cards, chat, reports). To render Markdown, import `MarkdownContent`. To add capability, extend that component — prefer a standard **remark/rehype plugin** over bespoke logic; do not special-case for one screen.
+- **Content structure is the producer's job, not the renderer's.** If AI output looks wrong (e.g. list numbering, spacing), fix the **prompt** to emit clean, standard Markdown — do NOT patch the shared renderer to compensate for one content shape.
+- The only app-specific behaviour baked in is numeric citation chips + a References footer, driven by CommonMark link-reference definitions (`[1]: url "title"`). Keep any new app-specific behaviour isolated (plugin/opt-in prop), never forked into a second renderer.

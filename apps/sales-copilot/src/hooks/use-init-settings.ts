@@ -72,9 +72,15 @@ export function useInitSettings(): InitSettingsResult {
     // to the right agent. Preserve any in-flight conversationId.
     if (hasCopilotConfig && appSettings.copilotStudioAgentName) {
       const current = getCopilotConfig();
+      // One agent pointer for the whole app (product Q&A + enrichment): the
+      // `copilot_studio_agent_name` Setting is authoritative. Overwrite the cache
+      // when it differs (e.g. new environment / renamed agent). Preserve conversationId.
       if (current.agentName !== appSettings.copilotStudioAgentName) {
-        console.log('[InitSettings] Copilot agent from Setting table differs from cache — syncing:', appSettings.copilotStudioAgentName);
-        saveCopilotConfig({ agentName: appSettings.copilotStudioAgentName, conversationId: current.conversationId });
+        console.log('[InitSettings] Syncing Copilot agent name from Setting table:', appSettings.copilotStudioAgentName);
+        saveCopilotConfig({
+          agentName: appSettings.copilotStudioAgentName,
+          conversationId: current.conversationId,
+        });
       } else {
         console.log('[InitSettings] Copilot agent name already in sync with Setting table');
       }

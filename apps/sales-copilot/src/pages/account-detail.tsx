@@ -1,11 +1,12 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   Building2,
   Phone,
   Mail,
   MapPin,
+  Globe,
   Calendar,
   Clock,
   Edit,
@@ -17,8 +18,12 @@ import {
   User,
   Trash2,
   Save,
+  Sparkles,
+  RefreshCw,
   X,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -51,6 +56,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { FloatingQuickActions } from '@/components/floating-quick-actions';
 import { AISummaryCard } from '@/components/ai-summary-card';
+import { MarkdownContent } from '@/components/markdown-content';
 import { useAccount, useUpdateAccount, useDeleteAccount } from '@/generated/hooks/use-account';
 import { useQueryClient } from '@tanstack/react-query';
 import { useContactList } from '@/generated/hooks/use-contact';
@@ -62,8 +68,14 @@ import type { Activity } from '@/generated/models/activity-model';
 import type { Contact } from '@/generated/models/contact-model';
 import { toast } from '@/lib/toast-utils';
 import { getLocale, t } from '@/lib/i18n';
+import { industryLabel } from '@/lib/industry';
 import { useCopilot } from '@/contexts/copilot-context';
 import { PullToRefresh } from '@/components/pull-to-refresh';
+import {
+  triggerAccountEnrichment,
+  applyEnrichmentToAccount,
+  splitEnrichment,
+} from '@/services/account-enrichment-service';
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -105,6 +117,11 @@ function getActivityTypeIcon(type: string | null | undefined): React.ComponentTy
   }
 }
 
+/** Ensure an outbound link has an http(s) scheme; neutralizes javascript: values. */
+function normalizeUrl(url: string): string {
+  return /^https?:\/\//i.test(url) ? url : `https://${url.replace(/^\/+/, '')}`;
+}
+
 export default function ClientDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
@@ -112,12 +129,16 @@ export default function ClientDetailPage() {
   const [activeTab, setActiveTab] = useState('overview');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [isEditMode, setIsEditMode] = useState(searchParams.get('edit') === 'true');
+  const [isEnriching, setIsEnriching] = useState(false);
+  const [enrichFeedback, setEnrichFeedback] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
+  const [isMarketingExpanded, setIsMarketingExpanded] = useState(true);
   const locale = getLocale();
 
   // Edit form state
   const [editForm, setEditForm] = useState({
     name1: '',
     industry: '',
+    website: '',
     phone: '',
     email: '',
     address: '',
@@ -168,8 +189,50 @@ export default function ClientDetailPage() {
     ]);
   }, [queryClient, id]);
 
+  // After a Marketing Insight refresh, regenerate Sales Insight so it reflects
+  // the new public facts (combined with pipeline + activities).
+  const [salesRegenQueued, setSalesRegenQueued] = useState(false);
+
+  // On-demand enrichment: ask the Account Enrichment Agent to refresh this
+  // account's public master fields and description intelligence block.
+  const handleEnrich = useCallback(async () => {
+    if (!account || isEnriching) return;
+    setIsEnriching(true);
+    setEnrichFeedback(null);
+    try {
+      const res = await triggerAccountEnrichment(account, locale);
+      if (!res.success || !res.result) throw new Error(res.error || 'Enrichment failed');
+      if (res.result.status === 'skipped') {
+        setEnrichFeedback({
+          kind: 'error',
+          text: res.result.reason || (locale === 'zh-Hans' ? '未找到足够的公开信息。' : 'Not enough public information found.'),
+        });
+      } else {
+        await applyEnrichmentToAccount(account, res.result);
+        setEnrichFeedback({
+          kind: 'success',
+          text: locale === 'zh-Hans' ? '客户情报已更新。' : 'Customer intelligence updated.',
+        });
+        await queryClient.invalidateQueries({ queryKey: ['account', id] });
+        await queryClient.invalidateQueries({ queryKey: ['aISummary-list'] });
+        setSalesRegenQueued(true);
+      }
+    } catch (err: unknown) {
+      setEnrichFeedback({
+        kind: 'error',
+        text: err instanceof Error && err.message
+          ? err.message
+          : (locale === 'zh-Hans' ? '刷新失败，请稍后重试' : 'Refresh failed, please try again'),
+      });
+    } finally {
+      setIsEnriching(false);
+    }
+  }, [account, id, locale, isEnriching, queryClient]);
+
   // AI Summary hooks
   const { summary: aiSummary, isLoading: isLoadingAISummary, isGenerating, isExpired, isFailed, localeMismatch, refetch: refetchAISummary } = useEntityAISummary('account', id || '');
+  // Marketing Insight is stored as a separate AISummary record (type='marketing').
+  const { summary: marketingRecord } = useEntityAISummary('account', id || '', 'marketing');
   const { triggerForEntity, isTriggering } = useWithAISummaryTrigger();
 
   // Initialize edit form when account loads
@@ -178,6 +241,7 @@ export default function ClientDetailPage() {
       setEditForm({
         name1: account.name1 || '',
         industry: account.industry || '',
+        website: account.website || '',
         phone: account.phone || '',
         email: account.email || '',
         address: account.address || '',
@@ -204,12 +268,13 @@ export default function ClientDetailPage() {
       opportunities: opportunities.map((o: Opportunity) => ({ id: o.id, name: o.name1, stage: o.stage, amount: o.totalamount })),
       activities: activities.map((a: Activity) => ({ id: a.id, title: a.title, type: a.type, date: a.scheduleddate })),
       contacts: contacts.map((c: Contact) => ({ id: c.id, name: c.fullname, title: c.title })),
+      marketingInsight: marketingRecord?.summary || '',
     });
     setTimeout(() => {
       refetchAISummary();
       setIsRefreshingAI(false);
     }, 500);
-  }, [account, opportunities, activities, contacts, triggerForEntity, refetchAISummary]);
+  }, [account, opportunities, activities, contacts, triggerForEntity, refetchAISummary, marketingRecord]);
 
   // Regenerate the insight when the user switched language since it was generated.
   useEffect(() => {
@@ -217,6 +282,15 @@ export default function ClientDetailPage() {
       handleRefreshAISummary();
     }
   }, [localeMismatch, account, isGenerating, isTriggering, isRefreshingAI, handleRefreshAISummary]);
+
+  // After enrichment refreshes the Marketing Insight facts, regenerate Sales
+  // Insight so it is derived from the latest facts + pipeline + activities.
+  useEffect(() => {
+    if (salesRegenQueued && account && !isEnriching && !isTriggering && !isRefreshingAI) {
+      setSalesRegenQueued(false);
+      handleRefreshAISummary();
+    }
+  }, [salesRegenQueued, account, isEnriching, isTriggering, isRefreshingAI, handleRefreshAISummary]);
 
   // Calculate stats
   const totalPipelineValue = opportunities.reduce(
@@ -249,6 +323,7 @@ export default function ClientDetailPage() {
         industry: account.industry,
         phone: account.phone,
         email: account.email,
+        website: account.website,
         address: account.address,
         contactsCount: contacts.length,
         opportunitiesCount: opportunities.length,
@@ -282,6 +357,7 @@ export default function ClientDetailPage() {
       const updatedData = {
         name1: editForm.name1,
         industry: editForm.industry,
+        website: editForm.website,
         phone: editForm.phone,
         email: editForm.email,
         address: editForm.address,
@@ -315,6 +391,7 @@ export default function ClientDetailPage() {
       setEditForm({
         name1: account.name1 || '',
         industry: account.industry || '',
+        website: account.website || '',
         phone: account.phone || '',
         email: account.email || '',
         address: account.address || '',
@@ -328,7 +405,7 @@ export default function ClientDetailPage() {
       <MobileLayout title={t('accountDetailsTitle', locale)}>
         <div className="px-4 pb-40 space-y-4 mt-4">
           {/* Header card skeleton */}
-          <div className="glass-card p-4 animate-pulse" style={{ borderRadius: 20 }}>
+          <div className="glass-card p-4 animate-pulse rounded-[20px]">
             <div className="flex items-start gap-4">
               <div className="w-14 h-14 rounded-2xl bg-muted/50" />
               <div className="flex-1 space-y-2">
@@ -339,11 +416,11 @@ export default function ClientDetailPage() {
             </div>
           </div>
           {/* Info rows skeleton */}
-          <div className="glass-card p-4 animate-pulse space-y-3" style={{ borderRadius: 20 }}>
+          <div className="glass-card p-4 animate-pulse space-y-3 rounded-[20px]">
             {[0,1,2,3].map(i => <div key={i} className="flex justify-between"><div className="h-4 w-20 rounded bg-muted/40" /><div className="h-4 w-36 rounded bg-muted/50" /></div>)}
           </div>
           {/* List skeleton */}
-          <div className="glass-card p-4 animate-pulse space-y-3" style={{ borderRadius: 20 }}>
+          <div className="glass-card p-4 animate-pulse space-y-3 rounded-[20px]">
             <div className="h-5 w-24 rounded bg-muted/50" />
             {[0,1,2].map(i => <div key={i} className="h-12 rounded-lg bg-muted/30" />)}
           </div>
@@ -466,6 +543,17 @@ export default function ClientDetailPage() {
               </div>
 
               <div>
+                <Label htmlFor="website">Website</Label>
+                <Input
+                  id="website"
+                  type="url"
+                  value={editForm.website}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditForm({ ...editForm, website: e.target.value })}
+                  placeholder="https://company.com"
+                />
+              </div>
+
+              <div>
                 <Label htmlFor="phone">Phone</Label>
                 <Input
                   id="phone"
@@ -543,6 +631,14 @@ export default function ClientDetailPage() {
     );
   }
 
+  // Marketing Insight facts come from the shared AISummary store (type='marketing').
+  // The customer profile lives in the account description, shown in the header card.
+  const enrichmentBody = (marketingRecord?.summary || '').trim();
+  const marketingUpdated = marketingRecord?.generatedOn ? String(marketingRecord.generatedOn).slice(0, 10) : '';
+  // Customer profile is written to the description by enrichment; strip any legacy
+  // managed block so only the human-readable profile shows in the header.
+  const profileText = splitEnrichment(account.notes).human;
+
   // View Mode UI
   return (
     <MobileLayout title="Client Details" hideVoiceButton headerRight={viewHeaderActions}>
@@ -564,7 +660,7 @@ export default function ClientDetailPage() {
                 <h1 className="text-xl font-bold text-foreground truncate">{account.name1}</h1>
               </div>
               <p className="text-sm text-muted-foreground mb-2">
-                {account.industry || 'Uncategorized'}
+                {industryLabel(account.industry) || 'Uncategorized'}
               </p>
               <div className="flex flex-wrap gap-2">
                 {daysSinceContact <= 14 ? (
@@ -579,6 +675,68 @@ export default function ClientDetailPage() {
                   </Badge>
                 ) : null}
               </div>
+              {(account.website || account.phone || account.email || account.address) && (
+                <div className="mt-2 space-y-1">
+                  {account.website && (
+                    <a
+                      href={normalizeUrl(account.website)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 text-xs text-primary hover:underline"
+                    >
+                      <Globe className="w-3.5 h-3.5 shrink-0" />
+                      <span className="truncate">{account.website}</span>
+                    </a>
+                  )}
+                  {account.phone && (
+                    <a
+                      href={`tel:${account.phone}`}
+                      className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      <Phone className="w-3.5 h-3.5 shrink-0" />
+                      <span className="truncate">{account.phone}</span>
+                    </a>
+                  )}
+                  {account.email && (
+                    <a
+                      href={`mailto:${account.email}`}
+                      className="flex items-center gap-1.5 text-xs text-primary hover:underline"
+                    >
+                      <Mail className="w-3.5 h-3.5 shrink-0" />
+                      <span className="truncate">{account.email}</span>
+                    </a>
+                  )}
+                  {account.address && (
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <MapPin className="w-3.5 h-3.5 shrink-0" />
+                      <span className="truncate">{account.address}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+              {profileText && (
+                <p className="mt-2 text-xs text-muted-foreground/90 leading-relaxed">
+                  {profileText}
+                </p>
+              )}
+            </div>
+            {/* AI enrich — top-right of the account card */}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {isEnriching && (
+                <span className="text-xs text-muted-foreground animate-pulse">
+                  {locale === 'zh-Hans' ? '获取中…' : 'Fetching…'}
+                </span>
+              )}
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => handleEnrich()}
+                disabled={isEnriching}
+                aria-label={locale === 'zh-Hans' ? '刷新市场情报' : 'Refresh marketing insight'}
+                title={locale === 'zh-Hans' ? '刷新市场情报' : 'Refresh marketing insight'}
+              >
+                <RefreshCw className={cn('w-4 h-4', isEnriching && 'animate-spin')} />
+              </Button>
             </div>
           </div>
 
@@ -612,8 +770,100 @@ export default function ClientDetailPage() {
 
           {/* Overview Tab */}
           <TabsContent value="overview" className="mt-4 space-y-4">
+            {/* Marketing Insight (enrichment) — collapsible; always shown so refresh is available */}
+            <GlassCard className="overflow-hidden">
+              {/* Header (collapsible, matches Sales Insight) */}
+              <div
+                className="w-full flex items-center gap-3 text-left cursor-pointer"
+                onClick={() => setIsMarketingExpanded(!isMarketingExpanded)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e: React.KeyboardEvent) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setIsMarketingExpanded(!isMarketingExpanded);
+                  }
+                }}
+              >
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center flex-shrink-0">
+                  <Sparkles className="w-5 h-5 text-primary" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-base font-semibold text-foreground">
+                    {locale === 'zh-Hans' ? '\u5e02\u573a\u60c5\u62a5' : 'Marketing Insight'}
+                  </h3>
+                  {marketingUpdated && (
+                    <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                      {marketingUpdated}
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {isMarketingExpanded ? (
+                    <ChevronUp className="w-4 h-4 text-muted-foreground" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                  )}
+                </div>
+              </div>
+
+              {/* Expandable content */}
+              <AnimatePresence initial={false}>
+                {isMarketingExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2, ease: 'easeInOut' as const }}
+                  >
+                    <div className="pt-4 mt-4 border-t border-border/50 space-y-3">
+                      {/* Agent call feedback — shown while running and after it returns */}
+                      {(isEnriching || enrichFeedback) && (
+                        <div
+                          className={cn(
+                            'rounded-lg px-3 py-2 text-xs',
+                            enrichFeedback?.kind === 'error'
+                              ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
+                              : 'bg-primary/5 text-muted-foreground',
+                          )}
+                        >
+                          <div className="flex items-start gap-2">
+                            {isEnriching && <Loader2 className="w-3.5 h-3.5 animate-spin mt-0.5 shrink-0 text-primary" />}
+                            <div className="min-w-0 flex-1">
+                              {isEnriching ? (
+                                <span className="leading-relaxed">
+                                  {locale === 'zh-Hans'
+                                    ? '\u6b63\u5728\u8c03\u7528 Enrichment Agent\uff0c\u4ece\u516c\u5f00\u7f51\u7edc\u83b7\u53d6\u5ba2\u6237\u4fe1\u606f\u2026'
+                                    : 'Calling the enrichment agent to fetch public info from the web\u2026'}
+                                </span>
+                              ) : (
+                                <MarkdownContent content={enrichFeedback!.text} className="text-xs leading-relaxed" />
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {enrichmentBody && (
+                        <MarkdownContent content={enrichmentBody} className="text-sm text-muted-foreground leading-relaxed" />
+                      )}
+                      {!enrichmentBody && !isEnriching && !enrichFeedback && (
+                        <p className="text-sm text-muted-foreground/70">
+                          {locale === 'zh-Hans'
+                            ? '\u6682\u65e0\u5e02\u573a\u60c5\u62a5\u3002\u70b9\u53f3\u4e0a\u89d2\u5237\u65b0\uff0c\u4ece\u516c\u5f00\u7f51\u7edc\u83b7\u53d6\u5ba2\u6237\u4fe1\u606f\u3002'
+                            : 'No marketing insight yet. Tap refresh to fetch public details from the web.'}
+                        </p>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </GlassCard>
+
             {/* AI Insights */}
             <AISummaryCard
+              title={locale === 'zh-Hans' ? '销售洞察' : 'Sales Insight'}
               summary={aiSummary}
               isLoading={isLoadingAISummary}
               isGenerating={isGenerating}
@@ -622,41 +872,6 @@ export default function ClientDetailPage() {
               isRefreshing={isRefreshingAI || isTriggering}
               onRefresh={handleRefreshAISummary}
             />
-
-            {/* Contact Info */}
-            <GlassCard>
-              <h3 className="text-sm font-medium text-foreground mb-3">Contact Info</h3>
-              <div className="space-y-3">
-                {account.phone && (
-                  <div className="flex items-center gap-3 text-sm">
-                    <Phone className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-foreground">{account.phone}</span>
-                  </div>
-                )}
-                {account.email && (
-                  <div className="flex items-center gap-3 text-sm">
-                    <Mail className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-foreground">{account.email}</span>
-                  </div>
-                )}
-                {account.address && (
-                  <div className="flex items-center gap-3 text-sm">
-                    <MapPin className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-foreground">{account.address}</span>
-                  </div>
-                )}
-              </div>
-            </GlassCard>
-
-            {/* Notes */}
-            {account.notes && (
-              <GlassCard>
-                <h3 className="text-sm font-medium text-foreground mb-2">Notes</h3>
-                <p className="text-sm text-muted-foreground leading-relaxed">
-                  {account.notes}
-                </p>
-              </GlassCard>
-            )}
           </TabsContent>
 
           {/* Contacts Tab */}

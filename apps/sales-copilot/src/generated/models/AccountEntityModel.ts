@@ -22,6 +22,7 @@ export interface AccountBase {
   telephone1?: string;
   description?: string;
   industrycode?: number;
+  websiteurl?: string;
   address1_composite?: string;
   address1_line1?: string;
   address1_city?: string;

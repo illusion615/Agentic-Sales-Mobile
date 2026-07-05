@@ -6,6 +6,7 @@ import {
   clearCopilotConversation,
 } from '@/services/copilot-service';
 import { getLocale, getSimulateStreaming, t, type Locale } from '@/lib/i18n';
+import { industryLabel } from '@/lib/industry';
 import { toast } from '@/lib/toast-utils';
 import { isDataverseReachable } from '@/lib/connectivity';
 import { type ThinkingProgress, type AgentResponse, type IntentResult, type ThinkingStep } from '@/lib/copilot-agent';

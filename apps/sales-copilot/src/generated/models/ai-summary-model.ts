@@ -52,6 +52,11 @@ export interface AISummary {
    * @validationRule Required for create/update operations
    */
   summary: string;
+  /**
+   * @displayName Type
+   * @description App-managed discriminator, e.g. 'sales' | 'marketing'.
+   */
+  type?: string;
 }
 
 export const _AISummary = 'AISummary' as const;

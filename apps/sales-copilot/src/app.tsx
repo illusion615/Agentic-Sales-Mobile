@@ -85,6 +85,7 @@ function App() {
       localStorage.setItem('theme', 'light');
     }
   }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       <ErrorBoundary resetQueryCache>

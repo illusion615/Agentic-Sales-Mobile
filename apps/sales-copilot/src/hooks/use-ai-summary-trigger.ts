@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCreateAISummary, useUpdateAISummary, useAISummaryList } from '@/generated/hooks/use-aisummary';
 import type { AISummary } from '@/generated/models/ai-summary-model';
 import { getLocale, type Locale } from '@/lib/i18n';
+import { industryLabel } from '@/lib/industry';
 import { useAppSettings } from './use-app-settings';
 import { useUser } from './use-user';
 
@@ -56,6 +57,16 @@ function getEntityName(entityType: EntityType, entityData: Record<string, unknow
  * Build an AI-friendly prompt based on entity context
  * Converts key values to human-readable labels
  */
+/**
+ * Shared formatting directive so every entity's Action Items render as a single,
+ * correctly-numbered Markdown list (one self-contained item per line) instead of a
+ * title-plus-separate-paragraph structure that Markdown splits into many 1-item lists.
+ */
+const ACTION_ITEMS_FORMAT =
+  'Format the action items as ONE numbered Markdown list. Write each item on a single line as ' +
+  '`N. **Action title** — one or two sentences of specific guidance`, numbered sequentially ' +
+  '(1, 2, 3, 4). Do not put blank lines between items and do not split an item into a separate paragraph.';
+
 function buildAIPrompt(
   entityType: EntityType,
   entityData: Record<string, unknown>,
@@ -68,29 +79,50 @@ function buildAIPrompt(
       const opportunities = relatedData?.opportunities as Array<Record<string, unknown>> | undefined;
       const activities = relatedData?.activities as Array<Record<string, unknown>> | undefined;
       const contacts = relatedData?.contacts as Array<Record<string, unknown>> | undefined;
-      
-      return `Analyze this sales account and provide actionable insights.
+      const marketingInsight = (relatedData?.marketingInsight as string | undefined)?.trim();
+      const oppList = opportunities?.length
+        ? opportunities.map((o) => {
+            const amt = o.amount ? `, $${Number(o.amount).toLocaleString()}` : '';
+            return `- ${o.name || 'Opportunity'} — ${o.stage || 'stage n/a'}${amt}`;
+          }).join('\n')
+        : 'None';
+      const actList = activities?.length
+        ? activities.slice(0, 8).map((a) => {
+            const meta = [a.type, a.date ? String(a.date).slice(0, 10) : ''].filter(Boolean).join(', ');
+            return `- ${a.title || 'Activity'}${meta ? ` (${meta})` : ''}`;
+          }).join('\n')
+        : 'None';
+
+      return `Produce actionable Sales Insight for this account.
 
 ACCOUNT: ${entityName}
-- Industry: ${entityData.industry || 'Not specified'}
+- Industry: ${industryLabel(entityData.industry as string | number | null | undefined) || 'Not specified'}
 - Revenue: ${entityData.annualrevenue ? `$${Number(entityData.annualrevenue).toLocaleString()}` : 'Not specified'}
 
-RELATED DATA
-- Open Opportunities: ${opportunities?.length || 0}
-- Recent Activities: ${activities?.length || 0}
-- Contacts: ${contacts?.length || 0}
+PUBLIC INTELLIGENCE (objective facts collected in Marketing Insight):
+${marketingInsight || 'No marketing insight has been collected yet.'}
+
+PIPELINE — open opportunities:
+${oppList}
+
+RECENT ACTIVITIES:
+${actList}
+
+CONTACTS: ${contacts?.length || 0}
+
+Interpret the PUBLIC INTELLIGENCE above in light of this account's own pipeline and activities. Do not merely restate the facts; turn them into selling guidance.
 
 IMPORTANT: Respond with plain Markdown text directly. Do NOT wrap your response in markdown code blocks. Just write the content directly.
 
 Structure your response as:
 
 ### Summary
-A brief summary (2-3 sentences) of the account's current status and potential.
+A brief summary (2-3 sentences) of where the account stands and the near-term opportunity.
 
 ### Action Items
-3-4 specific action items as a bulleted list that the sales rep should take next.
+3-4 specific, prioritized action items (sales angles to pursue and concrete next steps), each tied to a fact, opportunity, or activity above.
 
-Focus on actionable insights that help close deals and grow the relationship.`;
+${ACTION_ITEMS_FORMAT}`;
     }
     
     case 'opportunity': {
@@ -113,7 +145,9 @@ Structure your response as:
 A brief summary (2-3 sentences) of the deal status and likelihood to close.
 
 ### Action Items
-3-4 specific action items as a bulleted list to advance this opportunity.
+3-4 specific action items to advance this opportunity.
+
+${ACTION_ITEMS_FORMAT}
 
 Focus on deal acceleration and risk mitigation.`;
     }
@@ -133,7 +167,9 @@ Structure your response as:
 A brief summary (2-3 sentences) of this contact's role and importance.
 
 ### Action Items
-3-4 specific action items as a bulleted list for engaging with this stakeholder.
+3-4 specific action items for engaging with this stakeholder.
+
+${ACTION_ITEMS_FORMAT}
 
 Focus on relationship building and influence mapping.`;
     }
@@ -159,13 +195,15 @@ Structure your response as:
 A brief summary (2-3 sentences) of the activity outcome and implications.
 
 ### Action Items
-3-4 specific follow-up action items as a bulleted list.
+3-4 specific follow-up action items.
+
+${ACTION_ITEMS_FORMAT}
 
 Focus on momentum and next steps.`;
     }
     
     default:
-      return `Analyze this ${entityType} and provide actionable sales insights with specific next steps. IMPORTANT: Respond with plain Markdown text directly. Do NOT wrap your response in markdown code blocks. Include a ### Summary section and a ### Action Items section with bulleted points.`;
+      return `Analyze this ${entityType} and provide actionable sales insights with specific next steps. IMPORTANT: Respond with plain Markdown text directly. Do NOT wrap your response in markdown code blocks. Include a ### Summary section and a ### Action Items section formatted as one sequentially numbered Markdown list (one item per line).`;
   }
 }
 
@@ -289,14 +327,15 @@ function generatePlaceholderSummary(
 /**
  * Hook to get the latest AI summary for an entity
  */
-export function useEntityAISummary(entityType: EntityType, entityId: string) {
+export function useEntityAISummary(entityType: EntityType, entityId: string, insightType: string = 'sales') {
   const { data: allSummaries = [], isLoading, refetch } = useAISummaryList();
   
   const entityTypeLabel = ENTITY_TYPES[entityType];
   
-  // Find the latest summary for this entity
+  // Find the latest summary for this entity of the requested insight type.
+  // Records with no `type` are legacy Sales Insight rows, so treat them as 'sales'.
   const summary = allSummaries
-    .filter((s: AISummary) => s.entityType === entityTypeLabel && s.entityID === entityId)
+    .filter((s: AISummary) => s.entityType === entityTypeLabel && s.entityID === entityId && (s.type || 'sales') === insightType)
     .sort((a: AISummary, b: AISummary) => {
       const dateA = a.generatedOn ? new Date(a.generatedOn).getTime() : 0;
       const dateB = b.generatedOn ? new Date(b.generatedOn).getTime() : 0;
@@ -363,6 +402,7 @@ export function useAISummaryTrigger() {
       const summaryRecord = await createAISummary.mutateAsync({
         entityID: entityId,
         entityType: entityTypeLabel,
+        type: 'sales',
         status: STATUSES.pending,
         summary: 'Generating AI summary...',
         generatedOn: new Date().toISOString(),

@@ -13,6 +13,7 @@
 
 import { invokeFlowForLLM } from '@/services/power-automate-service';
 import { getLocale, outputLanguageDirective, type Locale } from '@/lib/i18n';
+import { industryLabel } from '@/lib/industry';
 import { getDisplayName, getFunctionListForPrompt, getFunctionSubject } from './function-registry';
 import { executeFunction } from './function-executor';
 import { 
@@ -1481,7 +1482,7 @@ Please provide a brief summary and analysis, do not list individual records.`;
         records: resultData.map((item: Record<string, unknown>) => ({
           id: String(item.id || ''),
           title: String(item.name1 || item.name || ''),
-          subtitle: String(item.industry || ''),
+          subtitle: industryLabel(item.industry as string | number | null | undefined) || '',
           meta: String(item.region || ''),
         })),
         title: isZh ? '客户列表' : 'Accounts',

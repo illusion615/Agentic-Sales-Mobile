@@ -28,6 +28,7 @@ export const Crf5c_aisummariesstatuscode = {
 export type Crf5c_aisummariesstatuscode = keyof typeof Crf5c_aisummariesstatuscode;
 
 export interface Crf5c_aisummariesBase {
+  biz_type?: string;
   crf5c_actionitems?: string;
   crf5c_aisummaryid: string;
   crf5c_entityid: string;

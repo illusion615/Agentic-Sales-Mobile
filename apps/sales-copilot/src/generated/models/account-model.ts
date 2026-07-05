@@ -16,6 +16,8 @@ export interface Account {
   email?: string;
   /** @displayName Industry */
   industry?: string;
+  /** @displayName Website */
+  website?: string;
   /** @displayName Latitude */
   latitude?: number;
   /** @displayName Longitude */

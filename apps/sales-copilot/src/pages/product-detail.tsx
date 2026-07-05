@@ -9,6 +9,7 @@ import { useProductList, useAccountList, useOpportunityList, useActivityList } f
 import type { Product } from '@/generated/models/product-model';import type { Account } from '@/generated/models/account-model';import type { Opportunity } from '@/generated/models/opportunity-model';import type { Activity } from '@/generated/models/activity-model';import { imageFallbackByCategory, type ImageFallbackCategory } from '@/lib/product-images';
 import { useCopilot } from '@/contexts/copilot-context';
 import { getLocale } from '@/lib/i18n';
+import { industryLabel } from '@/lib/industry';
 import { useFirstMount } from '@/hooks/use-first-mount';
 
 const containerVariants = {
@@ -256,7 +257,7 @@ export default function ProductDetailPage() {
                         <div>
                           <h4 className="text-sm font-medium text-foreground">{account.name1}</h4>
                           <p className="text-xs text-muted-foreground mt-0.5">
-                            {account.industry || 'No industry'}
+                            {industryLabel(account.industry) || 'No industry'}
                           </p>
                         </div>
                         <span className="text-xs text-muted-foreground">{account.industry}</span>

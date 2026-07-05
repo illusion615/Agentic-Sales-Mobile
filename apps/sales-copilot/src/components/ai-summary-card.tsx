@@ -17,6 +17,8 @@ interface AISummaryCardProps {
   isFailed?: boolean;
   onRefresh?: () => void;
   isRefreshing?: boolean;
+  /** Override the card title (defaults to the localized "AI Insights"). */
+  title?: string;
   className?: string;
 }
 
@@ -28,6 +30,7 @@ export function AISummaryCard({
   isFailed,
   onRefresh,
   isRefreshing,
+  title,
   className,
 }: AISummaryCardProps) {
   const [isExpanded, setIsExpanded] = useState(true);
@@ -90,7 +93,7 @@ export function AISummaryCard({
           </div>
           <div className="flex-1">
             <h3 className="text-base font-semibold text-foreground">
-              {t('aiInsights', locale)}
+              {title ?? t('aiInsights', locale)}
             </h3>
             <p className="text-xs text-muted-foreground mt-1">
               {t('aiAnalysisAfterUpdate', locale)}
@@ -154,7 +157,7 @@ export function AISummaryCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h3 className="text-base font-semibold text-foreground">
-              {t('aiInsights', locale)}
+              {title ?? t('aiInsights', locale)}
             </h3>
             {isExpired && (
               <Badge variant="outline" className="text-[10px] gap-1 text-amber-600 border-amber-200 dark:border-amber-900">

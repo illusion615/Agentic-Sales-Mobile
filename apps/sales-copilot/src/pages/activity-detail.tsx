@@ -1,6 +1,7 @@
 import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
+import { industryLabel } from '@/lib/industry';
 import {
   Phone,
   Calendar,
@@ -507,7 +508,7 @@ export default function ActivityDetailPage() {
                     </div>
                     <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
                       {fullAccount?.industry && (
-                        <span>{fullAccount.industry}</span>
+                        <span>{industryLabel(fullAccount.industry) || fullAccount.industry}</span>
                       )}
                       {fullAccount?.phone && (
                         <span className="flex items-center gap-1">

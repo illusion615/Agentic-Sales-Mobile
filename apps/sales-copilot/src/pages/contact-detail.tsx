@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
+import { industryLabel } from '@/lib/industry';
 import {
   User,
   Phone,
@@ -536,7 +537,7 @@ export default function ContactDetailPage() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-foreground truncate">{accountData.name1}</p>
-                    <p className="text-xs text-muted-foreground">{accountData.industry || 'Uncategorized'}</p>
+                    <p className="text-xs text-muted-foreground">{industryLabel(accountData.industry) || 'Uncategorized'}</p>
                   </div>
                   <ChevronRight className="w-4 h-4 text-muted-foreground" />
                 </div>

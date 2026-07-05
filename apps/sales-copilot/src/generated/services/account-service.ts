@@ -13,6 +13,7 @@ const FIELD_MAP: Record<string, string> = {
   address: 'address1_composite',
   email: 'emailaddress1',
   industry: 'industrycode',
+  website: 'websiteurl',
   latitude: 'address1_latitude',
   longitude: 'address1_longitude',
   notes: 'description',
@@ -27,6 +28,7 @@ function fromDv(dv: AccountEntity): Account {
     address: dv.address1_composite ?? dv.address1_line1,
     email: dv.emailaddress1,
     industry: dv.industrycode != null ? String(dv.industrycode) : undefined,
+    website: dv.websiteurl,
     latitude: typeof dv.address1_latitude === 'number' ? dv.address1_latitude : undefined,
     longitude: typeof dv.address1_longitude === 'number' ? dv.address1_longitude : undefined,
     notes: dv.description,
@@ -42,6 +44,7 @@ function toDv(r: Partial<Omit<Account, 'id'>>): Record<string, unknown> {
   if (r.email !== undefined) dv.emailaddress1 = r.email;
   if (r.notes !== undefined) dv.description = r.notes;
   if (r.phone !== undefined) dv.telephone1 = r.phone;
+  if (r.website !== undefined) dv.websiteurl = r.website;
   if (r.latitude !== undefined) dv.address1_latitude = r.latitude;
   if (r.longitude !== undefined) dv.address1_longitude = r.longitude;
   // industrycode is an integer option set; fromDv exposes it as the numeric code

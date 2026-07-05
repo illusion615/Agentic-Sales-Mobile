@@ -23,6 +23,7 @@ function fromDv(dv: Crf5c_aisummaries): AISummary {
     generatedOn: dv.crf5c_generatedon,
     status: dvChoice(d, 'crf5c_status', Crf5c_aisummariescrf5c_status),
     summary: dv.crf5c_summary,
+    type: dv.biz_type,
   };
 }
 
@@ -35,6 +36,7 @@ function toDv(r: Partial<Omit<AISummary, 'id'>>): Record<string, unknown> {
   if (r.generatedOn !== undefined) dv.crf5c_generatedon = r.generatedOn;
   if (r.status !== undefined) dv.crf5c_status = labelToDv(AISummaryStatusKeyToLabel, r.status);
   if (r.summary !== undefined) dv.crf5c_summary = r.summary;
+  if (r.type !== undefined) dv.biz_type = r.type;
   return dv;
 }
 

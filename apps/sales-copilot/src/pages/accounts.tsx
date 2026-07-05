@@ -4,6 +4,7 @@ import { motion } from 'motion/react';
 import { Building2, Phone, ChevronRight, AlertTriangle, Search, Users, Sparkles, RefreshCw, Loader2 } from 'lucide-react';
 import { MobileLayout } from '@/components/mobile-layout';
 import { cn } from '@/lib/utils';
+import { industryLabel } from '@/lib/industry';
 import { useAccountList } from '@/generated/hooks/use-account';
 import { useContactList } from '@/generated/hooks/use-contact';
 import { useActivityList } from '@/generated/hooks/use-activity';
@@ -163,7 +164,7 @@ export default function ClientsPage() {
     setAiLoading(true);
     try {
       const clientData = enrichedAccounts.map((a) => ({
-        name: a.name1, industry: a.industry,
+        name: a.name1, industry: industryLabel(a.industry),
         daysSinceContact: a.daysSince, status: a.contactStatus.label,
         contactCount: a.contactCount,
       }));
@@ -394,7 +395,7 @@ export default function ClientsPage() {
                         </h3>
                       </div>
                       <p className="text-xs text-muted-foreground mb-1.5">
-                        {account.industry || 'Uncategorized'}
+                        {industryLabel(account.industry) || 'Uncategorized'}
                       </p>
                       <div className="flex items-center gap-3 text-xs">
                         <span className={cn('px-1.5 py-0.5 rounded-md text-[10px] font-medium', account.contactStatus.color)}>
