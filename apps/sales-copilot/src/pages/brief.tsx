@@ -68,7 +68,7 @@ export default function BriefMePage() {
   // Refs
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const followTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const followTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordStartRef = useRef<number>(0);
 
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
