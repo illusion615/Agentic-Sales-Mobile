@@ -4,7 +4,7 @@ import { motion, AnimatePresence, useDragControls, type PanInfo } from 'motion/r
 import { ArrowUp, SquarePen, X, Copy, Volume2, VolumeX, Loader2, Square, Play, Pause, Paperclip, RotateCcw, Mic, ScrollText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useCopilot, type ChatMessage, isUnresolvedBlockingCard } from '@/contexts/copilot-context';
-import { getLocale, getChatFontClass, getSelectedVoice, findMatchingSystemVoice, getLLMConfig, getVoiceSummaryEnabled, getCopilotDockLayout, getCopilotFullscreenDefault, getDebugMode, speechLang, t, localeBcp47, type CopilotDockLayout, type Locale } from '@/lib/i18n';
+import { getLocale, getChatFontClass, getSelectedVoice, getAzureVoiceForLocale, getVoiceEngine, findMatchingSystemVoice, getLLMConfig, getVoiceSummaryEnabled, getCopilotDockLayout, getCopilotFullscreenDefault, getDebugMode, speechLang, t, localeBcp47, type CopilotDockLayout, type Locale } from '@/lib/i18n';
 import { useSpeechPlayer } from '@/hooks/use-speech-player';
 import { ThinkingIndicator } from '@/components/thinking-indicator';
 import { DynamicDataRenderer, tryParseJson } from '@/components/dynamic-data-renderer';
@@ -27,6 +27,8 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { useEffectiveOffline } from '@/lib/connectivity';
 import { newAttachmentId, type CopilotAttachment } from '@/lib/attachments';
 import { useDynamicSuggestions } from '@/hooks/use-dynamic-suggestions';
+import { startRecording, type AudioRecording } from '@/lib/audio-recorder';
+import { transcribeSpeech } from '@/lib/azure-stt';
 
 
 
@@ -187,6 +189,8 @@ export function CopilotPanel() {
   const { state: ttsState, play: ttsPlay, stop: ttsStop } = useSpeechPlayer({
     getLang: () => speechLang(locale),
     getVoice: () => findMatchingSystemVoice(getSelectedVoice(), locale),
+    getAzureVoice: () => getAzureVoiceForLocale(locale),
+    getEnginePref: () => getVoiceEngine(),
   });
   const speakingMessageId = ttsState.isActive ? ttsState.activeId : null;
 
@@ -431,145 +435,124 @@ export function CopilotPanel() {
     closePanel();
   };
 
-  // ─── Press-to-talk voice input (Web Speech API) ───────────────────────────
-  // Hold the mic to dictate (release to stop); a quick tap toggles a hands-free
-  // continuous listen mode (tap again to stop). Also the iframe-mic-permission probe.
+  // ─── Tap-to-toggle voice input (record → Azure STT) ───────────────────────
+  // Tap the mic to start recording; tap again to stop and transcribe
+  // (getUserMedia + WAV → the Azure connector). getUserMedia is async, so the
+  // recorder may not exist yet when the user taps stop — the session model
+  // below handles that race.
   const [isListening, setIsListening] = useState(false);
-  const recognitionRef = useRef<any>(null);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const baseTextRef = useRef('');
-  // Mic gesture state machine: idle | hold (press-and-hold) | toggle (tap-to-toggle)
-  const listenModeRef = useRef<'idle' | 'hold' | 'toggle'>('idle');
-  const pressStartRef = useRef(0);
-  const suppressNextUpRef = useRef(false);
+  // Recording session. `startRecording()` (getUserMedia) is async, so the
+  // recorder may not exist yet when the user taps stop. We track the whole
+  // session — the live recorder plus stop/cancel intent — so the stop tap
+  // always finalises correctly no matter how slow the mic is to open.
+  const sessionRef = useRef<{
+    recording: AudioRecording | null;
+    stopRequested: boolean;
+    canceled: boolean;
+  } | null>(null);
+  // Dictation records the mic (getUserMedia + in-browser WAV) and transcribes via
+  // Azure through the connector. The browser's own SpeechRecognition service is
+  // unavailable in the Android Power Apps WebView, so we do NOT rely on it.
   const speechSupported =
-    typeof window !== 'undefined' &&
-    ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+    typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
 
-  const stopListening = useCallback(() => {
-    try {
-      recognitionRef.current?.stop();
-    } catch {
-      /* noop */
-    }
-  }, []);
-
-  const startListening = useCallback(() => {
-    if (isListening) return;
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) {
-      toast.error(
-        t('speechNotSupported', locale)
-      );
-      return;
-    }
-
-    const recognition = new SR();
-    recognition.lang = speechLang(locale);
-    recognition.continuous = true;
-    recognition.interimResults = true;
-
-    baseTextRef.current = inputValue ? inputValue.trimEnd() + ' ' : '';
-
-    recognition.onstart = () => {
-      setIsListening(true);
-    };
-
-    recognition.onresult = (event: any) => {
-      let transcript = '';
-      for (let i = 0; i < event.results.length; i++) {
-        transcript += event.results[i][0].transcript;
-      }
-      setInputValue(baseTextRef.current + transcript);
-    };
-
-    recognition.onerror = (event: any) => {
+  // Stop the live recorder and transcribe. Runs once per session.
+  const finalizeSession = useCallback(
+    async (session: { recording: AudioRecording | null }) => {
+      if (sessionRef.current === session) sessionRef.current = null;
+      const rec = session.recording;
       setIsListening(false);
-      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-        toast.error(
-          t('micPermissionDenied', locale)
-        );
-      } else if (event.error === 'no-speech') {
-        // silent — user simply didn't say anything
-      } else {
-        toast.error(
-          t('speechRecognitionError', locale, { error: event.error })
-        );
-      }
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-      listenModeRef.current = 'idle';
-      recognitionRef.current = null;
-    };
-
-    recognitionRef.current = recognition;
-    try {
-      recognition.start();
-    } catch (err) {
-      setIsListening(false);
-      toast.error(
-        t('speechStartFailed', locale)
-      );
-    }
-  }, [isListening, inputValue, locale, setInputValue]);
-
-  // Stop recognition if the component unmounts mid-recording.
-  useEffect(() => {
-    return () => {
+      if (!rec) return;
+      setIsTranscribing(true);
       try {
-        recognitionRef.current?.abort();
-      } catch {
-        /* noop */
+        const wav = await rec.stop();
+        const text = await transcribeSpeech(wav, speechLang(locale));
+        if (text) {
+          setInputValue(baseTextRef.current + text);
+        } else {
+          toast(t('noSpeechDetected', locale));
+        }
+      } catch (err) {
+        toast.error(t('speechRecognitionError', locale, { error: (err as Error)?.message || 'stt' }));
+      } finally {
+        setIsTranscribing(false);
       }
-    };
-  }, []);
-
-  // Mic gesture handlers: distinguish press-and-hold from tap-to-toggle by duration.
-  const TAP_THRESHOLD_MS = 300;
-  const handleMicPointerDown = useCallback(
-    (e: React.PointerEvent) => {
-      e.preventDefault();
-      // If already in hands-free toggle mode, a tap stops it.
-      if (listenModeRef.current === 'toggle') {
-        stopListening();
-        listenModeRef.current = 'idle';
-        suppressNextUpRef.current = true;
-        return;
-      }
-      pressStartRef.current = Date.now();
-      listenModeRef.current = 'hold';
-      startListening();
     },
-    [startListening, stopListening]
+    [locale, setInputValue]
   );
 
-  const handleMicPointerUp = useCallback(() => {
-    if (suppressNextUpRef.current) {
-      suppressNextUpRef.current = false;
+  // Tap the mic → toggle recording. First tap starts (optimistic UI); second
+  // tap stops and transcribes. getUserMedia is async, so a stop tap that lands
+  // before the mic opens sets `stopRequested` and finalises in startRecording's
+  // callback.
+  const toggleListening = useCallback(() => {
+    if (isTranscribing) return;
+    const active = sessionRef.current;
+    if (active) {
+      // Second tap → stop and transcribe (or finalise as soon as the mic opens).
+      active.stopRequested = true;
+      if (active.recording) finalizeSession(active);
       return;
     }
-    if (listenModeRef.current !== 'hold') return;
-    const duration = Date.now() - pressStartRef.current;
-    if (duration < TAP_THRESHOLD_MS) {
-      // Quick tap → switch to hands-free continuous listening (keep recording).
-      listenModeRef.current = 'toggle';
-    } else {
-      // Held → press-to-talk release stops dictation.
-      stopListening();
-      listenModeRef.current = 'idle';
+    // First tap → start.
+    baseTextRef.current = inputValue ? inputValue.trimEnd() + ' ' : '';
+    const session = { recording: null as AudioRecording | null, stopRequested: false, canceled: false };
+    sessionRef.current = session;
+    setIsListening(true); // banner shows the moment you tap
+    startRecording().then(
+      (rec) => {
+        if (session.canceled) {
+          rec.cancel();
+          return;
+        }
+        session.recording = rec;
+        // The user may have already tapped stop before the mic finished opening.
+        if (session.stopRequested) finalizeSession(session);
+      },
+      (err) => {
+        if (sessionRef.current === session) sessionRef.current = null;
+        setIsListening(false);
+        const name = (err as Error)?.name;
+        if (name === 'NotAllowedError' || name === 'SecurityError') {
+          toast.error(t('micPermissionDenied', locale));
+        } else {
+          toast.error(t('speechStartFailed', locale));
+        }
+      }
+    );
+  }, [isTranscribing, inputValue, locale, finalizeSession]);
+
+  // Release the mic if the component unmounts mid-recording.
+  useEffect(() => {
+    return () => {
+      const s = sessionRef.current;
+      if (s) {
+        s.canceled = true;
+        try {
+          s.recording?.cancel();
+        } catch {
+          /* noop */
+        }
+      }
+      sessionRef.current = null;
+    };
+  }, []);
+
+  // Elapsed recording time (seconds) for the live "listening" indicator.
+  const [recordSeconds, setRecordSeconds] = useState(0);
+  useEffect(() => {
+    if (!isListening) {
+      setRecordSeconds(0);
+      return;
     }
-  }, [stopListening]);
-
-  const handleMicPointerLeave = useCallback(() => {
-    // Only the press-and-hold gesture cancels on leave; toggle mode persists.
-    if (listenModeRef.current === 'hold') {
-      stopListening();
-      listenModeRef.current = 'idle';
-    }
-  }, [stopListening]);
-
-
+    const started = Date.now();
+    const id = window.setInterval(() => {
+      setRecordSeconds(Math.floor((Date.now() - started) / 1000));
+    }, 250);
+    return () => window.clearInterval(id);
+  }, [isListening]);
 
   // Get quick actions based on conversation or clarification suggestions
   const hasClarificationSuggestions = clarificationSuggestions.length > 0;
@@ -1259,6 +1242,41 @@ export function CopilotPanel() {
       <div className="absolute inset-0 rounded-2xl neon-glow-blur" />
       <div className="absolute inset-0 rounded-2xl neon-glow" />
 
+      {/* Voice status banner — makes it obvious whether we're recording or
+          transcribing, so the user never wonders if the mic is doing anything. */}
+      {(isListening || isTranscribing) && (
+        <div className="relative mx-1 mt-1 -mb-0.5 flex items-center gap-2.5 px-3 py-2 rounded-xl bg-muted/70 border border-border/40">
+          {isListening ? (
+            <>
+              <span className="relative flex h-2.5 w-2.5 shrink-0" aria-hidden="true">
+                <span className="absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-60 animate-ping" />
+                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-500" />
+              </span>
+              <span className="flex items-center gap-[3px] h-4" aria-hidden="true">
+                {[0, 1, 2, 3, 4].map((i: number) => (
+                  <motion.span
+                    key={i}
+                    className="w-[3px] rounded-full bg-red-500"
+                    animate={{ height: [5, 15, 5] }}
+                    transition={{ duration: 0.7, repeat: Infinity, ease: 'easeInOut', delay: i * 0.1 }}
+                  />
+                ))}
+              </span>
+              <span className="text-xs font-medium text-foreground">{t('listening', locale)}</span>
+              <span className="text-[11px] text-muted-foreground">· {t('tapToStop', locale)}</span>
+              <span className="ml-auto text-[11px] tabular-nums text-muted-foreground">
+                {Math.floor(recordSeconds / 60)}:{String(recordSeconds % 60).padStart(2, '0')}
+              </span>
+            </>
+          ) : (
+            <>
+              <Loader2 className="w-4 h-4 text-primary animate-spin shrink-0" />
+              <span className="text-xs font-medium text-foreground">{t('transcribing', locale)}</span>
+            </>
+          )}
+        </div>
+      )}
+
       <div className="relative flex items-end gap-2 p-2 rounded-[14px] bg-background">
         {/* Hidden input: file/photo picker. On mobile the native sheet already
             offers "Take Photo" as an option, so a separate camera shortcut is
@@ -1334,7 +1352,7 @@ export function CopilotPanel() {
           >
             <Mic className="w-5 h-5" />
           </button>
-        ) : !isListening && inputValue.trim() ? (
+        ) : !isListening && !isTranscribing && inputValue.trim() ? (
           <button
             onClick={() => { if (inputValue.trim()) { handleSend(inputValue); } }}
             className="w-10 h-10 flex items-center justify-center transition-all text-primary hover:brightness-125 shrink-0"
@@ -1346,19 +1364,20 @@ export function CopilotPanel() {
         ) : speechSupported ? (
           <button
             type="button"
-            onPointerDown={handleMicPointerDown}
-            onPointerUp={handleMicPointerUp}
-            onPointerLeave={handleMicPointerLeave}
+            onClick={isTranscribing ? undefined : toggleListening}
+            disabled={isTranscribing}
             className={cn(
-              'w-10 h-10 flex items-center justify-center rounded-full transition-colors touch-none select-none shrink-0',
+              'w-10 h-10 flex items-center justify-center rounded-full transition-colors select-none shrink-0',
               isListening
                 ? 'bg-red-500/15 text-red-500 animate-pulse'
-                : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                : isTranscribing
+                  ? 'text-muted-foreground'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
             )}
-            aria-label={isListening ? t('tapToStopListening', locale) : t('holdToTalk', locale)}
-            title={isListening ? t('tapToStopListening', locale) : t('holdToTalk', locale)}
+            aria-label={isListening ? t('tapToStop', locale) : t('tapToTalk', locale)}
+            title={isListening ? t('tapToStop', locale) : t('tapToTalk', locale)}
           >
-            <Mic className="w-5 h-5" />
+            {isTranscribing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Mic className="w-5 h-5" />}
           </button>
         ) : (
           <button

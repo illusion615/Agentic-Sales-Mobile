@@ -515,6 +515,15 @@ export const voiceOptions: VoiceOption[] = [
   { id: 'en-US-GuyNeural', name: 'Guy', tier: 'natural', locale: 'en-US', gender: 'male' },
   { id: 'en-US-AriaNeural', name: 'Aria', tier: 'premium', locale: 'en-US', gender: 'female' },
   { id: 'en-US-DavisNeural', name: 'Davis', tier: 'premium', locale: 'en-US', gender: 'male' },
+  // German voices
+  { id: 'de-DE-KatjaNeural', name: 'Katja', tier: 'natural', locale: 'de-DE', gender: 'female' },
+  { id: 'de-DE-ConradNeural', name: 'Conrad', tier: 'natural', locale: 'de-DE', gender: 'male' },
+  // French voices
+  { id: 'fr-FR-DeniseNeural', name: 'Denise', tier: 'natural', locale: 'fr-FR', gender: 'female' },
+  { id: 'fr-FR-HenriNeural', name: 'Henri', tier: 'natural', locale: 'fr-FR', gender: 'male' },
+  // Spanish voices
+  { id: 'es-ES-ElviraNeural', name: 'Elvira', tier: 'natural', locale: 'es-ES', gender: 'female' },
+  { id: 'es-ES-AlvaroNeural', name: 'Álvaro', tier: 'natural', locale: 'es-ES', gender: 'male' },
 ];
 
 export function getVoicesForLocale(locale: Locale): VoiceOption[] {
@@ -538,6 +547,36 @@ export function getSelectedVoice(): VoiceId {
 export function setSelectedVoice(voiceId: VoiceId): void {
   localStorage.setItem('voice', voiceId);
   window.dispatchEvent(new CustomEvent('voice-changed', { detail: voiceId }));
+}
+
+/**
+ * Azure Neural voice to use for a locale: the user's selected voice when it
+ * belongs to that locale, otherwise undefined so the speech Function falls back
+ * to the locale's default voice (avoids e.g. reading English with a zh voice
+ * when the user switched app language but never changed the voice).
+ */
+export function getAzureVoiceForLocale(locale: Locale): string | undefined {
+  const selected = getSelectedVoice();
+  return getVoicesForLocale(locale).some((v: VoiceOption) => v.id === selected)
+    ? selected
+    : undefined;
+}
+
+/**
+ * Which TTS engine to use. 'auto' = local when the device has a matching voice,
+ * else the Azure connector; 'local' / 'azure' force a specific engine (with a
+ * fallback the other way if the forced one is unavailable).
+ */
+export type VoiceEngine = 'auto' | 'local' | 'azure';
+
+export function getVoiceEngine(): VoiceEngine {
+  const v = localStorage.getItem('voiceEngine');
+  return v === 'local' || v === 'azure' ? v : 'auto';
+}
+
+export function setVoiceEngine(engine: VoiceEngine): void {
+  localStorage.setItem('voiceEngine', engine);
+  window.dispatchEvent(new CustomEvent('voiceengine-changed', { detail: engine }));
 }
 
 // Extract voice name from voice ID for matching with system voices

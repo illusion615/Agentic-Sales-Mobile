@@ -13,7 +13,7 @@ import { useAccountList } from '@/generated/hooks/use-account';
 import { useUpdateCopilotConversation, useCreateCopilotConversation } from '@/generated/hooks/use-copilot-conversation';
 import { useCreateBusinessInsight, useBusinessInsightList, useDeleteBusinessInsight } from '@/generated/hooks/use-business-insight';
 import { useLocale } from '@/lib/i18n';
-import { t, getGreeting, getChatFontClass, getThinkingDotStyle, getAutoPlayAgentResponse, getSelectedVoice, findMatchingSystemVoice, getVoiceSummaryEnabled, generateVoiceSummary, getAgentFramework, getHomeHeaderWidget, speechLang, localeBcp47, type Locale, type ThinkingDotStyle, type HomeHeaderWidget } from '@/lib/i18n';
+import { t, getGreeting, getChatFontClass, getThinkingDotStyle, getAutoPlayAgentResponse, getSelectedVoice, getAzureVoiceForLocale, getVoiceEngine, findMatchingSystemVoice, getVoiceSummaryEnabled, generateVoiceSummary, getAgentFramework, getHomeHeaderWidget, speechLang, localeBcp47, type Locale, type ThinkingDotStyle, type HomeHeaderWidget } from '@/lib/i18n';
 import { splitIntoSegments } from '@/lib/speech';
 import { useSpeechPlayer, type SpeechTrack } from '@/hooks/use-speech-player';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
@@ -915,6 +915,8 @@ export default function HomeDashboard() {
   const chatAutoPlayer = useSpeechPlayer({
     getLang: () => speechLang(locale),
     getVoice: () => findMatchingSystemVoice(getSelectedVoice(), locale),
+    getAzureVoice: () => getAzureVoiceForLocale(locale),
+    getEnginePref: () => getVoiceEngine(),
   });
 
   // Auto-play agent response with TTS when enabled
@@ -1126,6 +1128,8 @@ export default function HomeDashboard() {
   const insightPlayer = useSpeechPlayer({
     getLang: () => speechLang(locale),
     getVoice: () => findMatchingSystemVoice(getSelectedVoice(), locale),
+    getAzureVoice: () => getAzureVoiceForLocale(locale),
+    getEnginePref: () => getVoiceEngine(),
     getRate: () => briefMeSpeedRef.current,
     trackPauseMs: 800,
     segmentPauseMs: 500,
@@ -1479,12 +1483,18 @@ ${agentResponse}`;
       
       if (insightLines.length > 0) {
 
-        // Save new insights to Dataverse FIRST, then remove the user's older
-        // ones. We create first so we can read back the Dataverse-stamped owner
-        // (`_ownerid_value`) of a brand-new row — that is the reliable identity
-        // of the current user, obtained WITHOUT querying the systemuser table
-        // (which the Code App runtime cannot read). This makes the "replace my
-        // previous insights" cleanup both correct and multi-user safe.
+        // Snapshot the insight rows that exist BEFORE this run so we can delete
+        // exactly those afterwards. Telling "which rows are new" by echoed id or
+        // by generatedon is unreliable on hosted Dataverse: create returns 204
+        // No Content (no id echoed → we fall back to a synthetic temp id) and
+        // the stored generatedon can come back at a different precision than the
+        // ISO string we sent, so `generatedon === now` misses. A before/after id
+        // diff is immune to both. We still scope deletes to our own Dataverse
+        // owner (read back from a fresh row) so we never touch another rep's
+        // insights — this stays correct and multi-user safe.
+        const priorInsights = (await refetchBusinessInsights()).data || [];
+        const priorIds = new Set(priorInsights.map((r: { id: string }) => r.id));
+
         const now = new Date().toISOString();
         const validUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // Valid for 24 hours
         
@@ -1546,31 +1556,24 @@ ${agentResponse}`;
           });
         });
         
-        const created = await Promise.all(savePromises);
-        const newIds = new Set(
-          created.map((c: { id?: string }) => c?.id).filter((id): id is string => !!id)
-        );
+        await Promise.all(savePromises);
 
-        // Re-read so we can see the Dataverse-stamped owner of the rows we just
-        // created (this run is marked by generatedon === now).
+        // Re-read so we see all rows (old + new) with their Dataverse-stamped
+        // owner. New rows are exactly those that were not present before this run.
         const { data: afterCreate } = await refetchBusinessInsights();
         const all = afterCreate || [];
-        const myNewRows = all.filter(
-          (r: { id: string; generatedon?: string }) => r.generatedon === now || newIds.has(r.id)
-        );
+        const newRows = all.filter((r: { id: string }) => !priorIds.has(r.id));
         // The current user's Dataverse owner id, taken from a row we just made.
-        const myOwnerId = (myNewRows[0]?.ownerid || '').toLowerCase();
+        const myOwnerId = (newRows[0]?.ownerid || '').toLowerCase();
 
-        // Delete only THIS user's PRIOR insights (same owner, not part of this
-        // run). Scoping by the Dataverse owner of our own fresh row guarantees
-        // we never touch another rep's insights, and it also clears legacy rows
-        // that were created before ownership stamping worked.
+        // Delete only THIS user's PRIOR insights (rows that existed before this
+        // run and share our owner). Scoping by the Dataverse owner of our own
+        // fresh row guarantees we never touch another rep's insights, and it
+        // also clears legacy rows created before ownership stamping worked.
         if (myOwnerId) {
           const stale = all.filter(
-            (r: { id: string; ownerid?: string; generatedon?: string }) =>
-              (r.ownerid || '').toLowerCase() === myOwnerId &&
-              r.generatedon !== now &&
-              !newIds.has(r.id)
+            (r: { id: string; ownerid?: string }) =>
+              priorIds.has(r.id) && (r.ownerid || '').toLowerCase() === myOwnerId
           );
           if (stale.length > 0) {
             await Promise.all(
@@ -1977,6 +1980,7 @@ ${agentResponse}`;
               canPrevInsight={briefMeCurrentIndex > 0}
               canNextInsight={briefMeCurrentIndex < briefMeInsightTexts.length - 1}
               activeInsightIndex={briefMeCurrentIndex}
+              onInsightIndexChange={setBriefMeCurrentIndex}
               onInsightViewed={markInsightRead}
               isInsightPlaybackActive={briefMeIsPlaying}
               insightPlaybackElapsed={formatBriefMeTime(briefMeCurrentTime)}

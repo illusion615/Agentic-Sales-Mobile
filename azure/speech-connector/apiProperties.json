@@ -1,0 +1,24 @@
+{
+  "properties": {
+    "connectionParameters": {
+      "api_key": {
+        "type": "securestring",
+        "uiDefinition": {
+          "constraints": {
+            "clearText": false,
+            "required": "true",
+            "tabIndex": 2
+          },
+          "description": "The shared x-api-key configured on the Azure Function.",
+          "displayName": "x-api-key",
+          "tooltip": "Enter the shared API key for the voice Function."
+        }
+      }
+    },
+    "iconBrandColor": "#8b5cf6",
+    "capabilities": [],
+    "scriptOperations": null,
+    "publisher": "Sales Copilot",
+    "stackOwner": "Sales Copilot"
+  }
+}

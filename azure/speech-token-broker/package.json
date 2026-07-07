@@ -1,0 +1,12 @@
+{
+  "name": "speech-token-broker",
+  "version": "1.0.0",
+  "description": "Mints short-lived Azure Speech tokens so the front end never holds the subscription key.",
+  "main": "src/functions/*.js",
+  "scripts": {
+    "start": "func start"
+  },
+  "dependencies": {
+    "@azure/functions": "^4.5.0"
+  }
+}

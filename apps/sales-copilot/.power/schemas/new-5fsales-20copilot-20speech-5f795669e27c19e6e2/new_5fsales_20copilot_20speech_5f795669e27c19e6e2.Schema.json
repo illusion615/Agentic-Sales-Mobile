@@ -1,0 +1,240 @@
+{
+  "name": "shared_new-5fsales-20copilot-20speech-5f795669e27c19e6e2",
+  "id": "/providers/Microsoft.PowerApps/apis/shared_new-5fsales-20copilot-20speech-5f795669e27c19e6e2",
+  "type": "Microsoft.PowerApps/apis",
+  "properties": {
+    "xrmConnectorId": "89d801b4-d278-f111-ab0e-002248040a95",
+    "displayName": "Sales Copilot Speech",
+    "iconUri": "https://defaulticons.powerapps.com/defaulticons/api-dedicated.png",
+    "iconBrandColor": "#8b5cf6",
+    "contact": {},
+    "license": {},
+    "apiEnvironment": "Shared",
+    "isCustomApi": true,
+    "blobUrisAreProxied": false,
+    "connectionParameters": {},
+    "swagger": {
+      "swagger": "2.0",
+      "info": {
+        "title": "Sales Copilot Speech",
+        "description": "Server-side Azure Speech proxy for the Sales Copilot Code App (text-to-speech and speech-to-text). Called from the app via the Power Apps SDK to bypass the app iframe's connect-src sandbox.",
+        "version": "1.0.0"
+      },
+      "host": "usa002-004.azure-apihub.net",
+      "basePath": "/apim/new-5fsales-20copilot-20speech-5f795669e27c19e6e2",
+      "schemes": [
+        "https",
+        "http"
+      ],
+      "consumes": [
+        "application/json"
+      ],
+      "produces": [
+        "application/json"
+      ],
+      "paths": {
+        "/{connectionId}/tts": {
+          "post": {
+            "operationId": "Synthesize",
+            "summary": "Synthesize speech",
+            "description": "Convert text to speech and return base64 MP3 audio.",
+            "parameters": [
+              {
+                "name": "connectionId",
+                "in": "path",
+                "required": true,
+                "x-ms-visibility": "internal",
+                "type": "string"
+              },
+              {
+                "name": "body",
+                "in": "body",
+                "required": true,
+                "schema": {
+                  "$ref": "#/definitions/TtsRequest"
+                }
+              }
+            ],
+            "responses": {
+              "200": {
+                "description": "Audio synthesized",
+                "schema": {
+                  "$ref": "#/definitions/TtsResponse"
+                }
+              }
+            }
+          }
+        },
+        "/{connectionId}/stt": {
+          "post": {
+            "operationId": "Transcribe",
+            "summary": "Transcribe speech",
+            "description": "Convert base64 WAV audio (16 kHz mono PCM) to text.",
+            "parameters": [
+              {
+                "name": "connectionId",
+                "in": "path",
+                "required": true,
+                "x-ms-visibility": "internal",
+                "type": "string"
+              },
+              {
+                "name": "body",
+                "in": "body",
+                "required": true,
+                "schema": {
+                  "$ref": "#/definitions/SttRequest"
+                }
+              }
+            ],
+            "responses": {
+              "200": {
+                "description": "Audio transcribed",
+                "schema": {
+                  "$ref": "#/definitions/SttResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "definitions": {
+        "TtsRequest": {
+          "type": "object",
+          "required": [
+            "text"
+          ],
+          "properties": {
+            "text": {
+              "type": "string",
+              "description": "Text to synthesize"
+            },
+            "locale": {
+              "type": "string",
+              "description": "BCP-47 locale, e.g. zh-CN"
+            },
+            "voice": {
+              "type": "string",
+              "description": "Azure Neural voice name (optional)"
+            }
+          }
+        },
+        "TtsResponse": {
+          "type": "object",
+          "properties": {
+            "audio": {
+              "type": "string",
+              "description": "Base64-encoded MP3"
+            },
+            "format": {
+              "type": "string"
+            },
+            "voice": {
+              "type": "string"
+            },
+            "locale": {
+              "type": "string"
+            }
+          }
+        },
+        "SttRequest": {
+          "type": "object",
+          "required": [
+            "audio"
+          ],
+          "properties": {
+            "audio": {
+              "type": "string",
+              "description": "Base64-encoded 16 kHz mono PCM WAV"
+            },
+            "locale": {
+              "type": "string",
+              "description": "BCP-47 locale, e.g. zh-CN"
+            }
+          }
+        },
+        "SttResponse": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "description": "Recognized transcript"
+            },
+            "status": {
+              "type": "string",
+              "description": "RecognitionStatus (Success/NoMatch/...)"
+            },
+            "locale": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "runtimeUrls": [
+      "https://efcd2d46-3d9e-e31a-a9d8-5481ddae951c.01.custom.usa002.azure-apihub.net/apim/new-5fsales-20copilot-20speech-5f795669e27c19e6e2",
+      "http://efcd2d46-3d9e-e31a-a9d8-5481ddae951c.01.custom.usa002.azure-apihub.net/apim/new-5fsales-20copilot-20speech-5f795669e27c19e6e2"
+    ],
+    "primaryRuntimeUrl": "https://efcd2d46-3d9e-e31a-a9d8-5481ddae951c.01.custom.usa002.azure-apihub.net/apim/new-5fsales-20copilot-20speech-5f795669e27c19e6e2",
+    "doNotUseApiHubNetRuntimeUrl": "https://efcd2d46-3d9e-e31a-a9d8-5481ddae951c.01.custom.usa002.azure-apihub.net/apim/new-5fsales-20copilot-20speech-5f795669e27c19e6e2",
+    "metadata": {
+      "source": "powerapps-user-defined",
+      "brandColor": "#8b5cf6",
+      "contact": {},
+      "license": {},
+      "publisherUrl": null,
+      "serviceUrl": null,
+      "documentationUrl": null,
+      "environmentName": "efcd2d46-3d9e-e31a-a9d8-5481ddae951c",
+      "xrmConnectorId": "89d801b4-d278-f111-ab0e-002248040a95",
+      "almMode": "Solution",
+      "parameters": {},
+      "useNewApimVersion": "True",
+      "createdBy": "{\"id\":\"ccc69730-51cf-4703-94c4-5c49bf31082f\",\"displayName\":\"Wells Zhang\",\"email\":\"wellszhang@D365DemoTSCE49940039.OnMicrosoft.com\",\"type\":\"User\",\"userType\":\"NotSpecified\",\"tenantId\":\"899aca58-7bdc-45e9-bec6-1cc9d3f12894\",\"userPrincipalName\":\"wellszhang@D365DemoTSCE49940039.OnMicrosoft.com\"}",
+      "modifiedBy": "{\"id\":\"ccc69730-51cf-4703-94c4-5c49bf31082f\",\"displayName\":\"Wells Zhang\",\"email\":\"wellszhang@D365DemoTSCE49940039.OnMicrosoft.com\",\"type\":\"User\",\"userType\":\"NotSpecified\",\"tenantId\":\"899aca58-7bdc-45e9-bec6-1cc9d3f12894\",\"userPrincipalName\":\"wellszhang@D365DemoTSCE49940039.OnMicrosoft.com\"}",
+      "allowSharing": false,
+      "rateLimit": 0
+    },
+    "capabilities": [
+      "actions"
+    ],
+    "apiDefinitions": {
+      "originalSwaggerUrl": "https://usa002004wus3ext.blob.core.windows.net/api-swagger-files/unitedstates-002/new-5fsales-20copilot-20speech-5f795669e27c19e6e2.json_original?skoid=e6898b49-53e1-4e33-bbf3-f68cbec72336&sktid=33e01921-4d64-4f8c-a055-5bdaffd5e33d&skt=2026-07-05T11%3A39%3A47Z&ske=2026-07-06T11%3A39%3A47Z&sks=b&skv=2025-01-05&sv=2025-01-05&spr=https&se=2026-07-06T04%3A29%3A35Z&sr=b&sp=r&sig=cseGQyr8DpJJXtN%2Frr4G3g%2BIKX4POx9Kj638b1pSCyI%3D",
+      "modifiedSwaggerUrl": "https://usa002004wus3ext.blob.core.windows.net/api-swagger-files/unitedstates-002/new-5fsales-20copilot-20speech-5f795669e27c19e6e2.json?skoid=e6898b49-53e1-4e33-bbf3-f68cbec72336&sktid=33e01921-4d64-4f8c-a055-5bdaffd5e33d&skt=2026-07-05T11%3A39%3A47Z&ske=2026-07-06T11%3A39%3A47Z&sks=b&skv=2025-01-05&sv=2025-01-05&spr=https&se=2026-07-06T04%3A29%3A35Z&sr=b&sp=r&sig=F4ema4xTDTJoDJo2fxNIhzfnVDbOpR32LHFK69dJ8Wc%3D"
+    },
+    "policyTemplateInstances": [],
+    "backendService": {
+      "serviceUrl": "https://sales-copilot-token.azurewebsites.net/api"
+    },
+    "createdBy": {
+      "id": "ccc69730-51cf-4703-94c4-5c49bf31082f",
+      "displayName": "Wells Zhang",
+      "email": "wellszhang@D365DemoTSCE49940039.OnMicrosoft.com",
+      "type": "User",
+      "userType": "NotSpecified",
+      "tenantId": "899aca58-7bdc-45e9-bec6-1cc9d3f12894",
+      "userPrincipalName": "wellszhang@D365DemoTSCE49940039.OnMicrosoft.com"
+    },
+    "modifiedBy": {
+      "id": "ccc69730-51cf-4703-94c4-5c49bf31082f",
+      "displayName": "Wells Zhang",
+      "email": "wellszhang@D365DemoTSCE49940039.OnMicrosoft.com",
+      "type": "User",
+      "userType": "NotSpecified",
+      "tenantId": "899aca58-7bdc-45e9-bec6-1cc9d3f12894",
+      "userPrincipalName": "wellszhang@D365DemoTSCE49940039.OnMicrosoft.com"
+    },
+    "createdTime": "2026-07-06T00:36:33.9492494Z",
+    "changedTime": "2026-07-06T03:29:09.5001383Z",
+    "environment": {
+      "id": "/providers/Microsoft.PowerApps/environments/efcd2d46-3d9e-e31a-a9d8-5481ddae951c",
+      "name": "efcd2d46-3d9e-e31a-a9d8-5481ddae951c"
+    },
+    "tier": "Standard",
+    "publisher": "Wells Zhang",
+    "almMode": "Solution",
+    "parameters": {},
+    "rateLimit": 0,
+    "apiVersion": "None"
+  }
+}

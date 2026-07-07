@@ -130,6 +130,8 @@ interface KPICardsProps {
   canNextInsight?: boolean;
   activeInsightIndex?: number;
   onInsightViewed?: (insightId: string) => void;
+  /** Fired when the user manually changes the shown insight card (swipe / dots). */
+  onInsightIndexChange?: (index: number) => void;
   isInsightPlaybackActive?: boolean;
   insightPlaybackElapsed?: string;
   insightPlaybackTotal?: string;
@@ -238,6 +240,7 @@ export function KPICards({
   canNextInsight = false,
   activeInsightIndex,
   onInsightViewed,
+  onInsightIndexChange,
   isInsightPlaybackActive = false,
   insightPlaybackElapsed,
   insightPlaybackTotal,
@@ -1525,10 +1528,15 @@ export function KPICards({
                     dragElastic={0.2}
                     onDragEnd={(_: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
                       const swipeThreshold = 50;
+                      let nextIdx = insightsSheetIndex;
                       if (info.offset.x < -swipeThreshold && insightsSheetIndex < parsedActivityInsights.length - 1) {
-                        setInsightsSheetIndex(insightsSheetIndex + 1);
+                        nextIdx = insightsSheetIndex + 1;
                       } else if (info.offset.x > swipeThreshold && insightsSheetIndex > 0) {
-                        setInsightsSheetIndex(insightsSheetIndex - 1);
+                        nextIdx = insightsSheetIndex - 1;
+                      }
+                      if (nextIdx !== insightsSheetIndex) {
+                        setInsightsSheetIndex(nextIdx);
+                        onInsightIndexChange?.(nextIdx);
                       }
                     }}
                     className="cursor-grab active:cursor-grabbing"
@@ -1574,6 +1582,7 @@ export function KPICards({
                               onClick={(e: React.MouseEvent) => {
                                 e.stopPropagation();
                                 setInsightsSheetIndex(idx);
+                                onInsightIndexChange?.(idx);
                               }}
                               aria-label={t('jumpToInsight', locale, { n: idx + 1 })}
                               title={t('jumpToInsight', locale, { n: idx + 1 })}

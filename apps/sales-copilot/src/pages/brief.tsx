@@ -6,8 +6,9 @@ import { toast } from '@/lib/toast-utils';
 import { cn } from '@/lib/utils';
 import { useUser } from '@/hooks/use-user';
 import { useBriefingList, useUpdateBriefing } from '@/generated/hooks/use-briefing';
-import { getLocale, getSelectedVoice, findMatchingSystemVoice, voiceOptions, speechLang, t, type Locale, type VoiceOption } from '@/lib/i18n';
-import { primeSpeech } from '@/lib/speech';
+import { getLocale, getSelectedVoice, getAzureVoiceForLocale, getVoiceEngine, findMatchingSystemVoice, voiceOptions, speechLang, t, type Locale, type VoiceOption } from '@/lib/i18n';
+import { primeSpeech, ensureVoicesReady, hasSpeechSynthesis, hasLocalVoiceFor } from '@/lib/speech';
+import { synthesizeSpeech, prefetchSpeech } from '@/lib/azure-tts';
 import {
   parseBriefingPayload,
   priorityColors,
@@ -71,6 +72,9 @@ export default function BriefMePage() {
   const recordStartRef = useRef<number>(0);
 
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  // Engine chosen per chapter: 'local' Web Speech or 'azure' Neural TTS via the
+  // connector (used when the device has no local voice for the locale).
+  const briefEngineRef = useRef<'local' | 'azure'>('local');
   const chapterStartTimeRef = useRef<number>(0);
   const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
   // Per-chapter speech-segment queue. Incremented on every cancel/new chapter
@@ -126,25 +130,18 @@ export default function BriefMePage() {
   const currentItem = items[currentIndex];
   const totalChapters = items.length;
   
-  // Load system TTS voices
+  // Mark the player ready once the voice list settles (or a short timeout).
+  // We flip ready even when there are NO local voices (e.g. GMS-less Huawei):
+  // playback then routes to Azure Neural TTS via the connector instead of
+  // staying silent behind a "voice engine loading" gate forever.
   useEffect(() => {
-    if (!('speechSynthesis' in window)) {
-      setVoicesReady(false);
-      return;
-    }
-    const loadVoices = () => {
-      const voices = window.speechSynthesis.getVoices();
-      if (voices.length > 0) {
-        setVoicesReady(true);
-      }
-    };
-    
-    loadVoices();
-    window.speechSynthesis.onvoiceschanged = loadVoices;
-    
+    let cancelled = false;
+    void ensureVoicesReady().then(() => {
+      if (!cancelled) setVoicesReady(true);
+    });
     return () => {
-      window.speechSynthesis.onvoiceschanged = null;
-      window.speechSynthesis.cancel();
+      cancelled = true;
+      if (hasSpeechSynthesis) window.speechSynthesis.cancel();
     };
   }, []);
   
@@ -153,6 +150,21 @@ export default function BriefMePage() {
     const selectedVoiceId = getSelectedVoice();
     return findMatchingSystemVoice(selectedVoiceId, locale);
   }, [locale]);
+
+  // Stop the Azure <audio> segment (if any). Web Speech is cancelled separately.
+  const stopTtsAudio = useCallback(() => {
+    const el = audioRef.current;
+    if (!el) return;
+    audioRef.current = null;
+    try {
+      el.pause();
+      el.onended = null;
+      el.onerror = null;
+      el.src = '';
+    } catch {
+      /* ignore */
+    }
+  }, []);
   
   // Build paragraph-level segments for the current chapter so TTS has real
   // breathing room between thoughts. Browser SpeechSynthesis treats one
@@ -204,11 +216,50 @@ export default function BriefMePage() {
       // Whole chapter finished
       setIsSpeaking(false);
       utteranceRef.current = null;
+      stopTtsAudio();
       if (isPlaying && currentIndex < items.length - 1) {
         setCurrentIndex((prev) => prev + 1);
       } else if (currentIndex === items.length - 1) {
         setIsPlaying(false);
       }
+      return;
+    }
+
+    // Azure Neural TTS via the connector when the device has no local voice.
+    if (briefEngineRef.current === 'azure') {
+      const lang = speechLang(locale);
+      const voice = getAzureVoiceForLocale(locale);
+      const next = segments[index + 1];
+      if (next) prefetchSpeech(next, lang, voice);
+      synthesizeSpeech(segments[index], lang, voice).then(
+        (url) => {
+          if (runId !== chapterRunIdRef.current) return;
+          const audio = new Audio(url);
+          audioRef.current = audio;
+          audio.playbackRate = playbackRate;
+          setIsSpeaking(true);
+          audio.onended = () => {
+            if (runId !== chapterRunIdRef.current) return;
+            if (audioRef.current === audio) audioRef.current = null;
+            pauseTimerRef.current = setTimeout(() => speakSegment(segments, index + 1, runId), SEGMENT_PAUSE_MS);
+          };
+          audio.onerror = () => {
+            if (runId !== chapterRunIdRef.current) return;
+            setIsSpeaking(false);
+            audioRef.current = null;
+            toast.error(t('speechPlaybackFailed', locale));
+          };
+          void audio.play().catch(() => {
+            if (runId === chapterRunIdRef.current) setIsSpeaking(false);
+          });
+        },
+        () => {
+          if (runId !== chapterRunIdRef.current) return;
+          setIsSpeaking(false);
+          audioRef.current = null;
+          toast.error(t('speechPlaybackFailed', locale));
+        }
+      );
       return;
     }
 
@@ -239,12 +290,13 @@ export default function BriefMePage() {
     };
     utteranceRef.current = utterance;
     window.speechSynthesis.speak(utterance);
-  }, [locale, playbackRate, getSystemVoice, isPlaying, currentIndex, items.length]);
+  }, [locale, playbackRate, getSystemVoice, isPlaying, currentIndex, items.length, stopTtsAudio]);
 
   // Speak current chapter content using TTS, paragraph by paragraph.
   const speakChapter = useCallback((item: BriefingItem) => {
     // Abort anything currently queued, then start a fresh run.
     window.speechSynthesis.cancel();
+    stopTtsAudio();
     if (pauseTimerRef.current) {
       clearTimeout(pauseTimerRef.current);
       pauseTimerRef.current = null;
@@ -257,10 +309,15 @@ export default function BriefMePage() {
       return;
     }
 
+    // Engine for this chapter: honor the user's preference; 'auto'/'local'
+    // prefer a device voice and fall back to Azure, 'azure' always uses it.
+    const enginePref = getVoiceEngine();
+    briefEngineRef.current = enginePref === 'azure' ? 'azure' : hasLocalVoiceFor(speechLang(locale)) ? 'local' : 'azure';
+
     const segments = buildSegments(item);
     chapterStartTimeRef.current = Date.now();
     speakSegment(segments, 0, runId);
-  }, [voicesReady, locale, buildSegments, speakSegment]);
+  }, [voicesReady, locale, buildSegments, speakSegment, stopTtsAudio]);
   
   // Auto-play on mount when data is ready
   const hasAutoPlayed = useRef(false);
@@ -286,6 +343,7 @@ export default function BriefMePage() {
         pauseTimerRef.current = null;
       }
       window.speechSynthesis.cancel();
+      stopTtsAudio();
       setIsPlaying(false);
       setIsSpeaking(false);
     } else {
@@ -297,7 +355,7 @@ export default function BriefMePage() {
         speakChapter(currentItem);
       }
     }
-  }, [isPlaying, currentItem, speakChapter]);
+  }, [isPlaying, currentItem, speakChapter, stopTtsAudio]);
   
   // When currentIndex changes while playing, speak the new chapter
   useEffect(() => {
@@ -311,6 +369,7 @@ export default function BriefMePage() {
     // If currently speaking, we need to restart with new rate
     if (isSpeaking && currentItem) {
       window.speechSynthesis.cancel();
+      stopTtsAudio();
       setTimeout(() => {
         if (isPlaying) {
           speakChapter(currentItem);

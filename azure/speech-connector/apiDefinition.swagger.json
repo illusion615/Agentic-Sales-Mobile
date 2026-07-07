@@ -1,0 +1,101 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "Sales Copilot Speech",
+    "description": "Server-side Azure Speech proxy for the Sales Copilot Code App (text-to-speech and speech-to-text). Called from the app via the Power Apps SDK to bypass the app iframe's connect-src sandbox.",
+    "version": "1.0.0"
+  },
+  "host": "@environmentVariables(\"biz_VoiceFunctionHost\")",
+  "basePath": "/api",
+  "schemes": ["https"],
+  "consumes": ["application/json"],
+  "produces": ["application/json"],
+  "securityDefinitions": {
+    "api_key": {
+      "type": "apiKey",
+      "in": "header",
+      "name": "x-api-key"
+    }
+  },
+  "security": [{ "api_key": [] }],
+  "paths": {
+    "/tts": {
+      "post": {
+        "operationId": "Synthesize",
+        "summary": "Synthesize speech",
+        "description": "Convert text to speech and return base64 MP3 audio.",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": { "$ref": "#/definitions/TtsRequest" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Audio synthesized",
+            "schema": { "$ref": "#/definitions/TtsResponse" }
+          }
+        }
+      }
+    },
+    "/stt": {
+      "post": {
+        "operationId": "Transcribe",
+        "summary": "Transcribe speech",
+        "description": "Convert base64 WAV audio (16 kHz mono PCM) to text.",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": { "$ref": "#/definitions/SttRequest" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Audio transcribed",
+            "schema": { "$ref": "#/definitions/SttResponse" }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "TtsRequest": {
+      "type": "object",
+      "required": ["text"],
+      "properties": {
+        "text": { "type": "string", "description": "Text to synthesize" },
+        "locale": { "type": "string", "description": "BCP-47 locale, e.g. zh-CN" },
+        "voice": { "type": "string", "description": "Azure Neural voice name (optional)" }
+      }
+    },
+    "TtsResponse": {
+      "type": "object",
+      "properties": {
+        "audio": { "type": "string", "description": "Base64-encoded MP3" },
+        "format": { "type": "string" },
+        "voice": { "type": "string" },
+        "locale": { "type": "string" }
+      }
+    },
+    "SttRequest": {
+      "type": "object",
+      "required": ["audio"],
+      "properties": {
+        "audio": { "type": "string", "description": "Base64-encoded 16 kHz mono PCM WAV" },
+        "locale": { "type": "string", "description": "BCP-47 locale, e.g. zh-CN" }
+      }
+    },
+    "SttResponse": {
+      "type": "object",
+      "properties": {
+        "text": { "type": "string", "description": "Base64-encoded UTF-8 transcript (base64 to survive the connector's UTF-8 handling)" },
+        "status": { "type": "string", "description": "RecognitionStatus (Success/NoMatch/...)" },
+        "locale": { "type": "string" }
+      }
+    }
+  }
+}

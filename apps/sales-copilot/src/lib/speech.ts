@@ -26,6 +26,21 @@ export function getVoices(): SpeechSynthesisVoice[] {
   return window.speechSynthesis.getVoices();
 }
 
+/**
+ * True if the device has a usable local (Web Speech) voice for the given
+ * BCP-47 lang. Drives engine selection: when a local voice exists we speak for
+ * free and instantly; when it does not (e.g. GMS-less Huawei WebView returns an
+ * empty voice list) the caller falls back to Azure Neural TTS via the connector.
+ */
+export function hasLocalVoiceFor(lang: string): boolean {
+  if (!hasSpeechSynthesis) return false;
+  const voices = window.speechSynthesis.getVoices();
+  if (voices.length === 0) return false;
+  const prefix = (lang || '').split('-')[0].toLowerCase();
+  if (!prefix) return true;
+  return voices.some((v: SpeechSynthesisVoice) => v.lang.toLowerCase().startsWith(prefix));
+}
+
 // ---------------------------------------------------------------------------
 // Voice readiness — single source of truth for the async voice list.
 //

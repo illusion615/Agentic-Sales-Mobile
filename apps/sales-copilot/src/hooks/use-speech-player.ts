@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   hasSpeechSynthesis,
+  hasLocalVoiceFor,
   primeSpeech,
   ensureVoicesReady,
   stripMarkdown,
   splitIntoSegments,
 } from '@/lib/speech';
+import { synthesizeSpeech, prefetchSpeech } from '@/lib/azure-tts';
 
 // ---------------------------------------------------------------------------
 // useSpeechPlayer — the single shared text-to-speech player.
@@ -14,6 +16,9 @@ import {
 // Brief Me playback, Brief page) drives audio through this one hook. Each
 // screen keeps its OWN buttons, animations and progress UI; this hook only owns
 // the mechanics that everyone kept re-implementing differently:
+//   - engine selection: local Web Speech when the device has a matching voice
+//     (free + instant), else Azure Neural TTS via the speech connector (revives
+//     read-aloud on GMS-less WebViews like Huawei where getVoices() is empty)
 //   - mobile gesture unlock (primeSpeech) done correctly, every time
 //   - async voice-list readiness before the first utterance
 //   - multi-segment / multi-track queueing with clean cancel (runId guard)
@@ -47,8 +52,20 @@ export interface SpeechPlayerState {
 export interface SpeechPlayerOptions {
   /** BCP-47 lang for each utterance (e.g. 'zh-CN'). */
   getLang?: () => string;
-  /** Resolve the SpeechSynthesisVoice to use (per utterance). */
+  /** Resolve the SpeechSynthesisVoice to use for the LOCAL engine (per utterance). */
   getVoice?: () => SpeechSynthesisVoice | null;
+  /**
+   * Azure Neural voice name for the connector engine (e.g. 'zh-CN-XiaoxiaoNeural').
+   * Used only when the local engine is unavailable. Omit to let the Function
+   * pick a sensible default voice for the locale.
+   */
+  getAzureVoice?: () => string | undefined;
+  /**
+   * User preference for which engine to use: 'auto' (local when a matching
+   * device voice exists, else Azure), 'local' (prefer the device voice), or
+   * 'azure' (always the connector). Defaults to 'auto'.
+   */
+  getEnginePref?: () => 'auto' | 'local' | 'azure';
   /** Playback rate (per utterance); read fresh so speed toggles apply. */
   getRate?: () => number;
   /** Strip Markdown from track.text before segmenting. Default true. */
@@ -86,6 +103,30 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}) {
   // playback after the user paused, skipped, or stopped.
   const runIdRef = useRef(0);
   const pauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Fallback timer that advances the session if a segment's completion event is
+  // never delivered (some Android WebViews silently drop <audio>.onended and
+  // SpeechSynthesisUtterance.onend), so one dropped event can't freeze the
+  // whole read-aloud after the first segment.
+  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Engine resolved once per play() session: 'local' Web Speech or 'azure'
+  // Neural TTS via the connector.
+  const engineRef = useRef<'local' | 'azure'>('local');
+  // The <audio> element playing the current Azure segment (null on local).
+  const audioElRef = useRef<HTMLAudioElement | null>(null);
+
+  const stopAzureAudio = useCallback(() => {
+    const el = audioElRef.current;
+    if (!el) return;
+    audioElRef.current = null;
+    try {
+      el.pause();
+      el.onended = null;
+      el.onerror = null;
+      el.src = '';
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const clearPauseTimer = useCallback(() => {
     if (pauseTimerRef.current) {
@@ -111,9 +152,9 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}) {
   }, [clearPauseTimer]);
 
   // Recursive segment speaker. Guarded by runId so cancels abort cleanly.
+  // Dispatches each segment to the engine chosen for this session (engineRef).
   const speak = useCallback((trackIndex: number, segIndex: number, runId: number) => {
     if (runId !== runIdRef.current) return;
-    if (!hasSpeechSynthesis) return;
     const o = optsRef.current;
     const tracks = tracksRef.current;
     const track = tracks[trackIndex];
@@ -150,14 +191,17 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}) {
     }));
     o.onSegmentChange?.(trackIndex, segIndex, segText);
 
-    const utt = new SpeechSynthesisUtterance(segText);
-    utt.lang = o.getLang ? o.getLang() : 'en-US';
-    utt.rate = o.getRate ? o.getRate() : 1.0;
-    utt.pitch = 1.0;
-    const voice = o.getVoice?.();
-    if (voice) utt.voice = voice;
-
-    utt.onend = () => {
+    // Shared "this segment finished, go to the next" continuation. `done`
+    // guards against the engine's completion event AND the watchdog both firing
+    // for the same segment (which would skip one).
+    let done = false;
+    const advance = () => {
+      if (done) return;
+      done = true;
+      if (watchdogRef.current) {
+        clearTimeout(watchdogRef.current);
+        watchdogRef.current = null;
+      }
       if (runId !== runIdRef.current) return;
       const pause = o.segmentPauseMs ?? 0;
       if (pause > 0) {
@@ -166,6 +210,77 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}) {
         speak(trackIndex, segIndex + 1, runId);
       }
     };
+
+    // Completion-event safety net (see watchdogRef). If neither the engine's
+    // end event nor its error arrives within a generous upper bound of the
+    // spoken duration, advance anyway. The bound is deliberately long so it
+    // never clips real speech; a clean onend/onended clears it first.
+    const estMs = Math.max(2500, Math.ceil((segText.length * 260) / (o.getRate?.() ?? 1)) + 2500);
+    const armWatchdog = () => {
+      watchdogRef.current = setTimeout(() => {
+        watchdogRef.current = null;
+        if (done || runId !== runIdRef.current) return;
+        // Don't fire over a deliberate pause — wait it out and re-check.
+        if (stateRef.current.isPaused) {
+          armWatchdog();
+          return;
+        }
+        advance();
+      }, estMs);
+    };
+
+    // Azure Neural TTS via the connector: synthesize the segment to an MP3 data
+    // URL and play it through an <audio> element, chaining on `ended`.
+    if (engineRef.current === 'azure') {
+      const lang = o.getLang ? o.getLang() : 'en-US';
+      const voice = o.getAzureVoice?.();
+      // Warm the next segment while this one plays so playback stays gapless.
+      const nextText = segments[segIndex + 1];
+      if (nextText) prefetchSpeech(nextText, lang, voice);
+      synthesizeSpeech(segText, lang, voice).then(
+        (url) => {
+          if (runId !== runIdRef.current) return;
+          const audio = new Audio(url);
+          audioElRef.current = audio;
+          if (o.getRate) audio.playbackRate = o.getRate();
+          audio.onended = () => {
+            if (audioElRef.current === audio) audioElRef.current = null;
+            advance();
+          };
+          audio.onerror = () => {
+            if (runId !== runIdRef.current) return;
+            o.onError?.(new Error('Azure TTS: audio playback failed'));
+            finish(runId);
+          };
+          void audio.play().catch((err: unknown) => {
+            if (runId !== runIdRef.current) return;
+            o.onError?.(err);
+            finish(runId);
+          });
+          armWatchdog();
+        },
+        (err: unknown) => {
+          if (runId !== runIdRef.current) return;
+          o.onError?.(err);
+          finish(runId);
+        }
+      );
+      return;
+    }
+
+    // Local Web Speech engine.
+    if (!hasSpeechSynthesis) {
+      finish(runId);
+      return;
+    }
+    const utt = new SpeechSynthesisUtterance(segText);
+    utt.lang = o.getLang ? o.getLang() : 'en-US';
+    utt.rate = o.getRate ? o.getRate() : 1.0;
+    utt.pitch = 1.0;
+    const voice = o.getVoice?.();
+    if (voice) utt.voice = voice;
+
+    utt.onend = () => advance();
     utt.onerror = (e: SpeechSynthesisErrorEvent) => {
       // Cancel/interrupt are expected when we stop or skip — not real errors.
       if (e.error === 'canceled' || e.error === 'interrupted') return;
@@ -182,6 +297,7 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}) {
     } catch {
       /* ignore */
     }
+    armWatchdog();
   }, [finish, segmentsFor]);
 
   /**
@@ -196,10 +312,11 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}) {
   /** Start (or restart) a playback session. Primes the engine first. */
   const play = useCallback((tracks: SpeechTrack[], startIndex = 0) => {
     primeSpeech(); // must be the first thing — keeps the gesture valid
-    if (!hasSpeechSynthesis || tracks.length === 0) return;
+    if (tracks.length === 0) return;
 
     clearPauseTimer();
-    window.speechSynthesis.cancel();
+    if (hasSpeechSynthesis) window.speechSynthesis.cancel();
+    stopAzureAudio();
     runIdRef.current += 1;
     const runId = runIdRef.current;
     tracksRef.current = tracks;
@@ -211,20 +328,34 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}) {
     // Priming above already unlocked the engine, so this async hop is safe.
     void ensureVoicesReady().then(() => {
       if (runId !== runIdRef.current) return;
+      // Engine for this session: honor the user's preference when set. 'auto'
+      // and 'local' prefer a matching device voice (free + instant) and fall
+      // back to Azure; 'azure' always uses the connector.
+      const lang = optsRef.current.getLang ? optsRef.current.getLang() : 'en-US';
+      const pref = optsRef.current.getEnginePref?.() ?? 'auto';
+      engineRef.current = pref === 'azure' ? 'azure' : hasLocalVoiceFor(lang) ? 'local' : 'azure';
       speak(idx, 0, runId);
     });
-  }, [clearPauseTimer, speak]);
+  }, [clearPauseTimer, speak, stopAzureAudio]);
 
   const pause = useCallback(() => {
-    if (!hasSpeechSynthesis) return;
     clearPauseTimer();
-    window.speechSynthesis.pause();
+    if (engineRef.current === 'azure') {
+      audioElRef.current?.pause();
+    } else if (hasSpeechSynthesis) {
+      window.speechSynthesis.pause();
+    }
     setState((s) => (s.isActive ? { ...s, isPaused: true } : s));
   }, [clearPauseTimer]);
 
   const resume = useCallback(() => {
-    if (!hasSpeechSynthesis) return;
-    window.speechSynthesis.resume();
+    if (engineRef.current === 'azure') {
+      void audioElRef.current?.play().catch(() => {
+        /* ignore */
+      });
+    } else if (hasSpeechSynthesis) {
+      window.speechSynthesis.resume();
+    }
     setState((s) => (s.isActive ? { ...s, isPaused: false } : s));
   }, []);
 
@@ -232,8 +363,9 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}) {
     runIdRef.current += 1;
     clearPauseTimer();
     if (hasSpeechSynthesis) window.speechSynthesis.cancel();
+    stopAzureAudio();
     setState(IDLE);
-  }, [clearPauseTimer]);
+  }, [clearPauseTimer, stopAzureAudio]);
 
   const next = useCallback(() => {
     const tracks = tracksRef.current;
@@ -259,8 +391,9 @@ export function useSpeechPlayer(options: SpeechPlayerOptions = {}) {
       runIdRef.current += 1;
       if (pauseTimerRef.current) clearTimeout(pauseTimerRef.current);
       if (hasSpeechSynthesis) window.speechSynthesis.cancel();
+      stopAzureAudio();
     };
-  }, []);
+  }, [stopAzureAudio]);
 
   return { state, prime, play, pause, resume, stop, next, prev, restart };
 }
