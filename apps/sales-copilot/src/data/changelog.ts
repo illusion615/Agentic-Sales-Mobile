@@ -8,6 +8,9 @@
  * This file is the durable, human-readable record AND the data the "What's New"
  * dialog reads after a new release loads.
  *
+ * When to cut a release: on EVERY merge of a branch into main (boss policy
+ * 2026-07-07) — each merged branch gets a new version and its What's New here.
+ *
  * How to cut a release:
  *   1. Add a new entry at the TOP of CHANGELOG (newest first).
  *   2. Bump `version` (semver). This value is also the per-release "seen" key,
@@ -45,6 +48,28 @@ export interface ChangelogEntry {
 
 /** Newest first. The first entry is the current release. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.7.0',
+    date: '2026-07-07',
+    title: { zh: '开口即用的语音助手', en: 'Talk to your assistant' },
+    items: [
+      {
+        kind: 'feature',
+        zh: '语音输入：在对话框点一下麦克风开始说话，再点一下结束，说的话会自动变成文字。即使手机没有内置听写也能用。',
+        en: 'Voice input: tap the mic in the composer to start talking, tap again to stop, and your words turn into text automatically — even on phones without built-in dictation.',
+      },
+      {
+        kind: 'feature',
+        zh: '语音朗读：AI 回复和每日简报现在可以用自然的声音朗读出来，即使手机没有内置语音也能听。',
+        en: 'Read aloud: assistant replies and your daily briefing can now be read out in a natural voice — even on phones without a built-in voice.',
+      },
+      {
+        kind: 'improvement',
+        zh: '语音设置：可挑选朗读嗓音；当设备本地语音与云端语音都可用时，还能选择优先用哪一种。',
+        en: 'Voice settings: pick the read-aloud voice, and when both on-device and cloud voices are available, choose which one to use.',
+      },
+    ],
+  },
   {
     version: '1.6.0',
     date: '2026-07-06',
