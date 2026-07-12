@@ -14,11 +14,23 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { ChatMessage } from '@/contexts/copilot-context';
-import type { Locale } from '@/lib/i18n';
+import { getFollowupSuggestionsEnabled, type Locale } from '@/lib/i18n';
 import { getContextualSuggestions, type SuggestionPill } from '@/lib/contextual-suggestions';
 import { generateFollowupSuggestions } from '@/lib/followup-suggestions';
 
 export type SuggestionStatus = 'hidden' | 'generating' | 'ready';
+
+/**
+ * Create / update / match turns lock the composer on a confirmation card, so
+ * LLM-generated follow-ups would never be shown. These ALWAYS fall back to the
+ * free static pills — no AI call — regardless of the user's auto-suggestion
+ * setting. (This also fixes the wasted call that fired in the race window
+ * before the blocking card locked input, and was then discarded.)
+ */
+function isInteractiveTurn(functionCalled?: string): boolean {
+  if (!functionCalled) return false;
+  return /^(draft|update)/i.test(functionCalled) || /match/i.test(functionCalled);
+}
 
 /** Find the most recent assistant message that is a finished, non-empty reply. */
 function lastFinalAssistant(messages: ChatMessage[]): ChatMessage | null {
@@ -60,6 +72,15 @@ export function useDynamicSuggestions(opts: {
   const [pills, setPills] = useState<SuggestionPill[]>(() =>
     getContextualSuggestions({ hasMessages: messages.length > 0, locale }),
   );
+
+  // User setting: auto-generate follow-up pills via the LLM (default on).
+  // Reactive so toggling it in Settings takes effect without a reload.
+  const [autoGenerate, setAutoGenerate] = useState(() => getFollowupSuggestionsEnabled());
+  useEffect(() => {
+    const h = (e: Event) => setAutoGenerate((e as CustomEvent<boolean>).detail);
+    window.addEventListener('followupsuggestions-changed', h);
+    return () => window.removeEventListener('followupsuggestions-changed', h);
+  }, []);
 
   const cacheRef = useRef<Map<string, SuggestionPill[]>>(new Map());
   const inFlightKeyRef = useRef<string | null>(null);
@@ -106,6 +127,23 @@ export function useDynamicSuggestions(opts: {
       return;
     }
 
+    // Skip the LLM call — use the free static pills — when the user disabled
+    // auto suggestions, OR for interactive (create/update/match) turns whose
+    // composer locks on a confirmation card. Cache the static result so it
+    // doesn't re-fire on later renders (action-turn results were never cached
+    // before, so they re-generated on every re-render — pure wasted AI calls).
+    if (!autoGenerate || isInteractiveTurn(lastFinal.functionCalled)) {
+      const staticPills = getContextualSuggestions({
+        hasMessages: true,
+        lastFunctionCalled: lastFinal.functionCalled,
+        locale,
+      });
+      cacheRef.current.set(key, staticPills);
+      setPills(staticPills);
+      setStatus('ready');
+      return;
+    }
+
     // Already generating for this exact turn → just keep the skeleton.
     if (inFlightKeyRef.current === key) {
       setStatus('generating');
@@ -137,7 +175,7 @@ export function useDynamicSuggestions(opts: {
       setPills(result);
       setStatus('ready');
     })();
-  }, [messages, isSending, locale, enabled]);
+  }, [messages, isSending, locale, enabled, autoGenerate]);
 
   return { status, pills };
 }

@@ -11,6 +11,8 @@ import { toast } from '@/lib/toast-utils';
 import { isDataverseReachable } from '@/lib/connectivity';
 import { type ThinkingProgress, type AgentResponse, type IntentResult, type ThinkingStep } from '@/lib/copilot-agent';
 import { emptyState, hydrateConversationState, commitConversationState, buildStateSnapshot, recordConversationState, type ConversationState, type FocusPageContext, type EntityType } from '@/lib/conversation-state';
+import { beginAiTurn, getCurrentAiTurnId } from '@/lib/ai-call-log';
+import { stageTurnCost } from '@/lib/ai-cost-log';
 import { buildQueueFromIntent, findIntentByMessageId, type IntentQueue } from '@/lib/intent-queue';
 import { getFunctionSubject } from '@/lib/function-registry';
 import type { ChangeProposal } from '@/lib/change-proposal';
@@ -1713,6 +1715,9 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             turn: messagesRef.current.length,
           });
           conversationStateRef.current = hydratedState;
+          // Start a new AI-call ledger turn so the Frame Inspector can attribute
+          // every LLM call this message triggers (see ai-call-log.ts).
+          beginAiTurn(text.trim());
           const response = await processMessage(text.trim(), {
             userId: user?.objectId,
             userEmail: user?.userPrincipalName,
@@ -1727,6 +1732,12 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
             } : undefined,
             state: hydratedState,
           }, handleProgress);
+
+          // AI cost (operation-grain): stage this turn for persistence. Flushes
+          // the previous turn (its AI-call ledger is now complete) and schedules
+          // a fallback flush for this one. Placed before the abort check so a
+          // cancelled turn still records the credits it already consumed.
+          stageTurnCost({ turnId: getCurrentAiTurnId(), userMessage: text.trim(), rawIntent: response.rawIntent ?? null });
 
           // Bail out if the user cancelled while we were waiting for the LLM
           if (signal.aborted) return;

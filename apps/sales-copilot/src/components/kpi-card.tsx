@@ -1427,7 +1427,7 @@ export function KPICards({
 
       {/* Activity Insights Sheet with Swipe */}
       <Sheet open={insightsSheetOpen} onOpenChange={setInsightsSheetOpen}>
-        <SheetContent side="bottom" className="rounded-t-2xl px-6 pb-8">
+        <SheetContent side="bottom" showCloseButton={false} className="rounded-t-2xl px-6 pb-8">
           <SheetHeader className="pb-2">
             <SheetTitle className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">

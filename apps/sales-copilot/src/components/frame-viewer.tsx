@@ -25,6 +25,14 @@ import {
   clearConversationStateLog,
   type ConversationStateSnapshot,
 } from '@/lib/conversation-state';
+import {
+  readAiCallLog,
+  clearAiCallLog,
+  summarizeAiCalls,
+  estimateTokens,
+  type AiCallEntry,
+  type AiTurnConsumption,
+} from '@/lib/ai-call-log';
 import { isDagPlan } from '@/lib/dag-schema';
 import type { Locale } from '@/lib/i18n';
 
@@ -38,6 +46,7 @@ export function PipelineViewer({ open, onClose, locale }: PipelineViewerProps) {
   const [entries, setEntries] = useState<PipelineLogEntry[]>([]);
   const [benchmarks, setBenchmarks] = useState<BenchmarkEntry[]>([]);
   const [convStates, setConvStates] = useState<ConversationStateSnapshot[]>([]);
+  const [aiCalls, setAiCalls] = useState<AiCallEntry[]>([]);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
@@ -45,6 +54,7 @@ export function PipelineViewer({ open, onClose, locale }: PipelineViewerProps) {
     setEntries(readPipelineLog());
     setBenchmarks(readBenchmarkLog());
     setConvStates(readConversationStateLog());
+    setAiCalls(readAiCallLog());
   }, [open, tick]);
 
   const stats = useMemo(() => {
@@ -73,6 +83,21 @@ export function PipelineViewer({ open, onClose, locale }: PipelineViewerProps) {
       pipelineAvgMs,
     };
   }, [entries, benchmarks]);
+
+  // Group AI calls by turn so each user input shows its own call list + cost.
+  const { byTurn, aiTotal, aiTokensTotal, unattributed } = useMemo(() => {
+    const map = new Map<string, AiCallEntry[]>();
+    let tokensTotal = 0;
+    let unattributedCount = 0;
+    for (const c of aiCalls) {
+      tokensTotal += estimateTokens(c.promptChars + c.responseChars);
+      if (!c.turnId) { unattributedCount += 1; continue; }
+      const arr = map.get(c.turnId) ?? [];
+      arr.push(c);
+      map.set(c.turnId, arr);
+    }
+    return { byTurn: map, aiTotal: aiCalls.length, aiTokensTotal: tokensTotal, unattributed: unattributedCount };
+  }, [aiCalls]);
 
   return (
     <AnimatePresence>
@@ -121,6 +146,7 @@ export function PipelineViewer({ open, onClose, locale }: PipelineViewerProps) {
                   onClick={() => {
                     clearPipelineLog();
                     clearConversationStateLog();
+                    clearAiCallLog();
                     setTick((n) => n + 1);
                   }}
                 >
@@ -141,7 +167,7 @@ export function PipelineViewer({ open, onClose, locale }: PipelineViewerProps) {
               <div className="mb-2 text-[10px] uppercase tracking-wide text-stone-400">
                 {locale === 'zh-Hans' ? '⚡ 流水线性能' : '⚡ Pipeline Performance'}
               </div>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <Tile
                   label={locale === 'zh-Hans' ? '平均延迟' : 'Avg Latency'}
                   value={stats.pipelineAvgMs ? `${stats.pipelineAvgMs}ms` : '—'}
@@ -154,6 +180,11 @@ export function PipelineViewer({ open, onClose, locale }: PipelineViewerProps) {
                 <Tile
                   label={locale === 'zh-Hans' ? '样本量' : 'Samples'}
                   value={`${stats.total}`}
+                />
+                <Tile
+                  label={locale === 'zh-Hans' ? 'AI 调用' : 'AI Calls'}
+                  value={`${aiTotal}`}
+                  hint={`~${aiTokensTotal} tok${unattributed ? ` · ${unattributed} ${locale === 'zh-Hans' ? '未归属' : 'unattr.'}` : ''}`}
                 />
               </div>
             </div>
@@ -172,8 +203,9 @@ export function PipelineViewer({ open, onClose, locale }: PipelineViewerProps) {
                   {entries.map((e, idx) => {
                     // Find matching benchmark entry by timestamp proximity
                     const bench = benchmarks.find(b => Math.abs(b.ts - e.ts) < 5000 && b.userMessage === e.userMessage);
+                    const consumption = summarizeAiCalls(e.turnId ? (byTurn.get(e.turnId) ?? []) : []);
                     return (
-                      <EntryRow key={`${e.ts}-${idx}`} entry={e} benchmark={bench} locale={locale} />
+                      <EntryRow key={`${e.ts}-${idx}`} entry={e} benchmark={bench} aiConsumption={consumption} locale={locale} />
                     );
                   })}
                 </ul>
@@ -286,7 +318,7 @@ function ConversationStatePanel({ snapshot, locale }: { snapshot?: ConversationS
   );
 }
 
-function EntryRow({ entry, benchmark, locale }: { entry: PipelineLogEntry; benchmark?: BenchmarkEntry; locale: Locale }) {
+function EntryRow({ entry, benchmark, aiConsumption, locale }: { entry: PipelineLogEntry; benchmark?: BenchmarkEntry; aiConsumption?: AiTurnConsumption; locale: Locale }) {
   const [expanded, setExpanded] = useState(false);
   const f = entry.frame.result;
   const ok = entry.frame.success;
@@ -333,10 +365,45 @@ function EntryRow({ entry, benchmark, locale }: { entry: PipelineLogEntry; bench
           {benchmark?.result.planRetried && (
             <Chip danger>⟳ Plan retry</Chip>
           )}
+          {aiConsumption && aiConsumption.callCount > 0 && (
+            <Chip outlined>{aiConsumption.callCount} AI · ~{aiConsumption.totalTokensEst} tok</Chip>
+          )}
         </div>
       </button>
       {expanded && (
         <div className="border-t border-stone-100 bg-stone-50/60 px-3 py-2 text-xs">
+          {/* AI calls this turn — the full list of LLM invocations + rough cost. */}
+          {aiConsumption && aiConsumption.callCount > 0 && (
+            <div className="mb-2 rounded border border-amber-200 bg-amber-50/70 px-2 py-1.5">
+              <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-wide text-amber-700">
+                <span>{locale === 'zh-Hans' ? '本轮 AI 调用' : 'AI calls this turn'}</span>
+                <span>
+                  {aiConsumption.callCount} {locale === 'zh-Hans' ? '次' : 'calls'} · ~{aiConsumption.totalTokensEst} tok · {aiConsumption.totalLatencyMs}ms
+                </span>
+              </div>
+              <ul className="space-y-0.5">
+                {aiConsumption.calls.map((c, i) => (
+                  <li key={i} className="flex items-center justify-between gap-2 font-mono text-[11px] text-stone-700">
+                    <span className="flex items-center gap-1">
+                      <span className={c.ok ? 'text-emerald-600' : 'text-rose-600'}>{c.ok ? '●' : '✕'}</span>
+                      <span>{i + 1}. {c.label}</span>
+                      {c.traceId && (
+                        <span className="text-stone-400" title={c.traceId}>#{c.traceId.slice(0, 8)}</span>
+                      )}
+                    </span>
+                    <span className="text-stone-500">
+                      {estimateTokens(c.promptChars + c.responseChars)} tok
+                      <span className="text-stone-400"> ({c.promptChars}+{c.responseChars} ch)</span>
+                      {' · '}{c.latencyMs}ms
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-1 text-[10px] text-stone-400">
+                {locale === 'zh-Hans' ? 'tok 为估算（≈字符/4）；AI Builder 按次计费' : 'tok is estimated (≈chars/4); AI Builder bills per call'}
+              </div>
+            </div>
+          )}
           {/* Degradation detail: explain why a retry fired, so it's traceable. */}
           {(benchmark?.result.frameRetried || benchmark?.result.planRetried) && (
             <div className="mb-2 rounded border border-rose-200 bg-rose-50 px-2 py-1.5 text-[11px] text-rose-700">

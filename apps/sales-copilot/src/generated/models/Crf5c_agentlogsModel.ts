@@ -14,6 +14,11 @@ export const Crf5c_agentlogsstatuscode = {
 export type Crf5c_agentlogsstatuscode = keyof typeof Crf5c_agentlogsstatuscode;
 
 export interface Crf5c_agentlogsBase {
+  biz_aieventtracelist?: string;
+  biz_allocationmethod?: string;
+  biz_creditsconsumed?: number;
+  biz_operationindex?: number;
+  biz_operationtype?: string;
   crf5c_agentlogid: string;
   crf5c_agentname: string;
   crf5c_logname: string;

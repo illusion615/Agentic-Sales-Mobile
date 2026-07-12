@@ -365,6 +365,18 @@ html.light {
   .safe-area-bottom {
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
+
+  /*
+   * Lift a bottom-docked fixed surface above the on-screen keyboard (IME).
+   * `--keyboard-inset` is published by the useKeyboardInset hook (0 while the
+   * keyboard is closed), so this falls back to the safe-area inset at rest and
+   * grows to clear the keyboard while it is open. The transition keeps the lift
+   * smooth on hosts that report the keyboard height in a single step.
+   */
+  .keyboard-inset-bottom {
+    padding-bottom: max(env(safe-area-inset-bottom, 0px), var(--keyboard-inset, 0px));
+    transition: padding-bottom 0.2s ease;
+  }
   
   /* Neon flow animation */
   @keyframes neon-flow {

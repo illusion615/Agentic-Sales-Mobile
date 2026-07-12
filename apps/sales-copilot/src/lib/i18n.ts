@@ -579,6 +579,18 @@ export function setVoiceEngine(engine: VoiceEngine): void {
   window.dispatchEvent(new CustomEvent('voiceengine-changed', { detail: engine }));
 }
 
+export type SpeechInputMode = 'auto' | 'web-speech' | 'device-ime' | 'azure';
+
+export function getSpeechInputMode(): SpeechInputMode {
+  const v = localStorage.getItem('speechInputMode');
+  return v === 'web-speech' || v === 'device-ime' || v === 'azure' ? v : 'auto';
+}
+
+export function setSpeechInputMode(mode: SpeechInputMode): void {
+  localStorage.setItem('speechInputMode', mode);
+  window.dispatchEvent(new CustomEvent('speechinputmode-changed', { detail: mode }));
+}
+
 // Extract voice name from voice ID for matching with system voices
 // e.g., 'zh-CN-XiaoxiaoNeural' -> 'Xiaoxiao'
 export function extractVoiceName(voiceId: VoiceId): string {
@@ -1290,6 +1302,20 @@ export function getCompactDraftForms(): boolean {
 export function setCompactDraftForms(enabled: boolean): void {
   localStorage.setItem('compactDraftForms', String(enabled));
   window.dispatchEvent(new CustomEvent('compactdraftforms-changed', { detail: enabled }));
+}
+
+// Auto follow-up suggestions — after each reply, generate the composer's
+// "ask next" suggestion chips via the LLM. Off = free static pills, no AI call.
+// (Interactive create/update/match turns always skip the LLM regardless — see
+// use-dynamic-suggestions.ts.) Default OFF for new users (opt-in) — the extra
+// AI call is only made when the user explicitly turns it on.
+export function getFollowupSuggestionsEnabled(): boolean {
+  return localStorage.getItem('followupSuggestionsEnabled') === 'true'; // default false (opt-in)
+}
+
+export function setFollowupSuggestionsEnabled(enabled: boolean): void {
+  localStorage.setItem('followupSuggestionsEnabled', String(enabled));
+  window.dispatchEvent(new CustomEvent('followupsuggestions-changed', { detail: enabled }));
 }
 
 // Agenda default expanded on home page

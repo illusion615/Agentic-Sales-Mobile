@@ -101,7 +101,7 @@ export async function generateFollowupSuggestions(opts: {
     const res = await invokeFlowForLLM({
       messages: [{ role: 'user', content: prompt }],
       responseFormat: 'text',
-    });
+    }, { label: 'Follow-up suggestions' });
     if (!res.success || !res.content) return null;
     const pills = parsePills(res.content);
     return pills.length >= 2 ? pills.slice(0, 4) : null;

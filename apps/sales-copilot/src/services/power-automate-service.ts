@@ -17,6 +17,7 @@ import { jsonrepair } from 'jsonrepair';
 import { getClient } from '@microsoft/power-apps/data';
 import { dataSourcesInfo } from '../../.power/schemas/appschemas/dataSourcesInfo';
 import { getTextPromptOpName } from './prompt-resolver';
+import { recordAiCall, newTraceId, formatTracePrefix } from '@/lib/ai-call-log';
 import { Msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75cService as TextPromptService } from '@/generated/services/Msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75cService';
 
 export interface FlowLLMResponse {
@@ -95,6 +96,7 @@ export async function invokeFlowForLLM(
     messages: Array<{ role: string; content: string }>;
     responseFormat?: 'text' | 'json' | 'dag' | 'json-generic';
   },
+  meta?: { label?: string },
 ): Promise<FlowLLMResponse> {
   const startTime = Date.now();
 
@@ -106,13 +108,22 @@ export async function invokeFlowForLLM(
     };
   }
 
+  const baseText = request.messages
+    .map((m) => `${m.role}: ${m.content}`)
+    .join('\n');
+  const responseFormat: ResponseFormat = request.responseFormat ?? 'text';
+  // Frame Inspector AI-call ledger label (defaults to the response format).
+  const callLabel = meta?.label ?? responseFormat;
+  // AI cost logging (ALWAYS ON — recording adds no AI cost): prepend a per-call
+  // trace GUID so the AI Event row can be joined 1:1 to the Agent Log row later.
+  // The GUID sits at char 0 → survives the AI Event 4000-char prompt truncation.
+  // Overhead is negligible (~50 extra prompt chars, no credit-tier change). The
+  // trace is recorded in the client AI-call ledger; the turn's per-operation
+  // Agent Log rows are written later by stageTurnCost (see ai-cost-log.ts).
+  const traceId = newTraceId();
+  const text = `${formatTracePrefix(traceId)}${baseText}`;
+
   try {
-    const text = request.messages
-      .map((m) => `${m.role}: ${m.content}`)
-      .join('\n');
-
-    const responseFormat: ResponseFormat = request.responseFormat ?? 'text';
-
     console.log('[AI Tool] Invoking prompt via generated service, format:', responseFormat, 'prompt length:', text.length);
 
     // Single Text prompt for every format: the runtime-resolved op name keeps
@@ -134,6 +145,7 @@ export async function invokeFlowForLLM(
     if (!result.success) {
       console.error('[AI Tool] Custom API error:', JSON.stringify(result.error, null, 2));
       console.error('[AI Tool] Full result:', JSON.stringify(result, null, 2));
+      recordAiCall({ label: callLabel, responseFormat, promptChars: text.length, responseChars: 0, latencyMs, ok: false, traceId });
       return {
         success: false,
         error: result.error?.message ?? 'AI Builder predict failed',
@@ -175,10 +187,12 @@ export async function invokeFlowForLLM(
       }
     }
 
+    recordAiCall({ label: callLabel, responseFormat, promptChars: text.length, responseChars: rawContent.length, latencyMs, ok: true, traceId });
     return { success: true, content, latencyMs };
   } catch (error: unknown) {
     const latencyMs = Date.now() - startTime;
     console.error('[AI Tool] Error:', error);
+    recordAiCall({ label: callLabel, responseFormat, promptChars: text.length, responseChars: 0, latencyMs, ok: false, traceId });
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error invoking AI Builder',

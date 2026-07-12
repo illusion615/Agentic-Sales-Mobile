@@ -30,6 +30,7 @@ import {
   type ResolutionCandidate,
 } from './agent-utils';
 import { recordPipelineRun } from './frame';
+import { getCurrentAiTurnId } from '@/lib/ai-call-log';
 import { runIntentPipeline, recordBenchmark, type PipelineResult } from './orchestrator';
 import { frameToIntent } from './frame-to-intent';
 import { agentError, toUserMessage, toDevLog, type AgentError } from './errors';
@@ -495,6 +496,7 @@ async function processMessageInner(
         ts: Date.now(),
         userMessage,
         page: context.pageContext?.currentPage,
+        turnId: getCurrentAiTurnId(),
         frame: { success: !pipelineResult.error, result: pipelineResult.frame, latencyMs: pipelineResult.frameLatencyMs, error: pipelineResult.error ? toDevLog(pipelineResult.error) : undefined },
       });
       recordBenchmark({
@@ -544,7 +546,7 @@ async function processMessageInner(
                 { role: 'user', content: userMessage },
               ],
               responseFormat: 'text',
-            });
+            }, { label: 'Chat reply' });
             if (chatResp.success && chatResp.content) chatContent = chatResp.content.trim();
           } catch (e) {
             console.warn('[CopilotAgent] Chat lane LLM failed:', e);
@@ -1429,7 +1431,7 @@ Please provide a brief summary and analysis, do not list individual records.`;
         { role: 'system', content: responseSystemPromptLocalized },
         { role: 'user', content: responseUserPrompt },
       ],
-    });
+    }, { label: 'Response generation' });
     console.log('[CopilotAgent] Pass 2 response:', finalResponse.success, finalResponse.content?.slice(0, 100));
   } catch (pass2Error) {
     console.error('[CopilotAgent] Pass 2 error:', pass2Error);

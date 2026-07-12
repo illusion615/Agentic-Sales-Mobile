@@ -27,8 +27,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { useEffectiveOffline } from '@/lib/connectivity';
 import { newAttachmentId, type CopilotAttachment } from '@/lib/attachments';
 import { useDynamicSuggestions } from '@/hooks/use-dynamic-suggestions';
-import { startRecording, type AudioRecording } from '@/lib/audio-recorder';
-import { transcribeSpeech } from '@/lib/azure-stt';
+import { useSpeechInput } from '@/hooks/use-speech-input';
 
 
 
@@ -350,6 +349,24 @@ export function CopilotPanel() {
     return () => cancelAnimationFrame(raf);
   }, [isOpen]);
 
+  // Keep the latest message visible when the on-screen keyboard (IME) opens or
+  // closes. The keyboard shrinks the visible area (the sheet gains bottom
+  // padding via keyboard-inset-bottom), so without re-pinning the newest message
+  // would slip below the fold. Only re-pin while auto-scroll is active.
+  useEffect(() => {
+    const vv = typeof window !== 'undefined' ? window.visualViewport : null;
+    if (!vv) return;
+    const onResize = () => {
+      if (!isOpen || !shouldAutoScrollRef.current) return;
+      requestAnimationFrame(() => {
+        const el = messagesContainerRef.current;
+        if (el) el.scrollTop = el.scrollHeight;
+      });
+    };
+    vv.addEventListener('resize', onResize);
+    return () => vv.removeEventListener('resize', onResize);
+  }, [isOpen]);
+
   // Focus the composer shortly after open. Kept separate from the scroll above
   // so focus (which can itself nudge scroll) happens after the sheet settles.
   // We flag this focus as programmatic so handleInputFocus doesn't treat it as a
@@ -435,124 +452,19 @@ export function CopilotPanel() {
     closePanel();
   };
 
-  // ─── Tap-to-toggle voice input (record → Azure STT) ───────────────────────
-  // Tap the mic to start recording; tap again to stop and transcribe
-  // (getUserMedia + WAV → the Azure connector). getUserMedia is async, so the
-  // recorder may not exist yet when the user taps stop — the session model
-  // below handles that race.
-  const [isListening, setIsListening] = useState(false);
-  const [isTranscribing, setIsTranscribing] = useState(false);
-  const baseTextRef = useRef('');
-  // Recording session. `startRecording()` (getUserMedia) is async, so the
-  // recorder may not exist yet when the user taps stop. We track the whole
-  // session — the live recorder plus stop/cancel intent — so the stop tap
-  // always finalises correctly no matter how slow the mic is to open.
-  const sessionRef = useRef<{
-    recording: AudioRecording | null;
-    stopRequested: boolean;
-    canceled: boolean;
-  } | null>(null);
-  // Dictation records the mic (getUserMedia + in-browser WAV) and transcribes via
-  // Azure through the connector. The browser's own SpeechRecognition service is
-  // unavailable in the Android Power Apps WebView, so we do NOT rely on it.
-  const speechSupported =
-    typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
-
-  // Stop the live recorder and transcribe. Runs once per session.
-  const finalizeSession = useCallback(
-    async (session: { recording: AudioRecording | null }) => {
-      if (sessionRef.current === session) sessionRef.current = null;
-      const rec = session.recording;
-      setIsListening(false);
-      if (!rec) return;
-      setIsTranscribing(true);
-      try {
-        const wav = await rec.stop();
-        const text = await transcribeSpeech(wav, speechLang(locale));
-        if (text) {
-          setInputValue(baseTextRef.current + text);
-        } else {
-          toast(t('noSpeechDetected', locale));
-        }
-      } catch (err) {
-        toast.error(t('speechRecognitionError', locale, { error: (err as Error)?.message || 'stt' }));
-      } finally {
-        setIsTranscribing(false);
-      }
-    },
-    [locale, setInputValue]
-  );
-
-  // Tap the mic → toggle recording. First tap starts (optimistic UI); second
-  // tap stops and transcribes. getUserMedia is async, so a stop tap that lands
-  // before the mic opens sets `stopRequested` and finalises in startRecording's
-  // callback.
-  const toggleListening = useCallback(() => {
-    if (isTranscribing) return;
-    const active = sessionRef.current;
-    if (active) {
-      // Second tap → stop and transcribe (or finalise as soon as the mic opens).
-      active.stopRequested = true;
-      if (active.recording) finalizeSession(active);
-      return;
-    }
-    // First tap → start.
-    baseTextRef.current = inputValue ? inputValue.trimEnd() + ' ' : '';
-    const session = { recording: null as AudioRecording | null, stopRequested: false, canceled: false };
-    sessionRef.current = session;
-    setIsListening(true); // banner shows the moment you tap
-    startRecording().then(
-      (rec) => {
-        if (session.canceled) {
-          rec.cancel();
-          return;
-        }
-        session.recording = rec;
-        // The user may have already tapped stop before the mic finished opening.
-        if (session.stopRequested) finalizeSession(session);
-      },
-      (err) => {
-        if (sessionRef.current === session) sessionRef.current = null;
-        setIsListening(false);
-        const name = (err as Error)?.name;
-        if (name === 'NotAllowedError' || name === 'SecurityError') {
-          toast.error(t('micPermissionDenied', locale));
-        } else {
-          toast.error(t('speechStartFailed', locale));
-        }
-      }
-    );
-  }, [isTranscribing, inputValue, locale, finalizeSession]);
-
-  // Release the mic if the component unmounts mid-recording.
-  useEffect(() => {
-    return () => {
-      const s = sessionRef.current;
-      if (s) {
-        s.canceled = true;
-        try {
-          s.recording?.cancel();
-        } catch {
-          /* noop */
-        }
-      }
-      sessionRef.current = null;
-    };
-  }, []);
-
-  // Elapsed recording time (seconds) for the live "listening" indicator.
-  const [recordSeconds, setRecordSeconds] = useState(0);
-  useEffect(() => {
-    if (!isListening) {
-      setRecordSeconds(0);
-      return;
-    }
-    const started = Date.now();
-    const id = window.setInterval(() => {
-      setRecordSeconds(Math.floor((Date.now() - started) / 1000));
-    }, 250);
-    return () => window.clearInterval(id);
-  }, [isListening]);
+  // ─── Voice input: Web Speech / device keyboard / Azure STT ────────────────
+  // Runtime lives in useSpeechInput; the composer only consumes the controller.
+  // Destructured to the names the composer render already uses (zero render diff).
+  const {
+    isListening,
+    isTranscribing,
+    showMic: speechSupported,
+    recordSeconds,
+    onMicPointerDown: handleMicPointerDown,
+    onMicPointerUp: handleMicPointerUp,
+    onMicPointerLeave: handleMicPointerLeave,
+    onMicClick: handleMicClick,
+  } = useSpeechInput({ locale, inputValue, setInputValue });
 
   // Get quick actions based on conversation or clarification suggestions
   const hasClarificationSuggestions = clarificationSuggestions.length > 0;
@@ -1364,7 +1276,10 @@ export function CopilotPanel() {
         ) : speechSupported ? (
           <button
             type="button"
-            onClick={isTranscribing ? undefined : toggleListening}
+            onPointerDown={isTranscribing ? undefined : handleMicPointerDown}
+            onPointerUp={isTranscribing ? undefined : handleMicPointerUp}
+            onPointerLeave={isTranscribing ? undefined : handleMicPointerLeave}
+            onClick={isTranscribing ? undefined : handleMicClick}
             disabled={isTranscribing}
             className={cn(
               'w-10 h-10 flex items-center justify-center rounded-full transition-colors select-none shrink-0',
@@ -1542,7 +1457,7 @@ export function CopilotPanel() {
             }
           }}
           className={cn(
-            'flex flex-col overflow-clip safe-area-bottom min-h-0',
+            'flex flex-col overflow-clip keyboard-inset-bottom min-h-0',
             'bg-background/80 backdrop-blur-md',
             // Float mode: fixed bottom sheet overlay
             !isSideDocked && 'fixed bottom-0 left-0 right-0 z-[60] border-t border-border/50',
@@ -1666,7 +1581,7 @@ export function CopilotPanel() {
                 }
               }}
               className={cn(
-                'fixed bottom-0 left-0 right-0 z-[60] flex flex-col overflow-clip safe-area-bottom min-h-0',
+                'fixed bottom-0 left-0 right-0 z-[60] flex flex-col overflow-clip keyboard-inset-bottom min-h-0',
                 'bg-background/80 backdrop-blur-md border-t border-border/50',
                 !isFullScreen && 'rounded-t-[20px]',
               )}

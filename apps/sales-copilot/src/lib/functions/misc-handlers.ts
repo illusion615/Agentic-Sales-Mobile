@@ -195,7 +195,7 @@ const suggestPlan: FunctionHandler = async (args, ctx) => {
   const llmResp = await invokeFlowForLLM({
     messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: dataPayload }],
     responseFormat: 'text',
-  });
+  }, { label: 'Suggest plan' });
 
   if (!llmResp.success || !llmResp.content) return { success: false, error: llmResp.error || 'LLM failed to generate plan' };
 

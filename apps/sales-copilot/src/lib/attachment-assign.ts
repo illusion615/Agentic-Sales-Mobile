@@ -77,7 +77,7 @@ async function llmAssign(
         { role: 'user', content: user },
       ],
       responseFormat: 'json-generic',
-    });
+    }, { label: 'Attachment mapping' });
     if (!resp.success || !resp.content) return fallback;
 
     let parsed: unknown;

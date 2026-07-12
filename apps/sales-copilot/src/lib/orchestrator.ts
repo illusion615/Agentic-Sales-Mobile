@@ -332,7 +332,7 @@ export async function runIntentPipeline(ctx: FrameRunContext): Promise<PipelineR
       { role: 'user', content: userPrompt },
     ],
     responseFormat: 'text',
-  });
+  }, { label: 'Orchestrator' });
   let plan = planResp.success && planResp.content
     ? parseOrchestratorOutput(planResp.content, skeleton)
     : null;
@@ -353,7 +353,7 @@ export async function runIntentPipeline(ctx: FrameRunContext): Promise<PipelineR
         { role: 'user', content: userPrompt },
       ],
       responseFormat: 'text',
-    });
+    }, { label: 'Orchestrator · retry' });
     if (planResp.success && planResp.content) {
       plan = parseOrchestratorOutput(planResp.content, skeleton);
     }

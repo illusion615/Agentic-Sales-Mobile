@@ -84,7 +84,7 @@ export async function executeFunction(
               { role: 'user', content: fullUser },
             ],
             responseFormat,
-          });
+          }, { label: `Skill: ${functionName}` });
 
           if (!llmResp.success || !llmResp.content) {
             return { success: false, error: llmResp.error || 'LLM skill call failed' };

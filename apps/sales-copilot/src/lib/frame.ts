@@ -446,7 +446,7 @@ export async function runFrame(ctx: FrameRunContext): Promise<FrameRunOutcome> {
   let resp = await invokeFlowForLLM({
     messages,
     responseFormat: 'text',
-  });
+  }, { label: 'Frame' });
   let parsed = resp.success && resp.content ? tryParseFrame(resp.content) : null;
   let retried = false;
   let retryReason: string | undefined;
@@ -461,7 +461,7 @@ export async function runFrame(ctx: FrameRunContext): Promise<FrameRunOutcome> {
     resp = await invokeFlowForLLM({
       messages,
       responseFormat: 'text',
-    });
+    }, { label: 'Frame · retry' });
     if (resp.success && resp.content) parsed = tryParseFrame(resp.content);
     if (!resp.success && !resp.error && firstError) resp.error = firstError;
     if (parsed) {
@@ -573,6 +573,8 @@ export interface PipelineLogEntry {
   ts: number;
   userMessage: string;
   page?: string;
+  /** Correlates this turn to its AI-call ledger entries (ai-call-log.ts). */
+  turnId?: string;
   frame: FrameRunOutcome;
 }
 

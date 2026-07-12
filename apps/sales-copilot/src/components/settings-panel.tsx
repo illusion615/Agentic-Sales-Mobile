@@ -6,7 +6,7 @@ import { Switch } from '@/components/ui/switch';
 import { ThinkingIndicator } from '@/components/thinking-indicator';
 import { Button } from '@/components/ui/button';
 
-import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, getAzureVoiceForLocale, setSelectedVoice, getVoiceEngine, setVoiceEngine, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, getCopilotDockLayout, setCopilotDockLayout, copilotDockLayoutLabels, getWeekStartDay, setWeekStartDay, getCopilotFullscreenDefault, setCopilotFullscreenDefault, getCompactDraftForms, setCompactDraftForms, getAgendaDefaultExpanded, setAgendaDefaultExpanded, getCopilotListDefaultView, setCopilotListDefaultView, getCopilotListTopN, setCopilotListTopN, SUPPORTED_LOCALES, LOCALE_META, speechLang, localeLangPrefix, pickLabel, type Locale, type VoiceOption, type VoiceEngine, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget, type CopilotDockLayout, type WeekStartDay, type CopilotListDefaultView } from '@/lib/i18n';
+import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, getAzureVoiceForLocale, setSelectedVoice, getVoiceEngine, setVoiceEngine, getSpeechInputMode, setSpeechInputMode, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, getCopilotDockLayout, setCopilotDockLayout, copilotDockLayoutLabels, getWeekStartDay, setWeekStartDay, getCopilotFullscreenDefault, setCopilotFullscreenDefault, getCompactDraftForms, setCompactDraftForms, getFollowupSuggestionsEnabled, setFollowupSuggestionsEnabled, getAgendaDefaultExpanded, setAgendaDefaultExpanded, getCopilotListDefaultView, setCopilotListDefaultView, getCopilotListTopN, setCopilotListTopN, SUPPORTED_LOCALES, LOCALE_META, speechLang, localeLangPrefix, pickLabel, type Locale, type VoiceOption, type VoiceEngine, type SpeechInputMode, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget, type CopilotDockLayout, type WeekStartDay, type CopilotListDefaultView } from '@/lib/i18n';
 import { useNavigate } from 'react-router-dom';
 import { toast } from '@/lib/toast-utils';
 import { useSpeechPlayer } from '@/hooks/use-speech-player';
@@ -25,6 +25,7 @@ import {
 } from '@/lib/feedback';
 import { startOnboarding } from '@/lib/onboarding';
 import { openWhatsNew } from '@/components/whats-new';
+import { getSpeechInputModeOptions, isAzureSpeechReady, normalizeSpeechInputMode } from '@/lib/speech-input';
 import {
   Select,
   SelectContent,
@@ -92,6 +93,8 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const [voicesResolved, setVoicesResolved] = useState(false);
   // User's engine preference (offered only when both engines are available).
   const [voiceEngine, setVoiceEngineState] = useState<VoiceEngine>(() => getVoiceEngine());
+  const [speechInputMode, setSpeechInputModeState] = useState<SpeechInputMode>(() => getSpeechInputMode());
+  const [azureSpeechReady, setAzureSpeechReady] = useState(false);
 
   // Voice preview — driven by the shared speech player (mobile-safe priming).
   const voicePreviewPlayer = useSpeechPlayer({
@@ -128,6 +131,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const [simulateStreaming, setSimulateStreamingState] = useState(() => getSimulateStreaming());
   const [copilotFullscreenDefault, setCopilotFullscreenDefaultState] = useState(() => getCopilotFullscreenDefault());
   const [compactDraftForms, setCompactDraftFormsState] = useState(() => getCompactDraftForms());
+  const [followupSuggestions, setFollowupSuggestionsState] = useState(() => getFollowupSuggestionsEnabled());
   const [agendaDefaultExpanded, setAgendaDefaultExpandedState] = useState(() => getAgendaDefaultExpanded());
   const [copilotListDefaultView, setCopilotListDefaultViewState] = useState<CopilotListDefaultView>(() => getCopilotListDefaultView());
   const [copilotListTopN, setCopilotListTopNState] = useState<number>(() => getCopilotListTopN());
@@ -175,6 +179,22 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
     let cancelled = false;
     void ensureVoicesReady().then(() => {
       if (!cancelled) setVoicesResolved(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void isAzureSpeechReady().then((ready) => {
+      if (cancelled) return;
+      setAzureSpeechReady(ready);
+      setSpeechInputModeState((current) => {
+        const normalized = normalizeSpeechInputMode(current, ready);
+        if (normalized !== current) setSpeechInputMode(normalized);
+        return normalized;
+      });
     });
     return () => {
       cancelled = true;
@@ -255,6 +275,12 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
     setVoiceEngine(v);
   };
 
+  const handleSpeechInputModeChange = (v: SpeechInputMode) => {
+    const next = normalizeSpeechInputMode(v, azureSpeechReady);
+    setSpeechInputModeState(next);
+    setSpeechInputMode(next);
+  };
+
   const handleCopilotInAllScreensChange = (enabled: boolean) => {
     setCopilotInAllScreensState(enabled);
     setCopilotInAllScreens(enabled);
@@ -279,6 +305,11 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const handleCompactDraftFormsChange = (enabled: boolean) => {
     setCompactDraftFormsState(enabled);
     setCompactDraftForms(enabled);
+  };
+
+  const handleFollowupSuggestionsChange = (enabled: boolean) => {
+    setFollowupSuggestionsState(enabled);
+    setFollowupSuggestionsEnabled(enabled);
   };
 
   const handleAgendaDefaultExpandedChange = (enabled: boolean) => {
@@ -752,6 +783,23 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                 </p>
               </div>
 
+              {/* Auto follow-up suggestions toggle */}
+              <div className="pt-3 border-t border-border/30">
+                <SettingsItem
+                  icon={Sparkles}
+                  label={t('followupSuggestions', locale)}
+                  rightElement={
+                    <Switch
+                      checked={followupSuggestions}
+                      onCheckedChange={handleFollowupSuggestionsChange}
+                    />
+                  }
+                />
+                <p className="text-xs text-muted-foreground mt-1 pl-8">
+                  {t('followupSuggestionsDesc', locale)}
+                </p>
+              </div>
+
               {/* New bottom dock (ActionDock) toggle */}
             </div>
           </motion.div>
@@ -764,9 +812,37 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
               {t('voiceSection', locale)}
             </h3>
             <div className="glass-card p-4 space-y-2">
+              <SettingsItem
+                icon={Speech}
+                label={t('speechInputMode', locale)}
+                rightElement={
+                  <Select value={speechInputMode} onValueChange={(v: string) => handleSpeechInputModeChange(v as SpeechInputMode)}>
+                    <SelectTrigger className="w-36 h-8 text-sm bg-transparent border-border/50">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {getSpeechInputModeOptions(azureSpeechReady).map((mode) => (
+                        <SelectItem key={mode} value={mode}>
+                          {mode === 'auto'
+                            ? t('speechInputAuto', locale)
+                            : mode === 'web-speech'
+                              ? t('speechInputWebSpeech', locale)
+                              : mode === 'device-ime'
+                                ? t('speechInputDeviceIme', locale)
+                                : t('speechInputAzure', locale)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                }
+              />
+              <p className="text-xs text-muted-foreground -mt-1 pl-8">
+                {t('speechInputModeDesc', locale)}
+              </p>
               {/* Engine choice — only when the device has a local voice too, so
                   there is an actual choice (otherwise Azure is used and shown). */}
               {voicesResolved && hasLocalVoiceFor(speechLang(locale)) && (
+                <>
                 <SettingsItem
                   icon={Zap}
                   label={t('voiceEngine', locale)}
@@ -783,6 +859,10 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                     </Select>
                   }
                 />
+                <p className="text-xs text-muted-foreground -mt-1 pl-8">
+                  {t('voiceEngineDesc', locale)}
+                </p>
+                </>
               )}
               <SettingsItem
                 icon={Volume2}
@@ -903,29 +983,6 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                   />
                 }
               />
-              {/* Voice capability self-check (moved here from Help & Feedback) */}
-              <div className="border-t border-border/30 pt-2">
-                <button
-                  onClick={() => {
-                    if (onClose) onClose();
-                    navigate('/debug/voice-probe');
-                  }}
-                  className="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-muted/50 transition-colors"
-                >
-                  <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                    <Speech className="w-5 h-5 text-primary" />
-                  </div>
-                  <div className="flex-1 text-left">
-                    <p className="text-sm font-medium text-foreground">
-                      {locale === 'zh-Hans' ? '语音能力自检' : 'Voice capability check'}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {locale === 'zh-Hans' ? '检测麦克风与语音支持' : 'Probe microphone and speech support'}
-                    </p>
-                  </div>
-                  <ChevronRight className="w-5 h-5 text-muted-foreground" />
-                </button>
-              </div>
             </div>
           </motion.div>
 

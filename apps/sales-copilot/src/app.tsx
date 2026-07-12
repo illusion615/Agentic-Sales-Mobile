@@ -61,7 +61,6 @@ const ProductDetailPage = lazyWithReload(() => import('@/pages/product-detail'))
 const VisitLogPage = lazyWithReload(() => import('@/pages/visit-log'));
 const DataImportPage = lazyWithReload(() => import('@/pages/data-import'));
 const CodeReviewPage = lazyWithReload(() => import('@/pages/code-review'));
-const VoiceProbePage = lazyWithReload(() => import('@/pages/voice-probe'));
 const DiagnosticsPage = lazyWithReload(() => import('@/pages/diagnostics'));
 const HelpFeedbackPage = lazyWithReload(() => import('@/pages/help-feedback'));
 
@@ -121,7 +120,6 @@ function App() {
                   <Route path="data-import" element={<DataImportPage />} />
                   <Route path="help-feedback" element={<HelpFeedbackPage />} />
                   <Route path="debug/code-review" element={<CodeReviewPage />} />
-                  <Route path="debug/voice-probe" element={<VoiceProbePage />} />
                   <Route path="debug/diagnostics" element={<DiagnosticsPage />} />
                   <Route path="reports/performance" element={<PerformanceReportPage />} />
                   <Route path="*" element={<Navigate to="/" replace />} />

@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
-import { Lightbulb, ChevronRight, Check, X, MapPin, Phone, Calendar, Mail, CheckSquare, Building2, Users, TrendingUp, CalendarClock } from 'lucide-react';
+import { Lightbulb, ChevronRight, ChevronDown, Check, X, MapPin, Phone, Calendar, Mail, CheckSquare, Building2, Users, TrendingUp, CalendarClock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar as CalendarPicker } from '@/components/ui/calendar';
 import { getLocale, t, pickLabel, localeBcp47, type Locale } from '@/lib/i18n';
 import { useCopilot } from '@/contexts/copilot-context';
 import { useCreateActivity } from '@/generated/hooks/use-activity';
@@ -87,9 +89,8 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
     return {};
   });
   const [isSubmitting, setIsSubmitting] = useState<number | null>(null);
-  // Per-card scheduled-date override (ISO yyyy-mm-dd) and which card's scheduler is open.
+  // Per-card scheduled-date override (ISO yyyy-mm-dd).
   const [dateOverrides, setDateOverrides] = useState<Record<number, string>>({});
-  const [scheduleOpen, setScheduleOpen] = useState<number | null>(null);
 
   // Resolve the effective scheduled date for a card: user override → form data.
   const effectiveDate = (form: AdditionalIntentForm, index: number): string | undefined => {
@@ -105,7 +106,6 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
 
   const setCardDate = (index: number, iso: string) => {
     setDateOverrides((prev) => ({ ...prev, [index]: iso }));
-    setScheduleOpen(null);
   };
 
   // Persist status changes
@@ -241,21 +241,16 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
     }
   };
   
-  const getFormSubtitle = (form: AdditionalIntentForm, index: number): string | null => {
+  const getFormSubtitle = (form: AdditionalIntentForm): string | null => {
     const data = form.data;
     switch (form.type) {
       case 'activity': {
         const actType = data.type as string;
-        const typeLabel = actType === 'visit' ? (t('typeVisit', locale))
+        return actType === 'visit' ? (t('typeVisit', locale))
           : actType === 'call' ? (t('typeCall', locale))
           : actType === 'meeting' ? (t('typeMeeting', locale))
           : actType === 'email' ? (t('typeEmail', locale))
           : (t('typeOther', locale));
-        const scheduledDate = effectiveDate(form, index);
-        if (scheduledDate) {
-          return `${typeLabel} · ${new Date(scheduledDate).toLocaleDateString(localeBcp47(locale))}`;
-        }
-        return typeLabel;
       }
       case 'opportunity': {
         const stage = data.stage as string;
@@ -303,7 +298,7 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
             const status = formStatuses[idx];
             const Icon = form.type === 'activity' ? getActivityIcon(form.data) : EntityTypeIcons[form.type];
             const title = getFormTitle(form);
-            const subtitle = getFormSubtitle(form, idx);
+            const subtitle = getFormSubtitle(form);
             const isLoading = isSubmitting === idx;
             const createdRec = createdRecords[idx];
             const isNavigable = status === 'confirmed' && !!createdRec;
@@ -388,11 +383,60 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
                     )}>
                       {title}
                     </p>
-                    {subtitle && (
+                    {form.type === 'activity' ? (
+                      <div className="flex items-center flex-wrap gap-1 text-xs text-muted-foreground mt-0.5">
+                        {subtitle && <span>{subtitle}</span>}
+                        {subtitle && <span aria-hidden>·</span>}
+                        {(() => {
+                          const iso = effectiveDate(form, idx);
+                          const dateLabel = iso
+                            ? new Date(`${iso}T00:00:00`).toLocaleDateString(localeBcp47(locale))
+                            : t('scheduleLabel', locale);
+                          // Once confirmed / skipped the scheduled date is read-only.
+                          if (status) {
+                            return (
+                              <span className="inline-flex items-center gap-1 text-foreground/80">
+                                <CalendarClock className="w-3 h-3" />
+                                {dateLabel}
+                              </span>
+                            );
+                          }
+                          // Pending: the date itself is the control — tap it to open the calendar.
+                          return (
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <button
+                                  type="button"
+                                  onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                                  disabled={isLoading}
+                                  className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 -mx-0.5 text-foreground hover:bg-muted/60 transition-colors cursor-pointer disabled:opacity-50"
+                                >
+                                  <CalendarClock className="w-3 h-3" />
+                                  <span>{dateLabel}</span>
+                                  <ChevronDown className="w-3 h-3 opacity-60" />
+                                </button>
+                              </PopoverTrigger>
+                              <PopoverContent align="start" className="w-auto p-0">
+                                <CalendarPicker
+                                  mode="single"
+                                  selected={iso ? new Date(`${iso}T00:00:00`) : undefined}
+                                  onSelect={(d?: Date) => { if (d) setCardDate(idx, toISODate(d)); }}
+                                  disabled={(date: Date) => {
+                                    const start = new Date();
+                                    start.setHours(0, 0, 0, 0);
+                                    return date < start;
+                                  }}
+                                />
+                              </PopoverContent>
+                            </Popover>
+                          );
+                        })()}
+                      </div>
+                    ) : subtitle ? (
                       <p className="text-xs text-muted-foreground mt-0.5">
                         {subtitle}
                       </p>
-                    )}
+                    ) : null}
                     {/* Reason */}
                     <div className="flex items-start gap-1.5 text-xs text-muted-foreground mt-1.5 italic">
                       <Lightbulb className="w-3 h-3 flex-shrink-0 mt-0.5" />
@@ -404,68 +448,7 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
                 {/* Actions - below card content, full width */}
                 {!status && (
                   <>
-                    {/* Schedule picker (activity only) — lets the user pick a real day
-                        instead of accepting the suggested "today". */}
-                    {form.type === 'activity' && (
-                      <div className="mt-2.5 pt-2 border-t border-border/30">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => setScheduleOpen(scheduleOpen === idx ? null : idx)}
-                          disabled={isLoading}
-                          className="h-8 w-full justify-start text-xs text-muted-foreground hover:text-foreground"
-                        >
-                          <CalendarClock className="w-3.5 h-3.5 mr-1.5" />
-                          {t('scheduleLabel', locale)}
-                          <span className="ml-auto text-foreground">
-                            {effectiveDate(form, idx)
-                              ? new Date(effectiveDate(form, idx) as string).toLocaleDateString(localeBcp47(locale))
-                              : ''}
-                          </span>
-                        </Button>
-                        {scheduleOpen === idx && (
-                          <div className="flex flex-wrap gap-1.5 mt-2">
-                            {[
-                              { key: 'today', label: t('today', locale), offset: 0 },
-                              { key: 'tomorrow', label: t('tomorrow', locale), offset: 1 },
-                              { key: 'dayafter', label: t('dayAfter', locale), offset: 2 },
-                            ].map((opt) => {
-                              const d = new Date();
-                              d.setDate(d.getDate() + opt.offset);
-                              const iso = toISODate(d);
-                              const active = effectiveDate(form, idx) === iso;
-                              return (
-                                <button
-                                  key={opt.key}
-                                  type="button"
-                                  onClick={() => setCardDate(idx, iso)}
-                                  className={cn(
-                                    'px-2.5 py-1 rounded-full text-xs border transition-colors',
-                                    active
-                                      ? 'bg-primary text-primary-foreground border-primary'
-                                      : 'bg-card text-muted-foreground border-border hover:border-primary/50'
-                                  )}
-                                >
-                                  {opt.label}
-                                </button>
-                              );
-                            })}
-                            <label className="px-2.5 py-1 rounded-full text-xs border border-border bg-card text-muted-foreground hover:border-primary/50 cursor-pointer inline-flex items-center">
-                              {t('custom', locale)}
-                              <input
-                                type="date"
-                                className="sr-only"
-                                onChange={(e) => { if (e.target.value) setCardDate(idx, e.target.value); }}
-                              />
-                            </label>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    <div className={cn(
-                      'flex items-center gap-2 mt-2.5',
-                      form.type !== 'activity' && 'pt-2 border-t border-border/30'
-                    )}>
+                    <div className="flex items-center gap-2 mt-2.5 pt-2 border-t border-border/30">
                       <Button
                         size="sm"
                         variant="outline"

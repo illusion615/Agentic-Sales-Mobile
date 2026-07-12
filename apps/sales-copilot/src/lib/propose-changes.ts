@@ -113,7 +113,7 @@ export async function generateProposal(ctx: ProposeContext): Promise<ProposeOutc
       { role: 'user', content: user },
     ],
     responseFormat: 'text',
-  });
+  }, { label: 'Propose changes' });
   if (!resp.success || !resp.content) {
     return { proposal: null, error: resp.error ? String(resp.error) : 'LLM call failed' };
   }
