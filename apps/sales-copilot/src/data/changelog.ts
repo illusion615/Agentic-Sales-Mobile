@@ -49,6 +49,33 @@ export interface ChangelogEntry {
 /** Newest first. The first entry is the current release. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.8.0',
+    date: '2026-07-13',
+    title: { zh: '语音更灵活，移动端更顺手', en: 'More flexible voice, smoother on mobile' },
+    items: [
+      {
+        kind: 'feature',
+        zh: '语音输入方式可选：自动、浏览器语音识别、设备键盘听写、或云端语音（Azure）。选“自动”会挑当前设备最合适的一种。',
+        en: 'Choose how voice input works — Auto, browser speech recognition, device-keyboard dictation, or cloud voice (Azure). “Auto” picks whichever fits your device best.',
+      },
+      {
+        kind: 'improvement',
+        zh: '安卓输入法不再遮挡：在安卓上点输入框时，键盘不再挡住下方内容，输入框会自动抬到键盘上方。',
+        en: 'Android keyboard no longer overlaps: on Android, tapping the composer now lifts the input above the on-screen keyboard instead of hiding behind it.',
+      },
+      {
+        kind: 'fix',
+        zh: '排程改日期修复：智能规划里点任务日期会直接弹出日历，可选任意自定义日期（此前网页无反应、手机弹窗错位）。',
+        en: 'Scheduling date fix: tapping a planned task’s date now opens a calendar to pick any date (previously unresponsive on web and mispositioned on mobile).',
+      },
+      {
+        kind: 'improvement',
+        zh: '默认更简洁：新用户默认不再自动生成“下一步建议”，界面更清爽、更省资源；需要时可在设置里开启。',
+        en: 'Cleaner by default: for new users, automatic “next-step suggestions” are now off for a cleaner, lighter experience. Turn them on anytime in Settings.',
+      },
+    ],
+  },
+  {
     version: '1.7.0',
     date: '2026-07-07',
     title: { zh: '开口即用的语音助手', en: 'Talk to your assistant' },
