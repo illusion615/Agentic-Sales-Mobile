@@ -3,6 +3,7 @@ import { useCreateAISummary, useUpdateAISummary, useAISummaryList } from '@/gene
 import type { AISummary } from '@/generated/models/ai-summary-model';
 import { getLocale, type Locale } from '@/lib/i18n';
 import { industryLabel } from '@/lib/industry';
+import { normalizeInsightActions } from '@/lib/insight-actions';
 import { useAppSettings } from './use-app-settings';
 import { useUser } from './use-user';
 
@@ -176,30 +177,27 @@ Focus on relationship building and influence mapping.`;
     
     case 'activity': {
       const typeLabel = (entityData.type as string) || 'Not specified';
-      const statusLabel = (entityData.draftStatus as string) || 'Not specified';
-      const outcomeLabel = (entityData.outcome as string) || 'Not specified';
-      
-      return `Analyze this sales activity and provide follow-up insights.
+      const statusLabel = (entityData.status as string) || (entityData.draftStatus as string) || 'Not specified';
+      const account = relatedData?.account as { name?: string; industry?: string | number | null } | undefined;
+      const opp = relatedData?.opportunity as { name?: string; stage?: string; confidence?: number; amount?: number; closeDate?: string } | undefined;
+      const oppLine = opp?.name
+        ? `- Related opportunity: ${opp.name}`
+          + (opp.stage ? `, stage ${opp.stage}` : '')
+          + (opp.confidence != null ? `, confidence ${opp.confidence}%` : '')
+          + (opp.amount != null ? `, $${Number(opp.amount).toLocaleString()}` : '')
+          + (opp.closeDate ? `, expected close ${String(opp.closeDate).slice(0, 10)}` : '')
+        : '- Related opportunity: none linked';
+      // Context only — the generateEntityInsight skill owns the output structure.
+      return `Analyze this sales activity in its business context.
 
 ACTIVITY: ${entityName}
 - Type: ${typeLabel}
 - Status: ${statusLabel}
-- Outcome: ${outcomeLabel}
-- Notes: ${entityData.notes || 'No notes'}
+- Scheduled: ${entityData.scheduleddate ? String(entityData.scheduleddate).slice(0, 10) : 'n/a'}
+- Notes / outcome: ${entityData.notes || 'No notes recorded'}
 
-IMPORTANT: Respond with plain Markdown text directly. Do NOT wrap your response in markdown code blocks. Just write the content directly.
-
-Structure your response as:
-
-### Summary
-A brief summary (2-3 sentences) of the activity outcome and implications.
-
-### Action Items
-3-4 specific follow-up action items.
-
-${ACTION_ITEMS_FORMAT}
-
-Focus on momentum and next steps.`;
+ACCOUNT: ${account?.name || 'Not linked'}${account?.industry ? ` (${industryLabel(account.industry) || account.industry})` : ''}
+${oppLine}`;
     }
     
     default:
@@ -213,26 +211,44 @@ Focus on momentum and next steps.`;
 async function triggerFlowInBackground(
   userPrompt: string,
   entityType: EntityType,
+  entityName: string,
   summaryId: string,
   updateSummary: (params: { id: string; changedFields: Partial<Omit<AISummary, 'id'>> }) => Promise<unknown>,
   locale: Locale,
 ) {
   try {
     const { executeFunction } = await import('@/lib/function-executor');
-    const result = await executeFunction('generateEntitySummary', {
+    // Activity insights use the structured skill (narrative + explained actions);
+    // other entities keep the markdown summary skill.
+    const useStructured = entityType === 'activity';
+    const result = await executeFunction(useStructured ? 'generateEntityInsight' : 'generateEntitySummary', {
       data: userPrompt,
       entityType,
-    }, { locale });
+    }, {
+      locale,
+      standaloneAiOperation: {
+        operationType: `insight.${entityType}`,
+        queryText: `${entityType} insight · ${entityName}`,
+      },
+    });
     
     if (!result.success) {
       throw new Error(result.error || 'Skill execution failed');
     }
 
-    // generateEntitySummary declares a `text` contract (z.string().min(1)), so the
-    // executor guarantees a validated markdown string here — no shape-guessing needed.
-    const summaryContent = typeof result.data === 'string'
-      ? { summary: result.data, actionItems: '' }
-      : null;
+    // generateEntityInsight → { insight, actions[] } (structured); generateEntitySummary
+    // → validated markdown string. Both contracts are executor-guaranteed.
+    let summaryContent: { summary: string; actionItems: string } | null = null;
+    if (useStructured && result.data && typeof result.data === 'object') {
+      const d = result.data as { insight?: string; actions?: unknown };
+      const actions = normalizeInsightActions(d.actions);
+      summaryContent = {
+        summary: (d.insight || '').trim() || 'AI analysis completed.',
+        actionItems: actions.length ? JSON.stringify(actions) : '',
+      };
+    } else if (typeof result.data === 'string') {
+      summaryContent = { summary: result.data, actionItems: '' };
+    }
 
     if (summaryContent) {
       await updateSummary({
@@ -422,7 +438,14 @@ export function useAISummaryTrigger() {
         const userPrompt = buildAIPrompt(entityType, entityData, relatedData);
         
         // Fire and forget - don't wait for the flow to complete
-        triggerFlowInBackground(userPrompt, entityType, summaryRecord.id, updateAISummary.mutateAsync, locale);
+        triggerFlowInBackground(
+          userPrompt,
+          entityType,
+          getEntityName(entityType, entityData),
+          summaryRecord.id,
+          updateAISummary.mutateAsync,
+          locale,
+        );
       } else {
         // No flow configured or no user - generate a placeholder summary
         const placeholderSummary = generatePlaceholderSummary(entityType, entityData);

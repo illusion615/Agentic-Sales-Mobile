@@ -89,8 +89,29 @@ function toDv(r: Partial<Omit<Activity, 'id'>>, type: ActivityType): Record<stri
   if (r.title !== undefined) dv.subject = r.title;
   if (r.notes !== undefined) dv.description = r.notes;
   if (r.status !== undefined) {
-    // Native activity statecode: 0=open, 1=completed, 2=canceled.
-    dv.statecode = r.status === 'completed' ? 1 : r.status === 'canceled' ? 2 : 0;
+    // Native activity statecode/statuscode. Setting statecode ALONE is unreliable
+    // on activity tables (an appointment silently keeps its old state), so pair
+    // each state with the matching default status reason for its native table:
+    //   appointment(visit/meeting) open=1 completed=3 canceled=4
+    //   phonecall(call)            open=1 completed=2 canceled=3
+    //   email                      open=1 completed=3 canceled=5
+    const nativeTable: 'appointment' | 'phonecall' | 'email' =
+      type === 'call' ? 'phonecall' : type === 'email' ? 'email' : 'appointment';
+    const REASON = {
+      appointment: { open: 1, completed: 3, canceled: 4 },
+      phonecall: { open: 1, completed: 2, canceled: 3 },
+      email: { open: 1, completed: 3, canceled: 5 },
+    } as const;
+    if (r.status === 'completed') {
+      dv.statecode = 1;
+      dv.statuscode = REASON[nativeTable].completed;
+    } else if (r.status === 'canceled') {
+      dv.statecode = 2;
+      dv.statuscode = REASON[nativeTable].canceled;
+    } else {
+      dv.statecode = 0;
+      dv.statuscode = REASON[nativeTable].open;
+    }
   }
   if (r.scheduleddate !== undefined) {
     dv.scheduledstart = r.scheduleddate;

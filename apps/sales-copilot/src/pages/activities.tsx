@@ -13,6 +13,7 @@ import {
   ChevronLeft,
   AlertTriangle,
   CheckCircle2,
+  Ban,
   TrendingUp,
   FileText,
 } from 'lucide-react';
@@ -24,6 +25,8 @@ import { WeeklyReportCard, type WeeklyReportActivity } from '@/components/weekly
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { ACTIVITY_TYPE_COLORS } from '@/lib/activity-colors';
+import { isOverdue, daysOverdue, groupByStatus, activityStatusMeta } from '@/lib/activity-status';
+import { ActivityStatusBadge } from '@/components/activity-status-badge';
 import { useActivityList } from '@/generated/hooks/use-activity';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Activity as DataverseActivity } from '@/generated/models/activity-model';
@@ -71,22 +74,6 @@ function formatTime(dateStr: string): string {
   return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
-function isOverdue(activity: DataverseActivity): boolean {
-  if (activity.status === 'completed') return false;
-  const scheduled = new Date(activity.scheduleddate);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return scheduled < today;
-}
-
-function getDaysOverdue(activity: DataverseActivity): number {
-  const scheduled = new Date(activity.scheduleddate);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  scheduled.setHours(0, 0, 0, 0);
-  return Math.floor((today.getTime() - scheduled.getTime()) / (1000 * 60 * 60 * 24));
-}
-
 // ─── Activity Card (enhanced) ───
 function ActivityItem({ activity, showOverdue = false }: { activity: DataverseActivity; showOverdue?: boolean }) {
   const navigate = useNavigate();
@@ -94,9 +81,9 @@ function ActivityItem({ activity, showOverdue = false }: { activity: DataverseAc
   const typeLabel = activity.type;
   const Icon = activityIcons[typeLabel] || CheckSquare;
   const color = activityColors[typeLabel] || 'bg-muted';
-  const isCompleted = activity.status === 'completed';
+  const meta = activityStatusMeta(activity, locale);
   const overdue = showOverdue && isOverdue(activity);
-  const daysOver = overdue ? getDaysOverdue(activity) : 0;
+  const daysOver = overdue ? daysOverdue(activity) : 0;
 
   return (
     <div
@@ -117,7 +104,7 @@ function ActivityItem({ activity, showOverdue = false }: { activity: DataverseAc
           {/* Title - up to 2 lines */}
           <h3 className={cn(
             'text-[13px] font-medium leading-snug line-clamp-2',
-            isCompleted ? 'text-muted-foreground line-through' : 'text-foreground'
+            meta.titleClass
           )}>
             {activity.title}
           </h3>
@@ -143,12 +130,7 @@ function ActivityItem({ activity, showOverdue = false }: { activity: DataverseAc
               <Clock className="w-2.5 h-2.5" />
               {formatTime(activity.scheduleddate)}
             </span>
-            <span className={cn(
-              'px-1.5 py-0 rounded text-[9px] font-medium',
-              isCompleted ? 'bg-green-500/15 text-green-600' : 'bg-muted text-muted-foreground'
-            )}>
-              {activity.status}
-            </span>
+            <ActivityStatusBadge activity={activity} size="xs" />
             {overdue && (
               <span className="flex items-center gap-0.5 text-[9px] font-medium text-red-500">
                 <AlertTriangle className="w-2.5 h-2.5" />
@@ -209,13 +191,21 @@ export default function ActivitiesPage() {
     });
   }, [activities, viewMode, currentDate]);
 
-  // ─── Stats ───
-  const completedCount = filteredActivities.filter((a: DataverseActivity) => a.status === 'completed').length;
+  // ─── Stats ─── (grouped via the single source of truth so canceled never
+  // counts as pending or drags down the completion rate).
+  const { completed: completedActs, canceled: canceledActs } = useMemo(
+    () => groupByStatus(filteredActivities),
+    [filteredActivities]
+  );
   const totalCount = filteredActivities.length;
-  const pendingCount = totalCount - completedCount;
-  const completionRate = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
-  
-  // Overdue activities (not completed, scheduled before today)
+  const completedCount = completedActs.length;
+  const canceledCount = canceledActs.length;
+  // Pending excludes canceled; completion rate is over actionable items only.
+  const activeCount = totalCount - canceledCount;
+  const pendingCount = activeCount - completedCount;
+  const completionRate = activeCount > 0 ? Math.round((completedCount / activeCount) * 100) : 0;
+
+  // Overdue = still-pending activities scheduled before today (canonical).
   const overdueActivities = useMemo(() => 
     activities.filter((a: DataverseActivity) => isOverdue(a))
       .sort((a, b) => new Date(a.scheduleddate).getTime() - new Date(b.scheduleddate).getTime()),
@@ -233,12 +223,17 @@ export default function ActivitiesPage() {
     return grouped;
   }, [filteredActivities]);
 
-  // Selected day activities split into groups
+  // Selected day activities split into the three canonical buckets. Canceled is
+  // its OWN group — it must never leak into 待办 (the bug this refactor fixes).
   const selectedDateKey = format(currentDate, 'yyyy-MM-dd');
   const selectedDayActivities = activitiesByDate[selectedDateKey] || [];
-  const selectedDayPending = selectedDayActivities.filter((a) => a.status !== 'completed');
-  const selectedDayCompleted = selectedDayActivities.filter((a) => a.status === 'completed');
+  const {
+    pending: selectedDayPending,
+    completed: selectedDayCompleted,
+    canceled: selectedDayCanceled,
+  } = useMemo(() => groupByStatus(selectedDayActivities), [selectedDayActivities]);
   const [showCompleted, setShowCompleted] = useState(false);
+  const [showCanceled, setShowCanceled] = useState(false);
 
   // Copilot page context
   useEffect(() => {
@@ -553,6 +548,27 @@ export default function ActivitiesPage() {
                                 <ChevronRight className={cn('w-3 h-3 text-muted-foreground ml-auto transition-transform', showCompleted && 'rotate-90')} />
                               </button>
                               {showCompleted && selectedDayCompleted.map((a) => (
+                                <motion.div key={a.id} initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
+                                  <ActivityItem activity={a} />
+                                </motion.div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Canceled (collapsible) — its own bucket, never mixed into 待办 */}
+                          {selectedDayCanceled.length > 0 && (
+                            <div className="space-y-1.5">
+                              <button
+                                onClick={() => setShowCanceled(!showCanceled)}
+                                className="flex items-center gap-1.5 px-1 w-full text-left"
+                              >
+                                <Ban className="w-3 h-3 text-muted-foreground" />
+                                <span className="text-[11px] font-semibold text-muted-foreground">
+                                  {t('canceledCount', locale, { count: selectedDayCanceled.length })}
+                                </span>
+                                <ChevronRight className={cn('w-3 h-3 text-muted-foreground ml-auto transition-transform', showCanceled && 'rotate-90')} />
+                              </button>
+                              {showCanceled && selectedDayCanceled.map((a) => (
                                 <motion.div key={a.id} initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
                                   <ActivityItem activity={a} />
                                 </motion.div>

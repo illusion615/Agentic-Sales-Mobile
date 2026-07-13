@@ -4,6 +4,7 @@ import { motion } from 'motion/react';
 import { Building2, Phone, ChevronRight, AlertTriangle, Search, Users, Sparkles, RefreshCw, Loader2 } from 'lucide-react';
 import { MobileLayout } from '@/components/mobile-layout';
 import { cn } from '@/lib/utils';
+import { isCompleted } from '@/lib/activity-status';
 import { industryLabel } from '@/lib/industry';
 import { useAccountList } from '@/generated/hooks/use-account';
 import { useContactList } from '@/generated/hooks/use-contact';
@@ -105,7 +106,7 @@ export default function ClientsPage() {
   const lastCompletedByAccount = useMemo(() => {
     const map = new Map<string, Date>();
     for (const a of activities as Activity[]) {
-      if (a.status !== 'completed') continue;
+      if (!isCompleted(a)) continue;
       const accId = a.account?.id;
       if (!accId || !a.scheduleddate) continue;
       const d = new Date(a.scheduleddate);
@@ -173,7 +174,13 @@ export default function ClientsPage() {
       const result = await executeFunction('summarizeEntities', {
         data: JSON.stringify(clientData),
         entityType: 'account',
-      }, { locale });
+      }, {
+        locale,
+        standaloneAiOperation: {
+          operationType: 'insight.account.portfolio',
+          queryText: `Account portfolio insight · ${clientData.length} accounts`,
+        },
+      });
 
       if (result.success && result.data) {
         const parsed = result.data as AISummarySlide[];

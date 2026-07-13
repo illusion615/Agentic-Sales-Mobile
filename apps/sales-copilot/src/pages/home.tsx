@@ -18,6 +18,7 @@ import { splitIntoSegments } from '@/lib/speech';
 import { useSpeechPlayer, type SpeechTrack } from '@/hooks/use-speech-player';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { formatCurrencyCompact, formatCurrencyFull } from '@/lib/format-currency';
+import { isPending, isCompleted, isCanceled, isOverdue } from '@/lib/activity-status';
 
 import { SettingsPanel } from '@/components/settings-panel';
 import type { Activity } from '@/generated/models/activity-model';import type { Opportunity } from '@/generated/models/opportunity-model';import type { Account } from '@/generated/models/account-model';import { useCopilotConfigured } from '@/hooks/use-copilot-configured';
@@ -111,6 +112,7 @@ function HomeHeaderWidgetDisplay({
   kpiData: {
     agendaCompleted: number;
     agendaItems: { id: string }[];
+    agendaTotal: number;
     quarterlyWonAmount: number;
     quarterlyTarget: number;
     activitiesThisWeek: number;
@@ -154,8 +156,8 @@ function HomeHeaderWidgetDisplay({
   };
 
   // Calculate task completion rate
-  const taskCompletionRate = kpiData.agendaItems.length > 0 
-    ? Math.round((kpiData.agendaCompleted / kpiData.agendaItems.length) * 100) 
+  const taskCompletionRate = kpiData.agendaTotal > 0
+    ? Math.round((kpiData.agendaCompleted / kpiData.agendaTotal) * 100)
     : 0;
 
   // Calculate quarterly forecast using quarterly performance data
@@ -190,7 +192,7 @@ function HomeHeaderWidgetDisplay({
           <p className="text-2xl font-bold text-foreground leading-tight mt-0.5 tabular-nums">
             {taskCompletionRate}% 
             <span className="text-sm font-normal text-muted-foreground">
-              ({kpiData.agendaCompleted}/{kpiData.agendaItems.length})
+              ({kpiData.agendaCompleted}/{kpiData.agendaTotal})
             </span>
           </p>
         </div>
@@ -639,13 +641,20 @@ export default function HomeDashboard() {
     const todayEnd = new Date(today);
     todayEnd.setHours(23, 59, 59, 999);
     
+    // Non-cancelled activities scheduled today. A cancelled activity is neither
+    // pending nor done, so it must not appear in the agenda or count toward progress.
     const todayActivities = activities.filter((a: Activity) => {
       if (!a.scheduleddate) return false;
       const scheduled = new Date(a.scheduleddate);
-      return scheduled >= todayStart && scheduled <= todayEnd;
+      return scheduled >= todayStart && scheduled <= todayEnd && !isCanceled(a);
     });
     
-    const agendaItems: AgendaItem[] = todayActivities.slice(0, 5).map((a: Activity, idx: number) => {
+    // The agenda list shows only pending tasks — a completed or cancelled
+    // task rendered as a plain row reads as still-to-do (boss report).
+    const agendaItems: AgendaItem[] = todayActivities
+      .filter((a: Activity) => isPending(a))
+      .slice(0, 5)
+      .map((a: Activity, idx: number) => {
       const typeLabel = a.type;
       const type = typeLabel === 'call' ? 'call' :
                    typeLabel === 'visit' || typeLabel === 'meeting' ? 'visit' :
@@ -661,17 +670,9 @@ export default function HomeDashboard() {
       };
     });
 
-    // Overdue items - any activity scheduled BEFORE today that is NOT completed
-    // This includes activities from this week before today AND any older activities
-    const overdueActivities = activities.filter((a: Activity) => {
-      if (!a.scheduleddate) return false;
-      const scheduled = new Date(a.scheduleddate);
-      // Any activity scheduled before today (not including today)
-      const isBeforeToday = scheduled < todayStart;
-      // NOT completed
-      const isNotCompleted = a.status !== 'completed';
-      return isBeforeToday && isNotCompleted;
-    });
+    // Overdue = still-pending activities scheduled before today (canonical
+    // single-source rule; completed AND canceled are excluded).
+    const overdueActivities = activities.filter((a: Activity) => isOverdue(a));
     
     const overdueItems: AgendaItem[] = overdueActivities.map((a: Activity, idx: number) => {
       const typeLabel = a.type;
@@ -693,9 +694,9 @@ export default function HomeDashboard() {
 
     // No fallback placeholder data - show real data only
 
-    const agendaCompleted = todayActivities.filter(
-      (a: Activity) => a.status === 'completed'
-    ).length;
+    const agendaCompleted = todayActivities.filter((a: Activity) => isCompleted(a)).length;
+    // Progress denominator = all non-cancelled today (open + completed).
+    const agendaTotal = todayActivities.length;
 
     // Quarterly Performance calculation
     // Get current quarter boundaries
@@ -732,7 +733,8 @@ export default function HomeDashboard() {
     return {
       // Today's Agenda
       agendaItems,
-      agendaCompleted: Math.min(agendaCompleted, agendaItems.length),
+      agendaCompleted: Math.min(agendaCompleted, agendaTotal),
+      agendaTotal,
       overdueItems: overdueItems.sort((a, b) => b.scheduledDate!.getTime() - a.scheduledDate!.getTime()), // Most recent first
       
       // Quarterly Performance (replaces Hot Opportunities)

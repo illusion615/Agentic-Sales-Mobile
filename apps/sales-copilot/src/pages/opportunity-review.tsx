@@ -145,7 +145,13 @@ export default function OpportunityReviewPage() {
       const result = await executeFunction('summarizeEntities', {
         data: JSON.stringify(pipelineData),
         entityType: 'opportunity',
-      }, { locale });
+      }, {
+        locale,
+        standaloneAiOperation: {
+          operationType: 'insight.opportunity.pipeline',
+          queryText: `Opportunity pipeline insight · ${pipelineData.length} opportunities`,
+        },
+      });
 
       if (result.success && result.data) {
         const parsed = result.data as AISummarySlide[];

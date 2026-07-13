@@ -1,6 +1,6 @@
-import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
+import { useMemo, useState, useCallback, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import { industryLabel } from '@/lib/industry';
 import {
   Phone,
@@ -17,16 +17,22 @@ import {
   Edit,
   Trash2,
   CheckCircle,
+  CalendarClock,
+  ChevronDown,
+  Ban,
+  RotateCcw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ACTIVITY_TYPE_COLORS } from '@/lib/activity-colors';
+import { activityStatusMeta } from '@/lib/activity-status';
 import { MobileLayout } from '@/components/mobile-layout';
 import { GlassCard } from '@/components/glass-card';
 import { AISummaryCard } from '@/components/ai-summary-card';
+import type { InsightAction } from '@/lib/insight-actions';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
-import { useActivity, useUpdateActivity, useDeleteActivity } from '@/generated/hooks/use-activity';
+import { useActivity, useUpdateActivity, useDeleteActivity, useCreateActivity } from '@/generated/hooks/use-activity';
 import { useQueryClient } from '@tanstack/react-query';
 import { useContactList } from '@/generated/hooks/use-contact';
 import { useAccountList } from '@/generated/hooks/use-account';
@@ -45,7 +51,8 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { ClientProfileSheet } from '@/components/client-profile-sheet';
-import { FloatingQuickActions, type QuickAction } from '@/components/floating-quick-actions';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar as CalendarPicker } from '@/components/ui/calendar';
 import { getLocale, t } from '@/lib/i18n';
 import { useCopilot } from '@/contexts/copilot-context';
 import { PullToRefresh } from '@/components/pull-to-refresh';
@@ -92,6 +99,10 @@ function formatTime(dateStr: string): string {
   return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
 }
 
+function toISODate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 export default function ActivityDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -122,6 +133,7 @@ export default function ActivityDetailPage() {
   }, []);
   const updateActivity = useUpdateActivity();
   const deleteActivity = useDeleteActivity();
+  const createActivity = useCreateActivity();
   const queryClient = useQueryClient();
 
   // Pull to refresh handler
@@ -140,13 +152,7 @@ export default function ActivityDetailPage() {
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [profileSheetOpen, setProfileSheetOpen] = useState(false);
-  // Detail sections are presented as left-right switchable tabs (D20) instead of
-  // a long vertical scroll. Default tab is Details so the user sees the core
-  // activity info at a glance.
-  type DetailTab = 'details' | 'insights' | 'related';
-  const [activeTab, setActiveTab] = useState<DetailTab>('details');
-  const [tabDir, setTabDir] = useState(0);
-  const tabDragStartX = useRef(0);
+  const [rescheduleOpen, setRescheduleOpen] = useState(false);
   const locale = getLocale();
 
   // Find contacts related to this activity's account
@@ -209,14 +215,36 @@ export default function ActivityDetailPage() {
     if (!activity) return;
     setIsRefreshingAI(true);
     triggerForEntity('activity', activity.id, JSON.parse(JSON.stringify(activity)), {
-      account: activity.account ? { id: activity.account.id, name: activity.account.name1 } : undefined,
-      opportunity: activity.opportunity ? { id: activity.opportunity.id, name: activity.opportunity.name1 } : undefined,
+      account: activity.account ? { id: activity.account.id, name: activity.account.name1, industry: fullAccount?.industry } : undefined,
+      opportunity: activity.opportunity ? { id: activity.opportunity.id, name: activity.opportunity.name1, stage: fullOpportunity?.stage, confidence: fullOpportunity?.confidence, amount: fullOpportunity?.totalamount, closeDate: fullOpportunity?.expectedclosedate } : undefined,
     });
     setTimeout(() => {
       refetchAISummary();
       setIsRefreshingAI(false);
     }, 500);
-  }, [activity, triggerForEntity, refetchAISummary]);
+  }, [activity, fullAccount, fullOpportunity, triggerForEntity, refetchAISummary]);
+
+  // Create a follow-up activity from a structured insight action, linked to THIS
+  // activity's account + opportunity (closes the loop insight → action → record).
+  const handleCreateInsightTask = useCallback(async (action: InsightAction, scheduledDate: string): Promise<string | null> => {
+    if (!activity) return null;
+    try {
+      const created = await createActivity.mutateAsync({
+        title: action.title,
+        type: action.type,
+        scheduleddate: scheduledDate,
+        status: 'open',
+        ownerid: '',
+        ...(action.explanation ? { notes: action.explanation } : {}),
+        ...(activity.account ? { account: activity.account } : {}),
+        ...(activity.opportunity ? { opportunity: activity.opportunity } : {}),
+      } as Parameters<typeof createActivity.mutateAsync>[0]);
+      return (created as { id?: string })?.id ?? null;
+    } catch {
+      toast.error(t('suggestedTasksFailed', locale));
+      return null;
+    }
+  }, [activity, createActivity, locale]);
 
   // Regenerate the insight when the user switched language since it was generated.
   useEffect(() => {
@@ -231,6 +259,7 @@ export default function ActivityDetailPage() {
     // re-renders, so re-entry is possible. updateActivity.isPending also drives
     // the chip's busy state, but guard here too so a fast second tap is a no-op.
     if (updateActivity.isPending) return;
+    queryClient.setQueryData(['activity', activity.id], (old?: DataverseActivity) => (old ? { ...old, status: 'completed' } : old));
     try {
       await updateActivity.mutateAsync({
         id: activity.id,
@@ -244,11 +273,41 @@ export default function ActivityDetailPage() {
         ...activity,
         status: 'completed',
       } as Record<string, unknown>, {
-        account: activity.account ? { id: activity.account.id, name: activity.account.name1 } : undefined,
-        opportunity: activity.opportunity ? { id: activity.opportunity.id, name: activity.opportunity.name1 } : undefined,
+        account: activity.account ? { id: activity.account.id, name: activity.account.name1, industry: fullAccount?.industry } : undefined,
+        opportunity: activity.opportunity ? { id: activity.opportunity.id, name: activity.opportunity.name1, stage: fullOpportunity?.stage, confidence: fullOpportunity?.confidence, amount: fullOpportunity?.totalamount, closeDate: fullOpportunity?.expectedclosedate } : undefined,
       } as Record<string, unknown>);
       // Status badge updates inline via query invalidation; no toast.
     } catch (error: unknown) {
+      toast.error('Failed to update activity');
+    }
+  };
+
+  const handleReschedule = async (d: Date) => {
+    if (!activity || updateActivity.isPending) return;
+    setRescheduleOpen(false);
+    try {
+      await updateActivity.mutateAsync({ id: activity.id, changedFields: { scheduleddate: toISODate(d) } });
+    } catch {
+      toast.error('Failed to update activity');
+    }
+  };
+
+  const handleCancelActivity = async () => {
+    if (!activity || updateActivity.isPending) return;
+    queryClient.setQueryData(['activity', activity.id], (old?: DataverseActivity) => (old ? { ...old, status: 'canceled' } : old));
+    try {
+      await updateActivity.mutateAsync({ id: activity.id, changedFields: { status: 'canceled' } });
+    } catch {
+      toast.error('Failed to update activity');
+    }
+  };
+
+  const handleReopen = async () => {
+    if (!activity || updateActivity.isPending) return;
+    queryClient.setQueryData(['activity', activity.id], (old?: DataverseActivity) => (old ? { ...old, status: 'open' } : old));
+    try {
+      await updateActivity.mutateAsync({ id: activity.id, changedFields: { status: 'open' } });
+    } catch {
       toast.error('Failed to update activity');
     }
   };
@@ -310,31 +369,13 @@ export default function ActivityDetailPage() {
   const typeLabel = activity.type;
   const Icon = activityIcons[typeLabel] || CheckSquare;
   const color = activityColors[typeLabel] || 'bg-muted';
-  const statusLabel = activity.status;
-  const isCompleted = statusLabel === 'completed';
-
-  // Left-right switchable detail sections (D20). Order: Details | AI Insights | Related Context.
-  const detailTabs: { key: DetailTab; label: string }[] = [
-    { key: 'details', label: t('details', locale) },
-    { key: 'insights', label: t('aiInsights', locale) },
-    { key: 'related', label: t('related', locale) },
-  ];
-  const activeTabIndex = detailTabs.findIndex((t) => t.key === activeTab);
-  const switchTab = (key: DetailTab) => {
-    const nextIndex = detailTabs.findIndex((t) => t.key === key);
-    setTabDir(nextIndex > activeTabIndex ? 1 : nextIndex < activeTabIndex ? -1 : 0);
-    setActiveTab(key);
-  };
-  const stepTab = (delta: number) => {
-    const next = activeTabIndex + delta;
-    if (next < 0 || next >= detailTabs.length) return;
-    switchTab(detailTabs[next].key);
-  };
-  const handleTabDragStart = (e: React.PointerEvent) => { tabDragStartX.current = e.clientX; };
-  const handleTabDragEnd = (e: React.PointerEvent) => {
-    const diff = tabDragStartX.current - e.clientX;
-    if (Math.abs(diff) > 50) stepTab(diff > 0 ? 1 : -1);
-  };
+  // Status pill/label + title decoration come from the single source of truth
+  // (lib/activity-status) so the detail page, the list and the relation pages
+  // all render the three states identically.
+  const statusMeta = activityStatusMeta(activity, locale);
+  const isCompleted = statusMeta.status === 'completed';
+  const isCanceled = statusMeta.status === 'canceled';
+  const StatusIcon = statusMeta.icon;
 
   const deleteButton = (
     <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
@@ -399,16 +440,14 @@ export default function ActivityDetailPage() {
               <Icon className="w-7 h-7 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <h1 className="text-lg font-semibold text-foreground mb-1">
+              <h1 className={cn('text-lg font-semibold mb-1', statusMeta.titleClass)}>
                 {activity.title}
               </h1>
               <div className="flex items-center gap-2 flex-wrap">
-                <Badge
-                  variant={isCompleted ? 'secondary' : 'default'}
-                  className="capitalize"
-                >
-                  {statusLabel}
-                </Badge>
+                <span className={cn('inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium', statusMeta.pillClass)}>
+                  {StatusIcon && <StatusIcon className="w-3 h-3" />}
+                  {statusMeta.label}
+                </span>
                 <Badge variant="outline" className="capitalize">
                   {typeLabel}
                 </Badge>
@@ -428,66 +467,72 @@ export default function ActivityDetailPage() {
               </p>
             </div>
           </div>
-        </GlassCard>
 
-        {/* Switchable detail sections (D20): Details | AI Insights | Related.
-            Left-right swipe + segmented control instead of a long scroll. */}
-        <div
-          className="touch-pan-y select-none"
-          onPointerDown={handleTabDragStart}
-          onPointerUp={handleTabDragEnd}
-        >
-          {/* Segmented control */}
-          <div className="flex gap-1 p-1 rounded-xl bg-muted/40 mb-3">
-            {detailTabs.map((tab) => (
+          {/* Quick actions — mark done / reschedule / cancel (open) or reopen (done/cancelled) */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {!isCompleted && !isCanceled ? (
+              <>
+                <button
+                  type="button"
+                  onClick={handleMarkComplete}
+                  disabled={updateActivity.isPending}
+                  className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
+                >
+                  <CheckCircle className="w-4 h-4" />
+                  {t('markDone', locale)}
+                </button>
+                <Popover open={rescheduleOpen} onOpenChange={setRescheduleOpen}>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg bg-muted/60 text-foreground hover:bg-muted transition-colors"
+                    >
+                      <CalendarClock className="w-4 h-4" />
+                      {t('reschedule', locale)}
+                      <ChevronDown className="w-3 h-3 opacity-60" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className="w-auto p-0">
+                    <CalendarPicker
+                      mode="single"
+                      selected={new Date(`${String(activity.scheduleddate).slice(0, 10)}T00:00:00`)}
+                      onSelect={(d?: Date) => { if (d) handleReschedule(d); }}
+                      disabled={(date: Date) => {
+                        const start = new Date();
+                        start.setHours(0, 0, 0, 0);
+                        return date < start;
+                      }}
+                    />
+                  </PopoverContent>
+                </Popover>
+                <button
+                  type="button"
+                  onClick={handleCancelActivity}
+                  disabled={updateActivity.isPending}
+                  className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg bg-muted/60 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50"
+                >
+                  <Ban className="w-4 h-4" />
+                  {t('cancelTask', locale)}
+                </button>
+              </>
+            ) : (
               <button
-                key={tab.key}
                 type="button"
-                onClick={() => switchTab(tab.key)}
-                className={cn(
-                  'flex-1 py-1.5 text-xs font-medium rounded-lg transition-colors',
-                  activeTab === tab.key
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
+                onClick={handleReopen}
+                disabled={updateActivity.isPending}
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg bg-muted/60 text-foreground hover:bg-muted transition-colors disabled:opacity-50"
               >
-                {tab.label}
+                <RotateCcw className="w-4 h-4" />
+                {t('reopen', locale)}
               </button>
-            ))}
+            )}
           </div>
-
-          <AnimatePresence mode="wait" custom={tabDir} initial={false}>
-            <motion.div
-              key={activeTab}
-              custom={tabDir}
-              initial={{ opacity: 0, x: tabDir >= 0 ? 40 : -40 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: tabDir >= 0 ? -40 : 40 }}
-              transition={{ duration: 0.2, ease: 'easeOut' as const }}
-              className="space-y-4"
-            >
-
-        {/* AI Insights Card */}
-        {activeTab === 'insights' && (
-        <AISummaryCard
-          summary={aiSummary}
-          isLoading={isLoadingAISummary}
-          isGenerating={isGenerating}
-          isExpired={isExpired}
-          isFailed={isFailed}
-          isRefreshing={isRefreshingAI || isTriggering}
-          onRefresh={handleRefreshAISummary}
-        />
-        )}
-
-        {/* Unified Related Context Card - Account, Contact, Opportunity */}
-        {activeTab === 'related' && (
-          (activity.account || activity.contact || activity.opportunity) ? (
-          <GlassCard className="space-y-3">
-            <h2 className="text-sm font-semibold text-foreground uppercase tracking-wide">
-              {t('relatedContext', locale)}
-            </h2>
-
+          {/* Related context — account / attendees / opportunity (merged into the activity card) */}
+          {(activity.account || activity.contact || (activity.contacts && activity.contacts.length > 0) || activity.opportunity) && (
+            <div className="space-y-2 pt-1">
+              <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                {t('relatedContext', locale)}
+              </h2>
             {/* Combined Context Grid */}
             <div className="p-4 rounded-xl bg-gradient-to-br from-muted/50 to-muted/20 border border-border/50">
               {/* Account Section */}
@@ -639,23 +684,15 @@ export default function ActivityDetailPage() {
                 </div>
               )}
             </div>
-          </GlassCard>
-          ) : (
-            <GlassCard className="py-10 text-center text-sm text-muted-foreground">
-              {t('noRelatedRecords', locale)}
-            </GlassCard>
-          )
-        )}
+            </div>
+          )}
 
-        {/* Details tab: Notes + Attachments */}
-        {activeTab === 'details' && (
-          <>
-        {/* Details Card - Notes */}
-        {activity.notes && (
-          <GlassCard className="space-y-4">
-            <h2 className="text-sm font-semibold text-foreground uppercase tracking-wide">
-              {t('details', locale)}
-            </h2>
+          {/* Details — notes (merged into the activity card) */}
+          {activity.notes && (
+            <div className="space-y-2 pt-3 border-t border-border/40">
+              <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                {t('details', locale)}
+              </h2>
 
             {/* Notes */}
             {activity.notes && (
@@ -686,15 +723,15 @@ export default function ActivityDetailPage() {
                 )}
               </div>
             )}
-          </GlassCard>
-        )}
+            </div>
+          )}
 
-        {/* Attachments Card - saved file Notes bound to this activity */}
-        {savedAttachments.length > 0 && (
-          <GlassCard className="space-y-3">
-            <h2 className="text-sm font-semibold text-foreground uppercase tracking-wide">
-              {t('attachmentsCount', locale, { count: savedAttachments.length })}
-            </h2>
+          {/* Attachments — merged into the activity card */}
+          {savedAttachments.length > 0 && (
+            <div className="space-y-2 pt-3 border-t border-border/40">
+              <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                {t('attachmentsCount', locale, { count: savedAttachments.length })}
+              </h2>
             <div className="flex gap-2 flex-wrap">
               {savedAttachments.map((att) => (
                 <button
@@ -725,21 +762,29 @@ export default function ActivityDetailPage() {
                 </button>
               ))}
             </div>
-          </GlassCard>
-        )}
+            </div>
+          )}
 
-        {/* Empty details fallback */}
-        {!activity.notes && savedAttachments.length === 0 && (
-          <GlassCard className="py-10 text-center text-sm text-muted-foreground">
-            {t('noNotesOrAttachments', locale)}
-          </GlassCard>
-        )}
-          </>
-        )}
+          {/* Empty fallback — only when the card has no related context, notes or attachments */}
+          {!activity.account && !activity.contact && !(activity.contacts && activity.contacts.length > 0) && !activity.opportunity && !activity.notes && savedAttachments.length === 0 && (
+            <p className="py-4 text-center text-sm text-muted-foreground">
+              {t('noNotesOrAttachments', locale)}
+            </p>
+          )}
+        </GlassCard>
 
-            </motion.div>
-          </AnimatePresence>
-        </div>
+        {/* AI Insight — narrative + structured, explained next actions (closed loop) */}
+        <AISummaryCard
+          summary={aiSummary}
+          isLoading={isLoadingAISummary}
+          isGenerating={isGenerating}
+          isExpired={isExpired}
+          isFailed={isFailed}
+          isRefreshing={isRefreshingAI || isTriggering}
+          onRefresh={handleRefreshAISummary}
+          entityId={activity.id}
+          onCreateTask={handleCreateInsightTask}
+        />
 
         {/* Metadata */}
         {activity.createdon && (
@@ -758,21 +803,6 @@ export default function ActivityDetailPage() {
           onOpenChange={setProfileSheetOpen}
         />
       )}
-
-      <FloatingQuickActions
-        actions={[
-          ...(!isCompleted ? [{
-            id: 'complete',
-            icon: CheckCircle,
-            label: updateActivity.isPending
-              ? t('completing', locale)
-              : t('complete', locale),
-            onClick: handleMarkComplete,
-            disabled: updateActivity.isPending,
-            busy: updateActivity.isPending,
-          }] : []) as QuickAction[],
-        ]}
-      />
 
       {/* Attachment lightbox */}
       {lightboxAttachment && (

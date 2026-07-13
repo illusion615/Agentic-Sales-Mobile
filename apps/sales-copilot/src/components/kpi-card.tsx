@@ -72,6 +72,8 @@ export interface KPIData {
   // Today's Agenda
   agendaItems: AgendaItem[];
   agendaCompleted: number;
+  /** Total non-cancelled activities today (open + completed) — progress denominator. */
+  agendaTotal: number;
   
   // Overdue items (scheduled between Monday 00:00 and now, NOT completed)
   overdueItems?: AgendaItem[];

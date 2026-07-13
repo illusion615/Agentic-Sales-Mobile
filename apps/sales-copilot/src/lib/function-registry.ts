@@ -502,6 +502,41 @@ Return plain Markdown text only. Do not return JSON. Do not wrap output in code 
     },
   },
   {
+    name: 'generateEntityInsight',
+    displayName: { 'zh-Hans': '实体洞察与行动', 'en-US': 'Generate Entity Insight' },
+    description: 'Analyze one CRM record in its business context and return a grounded insight plus a small set of high-conviction, explained next actions.',
+    llmBacked: true,
+    responseFormat: 'text',
+    outputSchema: z.object({
+      insight: z.string().min(1),
+      actions: z.array(z.object({
+        title: z.string().min(1),
+        explanation: z.string().default(''),
+        type: z.string().default('call'),
+        dueInDays: z.number().optional(),
+      })).default([]),
+    }).passthrough(),
+    promptTemplate: `You are a senior B2B sales coach analyzing ONE CRM record together with its surrounding business context. Produce a grounded insight AND a SMALL set of high-conviction next actions.
+
+Return ONLY strict JSON — no markdown, no code fences, no prose outside the JSON:
+{"insight":"2-4 sentence narrative of where things stand and the single most important implication","actions":[{"title":"specific next action","explanation":"one sentence: WHY this action now, tied to a concrete fact in the context","type":"visit|call|meeting|email","dueInDays":3}]}
+
+Rules for actions — QUALITY OVER QUANTITY, this is the most important instruction:
+- Recommend an action ONLY when the context genuinely warrants a specific, valuable next step. Returning FEWER actions (even an empty list) is better than padding with generic advice.
+- Maximum 3 actions; most records need only 1-2.
+- Every action's explanation MUST cite a SPECIFIC fact from the context (a note, the deal stage/amount/close date, the account situation, the timing). Generic filler such as "follow up", "stay in touch", "build rapport", "check in" is FORBIDDEN unless bound to a concrete, stated reason.
+- Do NOT restate what already happened; propose what comes NEXT.
+- "type" must be exactly one of: visit, call, meeting, email. "dueInDays" is an integer number of days from today (1-14).`,
+    parameters: {
+      type: 'object',
+      properties: {
+        data: { type: 'string', description: 'Entity context (facts about the record and its account/opportunity/history)' },
+        entityType: { type: 'string', description: 'Entity type for context', enum: ['account', 'opportunity', 'activity', 'contact'] },
+      },
+      required: ['data'],
+    },
+  },
+  {
     name: 'analyzeOpportunity',
     displayName: { 'zh-Hans': '商机分析', 'en-US': 'Analyze Opportunity' },
     description: 'Analyze visit data to determine if there is a sales opportunity, and check for duplicates with existing opportunities.',

@@ -27,6 +27,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ActivityStatusBadge } from '@/components/activity-status-badge';
 import { MobileLayout } from '@/components/mobile-layout';
 import { GlassCard } from '@/components/glass-card';
 import { Button } from '@/components/ui/button';
@@ -1019,15 +1020,7 @@ export default function ClientDetailPage() {
                           {activity.title}
                         </h4>
                         {activity.status && (
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              'text-[10px]',
-                              activity.status === 'completed' && 'text-emerald-600 border-emerald-200'
-                            )}
-                          >
-                            {activity.status}
-                          </Badge>
+                          <ActivityStatusBadge activity={activity} size="sm" />
                         )}
                       </div>
                       <p className="text-xs text-muted-foreground mb-1">
