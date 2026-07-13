@@ -49,6 +49,38 @@ export interface ChangelogEntry {
 /** Newest first. The first entry is the current release. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.9.0',
+    date: '2026-07-14',
+    title: { zh: '洞察直接变行动', en: 'Turn insights into action' },
+    items: [
+      {
+        kind: 'feature',
+        zh: '活动洞察会结合客户、商机与活动内容，给出少量有明确原因的下一步行动；可调整日期并直接创建任务。',
+        en: 'Activity insights now use account, opportunity, and activity context to recommend a few well-explained next actions. Adjust the date and create the task directly.',
+      },
+      {
+        kind: 'feature',
+        zh: '活动详情新增快捷操作：标记完成、重新安排、取消和重新开启，处理活动无需再进入编辑表单。',
+        en: 'Activity details now include quick actions to complete, reschedule, cancel, or reopen work without opening the edit form.',
+      },
+      {
+        kind: 'fix',
+        zh: '已取消活动不再出现在今日待办或逾期任务中，进行中、已完成和已取消状态在各页面保持一致。',
+        en: 'Cancelled activities no longer appear in today’s agenda or overdue work, and Open, Completed, and Cancelled statuses are consistent across the app.',
+      },
+      {
+        kind: 'improvement',
+        zh: '手机上从 Copilot 打开记录后，面板会自动收起；安卓面板背景也更清晰，不再与底层页面互相干扰。',
+        en: 'On mobile, opening a record from Copilot now collapses the panel automatically. Android panels are also clearer and no longer visually blend into the page behind them.',
+      },
+      {
+        kind: 'fix',
+        zh: '云端语音是可选能力：未部署时不会启用或打扰用户；已部署时，首次打开应用也不再要求用户输入连接器密钥。',
+        en: 'Cloud speech is now truly optional: it stays out of the way when not deployed, and deployed apps no longer ask users to enter a connector key on first launch.',
+      },
+    ],
+  },
+  {
     version: '1.8.0',
     date: '2026-07-13',
     title: { zh: '语音更灵活，移动端更顺手', en: 'More flexible voice, smoother on mobile' },

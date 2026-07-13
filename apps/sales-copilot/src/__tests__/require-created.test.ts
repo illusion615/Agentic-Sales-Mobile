@@ -16,7 +16,7 @@ describe('requireCreated (strict SDK contract guard)', () => {
   it('throws with diagnostic (returned keys) when PK is missing', () => {
     const row = { something: 'else', foo: 'bar' } as unknown as TestRow;
     expect(() => requireCreated(row, 'crf5c_aisummaryid', 'AISummary'))
-      .toThrowError(/Row keys actually returned: \[something, foo\]/);
+      .toThrowError(/Row keys: \[something, foo\]/);
   });
 
   it('throws when data is null/undefined', () => {
