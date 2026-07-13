@@ -12,8 +12,8 @@ only through a **custom connector**, invoked via the Power Apps SDK
 proxies on the app's behalf.
 
 Operations:
-- `POST /api/tts` — text-to-speech. `{ text, locale?, voice? }` -> `{ audio: <base64 mp3>, format, voice, locale }`. (Live.)
-- `POST /api/stt` — speech-to-text, batch press-to-record. (Planned.)
+- `POST /api/tts` — text-to-speech. `{ text, locale?, voice?, apiKey }` -> `{ audio: <base64 mp3>, format, voice, locale }`. (Live.)
+- `POST /api/stt` — speech-to-text. `{ audio, locale?, apiKey }` -> `{ text, status, locale }`. (Live.)
 - `GET /api/token` — legacy token minter, now unused (client-side tokens are blocked by the sandbox).
 
 Front-end call site: `apps/sales-copilot/src/generated/services/SalesCopilotSpeechService.ts`
@@ -44,7 +44,7 @@ those who prefer to run them by hand or need to understand what the script does.
 | Azure Function App (Linux, Consumption) | Server-side speech proxy (holds the key) | Consumption (~free at low volume) | **Node 22** — see the gotcha below. |
 | Storage account (Standard_LRS) | Function App runtime dependency | Standard_LRS | Required by every Function App. |
 | Custom connector | Lets the Code App call the Function via the SDK (bypasses the sandbox) | — | `pac connector create` from `azure/speech-connector`. |
-| Connection (NoAuth) | The connector instance the app binds to | — | Maker-portal action (not scriptable for NoAuth). |
+| Connection (NoAuth) | The connector instance the app binds to | — | Users only confirm connection creation; no key is requested. |
 
 Reference deployment used resource group **`WellsRG`** (region **`eastus`**).
 Change the names/region for a new environment.
@@ -96,13 +96,18 @@ az functionapp create -n sales-copilot-token -g WellsRG \
 > 22 (LTS) works. If you already created the app on 24, fix it in place:
 > `az functionapp config set -n sales-copilot-token -g WellsRG --linux-fx-version "Node|22" && az functionapp restart -n sales-copilot-token -g WellsRG`.
 
-### 3. App settings (the key stays here, server-side)
+### 3. App settings
 
 ```bash
 KEY=$(az cognitiveservices account keys list -n sales-copilot-speech -g WellsRG --query key1 -o tsv)
+PROXY_KEY=$(openssl rand -hex 32)
 az functionapp config appsettings set -n sales-copilot-token -g WellsRG \
-  --settings SPEECH_KEY="$KEY" SPEECH_REGION=eastus
+  --settings SPEECH_KEY="$KEY" SPEECH_REGION=eastus SPEECH_API_KEY="$PROXY_KEY"
 ```
+
+`SPEECH_KEY` is the Azure Speech subscription key and stays server-side only.
+`SPEECH_API_KEY` is the lower-value proxy gate; set the same value as the target
+environment's optional `biz_VoiceConnectorApiKey` current value.
 
 ### 4. Deploy (run-from-package)
 
@@ -141,7 +146,7 @@ az functionapp cors add -n sales-copilot-token -g WellsRG --allowed-origins "*"
 ```bash
 curl -s -X POST "https://sales-copilot-token.azurewebsites.net/api/tts" \
   -H "Content-Type: application/json" \
-  -d '{"text":"hello","locale":"en-US"}' | head -c 60
+  -d '{"text":"hello","locale":"en-US","apiKey":"<proxy-key>"}' | head -c 60
 # Expect {"audio":"<base64 mp3>","format":"mp3", ...}
 ```
 
@@ -149,7 +154,9 @@ curl -s -X POST "https://sales-copilot-token.azurewebsites.net/api/tts" \
 
 The Code App cannot call the Function with `fetch` (sandbox), so expose it as a
 custom connector. The connector definition lives in `azure/speech-connector/`
-(`apiDefinition.swagger.json` + `apiProperties.json`, NoAuth).
+(`apiDefinition.swagger.json` + `apiProperties.json`, NoAuth). The proxy key is
+an operation-body field, not connection authentication, so connection creation
+never shows a credential input.
 
 ```bash
 cd ../speech-connector
@@ -160,9 +167,9 @@ pac connector create \
 
 ### 8. Connection (maker portal — manual)
 
-NoAuth connections are not scriptable via `pac`. In the maker portal:
+In the maker portal:
 **Connections -> + New connection -> "Sales Copilot Speech" -> Create**
-(creates instantly, no credentials). Then grab its id:
+(creates instantly after confirmation, no credentials). Then grab its id:
 
 ```bash
 pac connection list   # note the Id and the /providers/.../apis/shared_... apiId
@@ -185,36 +192,45 @@ node "$BIN" add-data-source \
 
 ---
 
-## Security — anti-abuse shared secret
+## Optional deployment and proxy-key gate
 
 The endpoints are anonymous at the HTTP layer (the Power Apps custom connector
-cannot do interactive OAuth), so a **shared-secret gate** protects them:
+is NoAuth), so a **shared proxy-key gate** protects deployed Speech environments:
 
 - Set a strong `SPEECH_API_KEY` app setting on the Function. When present, every
-  `/tts` and `/stt` call must carry a matching **`x-api-key`** header or it gets
-  **401**. When the setting is absent the gate is open (graceful — deploying the
-  code never breaks a running app; enforcement turns on only once the key is set
-  AND the connection sends it). `provision.sh` mints and sets this key
+  `/tts` and `/stt` call must carry a matching **`apiKey` request-body field** or
+  it gets **401**. A legacy `x-api-key` header is accepted only for cutover
+  compatibility. `provision.sh` mints and sets this key
   automatically for new deployments (`openssl rand -hex 32`).
-- The custom connector uses **API-key auth** (`securityDefinitions` header
-  `x-api-key`), so the key is stored on the connection and sent on every call.
+- Store the same value in the optional Power Platform string environment
+  variable `biz_VoiceConnectorApiKey`. The app reads it only when Speech is used
+  and sends it with that operation. End users never enter it.
+- `biz_VoiceFunctionHost` is the feature gate. When it is blank, Azure Speech is
+  hidden/disabled and the connector is never invoked; customers can deploy the
+  solution without deploying any Speech service.
+- This proxy key is not a high-value backend credential: it is readable by the
+  app and travels in the connector request. The actual Azure Speech subscription
+  key remains only in the Function's `SPEECH_KEY` app setting.
 - Still recommended before go-live: narrow **CORS** from `*` to the exact Power
   Apps origins, and add a per-IP / per-minute **rate limit**.
 
 The Speech **subscription key** stays only in `SPEECH_KEY`, server-side; it never
 reaches the front end and is never shared with whoever wires the app.
 
-### Cutover for an already-running Function (was anonymous)
+### Cutover for an already-running Function
 
-1. `az functionapp config appsettings set -n <func> -g <rg> --settings SPEECH_API_KEY="$(openssl rand -hex 32)"` (note the value).
-2. Update the custom connector to API-key auth (`pac connector update` with the new swagger) and **re-create the connection**, entering that key.
-3. Verify: `curl .../api/tts -H "x-api-key: <key>" ...` returns audio; without the header, 401.
+1. Generate one proxy key and set it in both Function `SPEECH_API_KEY` and the
+  target environment's `biz_VoiceConnectorApiKey` current value.
+2. Update the custom connector to the NoAuth definition and refresh the app data
+  source. Existing users do not enter or re-enter any credential.
+3. Verify a body containing `apiKey` returns audio and the same body without it
+  returns 401.
 
 ## Front-end integration
 
 The app calls the connector through the Power Apps SDK (never `fetch`):
 `apps/sales-copilot/src/generated/services/SalesCopilotSpeechService.ts`
-exposes `Synthesize({ text, locale, voice })`, which runs
+exposes `Synthesize({ text, locale, voice, apiKey })`, which runs
 `getClient().executeAsync({ connectorOperation: { operationName: 'Synthesize' } })`
 and returns `{ audio: <base64 mp3>, format, voice, locale }`. The app decodes
 the base64 into an `<audio>` element to play it.

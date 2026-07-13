@@ -10,6 +10,8 @@ export interface TtsRequest {
   locale?: string;
   // Azure Neural voice name (optional)
   voice?: string;
+  // Environment-managed proxy key; not the Azure Speech subscription key
+  apiKey: string;
 }
 
 export interface TtsResponse {
@@ -25,10 +27,12 @@ export interface SttRequest {
   audio: string;
   // BCP-47 locale, e.g. zh-CN
   locale?: string;
+  // Environment-managed proxy key; not the Azure Speech subscription key
+  apiKey: string;
 }
 
 export interface SttResponse {
-  // Recognized transcript
+  // Base64-encoded UTF-8 transcript (base64 to survive the connector's UTF-8 handling)
   text?: string;
   // RecognitionStatus (Success/NoMatch/...)
   status?: string;

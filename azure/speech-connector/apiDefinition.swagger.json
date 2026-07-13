@@ -10,14 +10,8 @@
   "schemes": ["https"],
   "consumes": ["application/json"],
   "produces": ["application/json"],
-  "securityDefinitions": {
-    "api_key": {
-      "type": "apiKey",
-      "in": "header",
-      "name": "x-api-key"
-    }
-  },
-  "security": [{ "api_key": [] }],
+  "securityDefinitions": {},
+  "security": [],
   "paths": {
     "/tts": {
       "post": {
@@ -65,11 +59,12 @@
   "definitions": {
     "TtsRequest": {
       "type": "object",
-      "required": ["text"],
+      "required": ["text", "apiKey"],
       "properties": {
         "text": { "type": "string", "description": "Text to synthesize" },
         "locale": { "type": "string", "description": "BCP-47 locale, e.g. zh-CN" },
-        "voice": { "type": "string", "description": "Azure Neural voice name (optional)" }
+        "voice": { "type": "string", "description": "Azure Neural voice name (optional)" },
+        "apiKey": { "type": "string", "description": "Environment-managed proxy key; not the Azure Speech subscription key" }
       }
     },
     "TtsResponse": {
@@ -83,10 +78,11 @@
     },
     "SttRequest": {
       "type": "object",
-      "required": ["audio"],
+      "required": ["audio", "apiKey"],
       "properties": {
         "audio": { "type": "string", "description": "Base64-encoded 16 kHz mono PCM WAV" },
-        "locale": { "type": "string", "description": "BCP-47 locale, e.g. zh-CN" }
+        "locale": { "type": "string", "description": "BCP-47 locale, e.g. zh-CN" },
+        "apiKey": { "type": "string", "description": "Environment-managed proxy key; not the Azure Speech subscription key" }
       }
     },
     "SttResponse": {

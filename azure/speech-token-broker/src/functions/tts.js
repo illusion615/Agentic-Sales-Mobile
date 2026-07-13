@@ -9,7 +9,7 @@ const { checkApiKey } = require('../auth');
  * Power Apps SDK). This endpoint synthesises speech server-side with the Speech
  * key (held in app settings) and returns base64 MP3 for the app to play.
  *
- * POST /api/tts  { text, locale?, voice? }  ->  { audio: <base64 mp3>, format, voice, locale }
+ * POST /api/tts  { text, locale?, voice?, apiKey }  ->  { audio: <base64 mp3>, format, voice, locale }
  */
 
 const DEFAULT_VOICE = {
@@ -33,9 +33,6 @@ app.http('tts', {
   methods: ['POST'],
   authLevel: 'anonymous',
   handler: async (request, context) => {
-    const denied = checkApiKey(request);
-    if (denied) return denied;
-
     const key = process.env.SPEECH_KEY;
     const region = process.env.SPEECH_REGION || 'eastus';
     if (!key) {
@@ -49,6 +46,9 @@ app.http('tts', {
     } catch {
       return { status: 400, jsonBody: { error: 'invalid_json' } };
     }
+
+    const denied = checkApiKey(request, body);
+    if (denied) return denied;
 
     const text = body && body.text ? String(body.text).trim() : '';
     if (!text) {

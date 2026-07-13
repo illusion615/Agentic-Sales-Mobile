@@ -18,7 +18,7 @@ import {
   collectDiagnostics, formatDiagnostics, type DiagTone, type BiLabel, type DiagSection,
 } from '@/lib/diagnostics';
 import { runVoiceProbe, formatProbeReport, micWorks, type VoiceProbeResult } from '@/lib/speech-probe';
-import { SalesCopilotSpeechService } from '@/generated/services/SalesCopilotSpeechService';
+import { synthesizeSpeech } from '@/lib/azure-tts';
 
 function ToneIcon({ tone }: { tone: DiagTone }) {
   if (tone === 'good') return <CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0" />;
@@ -94,17 +94,13 @@ export default function DiagnosticsPage() {
     setTtsState({ status: 'running' });
     const t0 = performance.now();
     try {
-      const res = await SalesCopilotSpeechService.Synthesize({
-        text: zh ? '你好，这是语音合成测试。' : 'Hello, this is a speech synthesis test.',
-        locale: speechLang(getLocale()),
-      });
+      const audioUrl = await synthesizeSpeech(
+        zh ? '你好，这是语音合成测试。' : 'Hello, this is a speech synthesis test.',
+        speechLang(getLocale())
+      );
       const ms = Math.round(performance.now() - t0);
-      if (res.success && res.data && res.data.audio) {
-        try { await new Audio('data:audio/mpeg;base64,' + res.data.audio).play(); } catch { /* autoplay may be blocked; the returned audio still proves the connector */ }
-        setTtsState({ status: 'ok', detail: `voice ${res.data.voice} · audio ${res.data.audio.length} chars · ${ms}ms` });
-      } else {
-        setTtsState({ status: 'err', detail: (res.error && res.error.message) || 'no audio returned' });
-      }
+      try { await new Audio(audioUrl).play(); } catch { /* autoplay may be blocked; the returned audio still proves the connector */ }
+      setTtsState({ status: 'ok', detail: `audio ${audioUrl.length} chars · ${ms}ms` });
     } catch (e) {
       setTtsState({ status: 'err', detail: (e as Error)?.message || String(e) });
     }

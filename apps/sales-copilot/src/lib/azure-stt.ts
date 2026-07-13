@@ -7,6 +7,7 @@
  * Speech and returns the transcript.
  */
 import { SalesCopilotSpeechService } from '@/generated/services/SalesCopilotSpeechService';
+import { getSpeechProxyConfig } from '@/lib/speech-config';
 
 /** Decode a base64 (UTF-8) string in the browser. */
 function decodeBase64Utf8(b64: string): string {
@@ -24,7 +25,9 @@ function decodeBase64Utf8(b64: string): string {
  * always survives, so we decode it here.
  */
 export async function transcribeSpeech(wavBase64: string, locale: string): Promise<string> {
-  const res = await SalesCopilotSpeechService.Transcribe({ audio: wavBase64, locale });
+  const config = await getSpeechProxyConfig();
+  if (!config.ready) throw new Error('Azure Speech is not configured');
+  const res = await SalesCopilotSpeechService.Transcribe({ audio: wavBase64, locale, apiKey: config.apiKey });
   if (!res.success || !res.data) {
     throw new Error(res.error?.message || 'Azure STT: request failed');
   }

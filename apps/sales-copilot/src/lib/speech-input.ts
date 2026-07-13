@@ -1,19 +1,7 @@
-import { EnvironmentvariabledefinitionsService } from '@/generated/services/EnvironmentvariabledefinitionsService';
-import { EnvironmentvariablevaluesService } from '@/generated/services/EnvironmentvariablevaluesService';
-import { withTimeout } from '@/lib/retry';
+import { getSpeechProxyConfig, getSpeechProxyConfigCached } from '@/lib/speech-config';
 import type { SpeechInputMode } from '@/lib/i18n';
 
 export type ResolvedSpeechInputMode = 'web-speech' | 'device-ime' | 'azure';
-
-const VOICE_FUNCTION_HOST_SCHEMA = 'biz_VoiceFunctionHost';
-const READY_CHECK_TIMEOUT_MS = 3500;
-
-let azureReadyPromise: Promise<boolean> | null = null;
-let azureReadyCache: boolean | null = null;
-
-function hasValue(value: unknown): boolean {
-  return typeof value === 'string' && value.trim().length > 0;
-}
 
 export function hasWebSpeechRecognition(): boolean {
   if (typeof window === 'undefined') return false;
@@ -59,39 +47,10 @@ export function resolveSpeechInputMode(
   return options.azureReady ? 'azure' : 'device-ime';
 }
 
-async function readVoiceFunctionHost(): Promise<string> {
-  const definitions = await EnvironmentvariabledefinitionsService.getAll({
-    filter: `schemaname eq '${VOICE_FUNCTION_HOST_SCHEMA}'`,
-    select: ['environmentvariabledefinitionid', 'schemaname', 'defaultvalue'],
-    top: 1,
-  });
-  const definition = definitions.data?.[0];
-  if (!definition) return '';
-
-  const values = await EnvironmentvariablevaluesService.getAll({
-    filter: `schemaname eq '${VOICE_FUNCTION_HOST_SCHEMA}'`,
-    select: ['value', 'schemaname'],
-    top: 1,
-  });
-  const currentValue = values.data?.find((row) => hasValue(row.value))?.value;
-  return hasValue(currentValue) ? String(currentValue).trim() : (definition.defaultvalue || '').trim();
-}
-
 export function isAzureSpeechReadyCached(): boolean | null {
-  return azureReadyCache;
+  return getSpeechProxyConfigCached()?.ready ?? null;
 }
 
 export async function isAzureSpeechReady(): Promise<boolean> {
-  if (azureReadyCache !== null) return azureReadyCache;
-  if (!azureReadyPromise) {
-    azureReadyPromise = withTimeout(readVoiceFunctionHost(), READY_CHECK_TIMEOUT_MS, 'voice function host lookup')
-      .then((host) => hasValue(host))
-      .catch(() => false)
-      .then((ready) => {
-        azureReadyCache = ready;
-        azureReadyPromise = null;
-        return ready;
-      });
-  }
-  return azureReadyPromise;
+  return (await getSpeechProxyConfig()).ready;
 }

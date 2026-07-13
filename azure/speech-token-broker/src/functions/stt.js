@@ -11,7 +11,7 @@ const { checkApiKey } = require('../auth');
  * Azure always accepts), base64-encodes it, and posts it here. We forward the
  * bytes to the Azure Speech short-audio REST API and return the transcript.
  *
- * POST /api/stt  { audio: <base64 wav>, locale? }  ->  { text, status, locale }
+ * POST /api/stt  { audio: <base64 wav>, locale?, apiKey }  ->  { text, status, locale }
  */
 
 const DEFAULT_LOCALE = 'zh-CN';
@@ -24,9 +24,6 @@ app.http('stt', {
   methods: ['POST'],
   authLevel: 'anonymous',
   handler: async (request, context) => {
-    const denied = checkApiKey(request);
-    if (denied) return denied;
-
     const key = process.env.SPEECH_KEY;
     const region = process.env.SPEECH_REGION || 'eastus';
     if (!key) {
@@ -40,6 +37,9 @@ app.http('stt', {
     } catch {
       return { status: 400, jsonBody: { error: 'invalid_json' } };
     }
+
+    const denied = checkApiKey(request, body);
+    if (denied) return denied;
 
     const b64 = body && body.audio ? String(body.audio) : '';
     if (!b64) {

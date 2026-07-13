@@ -32,6 +32,8 @@
       "produces": [
         "application/json"
       ],
+      "securityDefinitions": {},
+      "security": [],
       "paths": {
         "/{connectionId}/tts": {
           "post": {
@@ -102,7 +104,8 @@
         "TtsRequest": {
           "type": "object",
           "required": [
-            "text"
+            "text",
+            "apiKey"
           ],
           "properties": {
             "text": {
@@ -116,6 +119,10 @@
             "voice": {
               "type": "string",
               "description": "Azure Neural voice name (optional)"
+            },
+            "apiKey": {
+              "type": "string",
+              "description": "Environment-managed proxy key; not the Azure Speech subscription key"
             }
           }
         },
@@ -140,7 +147,8 @@
         "SttRequest": {
           "type": "object",
           "required": [
-            "audio"
+            "audio",
+            "apiKey"
           ],
           "properties": {
             "audio": {
@@ -150,6 +158,10 @@
             "locale": {
               "type": "string",
               "description": "BCP-47 locale, e.g. zh-CN"
+            },
+            "apiKey": {
+              "type": "string",
+              "description": "Environment-managed proxy key; not the Azure Speech subscription key"
             }
           }
         },
@@ -158,7 +170,7 @@
           "properties": {
             "text": {
               "type": "string",
-              "description": "Recognized transcript"
+              "description": "Base64-encoded UTF-8 transcript (base64 to survive the connector's UTF-8 handling)"
             },
             "status": {
               "type": "string",
@@ -188,23 +200,27 @@
       "environmentName": "efcd2d46-3d9e-e31a-a9d8-5481ddae951c",
       "xrmConnectorId": "89d801b4-d278-f111-ab0e-002248040a95",
       "almMode": "Solution",
-      "parameters": {},
+      "parameters": {
+        "host": "@environmentVariables(\"biz_VoiceFunctionHost\")",
+        "backendService": {
+          "serviceUrl": "https://@environmentVariables(\"biz_VoiceFunctionHost\")/api"
+        }
+      },
       "useNewApimVersion": "True",
       "createdBy": "{\"id\":\"ccc69730-51cf-4703-94c4-5c49bf31082f\",\"displayName\":\"Wells Zhang\",\"email\":\"wellszhang@D365DemoTSCE49940039.OnMicrosoft.com\",\"type\":\"User\",\"userType\":\"NotSpecified\",\"tenantId\":\"899aca58-7bdc-45e9-bec6-1cc9d3f12894\",\"userPrincipalName\":\"wellszhang@D365DemoTSCE49940039.OnMicrosoft.com\"}",
       "modifiedBy": "{\"id\":\"ccc69730-51cf-4703-94c4-5c49bf31082f\",\"displayName\":\"Wells Zhang\",\"email\":\"wellszhang@D365DemoTSCE49940039.OnMicrosoft.com\",\"type\":\"User\",\"userType\":\"NotSpecified\",\"tenantId\":\"899aca58-7bdc-45e9-bec6-1cc9d3f12894\",\"userPrincipalName\":\"wellszhang@D365DemoTSCE49940039.OnMicrosoft.com\"}",
       "allowSharing": false,
       "rateLimit": 0
     },
-    "capabilities": [
-      "actions"
-    ],
+    "capabilities": [],
+    "description": "Server-side Azure Speech proxy for the Sales Copilot Code App (text-to-speech and speech-to-text). Called from the app via the Power Apps SDK to bypass the app iframe's connect-src sandbox.",
     "apiDefinitions": {
-      "originalSwaggerUrl": "https://usa002004wus3ext.blob.core.windows.net/api-swagger-files/unitedstates-002/new-5fsales-20copilot-20speech-5f795669e27c19e6e2.json_original?skoid=e6898b49-53e1-4e33-bbf3-f68cbec72336&sktid=33e01921-4d64-4f8c-a055-5bdaffd5e33d&skt=2026-07-05T11%3A39%3A47Z&ske=2026-07-06T11%3A39%3A47Z&sks=b&skv=2025-01-05&sv=2025-01-05&spr=https&se=2026-07-06T04%3A29%3A35Z&sr=b&sp=r&sig=cseGQyr8DpJJXtN%2Frr4G3g%2BIKX4POx9Kj638b1pSCyI%3D",
-      "modifiedSwaggerUrl": "https://usa002004wus3ext.blob.core.windows.net/api-swagger-files/unitedstates-002/new-5fsales-20copilot-20speech-5f795669e27c19e6e2.json?skoid=e6898b49-53e1-4e33-bbf3-f68cbec72336&sktid=33e01921-4d64-4f8c-a055-5bdaffd5e33d&skt=2026-07-05T11%3A39%3A47Z&ske=2026-07-06T11%3A39%3A47Z&sks=b&skv=2025-01-05&sv=2025-01-05&spr=https&se=2026-07-06T04%3A29%3A35Z&sr=b&sp=r&sig=F4ema4xTDTJoDJo2fxNIhzfnVDbOpR32LHFK69dJ8Wc%3D"
+      "originalSwaggerUrl": "https://pafeblobprodby.blob.core.windows.net/20260713t000000zf9cd9a3743d04a3c9321c976bc87cea5/new-5fsales-20copilot-20speech-5f795669e27c19e6e2.json",
+      "modifiedSwaggerUrl": "https://usa002004wus3ext.blob.core.windows.net/api-swagger-files/unitedstates-002/new-5fsales-20copilot-20speech-5f795669e27c19e6e2.json"
     },
     "policyTemplateInstances": [],
     "backendService": {
-      "serviceUrl": "https://sales-copilot-token.azurewebsites.net/api"
+      "serviceUrl": "https://@environmentVariables(\"biz_VoiceFunctionHost\")/api"
     },
     "createdBy": {
       "id": "ccc69730-51cf-4703-94c4-5c49bf31082f",
@@ -225,7 +241,7 @@
       "userPrincipalName": "wellszhang@D365DemoTSCE49940039.OnMicrosoft.com"
     },
     "createdTime": "2026-07-06T00:36:33.9492494Z",
-    "changedTime": "2026-07-06T03:29:09.5001383Z",
+    "changedTime": "2026-07-13T17:55:26.0541055Z",
     "environment": {
       "id": "/providers/Microsoft.PowerApps/environments/efcd2d46-3d9e-e31a-a9d8-5481ddae951c",
       "name": "efcd2d46-3d9e-e31a-a9d8-5481ddae951c"
@@ -233,7 +249,12 @@
     "tier": "Standard",
     "publisher": "Wells Zhang",
     "almMode": "Solution",
-    "parameters": {},
+    "parameters": {
+      "host": "@environmentVariables(\"biz_VoiceFunctionHost\")",
+      "backendService": {
+        "serviceUrl": "https://@environmentVariables(\"biz_VoiceFunctionHost\")/api"
+      }
+    },
     "rateLimit": 0,
     "apiVersion": "None"
   }

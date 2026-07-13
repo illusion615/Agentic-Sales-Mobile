@@ -56,10 +56,11 @@ az functionapp create -n "$FUNC_NAME" -g "$RESOURCE_GROUP" \
   --functions-version 4 --os-type Linux --disable-app-insights true -o none
 # Guard against the CLI silently defaulting to Node 24 (which fails on Consumption).
 az functionapp config set -n "$FUNC_NAME" -g "$RESOURCE_GROUP" --linux-fx-version "Node|$NODE_VERSION" -o none
-# Anti-abuse shared secret: the endpoints are anonymous (the Power Apps connector
-# can't do interactive OAuth), so we mint a strong key and require it on every
-# call. The custom connector sends it as the `x-api-key` header (its API-key
-# connection parameter). Override by exporting SPEECH_API_KEY_VALUE beforehand.
+# Anti-abuse shared secret: the connector itself is NoAuth so users are never
+# asked for a credential. The app reads this proxy key from the optional
+# biz_VoiceConnectorApiKey Power Platform environment variable and includes it
+# only in TTS/STT request bodies. This is NOT the Azure Speech subscription key.
+# Override by exporting SPEECH_API_KEY_VALUE beforehand.
 SPEECH_API_KEY_VALUE="${SPEECH_API_KEY_VALUE:-$(openssl rand -hex 32)}"
 az functionapp config appsettings set -n "$FUNC_NAME" -g "$RESOURCE_GROUP" \
   --settings SPEECH_KEY="$SPEECH_KEY" SPEECH_REGION="$LOCATION" SPEECH_API_KEY="$SPEECH_API_KEY_VALUE" -o none
@@ -83,8 +84,9 @@ az functionapp cors add -n "$FUNC_NAME" -g "$RESOURCE_GROUP" --allowed-origins "
 
 # ---- 6. Custom connector ----------------------------------------------------
 echo "==> [6/6] Creating the custom connector ..."
-# The swagger host must match the Function App hostname.
-sed -i.bak "s/\"host\": \".*\"/\"host\": \"$FUNC_NAME.azurewebsites.net\"/" "$CONNECTOR_DIR/apiDefinition.swagger.json"
+# The swagger host stays environment-driven (biz_VoiceFunctionHost). A customer
+# that does not deploy Speech leaves that variable blank; the app never invokes
+# this connector in that environment.
 pac connector create \
   --api-definition-file "$CONNECTOR_DIR/apiDefinition.swagger.json" \
   --api-properties-file "$CONNECTOR_DIR/apiProperties.json"
@@ -93,22 +95,21 @@ FUNC_HOST="$FUNC_NAME.azurewebsites.net"
 cat <<EOF
 
 ============================================================
- Backend provisioned. Verify (note the x-api-key header):
+ Backend provisioned. Verify (proxy key is a request parameter):
    curl -s -X POST https://$FUNC_HOST/api/tts \\
      -H 'Content-Type: application/json' \\
-     -H 'x-api-key: $SPEECH_API_KEY_VALUE' \\
-     -d '{"text":"hello","locale":"en-US"}' | head -c 60
-   (expect {"audio":"<base64 mp3>", ...}; WITHOUT the header you get 401)
+     -d '{"text":"hello","locale":"en-US","apiKey":"$SPEECH_API_KEY_VALUE"}' | head -c 60
+   (expect {"audio":"<base64 mp3>", ...}; without apiKey you get 401)
 
- >>> HAND THESE TWO VALUES TO WHOEVER WIRES THE APP <<<
+ >>> ENVIRONMENT ADMIN CONFIGURATION (NEVER END-USER INPUT) <<<
    Function host : https://$FUNC_HOST
-   API key       : $SPEECH_API_KEY_VALUE
+   Proxy key     : $SPEECH_API_KEY_VALUE
    (The Speech SUBSCRIPTION key stays in this Function — never share it.)
 
- Connect the app (config only, no app code change):
-   Set the solution's two environment variables to the values above
-   (speech Function host + API key), then create/bind the connection.
-   Custom connectors read Host + security from environment variables set
-   per-environment at solution import, so no rebuild is needed.
+ Optional Speech deployment:
+   Set biz_VoiceFunctionHost and biz_VoiceConnectorApiKey to the values above,
+   then create/bind the NoAuth connection (confirmation only; no credential UI).
+   If Speech is not deployed, leave biz_VoiceFunctionHost blank. The app hides
+   Azure Speech and never calls the connector.
 ============================================================
 EOF

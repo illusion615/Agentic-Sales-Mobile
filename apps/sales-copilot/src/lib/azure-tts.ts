@@ -14,6 +14,7 @@
  * prefetched segments are only synthesized once.
  */
 import { SalesCopilotSpeechService } from '@/generated/services/SalesCopilotSpeechService';
+import { getSpeechProxyConfig } from '@/lib/speech-config';
 
 const DATA_URL_PREFIX = 'data:audio/mpeg;base64,';
 
@@ -64,7 +65,9 @@ export function synthesizeSpeech(
 
   const p = withTimeout(
     (async () => {
-      const res = await SalesCopilotSpeechService.Synthesize({ text, locale, voice });
+      const config = await getSpeechProxyConfig();
+      if (!config.ready) throw new Error('Azure Speech is not configured');
+      const res = await SalesCopilotSpeechService.Synthesize({ text, locale, voice, apiKey: config.apiKey });
       if (!res.success || !res.data?.audio) {
         throw new Error(res.error?.message || 'Azure TTS: no audio returned');
       }
