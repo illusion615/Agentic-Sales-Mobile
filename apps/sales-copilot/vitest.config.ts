@@ -6,6 +6,7 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
       '@microsoft/power-apps/data': path.resolve(__dirname, './src/__mocks__/power-apps-data.ts'),
+      '@microsoft/power-apps/app': path.resolve(__dirname, './src/__mocks__/power-apps-app.ts'),
     },
   },
   test: {

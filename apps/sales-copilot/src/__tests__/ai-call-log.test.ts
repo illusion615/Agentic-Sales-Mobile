@@ -1,5 +1,16 @@
-import { describe, expect, it } from 'vitest';
-import { newTraceId, formatTracePrefix, extractTraceId, TRACE_MARKER_RE } from '@/lib/ai-call-log';
+import { beforeEach, describe, expect, it } from 'vitest';
+import {
+  beginAiTurn,
+  clearAiCallLog,
+  extractTraceId,
+  formatTracePrefix,
+  newTraceId,
+  readAiCallLog,
+  recordAiCall,
+  TRACE_MARKER_RE,
+} from '@/lib/ai-call-log';
+
+beforeEach(() => clearAiCallLog());
 
 describe('ai-call-log trace helpers', () => {
   it('newTraceId returns a v4-shaped GUID', () => {
@@ -37,5 +48,22 @@ describe('ai-call-log trace helpers', () => {
     const stored = `[[trace:${id}]] (internal correlation id — ignore this line)\nsystem: …`;
     const m = stored.match(TRACE_MARKER_RE);
     expect(m?.[1].toLowerCase()).toBe(id.toLowerCase());
+  });
+
+  it('detaches standalone AI work from the active chat turn', () => {
+    beginAiTurn('chat message');
+    recordAiCall({
+      label: 'Skill: generateEntitySummary',
+      responseFormat: 'text',
+      promptChars: 100,
+      responseChars: 50,
+      latencyMs: 25,
+      ok: true,
+      traceId: newTraceId(),
+    }, { detached: true });
+
+    const [call] = readAiCallLog();
+    expect(call.turnId).toBe('');
+    expect(call.turnMessage).toBe('');
   });
 });

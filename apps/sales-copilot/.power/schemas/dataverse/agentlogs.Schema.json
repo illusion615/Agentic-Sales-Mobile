@@ -26,6 +26,13 @@
           "x-ms-schema-name": "biz_AllocationMethod",
           "maxLength": 100
         },
+        "biz_copilotcreditsconsumed": {
+          "type": "string",
+          "title": "Copilot Credits Consumed",
+          "x-ms-dataverse-attribute": "biz_copilotcreditsconsumed",
+          "x-ms-dataverse-type": "DecimalType",
+          "x-ms-schema-name": "biz_CopilotCreditsConsumed"
+        },
         "biz_creditsconsumed": {
           "type": "string",
           "title": "Credits Consumed",
@@ -179,6 +186,22 @@
           "x-ms-dataverse-type": "DateTimeType",
           "x-ms-schema-name": "crf5c_Timestamp",
           "required": true
+        },
+        "crf5c_userid": {
+          "type": "string",
+          "title": "AI Cost User ID",
+          "x-ms-dataverse-attribute": "crf5c_userid",
+          "x-ms-dataverse-type": "StringType",
+          "x-ms-schema-name": "crf5c_UserId",
+          "maxLength": 64
+        },
+        "crf5c_username": {
+          "type": "string",
+          "title": "AI Cost User Name",
+          "x-ms-dataverse-attribute": "crf5c_username",
+          "x-ms-dataverse-type": "StringType",
+          "x-ms-schema-name": "crf5c_UserName",
+          "maxLength": 200
         },
         "importsequencenumber": {
           "type": "string",

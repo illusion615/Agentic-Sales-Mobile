@@ -74,6 +74,7 @@ export function WeeklyReportCard({
       const md = await generateWeeklyReportMarkdown({
         weekStart: ws, weekEnd: we, activities: acts,
         completedCount: cc, totalCount: tc, locale: loc,
+        standalone: true,
       });
       if (md) {
         setMarkdown(md);

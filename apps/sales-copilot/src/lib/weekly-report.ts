@@ -129,14 +129,24 @@ export async function generateWeeklyReportMarkdown(params: {
   completedCount: number;
   totalCount: number;
   locale: string;
+  /** Page-triggered reports are standalone; chat-triggered reports use turn logging. */
+  standalone?: boolean;
 }): Promise<string | null> {
-  const { weekStart, weekEnd, activities, completedCount, totalCount, locale } = params;
+  const { weekStart, weekEnd, activities, completedCount, totalCount, locale, standalone = false } = params;
   const prompt = buildWeeklyReportPrompt(weekStart, weekEnd, activities, completedCount, totalCount, locale);
   const { executeFunction } = await import('@/lib/function-executor');
   const result = await executeFunction('generateEntitySummary', {
     data: prompt,
     entityType: 'activity',
-  }, { locale });
+  }, {
+    locale,
+    standaloneAiOperation: standalone
+      ? {
+          operationType: 'report.weekly',
+          queryText: `Weekly report · ${weekRangeLabel(weekStart, weekEnd, locale)}`,
+        }
+      : undefined,
+  });
 
   if (result.success && typeof result.data === 'string' && result.data.trim().length > 0) {
     const md = result.data.trim();

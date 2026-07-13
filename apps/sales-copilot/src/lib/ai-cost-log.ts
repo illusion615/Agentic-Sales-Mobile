@@ -44,6 +44,8 @@
  *   crf5c_sourcedescription = operationType         (human-scannable)
  *   crf5c_sessionid         = `${turnId}#${index}`  (unique per row)
  *   crf5c_timestamp         = ISO turn time
+ *   crf5c_userid            = Entra object id        (stable user grouping)
+ *   crf5c_username          = user display name      (analytics label)
  *   biz_operationtype       = operationType
  *   biz_operationindex      = 0-based op index in the turn
  *   biz_allocationmethod    = "sole" | "shared"
@@ -58,12 +60,13 @@
  * turn is written even without a follow-on turn. `biz_*` columns are written via
  * the raw Dataverse client because the friendly adapter only surfaces `crf5c_*`.
  *
- * v1 scope note: reactive/background AI calls that fire OUTSIDE a turn (composer
- * follow-up suggestions, auto-summaries, warm-ups) are excluded from the pool
- * and not yet costed here.
+ * Standalone/background business AI operations use
+ * `recordStandaloneAiOperation` below. Reactive UI-only calls (composer
+ * suggestions, warm-ups) remain excluded because they are not business work.
  */
 
 import { getClient } from '@microsoft/power-apps/data';
+import { getContext } from '@microsoft/power-apps/app';
 import { dataSourcesInfo } from '../../.power/schemas/appschemas/dataSourcesInfo';
 import { aiCallsForTurn } from './ai-call-log';
 import { deriveTurnOperations, type TurnOperation, type IntentPlanLike } from './cost-operation';
@@ -90,10 +93,44 @@ interface StagedTurn {
 let staged: StagedTurn | null = null;
 let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
 let costClient: ReturnType<typeof getClient> | null = null;
+let costUserPromise: Promise<{ userId: string; userName: string }> | null = null;
 
 function getCostClient(): ReturnType<typeof getClient> {
   if (!costClient) costClient = getClient(dataSourcesInfo);
   return costClient;
+}
+
+/** Resolve the signed-in user once per app session for cost attribution. */
+function getCostUser(): Promise<{ userId: string; userName: string }> {
+  if (!costUserPromise) {
+    costUserPromise = getContext()
+      .then((context) => ({
+        userId: (context.user.objectId || '').trim().toLowerCase(),
+        userName: (context.user.fullName || context.user.userPrincipalName || '').trim(),
+      }))
+      .catch((error: unknown) => {
+        // Permit a later write to retry if host context was temporarily unavailable.
+        costUserPromise = null;
+        console.warn('[AI Cost] User context unavailable (cost row remains unattributed):', error);
+        return { userId: '', userName: '' };
+      });
+  }
+  return costUserPromise;
+}
+
+/** Best-effort row persistence with an explicit user analytics snapshot. */
+async function persistAgentLogRow(row: Record<string, unknown>, warningLabel: string): Promise<void> {
+  try {
+    const user = await getCostUser();
+    const attributedRow = {
+      ...row,
+      ...(user.userId ? { crf5c_userid: user.userId } : {}),
+      ...(user.userName ? { crf5c_username: user.userName } : {}),
+    };
+    await getCostClient().createRecordAsync<Record<string, unknown>, unknown>(AGENT_LOG_DS, attributedRow);
+  } catch (error) {
+    console.warn(`[AI Cost] ${warningLabel} failed (ignored):`, error);
+  }
 }
 
 /**
@@ -146,8 +183,6 @@ export function flushStagedCost(): void {
     const tracePayload = JSON.stringify({ v: 1, traces, divisor });
     const nowIso = new Date().toISOString();
     const query = s.userMessage.slice(0, QUERY_MAX);
-    const client = getCostClient();
-
     for (const op of s.operations) {
       const row: Record<string, unknown> = {
         crf5c_logname: s.turnId,
@@ -164,11 +199,48 @@ export function flushStagedCost(): void {
         // matcher Flow backfills it from msdyn_aievent.
       };
       // Fire-and-forget: never await, never surface a write error to the turn.
-      void client
-        .createRecordAsync<Record<string, unknown>, unknown>(AGENT_LOG_DS, row)
-        .catch((e: unknown) => console.warn('[AI Cost] Agent Log write failed (ignored):', e));
+      void persistAgentLogRow(row, 'Agent Log write');
     }
   } catch (e) {
     console.warn('[AI Cost] flushStagedCost failed (ignored):', e);
+  }
+}
+
+/**
+ * Persist one data-driven AI operation that runs outside a Copilot chat turn
+ * (for example an account insight, pipeline summary, or page-generated weekly
+ * report). The caller supplies the exact AI Event trace emitted by
+ * `invokeFlowForLLM`, so the existing matcher Flow can backfill its real credit
+ * cost exactly as it does for chat operations.
+ *
+ * Deliberately stores only a short business descriptor, never the generated AI
+ * response or the full data prompt. Logging remains best-effort and must never
+ * block or fail the user-facing analysis.
+ */
+export function recordStandaloneAiOperation(args: {
+  operationType: string;
+  queryText: string;
+  traceId: string;
+}): void {
+  try {
+    if (!args.operationType || !args.traceId) return;
+    const operationId = `aiop_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const row: Record<string, unknown> = {
+      crf5c_logname: operationId,
+      crf5c_agentname: AGENT_NAME,
+      crf5c_querytext: (args.queryText || args.operationType).slice(0, QUERY_MAX),
+      crf5c_timestamp: new Date().toISOString(),
+      crf5c_sessionid: `${operationId}#0`,
+      crf5c_sourcedescription: args.operationType,
+      biz_operationtype: args.operationType,
+      biz_operationindex: 0,
+      biz_allocationmethod: 'sole',
+      biz_aieventtracelist: JSON.stringify({ v: 1, traces: [args.traceId], divisor: 1 }),
+      // biz_creditsconsumed is backfilled by the existing AI Event matcher Flow.
+      // crf5c_responsetext is intentionally omitted (metadata-only logging).
+    };
+    void persistAgentLogRow(row, 'Standalone Agent Log write');
+  } catch (e) {
+    console.warn('[AI Cost] recordStandaloneAiOperation failed (ignored):', e);
   }
 }

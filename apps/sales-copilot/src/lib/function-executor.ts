@@ -10,6 +10,7 @@ import { availableFunctions, coerceArgs } from './function-registry';
 import { agentError, toDevLog } from '@/lib/errors';
 import { getHandler, type FunctionCallResult } from './functions/handler-registry';
 import type { Locale } from '@/lib/i18n';
+import type { StandaloneAiOperation } from '@/services/power-automate-service';
 // Register all domain handlers (query, draft, etc.)
 import './functions';
 
@@ -33,6 +34,8 @@ export async function executeFunction(
     };
     conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
     locale?: string;
+    /** Explicit metadata for data-driven AI work outside a chat turn. */
+    standaloneAiOperation?: StandaloneAiOperation;
   }
 ): Promise<import('./functions/handler-registry').FunctionCallResult> {
   console.log('[FN] ENTER executeFunction, name=' + functionName + ', args=' + JSON.stringify(args));
@@ -84,7 +87,10 @@ export async function executeFunction(
               { role: 'user', content: fullUser },
             ],
             responseFormat,
-          }, { label: `Skill: ${functionName}` });
+          }, {
+            label: `Skill: ${functionName}`,
+            standaloneOperation: context.standaloneAiOperation,
+          });
 
           if (!llmResp.success || !llmResp.content) {
             return { success: false, error: llmResp.error || 'LLM skill call failed' };

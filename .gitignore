@@ -1,4 +1,5 @@
 node_modules/
+power-platform/generative-pages/**/*.compiled.js
 dist/
 build/
 # TypeScript incremental build cache — build artifact, must NOT be committed.

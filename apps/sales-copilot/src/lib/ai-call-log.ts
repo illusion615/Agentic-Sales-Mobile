@@ -19,8 +19,9 @@
  *
  * Correlation: `beginAiTurn(userMessage)` stamps a turn id at the start of each
  * user turn (called from copilot-context.sendMessage). Every call recorded
- * until the next turn is attributed to it. Calls made outside a turn (startup
- * warm-ups, restored-conversation suggestions) land under an empty turn id.
+ * until the next turn is attributed to it, unless the caller explicitly marks
+ * it detached (standalone/background AI work has its own Agent Log row). Calls
+ * made outside a turn land under an empty turn id.
  */
 
 const RING_KEY = 'copilot-ai-call-log';
@@ -75,13 +76,16 @@ export function estimateTokens(chars: number): number {
 
 // ---- ring buffer ---------------------------------------------------------
 
-export function recordAiCall(entry: Omit<AiCallEntry, 'ts' | 'turnId' | 'turnMessage'>): void {
+export function recordAiCall(
+  entry: Omit<AiCallEntry, 'ts' | 'turnId' | 'turnMessage'>,
+  options?: { detached?: boolean },
+): void {
   try {
     const full: AiCallEntry = {
       ...entry,
       ts: Date.now(),
-      turnId: currentTurnId,
-      turnMessage: currentTurnMessage,
+      turnId: options?.detached ? '' : currentTurnId,
+      turnMessage: options?.detached ? '' : currentTurnMessage,
     };
     const list = readAiCallLog();
     list.unshift(full);

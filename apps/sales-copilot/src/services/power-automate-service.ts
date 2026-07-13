@@ -18,6 +18,7 @@ import { getClient } from '@microsoft/power-apps/data';
 import { dataSourcesInfo } from '../../.power/schemas/appschemas/dataSourcesInfo';
 import { getTextPromptOpName } from './prompt-resolver';
 import { recordAiCall, newTraceId, formatTracePrefix } from '@/lib/ai-call-log';
+import { recordStandaloneAiOperation } from '@/lib/ai-cost-log';
 import { Msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75cService as TextPromptService } from '@/generated/services/Msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75cService';
 
 export interface FlowLLMResponse {
@@ -28,6 +29,13 @@ export interface FlowLLMResponse {
 }
 
 type ResponseFormat = 'text' | 'json' | 'dag' | 'json-generic';
+
+export interface StandaloneAiOperation {
+  /** Stable business dimension stored in biz_operationtype. */
+  operationType: string;
+  /** Short human-readable descriptor only — never the full prompt/response. */
+  queryText: string;
+}
 
 /** Telemetry counters */
 const b64Stats = { total: 0, b64: 0, raw: 0, decodeFailed: 0 };
@@ -96,7 +104,7 @@ export async function invokeFlowForLLM(
     messages: Array<{ role: string; content: string }>;
     responseFormat?: 'text' | 'json' | 'dag' | 'json-generic';
   },
-  meta?: { label?: string },
+  meta?: { label?: string; standaloneOperation?: StandaloneAiOperation },
 ): Promise<FlowLLMResponse> {
   const startTime = Date.now();
 
@@ -145,7 +153,10 @@ export async function invokeFlowForLLM(
     if (!result.success) {
       console.error('[AI Tool] Custom API error:', JSON.stringify(result.error, null, 2));
       console.error('[AI Tool] Full result:', JSON.stringify(result, null, 2));
-      recordAiCall({ label: callLabel, responseFormat, promptChars: text.length, responseChars: 0, latencyMs, ok: false, traceId });
+      recordAiCall(
+        { label: callLabel, responseFormat, promptChars: text.length, responseChars: 0, latencyMs, ok: false, traceId },
+        { detached: !!meta?.standaloneOperation },
+      );
       return {
         success: false,
         error: result.error?.message ?? 'AI Builder predict failed',
@@ -187,12 +198,21 @@ export async function invokeFlowForLLM(
       }
     }
 
-    recordAiCall({ label: callLabel, responseFormat, promptChars: text.length, responseChars: rawContent.length, latencyMs, ok: true, traceId });
+    recordAiCall(
+      { label: callLabel, responseFormat, promptChars: text.length, responseChars: rawContent.length, latencyMs, ok: true, traceId },
+      { detached: !!meta?.standaloneOperation },
+    );
+    if (meta?.standaloneOperation) {
+      recordStandaloneAiOperation({ ...meta.standaloneOperation, traceId });
+    }
     return { success: true, content, latencyMs };
   } catch (error: unknown) {
     const latencyMs = Date.now() - startTime;
     console.error('[AI Tool] Error:', error);
-    recordAiCall({ label: callLabel, responseFormat, promptChars: text.length, responseChars: 0, latencyMs, ok: false, traceId });
+    recordAiCall(
+      { label: callLabel, responseFormat, promptChars: text.length, responseChars: 0, latencyMs, ok: false, traceId },
+      { detached: !!meta?.standaloneOperation },
+    );
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error invoking AI Builder',

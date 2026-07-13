@@ -16,6 +16,7 @@ export type Crf5c_agentlogsstatuscode = keyof typeof Crf5c_agentlogsstatuscode;
 export interface Crf5c_agentlogsBase {
   biz_aieventtracelist?: string;
   biz_allocationmethod?: string;
+  biz_copilotcreditsconsumed?: number;
   biz_creditsconsumed?: number;
   biz_operationindex?: number;
   biz_operationtype?: string;
@@ -27,6 +28,8 @@ export interface Crf5c_agentlogsBase {
   crf5c_sessionid?: string;
   crf5c_sourcedescription?: string;
   crf5c_timestamp: string;
+  crf5c_userid?: string;
+  crf5c_username?: string;
   importsequencenumber?: number;
   overriddencreatedon?: string;
   ownerid: string;
