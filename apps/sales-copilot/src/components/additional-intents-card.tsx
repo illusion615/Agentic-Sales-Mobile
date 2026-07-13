@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
+import { fireFeedback } from '@/lib/feedback';
 import { Lightbulb, ChevronRight, ChevronDown, Check, X, MapPin, Phone, Calendar, Mail, CheckSquare, Building2, Users, TrendingUp, CalendarClock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -192,6 +193,9 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
         });
       }
       updateStatus(index, 'confirmed');
+      // Dynamic feedback via the user's configured scenario animation (boss: replace
+      // the janky card transition with scenario feedback). fireFeedback self-gates.
+      fireFeedback('success');
       // Inline status update reflects the save in-conversation; no toast.
     } catch (error: unknown) {
       // Toast is shown by the global MutationCache.onError handler.
@@ -203,6 +207,7 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
   
   const handleSkip = (index: number) => {
     updateStatus(index, 'skipped');
+    fireFeedback('warning');
   };
 
   // Deep-link a confirmed card to its record detail. Contacts have no detail
@@ -293,7 +298,6 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
       
       {/* Forms List */}
       <div className="space-y-2 pl-10">
-        <AnimatePresence mode="popLayout">
           {additionalIntents.forms.map((form: AdditionalIntentForm, idx: number) => {
             const status = formStatuses[idx];
             const Icon = form.type === 'activity' ? getActivityIcon(form.data) : EntityTypeIcons[form.type];
@@ -304,19 +308,18 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
             const isNavigable = status === 'confirmed' && !!createdRec;
             
             return (
-              <motion.div
+              <div
                 key={`${messageId}-${idx}`}
-                layout
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 10, height: 0 }}
-                transition={{ delay: idx * 0.1, duration: 0.2 }}
-                onClick={isNavigable ? () => openRecord(idx) : undefined}
-                role={isNavigable ? 'button' : undefined}
-                tabIndex={isNavigable ? 0 : undefined}
-                onKeyDown={isNavigable ? (e: React.KeyboardEvent) => {
-                  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openRecord(idx); }
-                } : undefined}
+                {...(isNavigable
+                  ? {
+                      role: 'button' as const,
+                      tabIndex: 0,
+                      onClick: () => openRecord(idx),
+                      onKeyDown: (e: React.KeyboardEvent) => {
+                        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openRecord(idx); }
+                      },
+                    }
+                  : {})}
                 className={cn(
                   'rounded-xl border p-3 transition-all',
                   status === 'confirmed' 
@@ -477,10 +480,9 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
                     </div>
                   </>
                 )}
-              </motion.div>
+              </div>
             );
           })}
-        </AnimatePresence>
       </div>
       
       {/* All processed message */}

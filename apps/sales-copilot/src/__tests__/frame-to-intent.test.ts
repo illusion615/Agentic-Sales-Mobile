@@ -136,6 +136,45 @@ describe('frameToIntent', () => {
     const out = frameToIntent(pipeline)!;
     expect(out.multiIntentAnalysis?.summary).toMatch(/intents from frame/);
   });
+
+  it('blanks $intent_N.* ref placeholders so resolvedContext fills them at runtime', () => {
+    // DAG: step 1 creates the opportunity; step 2 logs an activity that relates
+    // to it via "$intent_1.*" placeholders. Those placeholders must NOT survive
+    // into the intent args (they leak into the card as "$intent_1.name" and, being
+    // non-empty, block buildEffectiveArgs from filling the real created values).
+    const pipeline = makePipeline({
+      steps: [
+        {
+          seq: 1,
+          function: 'draftOpportunity',
+          arguments: { name: 'New OR Equipment', accountName: 'Nanshan Hospital' },
+        },
+        {
+          seq: 2,
+          function: 'draftActivity',
+          arguments: {
+            title: 'Internal prep meeting',
+            accountName: 'Nanshan Hospital',
+            opportunityId: '$intent_1.id',
+            opportunityName: '$intent_1.name',
+          },
+        },
+      ],
+    });
+    const out = frameToIntent(pipeline)!;
+    const activity = out.additionalActions![0].arguments;
+    // Placeholders normalized to '' → buildEffectiveArgs will fill from resolvedContext.
+    expect(activity.opportunityId).toBe('');
+    expect(activity.opportunityName).toBe('');
+    // Literal fields are untouched.
+    expect(activity.title).toBe('Internal prep meeting');
+    expect(activity.accountName).toBe('Nanshan Hospital');
+    // A blanked opportunityName must NOT spawn a fuzzy-match resolution.
+    const oppRes = (out.resolutions || []).find(
+      (r) => r.entityType === 'opportunity' && r.intentIndex === 1,
+    );
+    expect(oppRes).toBeUndefined();
+  });
 });
 
 describe('frameToIntent — query→think routing (analyzeResults)', () => {

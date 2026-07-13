@@ -1,5 +1,5 @@
 import { useRef, useEffect, useLayoutEffect, useCallback, useState, lazy, Suspense } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence, useDragControls, type PanInfo } from 'motion/react';
 import { ArrowUp, SquarePen, X, Copy, Volume2, VolumeX, Loader2, Square, Play, Pause, Paperclip, RotateCcw, Mic, ScrollText } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -28,6 +28,16 @@ import { useEffectiveOffline } from '@/lib/connectivity';
 import { newAttachmentId, type CopilotAttachment } from '@/lib/attachments';
 import { useDynamicSuggestions } from '@/hooks/use-dynamic-suggestions';
 import { useSpeechInput } from '@/hooks/use-speech-input';
+
+// Android WebView silently drops `backdrop-filter` when the element (or an
+// ancestor) carries a transform. The copilot sheet animates translateY and is
+// draggable, so on Android the frosted-glass blur never renders and the
+// semi-transparent panel background lets the page bleed through (visual
+// interference). iOS (WKWebView) renders backdrop-filter correctly. `@supports`
+// can't tell them apart because Android *reports* support — the failure is a
+// transform-interaction bug — so we branch on the platform (UA) and give Android
+// an opaque panel background, keeping the glass look untouched on iOS.
+const IS_ANDROID = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent);
 
 
 
@@ -107,6 +117,22 @@ export function CopilotPanel() {
   useEffect(() => {
     if (isSideDocked && !isOpen) openPanel(false);
   }, [isSideDocked, isOpen, openPanel]);
+
+  // Mobile: when a card/link inside the panel navigates to a record, auto-collapse
+  // the panel so the freshly loaded page (behind the panel) is revealed — otherwise
+  // the user must manually dismiss the panel to see it (boss report). Central route
+  // listener so it covers every in-panel navigation source (record list, match
+  // cards, suggest-plan "view details", markdown citations, etc.). Desktop
+  // side-dock stays open, so this is gated to mobile / binary mode only.
+  const location = useLocation();
+  const prevPathRef = useRef(location.pathname);
+  useEffect(() => {
+    if (location.pathname === prevPathRef.current) return;
+    prevPathRef.current = location.pathname;
+    if (isOpen && (isMobile || binaryMode)) {
+      closePanel();
+    }
+  }, [location.pathname, isOpen, isMobile, binaryMode, closePanel]);
 
   // Binary mode: if the panel ever opens to the mid state, snap it to fullscreen
   // so no intermediate height is ever shown (covers every open entry path).
@@ -1458,7 +1484,9 @@ export function CopilotPanel() {
           }}
           className={cn(
             'flex flex-col overflow-clip keyboard-inset-bottom min-h-0',
-            'bg-background/80 backdrop-blur-md',
+            // Android: opaque bg (backdrop-filter blur fails under transform there).
+            // iOS: keep the frosted glass (translucent bg + blur).
+            IS_ANDROID ? 'bg-background' : 'bg-background/80 backdrop-blur-md',
             // Float mode: fixed bottom sheet overlay
             !isSideDocked && 'fixed bottom-0 left-0 right-0 z-[60] border-t border-border/50',
             !isSideDocked && isOpen && !isFullScreen && 'rounded-t-[20px]',
@@ -1582,7 +1610,10 @@ export function CopilotPanel() {
               }}
               className={cn(
                 'fixed bottom-0 left-0 right-0 z-[60] flex flex-col overflow-clip keyboard-inset-bottom min-h-0',
-                'bg-background/80 backdrop-blur-md border-t border-border/50',
+                'border-t border-border/50',
+                // Android: opaque bg (backdrop-filter blur fails under transform there).
+                // iOS: keep the frosted glass (translucent bg + blur).
+                IS_ANDROID ? 'bg-background' : 'bg-background/80 backdrop-blur-md',
                 !isFullScreen && 'rounded-t-[20px]',
               )}
               style={{

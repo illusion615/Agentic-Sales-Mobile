@@ -70,6 +70,24 @@ function literalName(v: unknown): string {
   return v.trim();
 }
 
+/**
+ * Normalize a step's arguments by blanking any `$intent_N.field` ref placeholder
+ * to ''. Cross-step entity links (e.g. an activity that relates to the
+ * opportunity created in a prior step) are carried by the runtime's
+ * `resolvedContext` (keyed by entity type), which `buildEffectiveArgs` folds
+ * into MISSING arg keys only. A literal `$intent_N.*` string is non-empty, so
+ * leaving it in place both BLOCKS that fill AND leaks the raw placeholder into
+ * the form card (e.g. 关联商机 renders "$intent_1.name"). Blanking hands linking
+ * back to resolvedContext — the single cross-step linking mechanism.
+ */
+function stripRefPlaceholders(args: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(args)) {
+    out[k] = isRefPlaceholder(v) ? '' : v;
+  }
+  return out;
+}
+
 /** Extract resolution chain from arguments based on present name fields.
  *  Skips $ref placeholders (e.g. "$intent_1.name") — those are resolved at
  *  execution time from prior step outputs and must not leak into the UI as
@@ -148,20 +166,20 @@ export function frameToIntent(pipeline: PipelineResult): TranslatedIntent | null
     const head = sorted[0];
     if (!head.function) return null;
     primaryFn = head.function;
-    primaryArgs = { ...(head.arguments as Record<string, unknown>) };
+    primaryArgs = stripRefPlaceholders({ ...(head.arguments as Record<string, unknown>) });
     const headUsePageContext = head.usePageContext;
     extras = sorted.slice(1)
       .filter((s) => s.function)
       .map((s) => ({
         function: s.function,
-        arguments: { ...(s.arguments as Record<string, unknown>) },
+        arguments: stripRefPlaceholders({ ...(s.arguments as Record<string, unknown>) }),
         ...(s.usePageContext ? { usePageContext: true } : {}),
       }));
   } else {
     const single = plan as SingleIntent;
     if (!single.function) return null;
     primaryFn = single.function;
-    primaryArgs = { ...(single.arguments as Record<string, unknown>) };
+    primaryArgs = stripRefPlaceholders({ ...(single.arguments as Record<string, unknown>) });
   }
 
   // Correct-architecture routing (query → think): a single read intent whose
