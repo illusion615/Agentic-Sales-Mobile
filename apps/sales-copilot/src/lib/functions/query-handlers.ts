@@ -12,6 +12,7 @@ import type { Activity } from '@/generated/models/activity-model';
 import type { Contact } from '@/generated/models/contact-model';
 import { registerHandlers, type FunctionHandler } from './handler-registry';
 import { diagRetrieve, resolveAccountByName } from './_shared';
+import { activityStatus, normalizeQueryStatus } from '@/lib/activity-status';
 
 /**
  * Canonical opportunity stages stored in Dataverse (lowercase):
@@ -178,8 +179,10 @@ const queryActivities: FunctionHandler = async (args, ctx) => {
     filteredAct = filteredAct.filter((a: Activity) => (a.type ?? '').toLowerCase() === t);
   }
   if (actStatus) {
-    const st = actStatus.toLowerCase();
-    filteredAct = filteredAct.filter((a: Activity) => (a.status ?? '').toLowerCase() === st);
+    // Map the agent's status word (incl. legacy draft/confirmed) to a canonical
+    // state, then compare against the activity's canonical status. Unknown → skip.
+    const wanted = normalizeQueryStatus(actStatus);
+    if (wanted) filteredAct = filteredAct.filter((a: Activity) => activityStatus(a) === wanted);
   }
 
   if (scheduledDate) {

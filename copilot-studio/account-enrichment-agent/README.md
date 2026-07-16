@@ -1,9 +1,22 @@
 # Account Enrichment Agent
 
 This directory documents the standalone Copilot Studio agent that keeps a CRM
-account's public master data current and maintains a short public intelligence
-snapshot inside the account description. It is a background enrichment agent,
-not the main interactive sales assistant.
+account's public master data current on a weekly schedule. It stores a concise
+profile in `account.description` and upserts the same Marketing Insight record
+the app uses in `crf5c_aisummary` (`biz_type = marketing`). It is a background
+agent, not the main interactive sales assistant.
+
+## Architecture boundary
+
+This agent is **not** called by the account-detail refresh button. The app's
+on-demand path calls the single classic `Agentic CRM Mobile Support Agent`
+resolved from the `copilot_studio_agent_name` Setting; that agent returns
+`fields + marketingInsight`, and the app validates and persists the result.
+
+This standalone agent owns only background automation (currently the weekly
+batch workflow) and writes through its Dataverse MCP tool. Do not point the app
+at this `cliagent-1.0.0` agent, add an `account_enrichment_agent` app setting, or
+copy its compact workflow status response into the app-facing parser contract.
 
 ## Studio resources created
 
@@ -15,14 +28,16 @@ Agent:
 - Model: `Claude Sonnet 4.6`
 - Knowledge: `Search all websites` enabled
 - Tools: `Microsoft Dataverse MCP Server`
-- The agent uses the MCP server to read the account row, update public
-  master-data fields, and rewrite a managed enrichment block inside the account
-  `description`. It writes to the `account` table only.
+- Last verified publication: `2026-07-15T00:29:22Z`
+- The agent uses the MCP server to read account and AI Summary rows, update
+  public master-data fields and the plain-text account profile, and upsert one
+  account Marketing Insight row.
 
 Workflows:
 - `Account Enrichment - Account Changed`
   - Workflow id: `117c83dd-820e-c794-f0df-7a37b80dd886`
-  - Status: published in Copilot Studio
+  - Status: inactive (retained only as historical configuration; do not enable,
+    because field-triggered writes race the app's on-demand result)
   - Trigger: Microsoft Dataverse `When a row is added, modified or deleted`
   - Table: `Accounts`
   - Change type: `Added or Modified`
@@ -45,17 +60,15 @@ settled before a production run.
 
 ## What the agent enriches
 
-Everything lands on the `account` row. There are two kinds of output:
+There are two canonical persistence targets:
 
-1. Public master-data fields, updated in place from official or high-confidence
-   public sources.
-2. A public intelligence snapshot, written as a managed text block inside the
-   account `description` field, including recent news and announcements (tenders
-   and procurement notices, budgets, expansion, equipment, partnerships, and
-   leadership changes) that help sales mine opportunities.
+1. `account`: public master-data fields plus a concise plain-text profile in
+  `description`.
+2. `crf5c_aisummary`: ready-to-render Marketing Insight Markdown with
+  `crf5c_entitytype = account`, `biz_type = marketing`, and a 30-day expiry.
 
-The agent does not use the `crf5c_businessinsights` table. That table remains for
-the app's own in-product insights and is intentionally not touched here.
+The agent does not use the `crf5c_businessinsights` table and does not create a
+parallel snapshot format inside `account.description`.
 
 ## Public master fields updated
 
@@ -68,50 +81,36 @@ Standard `account` fields, updated from official or high-confidence sources:
   `address1_country`, `address1_postalcode`: official registered or HQ address.
 - `industrycode`: mapped to the closest existing Dataverse industry option-set
   value. If no option is a reasonable match, `industrycode` is left unchanged and
-  the public industry is noted inside the description snapshot instead.
+  the public industry may be noted in Marketing Insight instead.
 
 Update rules:
 - Empty fields are filled.
 - A non-empty field is refreshed only when an official source clearly supersedes
   the current value.
 - `name`, owner, and state/status are never changed.
-- Every field change is logged in the description snapshot `Field updates`
-  section, as old to new, so the change is auditable and a human can revert it.
 
-## Intelligence snapshot in `description`
+## Profile and Marketing Insight
 
-The snapshot is a single managed block delimited by exact markers:
-
-```text
-[AI-ENRICHMENT:START]
-...
-[AI-ENRICHMENT:END]
-```
-
-- Text outside the markers is preserved. It may be salesperson notes. Only the
-  content between the markers is replaced on each run. If no block exists yet, one
-  is appended.
-- The block is human-readable text in the output language, kept roughly under
-  1500 characters.
-- Sections in order: Profile, Industry trends, News & announcements, Risks,
-  Sales angles, Next actions, Field updates, Sources, Updated (UTC, valid about
-  30 days). The News & announcements section is a dated, sourced list focused on
-  opportunity mining (tenders/procurement, budgets, expansion, equipment,
-  partnerships, leadership changes).
-- Freshness is read from the `Updated` timestamp inside the block. If it is less
-  than 7 days old and `forceRefresh` is not true, the run is skipped. No separate
-  freshness table or field is needed.
+- `account.description` is fully owned by enrichment and contains only a
+  concise 2-4 sentence plain-text profile. Legacy `[AI-ENRICHMENT]` blocks are
+  not produced.
+- Marketing Insight is stored as Markdown in `crf5c_aisummary.crf5c_summary`.
+  It contains industry trends, dated news and announcements, risks, and
+  clickable HTTPS sources. Sales angles and next actions remain the Sales
+  Insight layer's responsibility.
+- Freshness is read from the matching Marketing Insight row's
+  `crf5c_generatedon` / `crf5c_expireson`, not parsed from prose.
 
 ## Safety rules
 
 - Treat web findings as public signals, not CRM truth.
 - Do not invent revenue, procurement status, installed base, decision makers, or
   buying intent.
-- Never overwrite salesperson notes; only the managed block is rewritten.
+- Do not put source lists, Markdown, or change logs in `account.description`.
 - Do not overwrite a non-empty public field unless an official source clearly
-  supersedes it, and always log the change.
+  supersedes it.
 - Skip or downgrade confidence when entity matching is weak.
-- Skip the run if the snapshot was refreshed in the last 7 days, unless
+- Skip the run if the Marketing Insight row was refreshed in the last 7 days, unless
   `forceRefresh` is true.
 - Do not scrape paywalled or login-only content.
 - Do not store private personal data from public pages unless it is clearly
@@ -122,10 +121,9 @@ The snapshot is a single managed block delimited by exact markers:
 The account detail page shows the enriched fields directly:
 
 - Phone, email, address, industry, and the official website appear in the
-  Contact Info card (website is a clickable link).
-- The description enrichment block is rendered as a dedicated Public Intelligence
-  card with the `[AI-ENRICHMENT:...]` markers stripped, while any human-entered
-  notes stay in the Notes card.
+  account header (website is a clickable link).
+- The description profile is shown in the account header. Marketing Insight is
+  rendered through the shared Markdown renderer from the `crf5c_aisummary` row.
 
 The app `Account` abstraction now maps `website` to the Dataverse `websiteurl`
 field (`generated/models/account-model.ts`, `AccountEntityModel.ts`, and
@@ -134,7 +132,6 @@ edits it.
 
 ## File map
 
-- `instructions.md`: exact agent instructions used in Copilot Studio, plus the
-  description snapshot format.
+- `instructions.md`: exact agent instructions used in Copilot Studio.
 - `workflows.md`: exact workflow configuration and trigger messages.
 - `test-script.md`: manual validation cases for Studio and Dataverse.

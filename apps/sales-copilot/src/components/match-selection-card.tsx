@@ -23,6 +23,7 @@ import { cn } from '@/lib/utils';
 import { getLocale, t, pickLabel, type Locale } from '@/lib/i18n';
 import { useCopilot } from '@/contexts/copilot-context';
 import { formatCurrency } from '@/lib/format-currency';
+import { recordDetailRoute } from '@/lib/record-route';
 
 // Opportunity metadata rendering — kept consistent with the Opportunities list
 // (same stage colors) so the picker row shows account / stage / status / revenue
@@ -278,20 +279,7 @@ export function MatchSelectionCard({
 
     setTimeout(() => {
       closePanel();
-      switch (matchSelection.entityType) {
-        case 'account':
-          navigate(`/accounts/${record.id}`);
-          break;
-        case 'opportunity':
-          navigate(`/opportunities/${record.id}`);
-          break;
-        case 'activity':
-          navigate(`/activities/${record.id}`);
-          break;
-        case 'contact':
-          navigate('/accounts');
-          break;
-      }
+      navigate(recordDetailRoute(matchSelection.entityType, record.id));
     }, 200);
   };
 

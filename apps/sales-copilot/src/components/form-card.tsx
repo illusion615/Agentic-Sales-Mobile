@@ -7,21 +7,22 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { Check, X, Calendar, User, Users, Building2, Phone, Mail, MapPin, DollarSign, TrendingUp, FileText, Tag, ChevronRight, ChevronDown, Target, Sparkles } from 'lucide-react';
+import { Check, X, Calendar, User, Users, Building2, Phone, Mail, MapPin, DollarSign, TrendingUp, FileText, Tag, ChevronRight, ChevronDown, Target, Sparkles, Bug, Lightbulb, Image, CircleDot } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Calendar as CalendarComponent } from '@/components/ui/calendar';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { cn } from '@/lib/utils';
-import { getLocale, t, getCompactDraftForms, type Locale, type TranslationKey } from '@/lib/i18n';
-import { formatCurrencyCompact } from '@/lib/format-currency';
+import { getLocale, t, getCompactDraftForms, type Locale } from '@/lib/i18n';
 import { useCopilot } from '@/contexts/copilot-context';
 import { format } from 'date-fns/format';
 
 // Hooks for creating records (use mutations for cache invalidation)
 import { useCreateActivity } from '@/generated/hooks/use-activity';
 import { useCreateOpportunity } from '@/generated/hooks/use-opportunity';
+import { getCurrencyCatalog, getPreferredCurrencyId, setPreferredCurrencyId, getBaseCurrencySymbol } from '@/lib/base-currency';
 import { useCreateAccount, useAccountList } from '@/generated/hooks/use-account';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useContactList } from '@/generated/hooks/use-contact';
@@ -33,9 +34,24 @@ import { useUser } from '@/hooks/use-user';
 import { useCreateContact } from '@/generated/hooks/use-contact';
 import type { Contact } from '@/generated/models/contact-model';
 import { getAttachments, dropAttachments, uploadAttachmentsToActivity } from '@/lib/attachments';
+import { useCreateAppFeedback } from '@/hooks/use-app-feedback';
+import type { AppFeedback } from '@/generated/models/app-feedback-model';
+import { CURRENT_VERSION } from '@/data/changelog';
+import { collectSafeFeedbackDiagnostics, safeFeedbackPage } from '@/lib/feedback-diagnostics';
+import { uploadFeedbackScreenshots } from '@/lib/feedback-attachments';
+import { recordDetailRoute, recordListRoute } from '@/lib/record-route';
+import { buildSavedCardDetails, formCardPrimaryText, type SavedCardRowKey } from '@/lib/form-card-display';
+import {
+  activityDraftDateLabelKey,
+  activityDraftDetailsPlaceholderKey,
+  activityStatusForDraftMode,
+  resolveActivityDraftMode,
+} from '@/lib/activity-draft-mode';
+import { TimeDurationFields } from '@/components/schedule-picker';
+import { combineDateTime, timeFromISO, DEFAULT_DURATION_MINUTES } from '@/lib/activity-schedule';
 
 export interface FormCardData {
-  type: 'activity' | 'opportunity' | 'account' | 'contact';
+  type: 'activity' | 'opportunity' | 'account' | 'contact' | 'feedback';
   isNew: boolean;
   existingId?: string;
   data: Record<string, unknown>;
@@ -48,6 +64,7 @@ export interface FormCardData {
 interface FormCardProps {
   formCard: FormCardData;
   messageId: string;
+  batchIndex?: number;
   onStatusChange?: (status: 'confirmed' | 'modified' | 'cancelled') => void;
 }
 
@@ -339,10 +356,60 @@ function OpportunitySelector({
   );
 }
 
+// Amount + inline currency picker — one field so the amount and its currency read
+// as a single unit (compact currency dropdown showing the ISO code sits to the
+// right of the number input). Default currency = the user's preference, not base.
+function AmountCurrencyField({
+  amount,
+  onAmountChange,
+  currencyId,
+  onCurrencyChange,
+  locale,
+}: {
+  amount: number | undefined;
+  onAmountChange: (value: string) => void;
+  currencyId: string | undefined;
+  onCurrencyChange: (currencyId: string) => void;
+  locale: Locale;
+}) {
+  const compact = useCompactDraftForms();
+  const inputCls = compact ? 'h-7 text-sm' : 'h-8 text-sm mt-0.5';
+  const currencies = getCurrencyCatalog();
+  const current = currencyId || getPreferredCurrencyId();
+  // Always show a currency, even before the catalog loads: fall back to a single
+  // base-currency entry so the picker is never empty.
+  const items = currencies.length > 0
+    ? currencies.map((c) => ({ id: c.id, code: c.iso || c.symbol || '?' }))
+    : [{ id: current || '__base__', code: getBaseCurrencySymbol() }];
+  const selectedId = current || items[0]?.id;
+  return (
+    <FieldShell icon={DollarSign} label={t('amount', locale)} compact={compact}>
+      <div className="flex items-center gap-1.5 min-w-0">
+        <Input
+          type="number"
+          value={String(amount || '')}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => onAmountChange(e.target.value)}
+          placeholder="0"
+          className={cn(inputCls, 'flex-1 min-w-0')}
+        />
+        <Select value={selectedId} onValueChange={(val: string) => { if (val && val !== '__base__') onCurrencyChange(val); }}>
+          <SelectTrigger className={cn(inputCls, 'w-auto shrink-0 gap-1 px-2 font-medium')} aria-label={t('currency', locale)}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {items.map((it) => (
+              <SelectItem key={it.id} value={it.id}>{it.code}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </FieldShell>
+  );
+}
+
 // Contact selector component
 function ContactSelector({ 
-  value, 
-  onChange,
+  value,   onChange,
   accountId,
   locale 
 }: { 
@@ -517,6 +584,10 @@ function ActivityFormCard({ data, formData, setFormData, onConfirm, onCancel, is
   const rawType = (formData.type as string) || 'visit';
   const activityType = typeOptions.some((o) => o.value === rawType) ? rawType : 'meeting';
   const typeLabel = typeOptions.find((t: { value: string; label: string }) => t.value === activityType)?.label || activityType;
+  const activityMode = resolveActivityDraftMode({
+    temporalMode: formData.temporalMode,
+    scheduledDate: formData.scheduledDate,
+  });
   const compact = useCompactDraftForms();
 
   return (
@@ -550,6 +621,29 @@ function ActivityFormCard({ data, formData, setFormData, onConfirm, onCancel, is
           type="select"
           options={typeOptions}
         />
+        <FieldShell icon={CircleDot} label={t('fieldStatus', locale)} compact={compact}>
+          <ToggleGroup
+            type="single"
+            value={activityMode}
+            onValueChange={(value: string) => {
+              if (value !== 'planned' && value !== 'completed') return;
+              setFormData((prev: Record<string, unknown>) => ({ ...prev, temporalMode: value }));
+            }}
+            variant="outline"
+            size="sm"
+            className="w-full"
+            aria-label={t('fieldStatus', locale)}
+            data-testid="activity-status-toggle"
+            data-activity-mode={activityMode}
+          >
+            <ToggleGroupItem value="planned" aria-label={t('statusPlanned', locale)}>
+              {t('statusPlanned', locale)}
+            </ToggleGroupItem>
+            <ToggleGroupItem value="completed" aria-label={t('statusCompleted', locale)}>
+              {t('statusCompleted', locale)}
+            </ToggleGroupItem>
+          </ToggleGroup>
+        </FieldShell>
         <AccountSelector
           value={formData.accountId as string}
           onChange={(id: string, name: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, accountId: id, accountName: name }))}
@@ -557,11 +651,19 @@ function ActivityFormCard({ data, formData, setFormData, onConfirm, onCancel, is
         />
         <EditableField 
           icon={Calendar} 
-          label={t('fieldDate', locale)} 
+          label={t(activityDraftDateLabelKey(activityMode), locale)}
           value={formData.scheduledDate as string}
           onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, scheduledDate: v }))}
           type="date"
           placeholder={t('selectDate', locale)}
+        />
+        <TimeDurationFields
+          time={(formData.scheduledTime as string) || timeFromISO(formData.scheduledDate as string)}
+          durationMinutes={(formData.durationMinutes as number) || DEFAULT_DURATION_MINUTES}
+          onTimeChange={(v) => setFormData((prev: Record<string, unknown>) => ({ ...prev, scheduledTime: v }))}
+          onDurationChange={(v) => setFormData((prev: Record<string, unknown>) => ({ ...prev, durationMinutes: v }))}
+          locale={locale}
+          className="px-0.5"
         />
         <OpportunitySelector
           value={formData.opportunityId as string}
@@ -600,9 +702,7 @@ function ActivityFormCard({ data, formData, setFormData, onConfirm, onCancel, is
           onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, result: v }))}
           type="textarea"
           placeholder={
-            formData.temporalMode === 'planned'
-              ? (t('detailsPlaceholderUpcoming', locale))
-              : (t('detailsPlaceholderPast', locale))
+            t(activityDraftDetailsPlaceholderKey(activityMode), locale)
           }
         />
       </div>
@@ -754,13 +854,15 @@ function OpportunityFormCard({ data, formData, setFormData, onConfirm, onCancel,
           onChange={(id: string, name: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, accountId: id, accountName: name }))}
           locale={locale}
         />
-        <EditableField 
-          icon={DollarSign} 
-          label={t('amount', locale)} 
-          value={formData.amount as number}
-          onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, amount: Number(v) || 0 }))}
-          type="number"
-          placeholder="0"
+        <AmountCurrencyField
+          amount={formData.amount as number}
+          onAmountChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, amount: Number(v) || 0 }))}
+          currencyId={formData.currencyId as string}
+          onCurrencyChange={(id: string) => {
+            setPreferredCurrencyId(id);
+            setFormData((prev: Record<string, unknown>) => ({ ...prev, currencyId: id }));
+          }}
+          locale={locale}
         />
         <EditableField 
           icon={Tag} 
@@ -1015,6 +1117,101 @@ function ContactFormCard({ data, formData, setFormData, onConfirm, onCancel, isC
   );
 }
 
+function FeedbackFormCard({ formData, setFormData, onConfirm, onCancel, isConfirming, locale, screenshotCount }: {
+  formData: Record<string, unknown>;
+  setFormData: React.Dispatch<React.SetStateAction<Record<string, unknown>>>;
+  onConfirm: () => void;
+  onCancel: () => void;
+  isConfirming: boolean;
+  locale: Locale;
+  screenshotCount: number;
+}) {
+  const isZh = locale === 'zh-Hans';
+  const feedbackType = formData.feedbackType === 'enhancement' ? 'enhancement' : 'bug';
+  const title = String(formData.title || '').trim();
+  const description = String(formData.description || '').trim();
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <div className={cn(
+          'w-8 h-8 rounded-lg flex items-center justify-center',
+          feedbackType === 'bug' ? 'bg-red-500/10' : 'bg-amber-500/10',
+        )}>
+          {feedbackType === 'bug'
+            ? <Bug className="w-4 h-4 text-red-600" />
+            : <Lightbulb className="w-4 h-4 text-amber-600" />}
+        </div>
+        <div>
+          <h4 className="font-medium text-sm text-foreground">{isZh ? '提交产品反馈' : 'Submit product feedback'}</h4>
+          <p className="text-xs text-muted-foreground">{isZh ? '确认后保存到反馈中心' : 'Saved to Feedback Center after confirmation'}</p>
+        </div>
+      </div>
+
+      <div className="bg-muted/30 rounded-lg p-3 space-y-2">
+        <EditableField
+          icon={Tag}
+          label={isZh ? '类型' : 'Type'}
+          value={feedbackType}
+          onChange={(value) => setFormData((prev) => ({ ...prev, feedbackType: value }))}
+          type="select"
+          options={[
+            { value: 'bug', label: isZh ? '缺陷' : 'Bug' },
+            { value: 'enhancement', label: isZh ? '改进建议' : 'Improvement' },
+          ]}
+          required
+        />
+        <EditableField
+          icon={FileText}
+          label={isZh ? '标题' : 'Title'}
+          value={title}
+          onChange={(value) => setFormData((prev) => ({ ...prev, title: value }))}
+          placeholder={isZh ? '一句话概括问题或建议' : 'Summarize the problem or request'}
+          required
+        />
+        <EditableField
+          icon={FileText}
+          label={feedbackType === 'bug' ? (isZh ? '实际表现' : 'Actual behavior') : (isZh ? '改进内容' : 'Requested improvement')}
+          value={description}
+          onChange={(value) => setFormData((prev) => ({ ...prev, description: value }))}
+          type="textarea"
+          required
+        />
+        <EditableField
+          icon={Check}
+          label={isZh ? '期望结果' : 'Expected outcome'}
+          value={formData.expectedOutcome as string}
+          onChange={(value) => setFormData((prev) => ({ ...prev, expectedOutcome: value }))}
+          type="textarea"
+        />
+        {feedbackType === 'bug' && (
+          <EditableField
+            icon={ChevronRight}
+            label={isZh ? '复现步骤' : 'Reproduction steps'}
+            value={formData.reproductionSteps as string}
+            onChange={(value) => setFormData((prev) => ({ ...prev, reproductionSteps: value }))}
+            type="textarea"
+          />
+        )}
+        {screenshotCount > 0 && (
+          <div className="flex items-center gap-2 rounded-md bg-background/60 px-3 py-2 text-xs text-muted-foreground" data-testid="feedback-screenshot-count">
+            <Image className="w-4 h-4 text-primary" />
+            {isZh ? `将上传 ${screenshotCount} 张截图` : `${screenshotCount} screenshot${screenshotCount > 1 ? 's' : ''} will be uploaded`}
+          </div>
+        )}
+      </div>
+
+      <div className="flex gap-2">
+        <Button size="sm" variant="outline" onClick={onCancel} disabled={isConfirming} className="flex-1">
+          <X className="w-3.5 h-3.5 mr-1.5" />{isZh ? '取消' : 'Cancel'}
+        </Button>
+        <Button size="sm" onClick={onConfirm} disabled={isConfirming || !title || !description} className="flex-1" data-testid="submit-feedback">
+          {isConfirming ? (isZh ? '提交中…' : 'Submitting…') : <><Check className="w-3.5 h-3.5 mr-1.5" />{isZh ? '提交反馈' : 'Submit feedback'}</>}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 // Confirmed status badge
 function ConfirmedBadge({ locale }: { locale: Locale }) {
   return (
@@ -1030,28 +1227,33 @@ function ConfirmedBadge({ locale }: { locale: Locale }) {
 // ── Saved-card read-only summary helpers ───────────────────────────────────
 type SummaryIcon = React.ComponentType<{ className?: string }>;
 
-const ACTIVITY_TYPE_KEYS: Record<string, TranslationKey> = {
-  visit: 'typeVisit',
-  call: 'typeCall',
-  meeting: 'typeMeeting',
-  email: 'typeEmail',
+/** Per-row icon for the expanded saved card, keyed by the stable field id the
+ *  display helper emits so the pure builder stays free of JSX/icon concerns. */
+const SAVED_ROW_ICONS: Record<SavedCardRowKey, SummaryIcon> = {
+  opportunity: Target,
+  attendees: Users,
+  contact: User,
+  close: Calendar,
+  confidence: TrendingUp,
+  email: Mail,
+  address: MapPin,
+  notes: FileText,
+  phone: Phone,
+  feedbackDetail: FileText,
+  expectedOutcome: Check,
+  reproductionSteps: ChevronRight,
 };
 
-const STAGE_KEYS: Record<string, TranslationKey> = {
-  prospecting: 'stageProspecting',
-  qualification: 'stageQualification',
-  proposal: 'stageProposal',
-  negotiation: 'stageNegotiation',
-  won: 'stageWon',
-  lost: 'stageLost',
-};
-
-/** Format an ISO/date string for compact display; falls back to the raw value. */
-function formatCardDate(dateStr: string | undefined, locale: Locale): string {
-  if (!dateStr) return '';
-  const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return dateStr;
-  return format(d, t('dateFormatLong', locale));
+/** Distinct saved-card header glyph per activity subtype. The summary already
+ *  spells out the type, but a matching icon speeds visual scanning. */
+function activityHeaderIcon(activityType: string): SummaryIcon {
+  switch (activityType) {
+    case 'call': return Phone;
+    case 'meeting': return Users;
+    case 'email': return Mail;
+    case 'visit': return MapPin;
+    default: return Calendar;
+  }
 }
 
 /** A single read-only label/value row in the expanded saved card. */
@@ -1068,80 +1270,8 @@ function ReadOnlyRow({ icon: Icon, label, value }: { icon: SummaryIcon; label: s
   );
 }
 
-/**
- * Build the collapsed one-line summary + the expanded read-only rows for a saved
- * record, organized per record type so users can review without navigating away.
- */
-function buildSavedCardDetails(
-  type: FormCardData['type'],
-  formData: Record<string, unknown>,
-  locale: Locale,
-): { summary: string; rows: Array<{ icon: SummaryIcon; label: string; value: string }> } {
-  const str = (k: string) => (typeof formData[k] === 'string' ? (formData[k] as string).trim() : '');
-  const rows: Array<{ icon: SummaryIcon; label: string; value: string }> = [];
-  let summary = '';
-
-  if (type === 'activity') {
-    const at = str('type') || 'visit';
-    const atKey = ACTIVITY_TYPE_KEYS[at]; const atLabel = atKey ? t(atKey, locale) : at;
-    const dateStr = formatCardDate(str('scheduledDate'), locale);
-    const accName = str('accountName');
-    const oppName = str('opportunityName');
-    const attendees = (formData.attendees as Array<{ id: string; fullname: string }>) || [];
-    const attendeeNames = attendees.map((a) => a.fullname).filter(Boolean).join(', ');
-    const contactName = str('contactName');
-    const isPlanned = str('temporalMode') === 'planned';
-
-    summary = [atLabel, dateStr, oppName || accName].filter(Boolean).join(' · ');
-    rows.push({ icon: Tag, label: t('fieldType', locale), value: atLabel });
-    rows.push({
-      icon: Calendar,
-      label: isPlanned ? t('fieldScheduled', locale) : t('fieldDate', locale),
-      value: dateStr,
-    });
-    rows.push({ icon: Building2, label: t('account', locale), value: accName });
-    rows.push({ icon: Target, label: t('linkedOpportunity', locale), value: oppName });
-    if (at === 'visit' || at === 'meeting') {
-      rows.push({ icon: Users, label: t('attendees', locale), value: attendeeNames });
-    } else {
-      rows.push({ icon: User, label: t('contact', locale), value: contactName });
-    }
-    rows.push({ icon: FileText, label: t('fieldResult', locale), value: str('result') });
-  } else if (type === 'opportunity') {
-    const stage = str('stage') || 'prospecting';
-    const stageKey = STAGE_KEYS[stage]; const stageLabel = stageKey ? t(stageKey, locale) : stage;
-    const amount = typeof formData.amount === 'number' ? formData.amount : Number(str('amount'));
-    const amountStr = amount ? formatCurrencyCompact(amount) : '';
-    const confidence = typeof formData.confidence === 'number' ? formData.confidence : Number(str('confidence'));
-    const confStr = Number.isFinite(confidence) && confidence > 0 ? `${confidence}%` : '';
-    const closeStr = formatCardDate(str('expectedCloseDate'), locale);
-
-    summary = [stageLabel, amountStr].filter(Boolean).join(' · ');
-    rows.push({ icon: Building2, label: t('account', locale), value: str('accountName') });
-    rows.push({ icon: DollarSign, label: t('amount', locale), value: amountStr });
-    rows.push({ icon: Tag, label: t('fieldStage', locale), value: stageLabel });
-    rows.push({ icon: TrendingUp, label: t('confidence', locale), value: confStr });
-    rows.push({ icon: Calendar, label: t('expectedClose', locale), value: closeStr });
-  } else if (type === 'account') {
-    summary = [str('industry'), str('phone')].filter(Boolean).join(' · ');
-    rows.push({ icon: Tag, label: t('fieldIndustry', locale), value: str('industry') });
-    rows.push({ icon: Phone, label: t('fieldPhone', locale), value: str('phone') });
-    rows.push({ icon: Mail, label: t('fieldEmail', locale), value: str('email') });
-    rows.push({ icon: MapPin, label: t('fieldAddress', locale), value: str('address') });
-    rows.push({ icon: FileText, label: t('notes', locale), value: str('notes') });
-  } else if (type === 'contact') {
-    summary = [str('title'), str('accountName')].filter(Boolean).join(' · ');
-    rows.push({ icon: Tag, label: t('fieldJobTitle', locale), value: str('title') });
-    rows.push({ icon: Building2, label: t('account', locale), value: str('accountName') });
-    rows.push({ icon: Phone, label: t('fieldPhone', locale), value: str('phone') });
-    rows.push({ icon: Mail, label: t('fieldEmail', locale), value: str('email') });
-  }
-
-  return { summary, rows: rows.filter((r) => r.value) };
-}
-
 // Main Form Card Component
-export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps) {
+export function FormCard({ formCard, messageId, batchIndex, onStatusChange }: FormCardProps) {
   const navigate = useNavigate();
   const locale: Locale = getLocale();
   const copilot = useCopilot();
@@ -1149,6 +1279,7 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
   const [isConfirming, setIsConfirming] = useState(false);
   const [status, setStatus] = useState<'pending' | 'confirmed' | 'modified' | 'cancelled'>(formCard.status || 'pending');
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [submissionWarning, setSubmissionWarning] = useState<string | null>(null);
   const [createdRecordId, setCreatedRecordId] = useState<string | null>(formCard.createdRecordId || null);
   // Use ref to keep the latest createdRecordId available immediately (for async operations)
   const createdRecordIdRef = useRef<string | null>(formCard.createdRecordId || null);
@@ -1170,7 +1301,16 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
   }, [formCard.createdRecordId]);
   
   // Editable form data state - initialized from formCard.data
-  const [formData, setFormData] = useState<Record<string, unknown>>(formCard.data);
+  const [formData, setFormData] = useState<Record<string, unknown>>(() => {
+    if (formCard.type !== 'activity') return formCard.data;
+    return {
+      ...formCard.data,
+      temporalMode: resolveActivityDraftMode({
+        temporalMode: formCard.data.temporalMode,
+        scheduledDate: formCard.data.scheduledDate,
+      }),
+    };
+  });
 
   // Sync formData when formCard.data changes (e.g., after user selects a match)
   // Use JSON comparison to avoid unnecessary updates
@@ -1202,6 +1342,7 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
   const createOpportunity = useCreateOpportunity();
   const createAccount = useCreateAccount();
   const createContact = useCreateContact();
+  const createFeedback = useCreateAppFeedback();
 
   // Handle confirmation - create the record
   const handleConfirm = async () => {
@@ -1211,7 +1352,51 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
     try {
       const { type } = formCard;
 
-      if (type === 'activity') {
+      if (type === 'feedback') {
+        const feedbackType = formData.feedbackType === 'enhancement' ? 'enhancement' : 'bug';
+        const title = String(formData.title || '').trim();
+        const description = String(formData.description || '').trim();
+        if (!title || !description) {
+          setValidationError(locale === 'zh-Hans' ? '标题和描述不能为空' : 'Title and description are required');
+          return;
+        }
+        const diagnostics = collectSafeFeedbackDiagnostics();
+        const createdFeedback = await createFeedback.mutateAsync({
+          title,
+          type: feedbackType,
+          description,
+          expectedOutcome: String(formData.expectedOutcome || '').trim(),
+          reproductionSteps: String(formData.reproductionSteps || '').trim(),
+          currentPage: safeFeedbackPage(String(formData.currentPage || '')),
+          appVersion: CURRENT_VERSION,
+          buildId: __BUILD_TIMESTAMP__,
+          locale,
+          ...diagnostics,
+          source: 'copilot',
+          status: 'collected',
+          clientRequestId: String(formData.clientRequestId || ''),
+          submittedOn: new Date().toISOString(),
+        } as Omit<AppFeedback, 'id'>);
+        setCreatedRecordId(createdFeedback.id);
+        createdRecordIdRef.current = createdFeedback.id;
+        if (formCard.attachmentIds?.length) {
+          const screenshots = getAttachments(formCard.attachmentIds);
+          const upload = await uploadFeedbackScreenshots(createdFeedback.id, screenshots);
+          if (upload.failed > 0) {
+            setSubmissionWarning(locale === 'zh-Hans'
+              ? `反馈已保存，但 ${upload.failed} 张截图上传失败`
+              : `Feedback was saved, but ${upload.failed} screenshot upload${upload.failed > 1 ? 's' : ''} failed`);
+          }
+          dropAttachments(formCard.attachmentIds);
+        }
+        copilot.updateFormCardStatus(messageId, 'confirmed', batchIndex, createdFeedback.id, formData);
+        await copilot.formCardSaved({
+          messageId,
+          type: 'feedback',
+          recordId: createdFeedback.id,
+          recordName: title,
+        });
+      } else if (type === 'activity') {
         // Only visit/call/meeting/email are backed by native Dataverse tables.
         // Coerce any legacy/stray value (e.g. a pre-existing 'other' draft) to a
         // representable type so the create path never receives an invalid type.
@@ -1274,11 +1459,11 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
           }
         }
         
-        // Map temporalMode -> status
-        const temporalMode = formData.temporalMode as 'planned' | 'completed' | 'unspecified' | undefined;
-        const status: Activity['status'] =
-          temporalMode === 'completed' ? 'completed'
-          : 'open';
+        const activityMode = resolveActivityDraftMode({
+          temporalMode: formData.temporalMode,
+          scheduledDate: formData.scheduledDate,
+        });
+        const status: Activity['status'] = activityStatusForDraftMode(activityMode);
 
         const resultText = ((formData.result as string) || '').trim();
         const notesText = ((formData.notes as string) || '').trim();
@@ -1291,7 +1476,11 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
           type: activityType as Activity['type'],
           status,
           ownerid: user?.objectId || 'unknown',
-          scheduleddate: formData.scheduledDate as string || new Date().toISOString(),
+          scheduleddate: combineDateTime(
+            (formData.scheduledDate as string) || new Date().toISOString(),
+            (formData.scheduledTime as string) || timeFromISO(formData.scheduledDate as string),
+          ),
+          durationMinutes: (formData.durationMinutes as number) || DEFAULT_DURATION_MINUTES,
           notes: activityNotes,
           ...(targetAccount && { account: { id: targetAccount.id, name1: targetAccount.name1 } }),
           ...(targetOpportunity && { opportunity: { id: targetOpportunity.id, name1: targetOpportunity.name1 } }),
@@ -1327,7 +1516,16 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
           }
         }
         // Pass the created record ID to persist it in session storage
-        copilot.updateFormCardStatus(messageId, 'confirmed', undefined, createdActivity.id);
+        copilot.updateFormCardStatus(messageId, 'confirmed', batchIndex, createdActivity.id, {
+          ...formData,
+          temporalMode: activityMode,
+          accountId: targetAccount?.id ?? formData.accountId,
+          accountName: targetAccount?.name1 ?? formData.accountName,
+          opportunityId: targetOpportunity?.id ?? formData.opportunityId,
+          opportunityName: targetOpportunity?.name1 ?? formData.opportunityName,
+          contactId: targetContact?.id ?? formData.contactId,
+          contactName: targetContact?.fullname ?? formData.contactName,
+        });
         copilot.formCardSaved({
           messageId,
           type: 'activity',
@@ -1378,6 +1576,7 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
           name1: oppName,
           account: { id: targetAccount.id, name1: targetAccount.name1 },
           totalamount: formData.amount as number || 0,
+          currencyId: (formData.currencyId as string) || getPreferredCurrencyId() || undefined,
           stage,
           confidence: formData.confidence as number || 50,
           expectedclosedate: (formData.expectedCloseDate as string) || undefined,
@@ -1386,7 +1585,11 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
         } as Omit<Opportunity, 'id'>);
         setCreatedRecordId(createdOpp.id);
         createdRecordIdRef.current = createdOpp.id;
-        copilot.updateFormCardStatus(messageId, 'confirmed', undefined, createdOpp.id);
+        copilot.updateFormCardStatus(messageId, 'confirmed', batchIndex, createdOpp.id, {
+          ...formData,
+          accountId: targetAccount.id,
+          accountName: targetAccount.name1 ?? formData.accountName,
+        });
         // Unified queue / legacy resume.
         copilot.formCardSaved({
           messageId,
@@ -1408,7 +1611,7 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
         } as Omit<Account, 'id'>);
         setCreatedRecordId(createdAccount.id);
         createdRecordIdRef.current = createdAccount.id;
-        copilot.updateFormCardStatus(messageId, 'confirmed', undefined, createdAccount.id);
+        copilot.updateFormCardStatus(messageId, 'confirmed', batchIndex, createdAccount.id, formData);
         // Unified queue / legacy resume.
         copilot.formCardSaved({
           messageId,
@@ -1451,7 +1654,11 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
         } as Omit<Contact, 'id'>);
         setCreatedRecordId(createdContact.id);
         createdRecordIdRef.current = createdContact.id;
-        copilot.updateFormCardStatus(messageId, 'confirmed', undefined, createdContact.id);
+        copilot.updateFormCardStatus(messageId, 'confirmed', batchIndex, createdContact.id, {
+          ...formData,
+          accountId: targetAccount.id,
+          accountName: targetAccount.name1 ?? formData.accountName,
+        });
 
         // Unified queue / legacy resume.
         copilot.formCardSaved({
@@ -1479,7 +1686,7 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
   const handleCancel = () => {
     setStatus('cancelled');
     onStatusChange?.('cancelled');
-    copilot.updateFormCardStatus(messageId, 'cancelled');
+    copilot.updateFormCardStatus(messageId, 'cancelled', batchIndex, undefined, formData);
     // Notify queue / context so a multi-step flow advances past this cancelled step
     // instead of stalling the entire queue.
     copilot.formCardCancelled(messageId);
@@ -1492,6 +1699,8 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         className="glass-card p-3 rounded-xl opacity-60"
+        data-form-card-type={formCard.type}
+        data-form-card-status="cancelled"
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -1499,8 +1708,9 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
             {formCard.type === 'contact' && <User className="w-4 h-4 text-muted-foreground" />}
             {formCard.type === 'opportunity' && <TrendingUp className="w-4 h-4 text-muted-foreground" />}
             {formCard.type === 'account' && <Building2 className="w-4 h-4 text-muted-foreground" />}
+            {formCard.type === 'feedback' && <Bug className="w-4 h-4 text-muted-foreground" />}
             <span className="text-sm font-medium text-muted-foreground line-through">
-              {formData.title as string || formData.name as string || formData.fullName as string || ''}
+              {formCardPrimaryText(formCard.type, formData)}
             </span>
           </div>
           <div className="flex items-center gap-1.5 text-muted-foreground bg-muted/30 px-2 py-1 rounded-md">
@@ -1541,12 +1751,14 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
           }
         } else if (type === 'account') {
           if (recordId) {
-            navigate(`/accounts/${recordId}`);
+            navigate(recordDetailRoute('account', recordId));
           } else {
-            navigate('/accounts');
+            navigate(recordListRoute('account'));
           }
         } else if (type === 'contact') {
-          navigate('/accounts');
+          navigate(recordId
+            ? recordDetailRoute('contact', recordId)
+            : recordListRoute('contact'));
         }
       }, 150);
     };
@@ -1556,10 +1768,13 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         className="glass-card rounded-xl overflow-hidden"
+        data-form-card-type={formCard.type}
+        data-form-card-status="confirmed"
       >
         {(() => {
-          const { summary, rows } = buildSavedCardDetails(formCard.type, formData, locale);
-          const title = (formData.title as string) || (formData.name as string) || (formData.fullName as string) || '';
+          const { summary, rows, description } = buildSavedCardDetails(formCard.type, formData, locale);
+          const title = formCardPrimaryText(formCard.type, formData);
+          const ActivityIcon = activityHeaderIcon(typeof formData.type === 'string' ? formData.type : 'visit');
           return (
             <>
               <button
@@ -1569,10 +1784,11 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
                 className="w-full flex items-center justify-between gap-2 p-3 text-left hover:bg-muted/30 transition-colors"
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  {formCard.type === 'activity' && <Calendar className="w-5 h-5 text-primary shrink-0" />}
+                  {formCard.type === 'activity' && <ActivityIcon className="w-5 h-5 text-primary shrink-0" />}
                   {formCard.type === 'contact' && <User className="w-5 h-5 text-purple-600 shrink-0" />}
                   {formCard.type === 'opportunity' && <TrendingUp className="w-5 h-5 text-green-600 shrink-0" />}
                   {formCard.type === 'account' && <Building2 className="w-5 h-5 text-blue-600 shrink-0" />}
+                  {formCard.type === 'feedback' && <Bug className="w-5 h-5 text-red-600 shrink-0" />}
                   <div className="min-w-0">
                     <span className="text-sm font-medium text-foreground block truncate">{title}</span>
                     {summary && (
@@ -1599,19 +1815,32 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
                   className="border-t border-border/50 px-3 pt-2 pb-3"
                 >
                   <div className="space-y-0.5">
-                    {rows.map((r, i) => (
-                      <ReadOnlyRow key={i} icon={r.icon} label={r.label} value={r.value} />
+                    {rows.map((r) => (
+                      <ReadOnlyRow key={r.key} icon={SAVED_ROW_ICONS[r.key]} label={r.label} value={r.value} />
                     ))}
                   </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={handleConfirmedClick}
-                    className="w-full mt-2.5"
-                  >
-                    {t('openFullDetails', locale)}
-                    <ChevronRight className="w-3.5 h-3.5 ml-1.5" />
-                  </Button>
+                  {description && (
+                    <p className="mt-1.5 text-sm text-foreground/90 whitespace-pre-wrap break-words leading-snug">
+                      {description}
+                    </p>
+                  )}
+                  {formCard.type !== 'feedback' && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleConfirmedClick}
+                      className="w-full mt-2.5"
+                    >
+                      {t('openFullDetails', locale)}
+                      <ChevronRight className="w-3.5 h-3.5 ml-1.5" />
+                    </Button>
+                  )}
+                  {submissionWarning && (
+                    <div className="mt-2 flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400" role="status">
+                      <Image className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                      <span>{submissionWarning}</span>
+                    </div>
+                  )}
                 </motion.div>
               )}
             </>
@@ -1628,8 +1857,10 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] as const }}
       className="glass-card p-4 rounded-xl"
+      data-form-card-type={formCard.type}
+      data-form-card-status="pending"
     >
-      {formCard.type === 'activity' && formCard.attachmentIds && formCard.attachmentIds.length > 0 && (
+      {(formCard.type === 'activity' || formCard.type === 'feedback') && formCard.attachmentIds && formCard.attachmentIds.length > 0 && (
         <div className="mb-3">
           <div className="text-helper text-muted-foreground mb-1.5">
             {t('attachmentsCount', locale, { count: formCard.attachmentIds.length })}
@@ -1694,6 +1925,17 @@ export function FormCard({ formCard, messageId, onStatusChange }: FormCardProps)
           onCancel={handleCancel}
           isConfirming={isConfirming}
           locale={locale}
+        />
+      )}
+      {formCard.type === 'feedback' && (
+        <FeedbackFormCard
+          formData={formData}
+          setFormData={setFormData}
+          onConfirm={handleConfirm}
+          onCancel={handleCancel}
+          isConfirming={isConfirming}
+          locale={locale}
+          screenshotCount={getAttachments(formCard.attachmentIds).filter((attachment) => attachment.type === 'image').length}
         />
       )}
       {validationError && (

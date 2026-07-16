@@ -6,8 +6,9 @@
  * (reserved key `__attachmentIds`). buildQueueFromIntent spreads arguments into
  * each QueueIntent, so the ids ride through to the form-card unchanged.
  *
- * Phase-1 scope: activities only.
- *   - 0 activity drafts  → no-op (nothing to attach to)
+ * Supported targets: activity drafts and feedback drafts.
+ *   - Feedback draft     → image attachments are screenshots for that feedback
+ *   - 0 activity drafts  → no-op (nothing else to attach to)
  *   - 1 activity draft   → all attachments go to it (precise by construction)
  *   - N activity drafts  → a dedicated LLM call maps each attachment to a draft
  *                          by reading the user message + activity titles + file
@@ -45,6 +46,17 @@ function collectActivitySlots(rawIntent: IntentResult): ActivitySlot[] {
     }
   }
   return slots;
+}
+
+function findFeedbackArgs(rawIntent: IntentResult): Record<string, unknown> | undefined {
+  if (rawIntent.function === 'draftFeedback') {
+    if (!rawIntent.arguments) rawIntent.arguments = {};
+    return rawIntent.arguments;
+  }
+  const feedback = rawIntent.additionalActions?.find((action) => action.function === 'draftFeedback');
+  if (!feedback) return undefined;
+  if (!feedback.arguments) feedback.arguments = {};
+  return feedback.arguments;
 }
 
 /**
@@ -118,8 +130,15 @@ export async function assignAttachmentsToIntent(
   locale: string,
 ): Promise<void> {
   if (!attachments.length) return;
+  const feedbackArgs = findFeedbackArgs(rawIntent);
+  if (feedbackArgs) {
+    const screenshotIds = attachments
+      .filter((attachment) => attachment.type === 'image')
+      .map((attachment) => attachment.id);
+    if (screenshotIds.length) feedbackArgs[ATTACHMENT_IDS_KEY] = screenshotIds;
+  }
   const slots = collectActivitySlots(rawIntent);
-  if (slots.length === 0) return; // phase-1: only activities receive attachments
+  if (slots.length === 0) return;
 
   if (slots.length === 1) {
     slots[0].args[ATTACHMENT_IDS_KEY] = attachments.map((a) => a.id);

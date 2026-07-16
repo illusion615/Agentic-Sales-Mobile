@@ -98,21 +98,20 @@
           "required": true,
           "maxLength": 100
         },
-        "crf5c_account": {
+        "crf5c_amount": {
           "type": "string",
-          "title": "Account(Deprecated)",
-          "x-ms-dataverse-attribute": "crf5c_account",
-          "x-ms-dataverse-type": "LookupType",
-          "x-ms-schema-name": "crf5c_Account"
+          "title": "Amount",
+          "x-ms-dataverse-attribute": "crf5c_amount",
+          "x-ms-dataverse-type": "MoneyType",
+          "x-ms-schema-name": "crf5c_Amount"
         },
-        "crf5c_accountname": {
+        "crf5c_amount_base": {
           "type": "string",
-          "title": "crf5c_accountname",
-          "x-ms-dataverse-attribute": "crf5c_accountname",
-          "x-ms-dataverse-type": "StringType",
-          "x-ms-schema-name": "crf5c_AccountName",
-          "x-ms-read-only": true,
-          "maxLength": 850
+          "title": "Amount (Base)",
+          "x-ms-dataverse-attribute": "crf5c_amount_base",
+          "x-ms-dataverse-type": "MoneyType",
+          "x-ms-schema-name": "crf5c_amount_Base",
+          "x-ms-read-only": true
         },
         "crf5c_blocker": {
           "type": "string",
@@ -212,14 +211,6 @@
           "required": true,
           "x-ms-keyType": "primary"
         },
-        "crf5c_ownerid": {
-          "type": "string",
-          "title": "Owner ID",
-          "x-ms-dataverse-attribute": "crf5c_ownerid",
-          "x-ms-dataverse-type": "StringType",
-          "x-ms-schema-name": "crf5c_OwnerID",
-          "maxLength": 100
-        },
         "crf5c_stage": {
           "type": "string",
           "title": "Stage",
@@ -271,6 +262,14 @@
           "x-ms-dataverse-type": "DecimalType",
           "x-ms-schema-name": "crf5c_TotalAmount",
           "required": true
+        },
+        "exchangerate": {
+          "type": "string",
+          "title": "Exchange Rate",
+          "x-ms-dataverse-attribute": "exchangerate",
+          "x-ms-dataverse-type": "DecimalType",
+          "x-ms-schema-name": "ExchangeRate",
+          "x-ms-read-only": true
         },
         "importsequencenumber": {
           "type": "string",
@@ -487,6 +486,22 @@
           "x-ms-dataverse-attribute": "timezoneruleversionnumber",
           "x-ms-dataverse-type": "IntegerType",
           "x-ms-schema-name": "TimeZoneRuleVersionNumber"
+        },
+        "transactioncurrencyid": {
+          "type": "string",
+          "title": "Currency",
+          "x-ms-dataverse-attribute": "transactioncurrencyid",
+          "x-ms-dataverse-type": "LookupType",
+          "x-ms-schema-name": "TransactionCurrencyId"
+        },
+        "transactioncurrencyidname": {
+          "type": "string",
+          "title": "transactioncurrencyidname",
+          "x-ms-dataverse-attribute": "transactioncurrencyidname",
+          "x-ms-dataverse-type": "StringType",
+          "x-ms-schema-name": "TransactionCurrencyIdName",
+          "x-ms-read-only": true,
+          "maxLength": 100
         },
         "utcconversiontimezonecode": {
           "type": "string",

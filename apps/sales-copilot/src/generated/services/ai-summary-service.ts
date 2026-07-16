@@ -43,11 +43,16 @@ function toDv(r: Partial<Omit<AISummary, 'id'>>): Record<string, unknown> {
 export class AISummaryService {
   static async create(record: Omit<AISummary, 'id'>): Promise<AISummary> {
     const dvPayload = toDv(record);
+    const escapedEntityId = record.entityID.replace(/'/g, "''");
+    const escapedType = record.type?.replace(/'/g, "''");
+    const readbackFilter = escapedType
+      ? `crf5c_entityid eq '${escapedEntityId}' and biz_type eq '${escapedType}'`
+      : `crf5c_entityid eq '${escapedEntityId}'`;
     return createWithReadback(
       (p) => Crf5c_aisummariesService.create(p as any),
       (o) => Crf5c_aisummariesService.getAll(o),
       dvPayload, 'crf5c_aisummaryid', 'AISummary',
-      `crf5c_entityid eq '${record.entityID}'`,
+      readbackFilter,
       fromDv,
     );
   }
@@ -56,7 +61,8 @@ export class AISummaryService {
     requireId(id, 'update', 'AISummary');
     const result = await Crf5c_aisummariesService.update(id, toDv(changedFields) as any);
     if (!result.success) throw result.error;
-    return fromDv(result.data!);
+    if (result.data) return fromDv(result.data);
+    return AISummaryService.get(id);
   }
 
   static async delete(id: string): Promise<void> {

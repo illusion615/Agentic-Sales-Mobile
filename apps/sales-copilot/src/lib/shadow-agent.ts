@@ -162,7 +162,7 @@ ${describeBoundEntities(frame)}
 - For queryCopilotStudio / externalKnowledgeQuery: "query" is REQUIRED — use the intent summary as the query text.
 - For Activity steps: temporal=past → temporalMode="completed"; temporal=future → temporalMode="planned".
 - For draftActivity: "type" is REQUIRED. Infer from context: 拜访/visit/went to/现场 → "visit", 电话/call/phoned/rang → "call", 会议/meeting/met with/讨论会 → "meeting", 邮件/email/sent mail → "email", otherwise → "meeting".
-- For queryActivities: always set date filters. "today" → dateRange="today" OR scheduledDate=YYYY-MM-DD. "this week" → dateRange="7days" OR dateFrom/dateTo. "completed today" → dateRange="today" + status="completed". "pending" → status="draft" or "confirmed".
+- For queryActivities: always set date filters. "today" → dateRange="today" OR scheduledDate=YYYY-MM-DD. "this week" → dateRange="7days" OR dateFrom/dateTo. "completed today" → dateRange="today" + status="completed". "pending"/"待办" → status="open" (NEVER draft/confirmed).
 - For queryOpportunities: "active/pipeline" → stage != won/lost. "at risk" → minConfidence=0 maxConfidence=49.
 
 # Page context data reuse

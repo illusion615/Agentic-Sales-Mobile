@@ -30,11 +30,11 @@ export type ResolutionItem = z.infer<typeof ResolutionItemSchema>;
 
 // I-8 Slice A: TemporalMode — semantic tense extracted from user's wording.
 // Carried inside draftActivity `arguments.temporalMode` (not top-level) so the
-// form-card can derive draftstatusKey and the visibility of the result field
-// from temporalMode alone — no need to couple to language-specific tense markers.
-//   planned     → activity is in the future or about to happen → status=Confirmed, hide result
-//   completed   → activity has already happened → status=Completed, show result, LLM prefills
-//   unspecified → no clear tense signal → keep current behavior (Draft, fields shown unfilled)
+// form-card can derive the editable Planned/Completed selection, native status,
+// and field wording without coupling to language-specific tense markers.
+//   planned     → activity is in the future or about to happen → status=open
+//   completed   → activity has already happened → status=completed
+//   unspecified → no clear tense signal → date fallback (past=completed; today/future=planned)
 export const TemporalModeSchema = z.enum(['planned', 'completed', 'unspecified']);
 export type TemporalMode = z.infer<typeof TemporalModeSchema>;
 
@@ -219,7 +219,7 @@ export function intentRequiresConfirmation(intent: SingleIntent): boolean {
   if (intent.confidence < 0.7) return true;
   
   // Draft functions need confirmation (they show a form)
-  const draftFunctions = ['draftActivity', 'draftOpportunity', 'draftAccount', 'draftContact'];
+  const draftFunctions = ['draftActivity', 'draftOpportunity', 'draftAccount', 'draftContact', 'draftFeedback'];
   if (draftFunctions.includes(intent.function)) return true;
   
   // Intents with missing fields need confirmation

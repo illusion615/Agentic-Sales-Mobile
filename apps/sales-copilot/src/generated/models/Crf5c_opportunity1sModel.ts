@@ -30,7 +30,7 @@ export type Crf5c_opportunity1sstatuscode = keyof typeof Crf5c_opportunity1sstat
 
 export interface Crf5c_opportunity1sBase {
   "biz_Account@odata.bind": string;
-  "crf5c_Account@odata.bind"?: string;
+  crf5c_amount?: number;
   crf5c_blocker?: string;
   crf5c_closedon?: string;
   crf5c_confidence?: number;
@@ -40,7 +40,6 @@ export interface Crf5c_opportunity1sBase {
   crf5c_lastaction?: string;
   crf5c_name: string;
   crf5c_opportunity1id: string;
-  crf5c_ownerid?: string;
   crf5c_stage: Crf5c_opportunity1scrf5c_stage;
   crf5c_totalamount: number;
   importsequencenumber?: number;
@@ -50,6 +49,7 @@ export interface Crf5c_opportunity1sBase {
   statecode: Crf5c_opportunity1sstatecode;
   statuscode?: Crf5c_opportunity1sstatuscode;
   timezoneruleversionnumber?: number;
+  "TransactionCurrencyId@odata.bind"?: string;
   utcconversiontimezonecode?: number;
 }
 
@@ -61,9 +61,10 @@ export interface Crf5c_opportunity1s extends Crf5c_opportunity1sBase {
   createdon?: string;
   createdonbehalfbyname?: string;
   createdonbehalfbyyominame: string;
-  crf5c_accountname?: string;
+  crf5c_amount_base?: number;
   crf5c_confidencetrendname?: string;
   crf5c_stagename?: string;
+  exchangerate?: number;
   modifiedbyname?: string;
   modifiedbyyominame: string;
   modifiedon?: string;
@@ -74,6 +75,7 @@ export interface Crf5c_opportunity1s extends Crf5c_opportunity1sBase {
   owningbusinessunitname: string;
   statecodename?: string;
   statuscodename?: string;
+  transactioncurrencyidname?: string;
   versionnumber?: number;
   biz_account?: object;
   _biz_account_value?: string;
@@ -81,8 +83,6 @@ export interface Crf5c_opportunity1s extends Crf5c_opportunity1sBase {
   _createdby_value?: string;
   createdonbehalfby?: object;
   _createdonbehalfby_value?: string;
-  crf5c_account?: object;
-  _crf5c_account_value?: string;
   modifiedby?: object;
   _modifiedby_value?: string;
   modifiedonbehalfby?: object;
@@ -93,4 +93,6 @@ export interface Crf5c_opportunity1s extends Crf5c_opportunity1sBase {
   _owningteam_value?: string;
   owninguser?: object;
   _owninguser_value?: string;
+  transactioncurrencyid?: object;
+  _transactioncurrencyid_value?: string;
 }

@@ -73,9 +73,25 @@ export interface Opportunity {
   stage: string;
   /**
    * @displayName Total Amount
+   * @description Amount in the opportunity's own transaction currency.
    * @validationRule Required for create/update operations
    */
   totalamount: number;
+  /**
+   * @displayName Amount (Base Currency)
+   * @description Dataverse-computed value of the amount in the environment base currency. Read-only.
+   */
+  amountBase?: number;
+  /**
+   * @displayName Transaction Currency Id
+   * @description GUID of the opportunity's transaction currency (transactioncurrency record).
+   */
+  currencyId?: string;
+  /**
+   * @displayName Transaction Currency Name
+   * @description Display name of the opportunity's transaction currency (e.g. "US Dollar").
+   */
+  currencyName?: string;
 }
 
 export const _Opportunity = 'Opportunity' as const;

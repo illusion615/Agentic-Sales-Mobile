@@ -41,8 +41,10 @@ export interface Activity {
   opportunity?: Pick<Opportunity, 'id' | 'name1'>;
   /** Notes / description */
   notes?: string;
-  /** Scheduled date (scheduledstart) */
+  /** Scheduled start as an ISO instant (maps to scheduledstart; carries time-of-day) */
   scheduleddate: string;
+  /** Planned duration in minutes (maps to scheduleddurationminutes; default 60) */
+  durationMinutes?: number;
   /** Status: 'open' | 'completed' | 'canceled' (from statecode) */
   status: 'open' | 'completed' | 'canceled';
   /** Owner ID */

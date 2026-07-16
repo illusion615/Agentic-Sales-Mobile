@@ -25,6 +25,7 @@ import {
 import { cn } from '@/lib/utils';
 import { ACTIVITY_TYPE_COLORS } from '@/lib/activity-colors';
 import { activityStatusMeta } from '@/lib/activity-status';
+import { resolveActivityRelations } from '@/lib/activity-relations';
 import { MobileLayout } from '@/components/mobile-layout';
 import { GlassCard } from '@/components/glass-card';
 import { AISummaryCard } from '@/components/ai-summary-card';
@@ -38,6 +39,7 @@ import { useContactList } from '@/generated/hooks/use-contact';
 import { useAccountList } from '@/generated/hooks/use-account';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import type { Contact } from '@/generated/models/contact-model';import type { Account } from '@/generated/models/account-model';import type { Opportunity, OpportunityStageKeyToLabel as OpportunityStageKeyToLabelType } from '@/generated/models/opportunity-model';import { useEntityAISummary, useWithAISummaryTrigger } from '@/hooks/use-ai-summary-trigger';
+import { useBusinessSettings } from '@/hooks/use-business-settings';
 import type { Activity as DataverseActivity } from '@/generated/models/activity-model';import { toast } from '@/lib/toast-utils';
 import {
   AlertDialog,
@@ -52,8 +54,9 @@ import {
 } from '@/components/ui/alert-dialog';
 import { ClientProfileSheet } from '@/components/client-profile-sheet';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Calendar as CalendarPicker } from '@/components/ui/calendar';
 import { getLocale, t } from '@/lib/i18n';
+import { ReschedulePickerBody } from '@/components/schedule-picker';
+import { combineDateTime, formatDuration, resolveScheduleValue, type ScheduleValue } from '@/lib/activity-schedule';
 import { useCopilot } from '@/contexts/copilot-context';
 import { PullToRefresh } from '@/components/pull-to-refresh';
 
@@ -99,10 +102,6 @@ function formatTime(dateStr: string): string {
   return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
 }
 
-function toISODate(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
 export default function ActivityDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -110,10 +109,17 @@ export default function ActivityDetailPage() {
   // Use useActivity(id) for single record lookup - not useActivityList().find()
   // Use useActivity(id) for single record lookup - not useActivityList().find()
   // Pass undefined when id is missing to prevent query from running
-  const { data: activity, isLoading, error: activityError } = useActivity(id ?? '');
+  const { data: storedActivity, isLoading, error: activityError } = useActivity(id ?? '');
   const { data: contacts = [] } = useContactList();
   const { data: accounts = [] } = useAccountList();
   const { data: allOpportunities = [] } = useOpportunityList();
+  // Dataverse activities have one polymorphic Regarding lookup. When it points
+  // to an opportunity/contact, reconstruct the parent account so the detail
+  // view consistently exposes the fullest useful business context.
+  const activity = useMemo(
+    () => storedActivity ? resolveActivityRelations(storedActivity, allOpportunities, contacts) : undefined,
+    [storedActivity, allOpportunities, contacts],
+  );
 
   // Saved file attachments (Dataverse Notes) bound to this activity.
   const [savedAttachments, setSavedAttachments] = useState<import('@/lib/attachments').SavedAttachment[]>([]);
@@ -149,6 +155,7 @@ export default function ActivityDetailPage() {
   // AI Summary hooks
   const { summary: aiSummary, isLoading: isLoadingAISummary, isGenerating, isExpired, isFailed, localeMismatch, refetch: refetchAISummary } = useEntityAISummary('activity', id || '');
   const { triggerForEntity, isTriggering } = useWithAISummaryTrigger();
+  const { settings: businessSettings } = useBusinessSettings();
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [profileSheetOpen, setProfileSheetOpen] = useState(false);
@@ -282,11 +289,17 @@ export default function ActivityDetailPage() {
     }
   };
 
-  const handleReschedule = async (d: Date) => {
+  const handleReschedule = async (value: ScheduleValue) => {
     if (!activity || updateActivity.isPending) return;
     setRescheduleOpen(false);
     try {
-      await updateActivity.mutateAsync({ id: activity.id, changedFields: { scheduleddate: toISODate(d) } });
+      await updateActivity.mutateAsync({
+        id: activity.id,
+        changedFields: {
+          scheduleddate: combineDateTime(value.date, value.time),
+          durationMinutes: value.durationMinutes,
+        },
+      });
     } catch {
       toast.error('Failed to update activity');
     }
@@ -455,20 +468,55 @@ export default function ActivityDetailPage() {
             </div>
           </div>
 
-          {/* Date & Time */}
-          <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/50">
-            <Calendar className="w-5 h-5 text-primary" />
-            <div>
-              <p className="text-sm font-medium text-foreground">
-                {formatDate(activity.scheduleddate)}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {formatTime(activity.scheduleddate)}
-              </p>
+          {/* Date & Time — tap to reschedule (date + time + duration) when the activity is open */}
+          {!isCompleted && !isCanceled ? (
+            <Popover open={rescheduleOpen} onOpenChange={setRescheduleOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="w-full flex items-center gap-3 p-3 rounded-xl bg-muted/50 hover:bg-muted transition-colors text-left"
+                >
+                  <Calendar className="w-5 h-5 text-primary flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-foreground">
+                      {formatDate(activity.scheduleddate)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {formatTime(activity.scheduleddate)}
+                      {activity.durationMinutes ? ` · ${formatDuration(activity.durationMinutes, locale)}` : ''}
+                    </p>
+                  </div>
+                  <span className="inline-flex items-center gap-1 text-xs text-muted-foreground flex-shrink-0 whitespace-nowrap">
+                    <CalendarClock className="w-4 h-4" />
+                    {t('reschedule', locale)}
+                    <ChevronDown className="w-3 h-3 opacity-60" />
+                  </span>
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-auto p-0">
+                <ReschedulePickerBody
+                  initial={resolveScheduleValue(activity.scheduleddate, activity.durationMinutes)}
+                  onConfirm={handleReschedule}
+                  confirming={updateActivity.isPending}
+                />
+              </PopoverContent>
+            </Popover>
+          ) : (
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/50">
+              <Calendar className="w-5 h-5 text-primary flex-shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-foreground">
+                  {formatDate(activity.scheduleddate)}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {formatTime(activity.scheduleddate)}
+                  {activity.durationMinutes ? ` · ${formatDuration(activity.durationMinutes, locale)}` : ''}
+                </p>
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Quick actions — mark done / reschedule / cancel (open) or reopen (done/cancelled) */}
+          {/* Quick actions — mark done / cancel (open) or reopen (done/cancelled); reschedule merged into the Date & Time card above */}
           <div className="flex items-center gap-2 flex-wrap">
             {!isCompleted && !isCanceled ? (
               <>
@@ -481,39 +529,33 @@ export default function ActivityDetailPage() {
                   <CheckCircle className="w-4 h-4" />
                   {t('markDone', locale)}
                 </button>
-                <Popover open={rescheduleOpen} onOpenChange={setRescheduleOpen}>
-                  <PopoverTrigger asChild>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
                     <button
                       type="button"
-                      className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg bg-muted/60 text-foreground hover:bg-muted transition-colors"
+                      disabled={updateActivity.isPending}
+                      className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg bg-muted/60 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50"
                     >
-                      <CalendarClock className="w-4 h-4" />
-                      {t('reschedule', locale)}
-                      <ChevronDown className="w-3 h-3 opacity-60" />
+                      <Ban className="w-4 h-4" />
+                      {t('cancelTask', locale)}
                     </button>
-                  </PopoverTrigger>
-                  <PopoverContent align="start" className="w-auto p-0">
-                    <CalendarPicker
-                      mode="single"
-                      selected={new Date(`${String(activity.scheduleddate).slice(0, 10)}T00:00:00`)}
-                      onSelect={(d?: Date) => { if (d) handleReschedule(d); }}
-                      disabled={(date: Date) => {
-                        const start = new Date();
-                        start.setHours(0, 0, 0, 0);
-                        return date < start;
-                      }}
-                    />
-                  </PopoverContent>
-                </Popover>
-                <button
-                  type="button"
-                  onClick={handleCancelActivity}
-                  disabled={updateActivity.isPending}
-                  className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg bg-muted/60 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50"
-                >
-                  <Ban className="w-4 h-4" />
-                  {t('cancelTask', locale)}
-                </button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>{t('cancelTaskConfirmTitle', locale)}</AlertDialogTitle>
+                      <AlertDialogDescription>{t('cancelTaskConfirmDesc', locale)}</AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>{t('keepTask', locale)}</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={handleCancelActivity}
+                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      >
+                        {t('cancelTask', locale)}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               </>
             ) : (
               <button
@@ -774,6 +816,7 @@ export default function ActivityDetailPage() {
         </GlassCard>
 
         {/* AI Insight — narrative + structured, explained next actions (closed loop) */}
+        {businessSettings.aiSummaryEnabled && (
         <AISummaryCard
           summary={aiSummary}
           isLoading={isLoadingAISummary}
@@ -785,6 +828,7 @@ export default function ActivityDetailPage() {
           entityId={activity.id}
           onCreateTask={handleCreateInsightTask}
         />
+        )}
 
         {/* Metadata */}
         {activity.createdon && (

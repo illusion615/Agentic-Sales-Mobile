@@ -9,6 +9,8 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { Calendar as CalendarPicker } from '@/components/ui/calendar';
+import { TimeDurationFields } from '@/components/schedule-picker';
+import { combineDateTime, timeFromISO, resolveScheduleValue, DEFAULT_TIME, DEFAULT_DURATION_MINUTES } from '@/lib/activity-schedule';
 import type { BusinessInsight } from '@/generated/models/business-insight-model';
 import type { Activity } from '@/generated/models/activity-model';
 import { ACTIVITY_TYPE_COLORS } from '@/lib/activity-colors';
@@ -27,6 +29,8 @@ export interface AgendaItem {
   accountName?: string;
   address?: string;
   scheduledDate?: Date;
+  /** Planned duration in minutes (lets reschedule preserve/adjust the length). */
+  durationMinutes?: number;
 }
 
 export interface HotOpportunity {
@@ -74,6 +78,8 @@ export interface KPIData {
   agendaCompleted: number;
   /** Total non-cancelled activities today (open + completed) — progress denominator. */
   agendaTotal: number;
+  /** True count of pending to-dos today (agenda list is capped at 5 for display). */
+  agendaPendingTotal: number;
   
   // Overdue items (scheduled between Monday 00:00 and now, NOT completed)
   overdueItems?: AgendaItem[];
@@ -104,7 +110,7 @@ interface KPICardsProps {
   isLoading?: boolean;
   onNavigate: (path: string) => void;
   onMarkDone?: (itemId: string) => void | Promise<void>;
-  onReschedule?: (itemId: string, newDate: Date) => void | Promise<void>;
+  onReschedule?: (itemId: string, scheduleddate: string, durationMinutes: number) => void | Promise<void>;
   // Activity-related business insights to display in agenda card
   activityInsights?: BusinessInsight[];
   // All activities for calendar month view
@@ -256,6 +262,8 @@ export function KPICards({
   const [rescheduleItemId, setRescheduleItemId] = useState<string | null>(null);
   const [customDatePickerOpen, setCustomDatePickerOpen] = useState(false);
   const [selectedCustomDate, setSelectedCustomDate] = useState<Date | undefined>(undefined);
+  const [customTime, setCustomTime] = useState<string>(DEFAULT_TIME);
+  const [customDuration, setCustomDuration] = useState<number>(DEFAULT_DURATION_MINUTES);
   // Remove insightCurrentIndex as it's no longer needed for swipe between calendar and insights
   const [overdueSheetOpen, setOverdueSheetOpen] = useState(false);
   const [overdueCurrentIndex, setOverdueCurrentIndex] = useState(0);
@@ -515,7 +523,7 @@ export function KPICards({
   
   const handleCustomDateSelect = () => {
     if (selectedCustomDate && rescheduleItemId && onReschedule) {
-      onReschedule(rescheduleItemId, selectedCustomDate);
+      onReschedule(rescheduleItemId, combineDateTime(selectedCustomDate, customTime), customDuration);
     }
     setCustomDatePickerOpen(false);
     setRescheduleSheetOpen(false);
@@ -976,7 +984,7 @@ export function KPICards({
             <span className="flex items-center gap-2">
               {data.agendaItems.length > 0 && (
                 <span className="text-xs font-medium text-primary/70">
-                  {data.agendaItems.length} {t('tasksCount', locale)}
+                  {data.agendaPendingTotal} {t('tasksCount', locale)}
                 </span>
               )}
               <motion.span
@@ -1276,7 +1284,7 @@ export function KPICards({
                     if (currentItem && onReschedule) {
                       setOverdueProcessing('today');
                       try {
-                        await onReschedule(currentItem.id, quickDates.today);
+                        await onReschedule(currentItem.id, combineDateTime(quickDates.today, timeFromISO(currentItem.scheduledDate?.toISOString())), currentItem.durationMinutes ?? DEFAULT_DURATION_MINUTES);
                       } finally {
                         setOverdueProcessing(null);
                       }
@@ -1307,7 +1315,7 @@ export function KPICards({
                     if (currentItem && onReschedule) {
                       setOverdueProcessing('tomorrow');
                       try {
-                        await onReschedule(currentItem.id, quickDates.tomorrow);
+                        await onReschedule(currentItem.id, combineDateTime(quickDates.tomorrow, timeFromISO(currentItem.scheduledDate?.toISOString())), currentItem.durationMinutes ?? DEFAULT_DURATION_MINUTES);
                       } finally {
                         setOverdueProcessing(null);
                       }
@@ -1338,7 +1346,7 @@ export function KPICards({
                     if (currentItem && onReschedule) {
                       setOverdueProcessing('dayafter');
                       try {
-                        await onReschedule(currentItem.id, quickDates.dayAfter);
+                        await onReschedule(currentItem.id, combineDateTime(quickDates.dayAfter, timeFromISO(currentItem.scheduledDate?.toISOString())), currentItem.durationMinutes ?? DEFAULT_DURATION_MINUTES);
                       } finally {
                         setOverdueProcessing(null);
                       }
@@ -1367,6 +1375,9 @@ export function KPICards({
                     }) ?? [];
                     const currentItem = sortedOverdue[overdueCurrentIndex];
                     if (currentItem) {
+                      const init = resolveScheduleValue(currentItem.scheduledDate?.toISOString(), currentItem.durationMinutes);
+                      setCustomTime(init.time);
+                      setCustomDuration(init.durationMinutes);
                       handleRescheduleClick(currentItem.id);
                       setCustomDatePickerOpen(true);
                     }
@@ -1384,6 +1395,14 @@ export function KPICards({
                 onSelect={setSelectedCustomDate}
                 disabled={(date: Date) => date < new Date()}
                 className="mx-auto"
+              />
+              <TimeDurationFields
+                time={customTime}
+                durationMinutes={customDuration}
+                onTimeChange={setCustomTime}
+                onDurationChange={setCustomDuration}
+                locale={locale}
+                className="mt-3 px-1"
               />
               <div className="flex gap-3 mt-4">
                 <Button
@@ -1407,7 +1426,7 @@ export function KPICards({
                     }) ?? [];
                     const currentItem = sortedOverdue[overdueCurrentIndex];
                     if (selectedCustomDate && currentItem && onReschedule) {
-                      onReschedule(currentItem.id, selectedCustomDate);
+                      onReschedule(currentItem.id, combineDateTime(selectedCustomDate, customTime), customDuration);
                       if (overdueCurrentIndex >= overdueCount - 1) {
                         setOverdueCurrentIndex(Math.max(0, overdueCount - 2));
                       }

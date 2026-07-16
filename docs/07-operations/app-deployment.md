@@ -99,6 +99,21 @@ npx -y @microsoft/power-apps-cli@0.11.6 push
 
 > `push` **不会**触发构建——务必先 `pnpm build` 再 push，否则推上去的是旧的 `dist/`。
 
+### 日常开发验证：分层测试，自动管理发布缓存键
+
+`sourcetime` 是 Power Apps 为每次发布包生成的缓存键；已打开页面不会自动切换到新值，普通刷新也可能继续运行旧包。这个机制不能删除，但不应让人手工复制管理。日常验证采用以下分层流程：
+
+```bash
+cd apps/sales-copilot
+nvm use
+
+pnpm test                         # 纯逻辑 / 组件单元测试
+pnpm test:dataverse:feedback      # 真实 Dataverse，可逆创建→断言→删除
+pnpm test:publish                 # build → push → 自动提取最新验收 URL
+```
+
+前两层无需发布，覆盖绝大多数逻辑与真实数据契约。只有需要验证 Power Apps 宿主、连接器、iframe 和最终交互时才执行第三层。`test:publish` 使用已安装的 Power Apps CLI，不下载另一套工具；成功后把完整最新播放地址写入 `.test-runtime/latest-play-url.txt`，并输出 `LATEST_PLAY_URL=...`。自动化助手直接把这个地址导航到 VS Code 内建浏览器，复用现有 Microsoft 登录会话；不要另开第二套浏览器认证，也不要让测试人员手动修改 `sourcetime`。
+
 ## 步骤 6 — 首次运行配置与验证
 
 1. 在 Power Apps 中打开应用。

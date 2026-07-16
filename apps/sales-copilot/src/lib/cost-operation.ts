@@ -62,6 +62,7 @@ export function operationTypeFor(fnName: string, args: Record<string, unknown> =
     case 'draftOpportunity': return 'create.opportunity';
     case 'draftAccount': return 'create.account';
     case 'draftContact': return 'create.contact';
+    case 'draftFeedback': return 'feedback.submit';
 
     // Update
     case 'updateActivity': return 'update.activity';

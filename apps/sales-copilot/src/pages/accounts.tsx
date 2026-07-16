@@ -4,11 +4,12 @@ import { motion } from 'motion/react';
 import { Building2, Phone, ChevronRight, AlertTriangle, Search, Users, Sparkles, RefreshCw, Loader2 } from 'lucide-react';
 import { MobileLayout } from '@/components/mobile-layout';
 import { cn } from '@/lib/utils';
-import { isCompleted } from '@/lib/activity-status';
+import { contactRecencyStatus, daysSinceContact, formatLastContact, latestContactByAccount } from '@/lib/account-engagement';
 import { industryLabel } from '@/lib/industry';
 import { useAccountList } from '@/generated/hooks/use-account';
 import { useContactList } from '@/generated/hooks/use-contact';
 import { useActivityList } from '@/generated/hooks/use-activity';
+import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Account } from '@/generated/models/account-model';
 import type { Contact } from '@/generated/models/contact-model';
@@ -42,19 +43,12 @@ const itemVariants = {
   show: { opacity: 1, y: 0, transition: { duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] } },
 } as const;
 
-function getDaysSinceContact(dateStr?: string): number {
-  if (!dateStr) return 999;
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffTime = Math.abs(now.getTime() - date.getTime());
-  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-}
-
-function getContactStatus(daysSince: number): { label: string; color: string; isAtRisk: boolean } {
-  if (daysSince <= 7) return { label: 'Recent', color: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400', isAtRisk: false };
-  if (daysSince <= 14) return { label: 'Active', color: 'bg-blue-500/10 text-blue-600 dark:text-blue-400', isAtRisk: false };
-  if (daysSince <= 30) return { label: 'Cooling', color: 'bg-amber-500/10 text-amber-600 dark:text-amber-400', isAtRisk: false };
-  return { label: 'At Risk', color: 'bg-rose-500/10 text-rose-600 dark:text-rose-400', isAtRisk: true };
+function getContactStatus(daysSince: number | null): { label: string; color: string; isAtRisk: boolean } {
+  const status = contactRecencyStatus(daysSince);
+  if (status === 'recent') return { label: 'Recent', color: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400', isAtRisk: false };
+  if (status === 'active') return { label: 'Active', color: 'bg-blue-500/10 text-blue-600 dark:text-blue-400', isAtRisk: false };
+  if (status === 'cooling') return { label: 'Cooling', color: 'bg-amber-500/10 text-amber-600 dark:text-amber-400', isAtRisk: false };
+  return { label: status === 'never' ? 'Never contacted' : 'At Risk', color: 'bg-rose-500/10 text-rose-600 dark:text-rose-400', isAtRisk: true };
 }
 
 export default function ClientsPage() {
@@ -72,6 +66,7 @@ export default function ClientsPage() {
   const { data: accounts = [], isLoading: isLoadingAccounts } = useAccountList();
   const { data: contacts = [] } = useContactList();
   const { data: activities = [] } = useActivityList();
+  const { data: opportunities = [] } = useOpportunityList();
   const queryClient = useQueryClient();
 
   // Debug logging for account IDs
@@ -91,6 +86,7 @@ export default function ClientsPage() {
       queryClient.invalidateQueries({ queryKey: ['account-list'] }),
       queryClient.invalidateQueries({ queryKey: ['contact-list'] }),
       queryClient.invalidateQueries({ queryKey: ['activity-list'] }),
+      queryClient.invalidateQueries({ queryKey: ['opportunity-list'] }),
     ]);
   }, [queryClient]);
 
@@ -99,35 +95,23 @@ export default function ClientsPage() {
     return contacts.filter((c: Contact) => c.account?.id === accountId);
   };
 
-  // Last engagement per account = the most recent COMPLETED activity tied to it.
-  // The old account.lastcontactedon field was dropped when we moved to the native
-  // activity entity, so "days since contact" must be derived from the activity log
-  // (D22). Only completed activities count as real engagement.
-  const lastCompletedByAccount = useMemo(() => {
-    const map = new Map<string, Date>();
-    for (const a of activities as Activity[]) {
-      if (!isCompleted(a)) continue;
-      const accId = a.account?.id;
-      if (!accId || !a.scheduleddate) continue;
-      const d = new Date(a.scheduleddate);
-      if (Number.isNaN(d.getTime())) continue;
-      const prev = map.get(accId);
-      if (!prev || d > prev) map.set(accId, d);
-    }
-    return map;
-  }, [activities]);
+  // Canonical contact recency: latest non-cancelled, non-future activity.
+  // See account-engagement.ts for relationship and date semantics.
+  const latestContact = useMemo(
+    () => latestContactByAccount(activities as Activity[], opportunities, contacts),
+    [activities, opportunities, contacts],
+  );
 
   // Enrich accounts with contact status
   const enrichedAccounts = useMemo(() => {
     return accounts.map((account: Account) => {
-      const lastContact = lastCompletedByAccount.get(account.id);
-      const daysSince = getDaysSinceContact(lastContact?.toISOString());
+      const daysSince = daysSinceContact(latestContact.get(account.id));
       const contactStatus = getContactStatus(daysSince);
       const accountContacts = getContactsByAccountId(account.id);
       return { ...account, daysSince, contactStatus, contactCount: accountContacts.length };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accounts, contacts, lastCompletedByAccount]);
+  }, [accounts, contacts, latestContact]);
 
   // Apply filters
   const filteredAccounts = useMemo(() => {
@@ -149,7 +133,7 @@ export default function ClientsPage() {
   // Stats
   const totalClients = accounts.length;
   const atRiskCount = enrichedAccounts.filter((a) => a.contactStatus.isAtRisk).length;
-  const contactedThisWeek = enrichedAccounts.filter((a) => a.daysSince <= 7).length;
+  const contactedThisWeek = enrichedAccounts.filter((a) => a.daysSince !== null && a.daysSince <= 7).length;
 
   // ─── AI Summary ───
   interface AISummarySlide { title: string; content: string }
@@ -166,7 +150,7 @@ export default function ClientsPage() {
     try {
       const clientData = enrichedAccounts.map((a) => ({
         name: a.name1, industry: industryLabel(a.industry),
-        daysSinceContact: a.daysSince, status: a.contactStatus.label,
+        lastContact: formatLastContact(a.daysSince, locale), status: a.contactStatus.label,
         contactCount: a.contactCount,
       }));
 
@@ -407,7 +391,7 @@ export default function ClientsPage() {
                       <div className="flex items-center gap-3 text-xs">
                         <span className={cn('px-1.5 py-0.5 rounded-md text-[10px] font-medium', account.contactStatus.color)}>
                           {account.contactStatus.isAtRisk && <AlertTriangle className="w-2.5 h-2.5 inline mr-0.5" />}
-                          {account.daysSince}d ago
+                          {t('lastContact', locale)}: {formatLastContact(account.daysSince, locale)}
                         </span>
                         {account.phone && (
                           <span className="flex items-center gap-1 text-muted-foreground">

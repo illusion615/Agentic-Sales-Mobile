@@ -3,9 +3,16 @@
 This file records the Studio workflow configuration for the Account Enrichment
 Agent. The workflows keep orchestration simple and let the agent perform the
 Dataverse read, the freshness check, the web research, the public-field updates,
-and the description snapshot write.
+the plain-text profile update, and the Marketing Insight upsert.
+
+The app refresh button does not use either workflow. It calls the classic
+Support Agent and persists that separate `fields + marketingInsight` contract.
+Only the weekly workflow below is active; keeping the field-trigger workflow off
+prevents two enrichment writers from racing after an on-demand account update.
 
 ## Workflow 1: Account Enrichment - Account Changed
+
+**Status: inactive. Historical configuration only; do not enable.**
 
 Studio URL:
 `https://copilotstudio.preview.microsoft.com/environments/efcd2d46-3d9e-e31a-a9d8-5481ddae951c/flows/117c83dd-820e-c794-f0df-7a37b80dd886`
@@ -47,9 +54,11 @@ Trigger payload JSON:
 Notes:
 - The selected columns are deliberately narrow. System-only account updates should
   not trigger enrichment.
-- The workflow is published and ready in Studio.
-- The `description` column is intentionally not in the trigger columns, so the
-  agent rewriting its own snapshot block does not re-trigger the workflow.
+- This workflow was intentionally deactivated after the app gained an on-demand
+  refresh path. Enabling it would cause the app's account update to invoke a
+  second agent and overwrite or duplicate the just-saved enrichment.
+- The `description` column is intentionally not in the historical trigger
+  columns. The workflow remains inactive regardless.
 
 ## Workflow 2: Account Enrichment - Weekly Batch
 
@@ -80,19 +89,23 @@ Trigger payload JSON:
   "outputLanguage": "zh-Hans",
   "forceRefresh": false,
   "maxAccounts": 25,
-  "selectionPolicy": "Use the Microsoft Dataverse MCP Server to find active accounts. Prioritize accounts with no AI enrichment block in their description, accounts whose enrichment block Updated timestamp is older than 30 days, and accounts missing key public fields such as websiteurl, telephone1, or address. Skip accounts whose enrichment block was updated in the last 7 days. For each account, update missing or clearly superseded public master fields and refresh the description enrichment block."
+  "selectionPolicy": "Use the Microsoft Dataverse MCP Server to find active accounts. Prioritize accounts with no crf5c_aisummary row where crf5c_entityid equals accountid and biz_type equals marketing, accounts whose matching row is expired, and accounts missing key public fields such as websiteurl, telephone1, or address. Skip accounts whose matching marketing row was generated in the last 7 days. For each account, update missing or clearly superseded public master fields, write a concise plain-text profile to account.description, and upsert the canonical Marketing Insight row."
 }
 ```
 
 Notes:
 - The workflow is published and ready in Studio.
+- Runtime and Designer graph prompt copies were synchronized and read back on
+  `2026-07-15T00:39:44Z`; no legacy description-block instruction remains.
+- Recent successful scheduled runs: `2026-07-06T01:00:41Z` and
+  `2026-07-13T01:00:43Z`.
 - Keep `maxAccounts` conservative until runtime quality and Copilot credit usage
   are measured.
 
-## Follow-up hardening
+## Contract guard
 
-- `websiteurl` is now surfaced in the app `Account` abstraction and shown on the
-  account detail page. The enrichment block in `description` is rendered as a
-  dedicated Public Intelligence card.
-- Add a manual refresh workflow later if the app needs an explicit `Refresh`
-  button on the account page.
+- Do not add a manual workflow for the app. The account-detail refresh button
+  already uses the classic Support Agent through the app's connector.
+- Do not restore description marker blocks. Both triggers share the same
+  persistence semantics: profile in `account.description`, Marketing Insight in
+  `crf5c_aisummary`.

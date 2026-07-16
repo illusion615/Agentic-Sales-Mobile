@@ -1461,15 +1461,18 @@ export function outputLanguageDirective(locale: Locale): string {
  * Falls back to English when a language is missing.
  */
 export function pickLabel(
-  o: { zh: string; en: string; de?: string; fr?: string; es?: string },
+  o: { zh: string; en: string; de?: string; fr?: string; es?: string } | undefined | null,
   locale: Locale,
 ): string {
+  // Null-safe: a missing label (e.g. an unmapped key in a data-driven label map)
+  // must degrade to an empty string, never crash the whole app.
+  if (!o) return '';
   switch (locale) {
-    case 'zh-Hans': return o.zh;
-    case 'de-DE': return o.de ?? o.en;
-    case 'fr-FR': return o.fr ?? o.en;
-    case 'es-ES': return o.es ?? o.en;
-    default: return o.en;
+    case 'zh-Hans': return o.zh ?? o.en ?? '';
+    case 'de-DE': return o.de ?? o.en ?? '';
+    case 'fr-FR': return o.fr ?? o.en ?? '';
+    case 'es-ES': return o.es ?? o.en ?? '';
+    default: return o.en ?? '';
   }
 }
 

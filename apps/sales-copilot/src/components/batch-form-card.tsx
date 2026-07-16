@@ -10,7 +10,6 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { getLocale, t, type Locale } from '@/lib/i18n';
 import { FormCard, type FormCardData } from '@/components/form-card';
-import { useCopilot } from '@/contexts/copilot-context';
 
 interface BatchFormCardProps {
   messageId: string;
@@ -21,6 +20,7 @@ interface BatchFormCardProps {
       data: Record<string, unknown>;
       batchIndex: number;
       status?: 'pending' | 'confirmed' | 'modified' | 'cancelled';
+      createdRecordId?: string;
     }>;
     totalCount: number;
   };
@@ -29,7 +29,6 @@ interface BatchFormCardProps {
 
 export function BatchFormCard({ messageId, batchFormCards, onStatusChange }: BatchFormCardProps) {
   const locale: Locale = getLocale();
-  const copilot = useCopilot();
   const [expandedIndex, setExpandedIndex] = useState<number | null>(0); // First item expanded by default
   
   // Initialize statuses from batchFormCards (restored from session storage)
@@ -66,8 +65,6 @@ export function BatchFormCard({ messageId, batchFormCards, onStatusChange }: Bat
 
   const handleItemStatusChange = (index: number, status: 'confirmed' | 'modified' | 'cancelled') => {
     setItemStatuses((prev) => ({ ...prev, [index]: status }));
-    // Persist batch item status to message for session storage
-    copilot.updateFormCardStatus(messageId, status, index);
     onStatusChange?.(index, status);
   };
 
@@ -172,12 +169,14 @@ export function BatchFormCard({ messageId, batchFormCards, onStatusChange }: Bat
                   className="px-3 pb-3"
                 >
                   <FormCard
-                    messageId={`${messageId}-batch-${index}`}
+                    messageId={messageId}
+                    batchIndex={index}
                     formCard={{
                       type: item.type,
                       isNew: item.isNew,
                       data: item.data,
                       status: status,
+                      createdRecordId: item.createdRecordId,
                     }}
                     onStatusChange={(newStatus) => handleItemStatusChange(index, newStatus)}
                   />

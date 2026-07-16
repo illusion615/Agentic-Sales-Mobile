@@ -57,6 +57,23 @@ export function isClosed(a: ActivityStatusLike): boolean {
 }
 
 /**
+ * Normalize a status FILTER value (from the LLM, query args, or an older
+ * session) to a canonical lifecycle state, or undefined for "any status".
+ * Accepts the OBSOLETE draft/confirmed vocabulary and English/Chinese variants
+ * so a "pending / 待办" query maps to `open` (the actionable state) instead of
+ * silently matching nothing. This is the single boundary that reconciles the
+ * agent's status words with `Activity.status`.
+ */
+export function normalizeQueryStatus(raw: unknown): ActivityStatus | undefined {
+  const s = String(raw ?? '').toLowerCase().trim();
+  if (!s || s === 'all' || s === 'any') return undefined;
+  if (['completed', 'complete', 'done', 'closed', 'finished', '\u5b8c\u6210', '\u5df2\u5b8c\u6210'].includes(s)) return 'completed';
+  if (['canceled', 'cancelled', 'cancel', '\u53d6\u6d88', '\u5df2\u53d6\u6d88'].includes(s)) return 'canceled';
+  if (['open', 'pending', 'draft', 'confirmed', 'todo', 'to-do', 'active', 'scheduled', 'planned', '\u5f85\u529e', '\u8fdb\u884c\u4e2d', '\u672a\u5b8c\u6210', '\u8ba1\u5212'].includes(s)) return 'open';
+  return undefined; // unknown token → do not over-filter
+}
+
+/**
  * Overdue = a still-pending activity whose scheduled date is before today.
  * Completed and canceled activities are never overdue.
  */

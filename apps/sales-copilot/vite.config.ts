@@ -24,6 +24,13 @@ export default defineConfig({
     host: true,
   },
   build: {
+    // Code Apps run inside a CSP-restricted WebView (`connect-src 'none'`).
+    // Vite's module-preload polyfill uses fetch(), which the host blocks on
+    // older WebViews. Keep native preload hints for modern players but do not
+    // inject that fetch-based fallback. ES2017 also keeps the output parseable
+    // on supported legacy players.
+    target: 'es2017',
+    modulePreload: { polyfill: false },
     chunkSizeWarningLimit: 800,
     rollupOptions: {
       output: {

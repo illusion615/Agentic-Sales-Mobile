@@ -1,12 +1,17 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'motion/react';
-import { ArrowLeft, MoreHorizontal, AlertTriangle, TrendingUp, TrendingDown, Minus, Clock, Sparkles, RefreshCw, Loader2, ChevronRight } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { ArrowLeft, Settings, AlertTriangle, TrendingUp, TrendingDown, Minus, Clock, Sparkles, RefreshCw, Loader2, ChevronRight, ChevronDown, Search, ArrowUpDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useUser } from '@/hooks/use-user';
 import { getLocale, t, pickLabel, type Locale } from '@/lib/i18n';
 import { useFirstMount } from '@/hooks/use-first-mount';
+import { useBusinessSettings } from '@/hooks/use-business-settings';
+import { OpportunitySettingsSheet } from '@/components/opportunity-settings-sheet';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { filterOpportunities, sortOpportunities, groupOpportunitiesByStage, type OpportunitySortKey } from '@/lib/opportunity-list';
 import type { Opportunity } from '@/generated/models/opportunity-model';
 
 const containerVariants = {
@@ -51,8 +56,8 @@ function formatDaysUntil(days: number, locale: Locale): string {
 }
 
 /** Determines if an opportunity needs urgent attention */
-function needsAction(opp: Opportunity): boolean {
-  if ((opp.confidence ?? 100) < 50) return true;
+function needsAction(opp: Opportunity, riskThreshold: number): boolean {
+  if ((opp.confidence ?? 100) < riskThreshold) return true;
   if (opp.blocker) return true;
   if (opp.expectedclosedate) {
     const days = getDaysUntil(opp.expectedclosedate);
@@ -90,6 +95,27 @@ export default function OpportunityReviewPage() {
   const firstMount = useFirstMount('opportunity-review');
   const { data: opportunities = [] } = useOpportunityList();
   const { data: user } = useUser();
+  const { settings } = useBusinessSettings();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState<OpportunitySortKey>('closeDate');
+  const [collapsedStages, setCollapsedStages] = useState<Set<string>>(() => {
+    try {
+      const s = localStorage.getItem('opps-collapsed-stages');
+      return s ? new Set<string>(JSON.parse(s)) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
+  const toggleStage = useCallback((stage: string) => {
+    setCollapsedStages((prev) => {
+      const next = new Set(prev);
+      if (next.has(stage)) next.delete(stage);
+      else next.add(stage);
+      try { localStorage.setItem('opps-collapsed-stages', JSON.stringify([...next])); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
 
   // Reads are already security-trimmed by Dataverse to the opportunities this
   // user can access — no client-side owner filter.
@@ -100,20 +126,29 @@ export default function OpportunityReviewPage() {
     [opportunities]
   );
 
-  const actionRequired = useMemo(() => activeOpps.filter(needsAction), [activeOpps]);
-  const onTrack = useMemo(() => activeOpps.filter((o) => !needsAction(o)), [activeOpps]);
+  const actionRequired = useMemo(() => activeOpps.filter((o) => needsAction(o, settings.riskThreshold)), [activeOpps, settings.riskThreshold]);
+  // Full browsable list (all active opps) — searchable, sortable, stage-grouped.
+  const listGroups = useMemo(
+    () => groupOpportunitiesByStage(sortOpportunities(filterOpportunities(activeOpps, search), sortBy)),
+    [activeOpps, search, sortBy],
+  );
+  const totalMatched = useMemo(() => listGroups.reduce((n, g) => n + g.items.length, 0), [listGroups]);
 
-  // Stage distribution
+  // Stage distribution — ordered by the opportunity lifecycle
+  // (探索→资质→方案→谈判), not by the arbitrary order stages appear in the data.
   const stageDistribution = useMemo(() => {
+    const LIFECYCLE = ['prospecting', 'qualification', 'proposal', 'negotiation'];
     const counts: Record<string, number> = {};
     for (const o of activeOpps) {
       counts[o.stage] = (counts[o.stage] || 0) + 1;
     }
-    return Object.entries(counts).map(([stage, count]) => ({
-      stage,
-      count,
-      pct: activeOpps.length > 0 ? (count / activeOpps.length) * 100 : 0,
-    }));
+    return LIFECYCLE
+      .filter((stage) => counts[stage] > 0)
+      .map((stage) => ({
+        stage,
+        count: counts[stage],
+        pct: activeOpps.length > 0 ? (counts[stage] / activeOpps.length) * 100 : 0,
+      }));
   }, [activeOpps]);
 
   // ─── AI Summary Carousel ───
@@ -122,11 +157,11 @@ export default function OpportunityReviewPage() {
   const [currentSlide, setCurrentSlide] = useState(0);
   const carouselRef = useRef<HTMLDivElement>(null);
 
-  const totalPipeline = activeOpps.reduce((s, o) => s + (o.totalamount || 0), 0);
-  const atRiskCount = activeOpps.filter((o) => (o.confidence ?? 100) < 50).length;
+  const totalPipeline = activeOpps.reduce((s, o) => s + (o.amountBase ?? o.totalamount ?? 0), 0);
+  const atRiskCount = activeOpps.filter((o) => (o.confidence ?? 100) < settings.riskThreshold).length;
 
   const generateAISummary = useCallback(async () => {
-    if (activeOpps.length === 0) return;
+    if (activeOpps.length === 0 || !settings.aiSummaryEnabled) return;
     setAiLoading(true);
     try {
       const pipelineData = activeOpps.map((o) => ({
@@ -170,12 +205,13 @@ export default function OpportunityReviewPage() {
     } finally {
       setAiLoading(false);
     }
-  }, [activeOpps, locale]);
+  }, [activeOpps, locale, settings.aiSummaryEnabled]);
 
   // Load cached summary or auto-generate. Cache is locale-scoped: insights in a
   // different language are ignored so switching language regenerates them.
+  // Skips entirely when the user has disabled AI summary generation (no cost).
   useEffect(() => {
-    if (activeOpps.length === 0) return;
+    if (activeOpps.length === 0 || !settings.aiSummaryEnabled) return;
     try {
       const cached = localStorage.getItem(AI_SUMMARY_CACHE_KEY);
       if (cached) {
@@ -187,7 +223,7 @@ export default function OpportunityReviewPage() {
       }
     } catch { /* ignore */ }
     generateAISummary();
-  }, [activeOpps.length > 0, locale]); // regenerate when data arrives or language changes
+  }, [activeOpps.length > 0, locale, settings.aiSummaryEnabled]); // regenerate when data arrives or language changes
 
   // Carousel scroll sync
   const handleCarouselScroll = () => {
@@ -216,7 +252,7 @@ export default function OpportunityReviewPage() {
   // ─── Opportunity Card ───
   const renderOppCard = (opp: Opportunity) => {
     const stage = getStageConfig(opp.stage);
-    const isAtRisk = (opp.confidence ?? 100) < 50;
+    const isAtRisk = (opp.confidence ?? 100) < settings.riskThreshold;
     const daysUntil = opp.expectedclosedate ? getDaysUntil(opp.expectedclosedate) : null;
 
     return (
@@ -243,7 +279,7 @@ export default function OpportunityReviewPage() {
             </p>
           </div>
           <p className="text-title font-bold text-foreground ml-3 shrink-0">
-            {formatCurrency(opp.totalamount || 0)}
+            {formatCurrency(opp.amountBase ?? opp.totalamount ?? 0)}
           </p>
         </div>
 
@@ -308,13 +344,16 @@ export default function OpportunityReviewPage() {
             {t('opportunityReview', locale)}
           </h1>
           <button
+            onClick={() => setSettingsOpen(true)}
             className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-muted active:bg-muted/80 transition-colors"
-            aria-label="More"
+            aria-label={t('businessSettings', locale)}
           >
-            <MoreHorizontal className="w-5 h-5 text-foreground" />
+            <Settings className="w-5 h-5 text-foreground" />
           </button>
         </div>
       </header>
+
+      <OpportunitySettingsSheet open={settingsOpen} onOpenChange={setSettingsOpen} />
 
       {/* Content */}
       <main className="flex-1 pt-14 overflow-y-auto scrollbar-hide safe-area-top">
@@ -335,24 +374,24 @@ export default function OpportunityReviewPage() {
                   {formatCurrency(totalPipeline)}
                 </p>
               </div>
-              <div className="grid grid-cols-3 gap-2 text-center min-w-[150px]">
-                <div>
-                  <p className="text-title font-bold text-foreground">{activeOpps.length}</p>
-                  <p className="text-[10px] text-muted-foreground">
+              <div className="grid grid-cols-3 gap-2 text-center min-w-[150px] items-start">
+                <div className="flex flex-col items-center">
+                  <p className="text-title font-bold text-foreground leading-none tabular-nums">{activeOpps.length}</p>
+                  <p className="text-[10px] text-muted-foreground mt-1">
                     {t('oppsShort', locale)}
                   </p>
                 </div>
-                <div>
-                  <p className={cn('text-title font-bold', atRiskCount > 0 ? 'text-amber-500' : 'text-green-500')}>
+                <div className="flex flex-col items-center">
+                  <p className={cn('text-title font-bold leading-none tabular-nums', atRiskCount > 0 ? 'text-amber-500' : 'text-green-500')}>
                     {atRiskCount}
                   </p>
-                  <p className="text-[10px] text-muted-foreground">
+                  <p className="text-[10px] text-muted-foreground mt-1">
                     {t('atRiskShort', locale)}
                   </p>
                 </div>
-                <div>
-                  <p className="text-title font-bold text-foreground">{actionRequired.length}</p>
-                  <p className="text-[10px] text-muted-foreground">
+                <div className="flex flex-col items-center">
+                  <p className="text-title font-bold text-foreground leading-none tabular-nums">{actionRequired.length}</p>
+                  <p className="text-[10px] text-muted-foreground mt-1">
                     {t('actionShort', locale)}
                   </p>
                 </div>
@@ -389,7 +428,8 @@ export default function OpportunityReviewPage() {
             )}
           </motion.div>
 
-          {/* ─── AI Summary Carousel ─── */}
+          {/* ─── AI Summary Carousel (gated on the AI summary generation setting) ─── */}
+          {settings.aiSummaryEnabled && (
           <motion.div variants={itemVariants} className="mx-4">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-1.5">
@@ -451,6 +491,7 @@ export default function OpportunityReviewPage() {
               </>
             ) : null}
           </motion.div>
+          )}
 
           {/* ─── Action Required Section ─── */}
           {actionRequired.length > 0 && (
@@ -469,30 +510,82 @@ export default function OpportunityReviewPage() {
             </motion.div>
           )}
 
-          {/* ─── On Track Section ─── */}
-          {onTrack.length > 0 && (
-            <motion.div variants={itemVariants} className="px-4">
-              <div className="flex items-center gap-2 mb-2">
-                <ChevronRight className="w-3.5 h-3.5 text-green-500" />
-                <h2 className="text-helper font-semibold text-foreground">
-                  {locale === 'zh-Hans'
-                    ? `正常跟进 (${onTrack.length})`
-                    : `On Track (${onTrack.length})`}
-                </h2>
+          {/* ─── All Opportunities — searchable / sortable / stage-grouped ─── */}
+          <motion.div variants={itemVariants} className="px-4">
+            <div className="flex items-center gap-2 mb-2">
+              <ChevronRight className="w-3.5 h-3.5 text-primary" />
+              <h2 className="text-helper font-semibold text-foreground">
+                {t('allOpportunities', locale)} ({totalMatched})
+              </h2>
+            </div>
+            {/* Search + sort controls */}
+            <div className="flex items-center gap-2 mb-3">
+              <div className="relative flex-1">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                <Input
+                  value={search}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearch(e.target.value)}
+                  placeholder={t('searchOpportunities', locale)}
+                  className="pl-8 h-9"
+                  aria-label={t('searchOpportunities', locale)}
+                />
               </div>
-              <div className="space-y-2.5">
-                {onTrack.map(renderOppCard)}
-              </div>
-            </motion.div>
-          )}
+              <Select value={sortBy} onValueChange={(v: string) => setSortBy(v as OpportunitySortKey)}>
+                <SelectTrigger className="h-9 w-auto gap-1.5 shrink-0" aria-label={t('sortByLabel', locale)}>
+                  <ArrowUpDown className="w-3.5 h-3.5" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="closeDate">{t('expectedClose', locale)}</SelectItem>
+                  <SelectItem value="amount">{t('amount', locale)}</SelectItem>
+                  <SelectItem value="confidence">{t('confidence', locale)}</SelectItem>
+                  <SelectItem value="name">{t('sortName', locale)}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-          {activeOpps.length === 0 && (
-            <motion.div variants={itemVariants} className="text-center py-12 px-4">
-              <p className="text-body text-muted-foreground">
-                {t('noActiveOpps', locale)}
+            {totalMatched === 0 ? (
+              <p className="text-center py-8 text-helper text-muted-foreground">
+                {search.trim() ? t('noMatchingOpportunities', locale) : t('noActiveOpps', locale)}
               </p>
-            </motion.div>
-          )}
+            ) : (
+              <div className="space-y-2">
+                {listGroups.map((group) => {
+                  const collapsed = collapsedStages.has(group.stage);
+                  const cfg = getStageConfig(group.stage);
+                  return (
+                    <div key={group.stage}>
+                      <button
+                        type="button"
+                        onClick={() => toggleStage(group.stage)}
+                        className="w-full flex items-center gap-2 px-1 py-1.5 text-left hover:bg-muted/30 rounded-lg transition-colors"
+                      >
+                        <span className={cn('w-2.5 h-2.5 rounded-full shrink-0', cfg.color)} />
+                        <span className="text-sm font-medium text-foreground">{pickLabel(cfg, locale)}</span>
+                        <span className="text-xs text-muted-foreground">({group.items.length})</span>
+                        <ChevronDown className={cn('w-4 h-4 text-muted-foreground ml-auto transition-transform', collapsed && '-rotate-90')} />
+                      </button>
+                      <AnimatePresence initial={false}>
+                        {!collapsed && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.2 }}
+                            className="overflow-hidden"
+                          >
+                            <div className="space-y-2.5 pt-1 pb-1">
+                              {group.items.map(renderOppCard)}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </motion.div>
         </motion.div>
       </main>
     </div>

@@ -6,15 +6,18 @@
  * knowledge + customer intelligence enrichment). The agent RESEARCHES public
  * sources and returns a structured JSON result; it does NOT write to Dataverse.
  * The frontend decides what to store: it maps the returned fields to the account
- * master fields and maintains the [AI-ENRICHMENT] block in the description.
+ * master fields and stores the agent-authored Marketing Insight Markdown.
  */
 
 import { MicrosoftCopilotStudioService } from '@/generated/services/MicrosoftCopilotStudioService';
 import { AccountService } from '@/generated/services/account-service';
 import { AISummaryService } from '@/generated/services/ai-summary-service';
 import { getContext } from '@microsoft/power-apps/app';
+import { jsonrepair } from 'jsonrepair';
+import { z } from 'zod';
 import { getCopilotConfig } from './copilot-service';
 import { outputLanguageDirective, type Locale } from '@/lib/i18n';
+import { industryLabel } from '@/lib/industry';
 import type { Account } from '@/generated/models/account-model';
 
 /** Markers that delimit the AI-managed intelligence block inside the description. */
@@ -30,6 +33,9 @@ export interface EnrichmentFields {
   address1_stateorprovince?: string;
   address1_country?: string;
   address1_postalcode?: string;
+  /** Canonical Dataverse account.industrycode option value. */
+  industrycode?: number;
+  /** Legacy public label; retained for reply compatibility but not persisted. */
   industry?: string;
   /** Concise customer profile → written to account.description (shown in the header). */
   description?: string;
@@ -55,6 +61,51 @@ export interface EnrichmentTriggerResult {
   error?: string;
 }
 
+const EnrichmentFieldsSchema = z.object({
+  websiteurl: z.string().optional(),
+  telephone1: z.string().optional(),
+  emailaddress1: z.string().optional(),
+  address1_line1: z.string().optional(),
+  address1_city: z.string().optional(),
+  address1_stateorprovince: z.string().optional(),
+  address1_country: z.string().optional(),
+  address1_postalcode: z.string().optional(),
+  industrycode: z.preprocess(
+    (value) => {
+      if (value === null || value === '') return undefined;
+      return typeof value === 'string' && value.trim() ? Number(value) : value;
+    },
+    z.number().int().min(1).max(33).optional(),
+  ),
+  industry: z.string().optional(),
+  description: z.string().optional(),
+}).strip();
+
+const EnrichmentResultSchema = z.object({
+  status: z.enum(['ok', 'skipped']),
+  reason: z.string().optional(),
+  fields: EnrichmentFieldsSchema.optional(),
+  marketingInsight: z.string().optional(),
+}).strip().superRefine((result, ctx) => {
+  if (result.status === 'skipped' && !result.reason?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['reason'],
+      message: 'A skipped enrichment result must include a reason',
+    });
+  }
+  const hasFieldValue = Object.entries(result.fields ?? {}).some(([key, value]) => {
+    if (key === 'industry') return false; // Legacy label is intentionally not persisted.
+    return typeof value === 'string' ? !!value.trim() : value !== undefined && value !== null;
+  });
+  if (result.status === 'ok' && !hasFieldValue && !result.marketingInsight?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'A successful enrichment result must include fields or marketingInsight',
+    });
+  }
+});
+
 /** Split an account description into human-entered notes and the AI block. */
 export function splitEnrichment(notes?: string): { human: string; enrichment: string } {
   if (!notes) return { human: '', enrichment: '' };
@@ -66,8 +117,13 @@ export function splitEnrichment(notes?: string): { human: string; enrichment: st
   return { human, enrichment };
 }
 
-/** Extract the first top-level JSON object from a reply (tolerant of code fences / stray prose). */
-function extractEnrichmentJson(reply: string): EnrichmentResult | null {
+/**
+ * Parse the first JSON object from an agent reply at the one response-contract
+ * boundary. `jsonrepair` handles common model serialization defects (notably
+ * unescaped quotation marks inside prose); Zod then prevents repaired but
+ * contract-invalid content from reaching Dataverse.
+ */
+export function extractEnrichmentJson(reply: string): EnrichmentResult | null {
   if (!reply) return null;
   let s = reply.trim();
   const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -76,42 +132,19 @@ function extractEnrichmentJson(reply: string): EnrichmentResult | null {
   const last = s.lastIndexOf('}');
   if (first === -1 || last === -1 || last < first) return null;
   try {
-    const obj = JSON.parse(s.slice(first, last + 1)) as EnrichmentResult;
-    if (obj && (obj.status || obj.fields || obj.marketingInsight)) {
-      if (obj.status !== 'skipped') obj.status = 'ok';
-      return obj;
-    }
-    return null;
+    const candidate = JSON.parse(jsonrepair(s.slice(first, last + 1)));
+    const parsed = EnrichmentResultSchema.safeParse(candidate);
+    return parsed.success ? parsed.data : null;
   } catch {
     return null;
   }
 }
 
-/** Compose the granular address fields into a single human-readable line. */
-function composeAddress(f: EnrichmentFields): string | undefined {
-  const parts = [f.address1_line1, f.address1_city, f.address1_stateorprovince, f.address1_postalcode, f.address1_country]
-    .map((p) => (p || '').trim())
-    .filter(Boolean);
-  return parts.length ? parts.join(', ') : undefined;
-}
-
 /**
- * Dataverse `account.description` hard limit. The merged notes (human text plus
- * the managed enrichment block) must never exceed this, or the write is rejected
- * with validation error 0x80044331.
+ * Dataverse `account.description` hard limit. The customer profile must never
+ * exceed this, or the write is rejected with validation error 0x80044331.
  */
 const MAX_DESCRIPTION_LEN = 2000;
-
-/** Replace the description with the managed enrichment block. Enrichment fully
- *  OWNS `account.description`: any pre-existing text (including a legacy block
- *  from an earlier enrichment version) is intentionally not preserved. The block
- *  is capped to the Dataverse `description` limit. */
-export function mergeEnrichmentIntoNotes(notes: string | undefined, block: string): string {
-  void notes; // description is fully managed by enrichment; prior text is dropped.
-  const budget = MAX_DESCRIPTION_LEN - ENRICH_START.length - ENRICH_END.length - 2;
-  const b = block.length > budget ? `${block.slice(0, budget - 1).trimEnd()}\u2026` : block;
-  return `${ENRICH_START}\n${b}\n${ENRICH_END}`;
-}
 
 /**
  * Ask the agent to research a single account and return structured intelligence.
@@ -148,7 +181,7 @@ export async function triggerAccountEnrichment(
   const payload = {
     accountName: account.name1,
     website: account.website || '',
-    industry: account.industry || '',
+    industry: industryLabel(account.industry) || '',
     outputLanguage: locale,
   };
 
@@ -229,12 +262,18 @@ export async function applyEnrichmentToAccount(
   if (f.websiteurl) updates.website = f.websiteurl;
   if (f.telephone1) updates.phone = f.telephone1;
   if (f.emailaddress1) updates.email = f.emailaddress1;
-  const addr = composeAddress(f);
-  if (addr) updates.address = addr;
+  if (f.address1_line1) updates.addressLine1 = f.address1_line1;
+  if (f.address1_city) updates.addressCity = f.address1_city;
+  if (f.address1_stateorprovince) updates.addressStateOrProvince = f.address1_stateorprovince;
+  if (f.address1_country) updates.addressCountry = f.address1_country;
+  if (f.address1_postalcode) updates.addressPostalCode = f.address1_postalcode;
+  if (f.industrycode !== undefined) updates.industry = String(f.industrycode);
   // Customer profile -> account.description (rendered in the account header card).
   if (f.description) updates.notes = f.description.trim().slice(0, MAX_DESCRIPTION_LEN);
 
-  const updated = await AccountService.update(account.id, updates);
+  const updated = Object.keys(updates).length
+    ? await AccountService.update(account.id, updates)
+    : account;
 
   // Descriptive insight -> Marketing Insight record (AISummary, type='marketing'),
   // stored and rendered verbatim as the agent's ready-made Markdown.

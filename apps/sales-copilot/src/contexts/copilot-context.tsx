@@ -25,6 +25,9 @@ import { extractEntitySeed, type AwaitingClarification, type ResolutionItem } fr
 import { extractVisitDataFromText, type ExtractedVisitData } from '@/lib/visit-extraction';
 import { putAttachments, toAttachmentMeta, type CopilotAttachment, type AttachmentMeta } from '@/lib/attachments';
 import { assignAttachmentsToIntent } from '@/lib/attachment-assign';
+import { detectAppFeedback, feedbackIntentFromSeed } from '@/lib/feedback-intent';
+import { formCardPrimaryText } from '@/lib/form-card-display';
+import { applyFormCardPersistenceUpdate } from '@/lib/form-card-persistence';
 import {
   pickLabel, buildOverviewMessage, buildAnnounceMessage,
   hasMessageAfterLastUser, collapseEarlierTasks, extractPriorOutcomes,
@@ -77,7 +80,9 @@ function invalidateRelatedQueries(
 function buildQueueAck(intent: IntentResult, locale: Locale): string {
   const isZh = locale === 'zh-Hans';
   const a = intent.arguments ?? {};
-  const title = (a.title ?? a.name ?? a.fullName ?? '') as string;
+  const title = intent.function === 'draftContact'
+    ? formCardPrimaryText('contact', a)
+    : (a.title ?? a.name ?? a.fullName ?? '') as string;
   const account = (a.accountName ?? '') as string;
   const contact = (a.contactName ?? '') as string;
   const dateRaw = (a.scheduledDate ?? a.expectedCloseDate ?? '') as string;
@@ -197,7 +202,7 @@ export interface ChatMessage {
   };
   // Form card for draft records (Activity/Opportunity/Account)
   formCard?: {
-    type: 'activity' | 'opportunity' | 'account' | 'contact';
+    type: 'activity' | 'opportunity' | 'account' | 'contact' | 'feedback';
     isNew: boolean;
     existingId?: string;
     data: Record<string, unknown>;
@@ -512,7 +517,8 @@ interface CopilotContextValue {
     messageId: string,
     status: 'pending' | 'confirmed' | 'modified' | 'cancelled',
     batchIndex?: number,
-    createdRecordId?: string
+    createdRecordId?: string,
+    finalData?: Record<string, unknown>,
   ) => void;
   
   // Rollback conversation to a specific message (removes that message and all after it)
@@ -532,7 +538,7 @@ interface CopilotContextValue {
   // the parked-intent legacy resume path.
   formCardSaved: (args: {
     messageId: string;
-    type: 'activity' | 'opportunity' | 'account' | 'contact';
+    type: 'activity' | 'opportunity' | 'account' | 'contact' | 'feedback';
     recordId: string;
     recordName?: string;
     accountId?: string;
@@ -692,7 +698,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
   // Predicate: does this LLM intent need the queue to orchestrate it?
   const shouldUseQueue = useCallback((intent: IntentResult | undefined): boolean => {
     if (!intent || !intent.function) return false;
-    const draftFns = ['draftActivity', 'draftOpportunity', 'draftAccount', 'draftContact'];
+    const draftFns = ['draftActivity', 'draftOpportunity', 'draftAccount', 'draftContact', 'draftFeedback'];
     if (draftFns.includes(intent.function)) return true;
     if (intent.additionalActions && intent.additionalActions.length > 0) return true;
     if (intent.requiresMatching) return true;
@@ -896,7 +902,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           functionDisplayName: fnDisplay,
           timestamp: new Date().toISOString(),
           formCard: {
-            type: data.type as 'activity' | 'opportunity' | 'account' | 'contact',
+            type: data.type as 'activity' | 'opportunity' | 'account' | 'contact' | 'feedback',
             isNew: data.isNew,
             data: data.data,
             status: 'pending',
@@ -940,7 +946,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           functionDisplayName: fnDisplay,
           timestamp: new Date().toISOString(),
           formCard: {
-            type: formData.type as 'activity' | 'opportunity' | 'account' | 'contact',
+            type: formData.type as 'activity' | 'opportunity' | 'account' | 'contact' | 'feedback',
             isNew: formData.isNew,
             data: formData.data,
             status: 'pending',
@@ -1006,7 +1012,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           functionDisplayName: fnDisplay,
           timestamp: new Date().toISOString(),
           formCard: {
-            type: formData.type as 'activity' | 'opportunity' | 'account' | 'contact',
+            type: formData.type as 'activity' | 'opportunity' | 'account' | 'contact' | 'feedback',
             isNew: formData.isNew,
             data: formData.data,
             status: 'pending',
@@ -1173,7 +1179,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
               { stage: 'executing' as const, status: 'completed' as const, label: t('formReady', locale, { fn: fnDisplayName }) },
             ],
             formCard: {
-              type: formCardResult.type as 'activity' | 'opportunity' | 'account' | 'contact',
+              type: formCardResult.type as 'activity' | 'opportunity' | 'account' | 'contact' | 'feedback',
               isNew: formCardResult.isNew,
               data: formCardResult.data,
               status: 'pending' as const,
@@ -1543,7 +1549,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
               functionDisplayName: fnDisplay,
               timestamp: new Date().toISOString(),
               formCard: {
-                type: formData.type as 'activity' | 'opportunity' | 'account' | 'contact',
+                type: formData.type as 'activity' | 'opportunity' | 'account' | 'contact' | 'feedback',
                 isNew: formData.isNew,
                 data: formData.data,
                 status: 'pending',
@@ -1590,6 +1596,34 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     setInputValue('');
     clearClarificationSuggestions(); // Clear any pending clarification suggestions
     setIsSending(true);
+
+    // Product feedback has its own high-precision entry gate. It must not depend
+    // on the sales Frame's ontology/JSON stability: explicit feedback requests
+    // go straight to the same blocking queue/card and still require confirmation.
+    const feedbackSeed = detectAppFeedback(text);
+    if (feedbackSeed) {
+      const feedbackIntent = feedbackIntentFromSeed(
+        feedbackSeed,
+        pageContextRef.current?.currentPage || 'Unknown',
+      );
+      if (turnAttachmentMeta.length) {
+        await assignAttachmentsToIntent(feedbackIntent, turnAttachmentMeta, userMessage.content, locale);
+      }
+      const feedbackQueue = buildQueueFromIntent(feedbackIntent);
+      feedbackQueue.userMessage = userMessage.content;
+      setMessages((prev) => [...prev, {
+        id: `msg-${Date.now()}-feedback-ack`,
+        type: 'agent',
+        role: 'assistant',
+        content: locale === 'zh-Hans' ? '我已整理成产品反馈，请确认后提交。' : 'I prepared a product feedback draft. Review it before submitting.',
+        functionCalled: 'draftFeedback',
+        functionDisplayName: locale === 'zh-Hans' ? '提交产品反馈' : 'Submit feedback',
+        timestamp: new Date().toISOString(),
+      }]);
+      setIsSending(false);
+      await runAndStoreQueue(feedbackQueue);
+      return;
+    }
 
     // Set up abort controller so cancelSend can signal this pipeline to stop
     const abortController = new AbortController();
@@ -1915,7 +1949,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           }
           
           // Check if response is a draft function (returns form card)
-          const isDraftFunction = response.functionCalled && ['draftActivity', 'draftOpportunity', 'draftAccount', 'draftContact'].includes(response.functionCalled);
+          const isDraftFunction = response.functionCalled && ['draftActivity', 'draftOpportunity', 'draftAccount', 'draftContact', 'draftFeedback'].includes(response.functionCalled);
           
           // Check if response is a fuzzy match function
           const isFuzzyMatchFunction = response.functionCalled && ['fuzzyMatchAccount', 'fuzzyMatchContact', 'fuzzyMatchOpportunity', 'fuzzyMatchActivity'].includes(response.functionCalled);
@@ -2030,7 +2064,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           } else if (isDraftFunction && response.success && response.functionResult) {
             // Create a form-card message instead of regular response
             setIsSending(false);
-            const formCardResult = response.functionResult as { type: 'activity' | 'opportunity' | 'account' | 'contact'; isNew: boolean; data: Record<string, unknown> };
+            const formCardResult = response.functionResult as { type: 'activity' | 'opportunity' | 'account' | 'contact' | 'feedback'; isNew: boolean; data: Record<string, unknown> };
             
             setMessages((prev) => prev.map((msg) => {
               if (msg.id !== thinkingMsgId) return msg;
@@ -2315,7 +2349,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       console.log('[CopilotContext] updatedArguments:', JSON.stringify(updatedArguments, null, 2));
 
       const fnDisplayName = getDisplayName(pendingIntent.function, locale === 'zh-Hans' ? 'zh-Hans' : 'en-US');
-      const isDraftFunction = ['draftActivity', 'draftOpportunity', 'draftAccount', 'draftContact'].includes(pendingIntent.function);
+      const isDraftFunction = ['draftActivity', 'draftOpportunity', 'draftAccount', 'draftContact', 'draftFeedback'].includes(pendingIntent.function);
 
       // I-3 Slice 3: Walk remaining resolution chain before executing the final draft.
       // For each remaining ResolutionItem: scopeBy-inject, run fuzzyMatch, then:
@@ -2604,7 +2638,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
                 { stage: 'executing' as const, status: 'completed' as const, label: t('formReady', locale, { fn: fnDisplayName }) },
               ],
               formCard: {
-                type: formCardResult.type as 'activity' | 'opportunity' | 'account' | 'contact',
+                type: formCardResult.type as 'activity' | 'opportunity' | 'account' | 'contact' | 'feedback',
                 isNew: formCardResult.isNew,
                 data: formCardResult.data,
                 status: 'pending' as const,
@@ -2844,7 +2878,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
               { stage: 'executing' as const, status: 'completed' as const, label: t('formReady', locale, { fn: fnDisplayName }) },
             ],
             formCard: {
-              type: formCardResult.type as 'activity' | 'opportunity' | 'account' | 'contact',
+              type: formCardResult.type as 'activity' | 'opportunity' | 'account' | 'contact' | 'feedback',
               isNew: true, // Always new when user clicks 'Create New'
               data: formCardResult.data,
               status: 'pending' as const,
@@ -3054,7 +3088,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           functionDisplayName: fnDisplay,
           timestamp: new Date().toISOString(),
           formCard: {
-            type: formData.type as 'activity' | 'opportunity' | 'account' | 'contact',
+            type: formData.type as 'activity' | 'opportunity' | 'account' | 'contact' | 'feedback',
             isNew: formData.isNew,
             data: formData.data,
             status: 'pending',
@@ -3203,40 +3237,16 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     messageId: string,
     status: 'pending' | 'confirmed' | 'modified' | 'cancelled',
     batchIndex?: number,
-    createdRecordId?: string
+    createdRecordId?: string,
+    finalData?: Record<string, unknown>,
   ) => {
-    setMessages((prev) => prev.map((msg) => {
-      if (msg.id !== messageId) return msg;
-      
-      // Handle batch form cards
-      if (typeof batchIndex === 'number' && msg.batchFormCards) {
-        const updatedItems = msg.batchFormCards.items.map((item, idx) => {
-          if (idx !== batchIndex) return item;
-          return { ...item, status, ...(createdRecordId && { createdRecordId }) };
-        });
-        return {
-          ...msg,
-          batchFormCards: {
-            ...msg.batchFormCards,
-            items: updatedItems,
-          },
-        };
-      }
-      
-      // Handle single form card
-      if (msg.formCard) {
-        return {
-          ...msg,
-          formCard: {
-            ...msg.formCard,
-            status,
-            ...(createdRecordId && { createdRecordId }),
-          },
-        };
-      }
-      
-      return msg;
-    }));
+    setMessages((prev) => prev.map((message) => applyFormCardPersistenceUpdate(message, {
+      messageId,
+      status,
+      batchIndex,
+      createdRecordId,
+      finalData,
+    })));
   }, []);
 
   // ===== IntentQueue: unified form-card save / cancel dispatchers =====
@@ -3245,7 +3255,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
   // (kept for backward compatibility with persisted pre-refactor messages).
   const formCardSaved = useCallback(async (args: {
     messageId: string;
-    type: 'activity' | 'opportunity' | 'account' | 'contact';
+    type: 'activity' | 'opportunity' | 'account' | 'contact' | 'feedback';
     recordId: string;
     recordName?: string;
     accountId?: string;

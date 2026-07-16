@@ -163,7 +163,7 @@ export const availableFunctions: FunctionDefinition[] = [
         scheduledDate: { type: 'string', description: 'Exact date in YYYY-MM-DD format' },
         dateFrom: { type: 'string', description: 'Start date YYYY-MM-DD for range queries' },
         dateTo: { type: 'string', description: 'End date YYYY-MM-DD for range queries' },
-        status: { type: 'string', description: 'Filter by status', enum: ['draft', 'confirmed', 'completed', 'cancelled'] },
+        status: { type: 'string', description: 'Filter by status. open = pending / to-do / actionable, completed = done, canceled = abandoned.', enum: ['open', 'completed', 'canceled'] },
         sortBy: { type: 'string', description: 'Sort field', enum: ['date', 'type', 'account'] },
         limit: { type: 'number', description: 'Max results, default 20' },
       },
@@ -201,6 +201,22 @@ export const availableFunctions: FunctionDefinition[] = [
 
   // ===== Draft/Create Functions (return form cards) =====
   {
+    name: 'draftFeedback',
+    displayName: { 'zh-Hans': '草拟产品反馈', 'en-US': 'Draft Feedback' },
+    description: 'Create an editable confirmation draft for a bug report or product improvement request about this Sales Copilot app. Never submit directly; the user must confirm the card.',
+    parameters: {
+      type: 'object',
+      properties: {
+        feedbackType: { type: 'string', description: 'Feedback category', enum: ['bug', 'enhancement'] },
+        title: { type: 'string', description: 'Concise, specific summary in the user\'s language' },
+        description: { type: 'string', description: 'Actual behavior/problem or requested product change, using only facts stated by the user' },
+        expectedOutcome: { type: 'string', description: 'Expected behavior or user outcome, when stated' },
+        reproductionSteps: { type: 'string', description: 'Steps to reproduce the bug, when stated' },
+      },
+      required: ['feedbackType', 'title', 'description'],
+    },
+  },
+  {
     name: 'draftActivity',
     displayName: { 'zh-Hans': '草拟活动', 'en-US': 'Draft Activity' },
     description: 'Extract activity info from the user\'s description and create a draft for confirmation. Use when the user describes a visit/meeting/call but does NOT explicitly say "save" or "create".',
@@ -218,6 +234,7 @@ export const availableFunctions: FunctionDefinition[] = [
         contactNames: { type: 'array', items: { type: 'string' }, description: 'List of attendee names for a meeting/visit. When the user mentions meeting/visiting several people, include each name, e.g. "meeting with Manager Zhang and Dr. Li" -> ["Manager Zhang","Dr. Li"].' },
         contactTitle: { type: 'string', description: 'Contact job title or department' },
         scheduledDate: { type: 'string', description: 'Date in ISO format YYYY-MM-DD' },
+        temporalMode: { type: 'string', description: 'Whether the activity is planned for the future or already completed', enum: ['planned', 'completed', 'unspecified'] },
         result: { type: 'string', description: 'Activity details (stored in the description column). Include ONLY what the user explicitly stated (outcome / discussion points / stated purpose). If the user gave no details, leave this EMPTY — never invent a purpose, agenda, or background.' },
         opportunityId: { type: 'string', description: 'Related opportunity ID (if known)' },
         opportunityName: { type: 'string', description: 'Related opportunity name' },
@@ -587,8 +604,8 @@ If no opportunity, set hasOpportunity to false and leave other fields empty.`,
     llmBacked: true,
     responseFormat: 'text',
     outputSchema: z.string().min(1),
-    promptTemplate: `You are a sales assistant. The user requested a multi-step analysis. Below are the query results from each step. Generate a complete, insightful report based on all the data to answer the user's original request. Use markdown format with clear sections.
-Ground every statement in the returned data ONLY: never invent records, names, amounts, or dates, and never assert a relationship the data does not support (e.g. do NOT present a general pipeline or account list as "today's visits", and do NOT relabel which day a record belongs to). If a step returned nothing relevant, say so plainly. Use today's date exactly as provided in the input — do not shift it.`,
+    promptTemplate: `You are a sales assistant. The user requested a multi-step analysis. Below are the query results from each step. Generate a complete, insightful report based on all the data to answer the user's original request. Use standard Markdown with clear sections. Use "- " for every list item, one item per line, with a blank line before each list. Do not use emoji or Unicode bullet characters such as •.
+  Ground every statement in the returned data ONLY: never invent records, names, amounts, or dates, and never assert a relationship the data does not support (e.g. do NOT present a general pipeline or account list as "today's visits", and do NOT relabel which day a record belongs to). If a step returned nothing relevant, say so plainly. Use today's date exactly as provided in the input — do not shift it.`,
     parameters: {
       type: 'object',
       properties: {

@@ -298,14 +298,21 @@ export function mapOptions(
     });
   }
 
-  // Map filter: replace known friendly names with DV names
+  // Map filter identifiers while preserving quoted OData string literals.
+  // This matters for functions such as
+  // EqualUserId(PropertyName='ownerid'): `ownerid` there is a Dataverse
+  // property-name argument, not a friendly field reference. Rewriting text
+  // inside quotes to `_ownerid_value` makes the otherwise-valid filter fail.
   if (typeof mapped.filter === 'string') {
-    let f = mapped.filter as string;
-    for (const [friendly, dv] of Object.entries(fieldMap)) {
-      // Word-boundary replacement to avoid partial matches
-      f = f.replace(new RegExp(`\\b${friendly}\\b`, 'g'), dv);
-    }
-    mapped.filter = f;
+    const segments = (mapped.filter as string).split(/('(?:''|[^'])*')/g);
+    mapped.filter = segments.map((segment, index) => {
+      if (index % 2 === 1) return segment;
+      let mappedSegment = segment;
+      for (const [friendly, dv] of Object.entries(fieldMap)) {
+        mappedSegment = mappedSegment.replace(new RegExp(`\\b${friendly}\\b`, 'g'), dv);
+      }
+      return mappedSegment;
+    }).join('');
   }
 
   return mapped;

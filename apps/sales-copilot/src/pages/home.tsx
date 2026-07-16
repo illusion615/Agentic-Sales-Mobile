@@ -9,6 +9,7 @@ import { useEffectiveOffline } from '@/lib/connectivity';
 import { useActivityList, useUpdateActivity } from '@/generated/hooks/use-activity';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useAccountList } from '@/generated/hooks/use-account';
+import { useContactList } from '@/generated/hooks/use-contact';
 
 import { useUpdateCopilotConversation, useCreateCopilotConversation } from '@/generated/hooks/use-copilot-conversation';
 import { useCreateBusinessInsight, useBusinessInsightList, useDeleteBusinessInsight } from '@/generated/hooks/use-business-insight';
@@ -19,9 +20,12 @@ import { useSpeechPlayer, type SpeechTrack } from '@/hooks/use-speech-player';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { formatCurrencyCompact, formatCurrencyFull } from '@/lib/format-currency';
 import { isPending, isCompleted, isCanceled, isOverdue } from '@/lib/activity-status';
+import { contactRecencyStatus, daysSinceContact, formatLastContact, latestContactByAccount } from '@/lib/account-engagement';
+import { useBusinessSettings } from '@/hooks/use-business-settings';
+import { currentQuarter, quarterTargetFor } from '@/lib/business-settings';
 
 import { SettingsPanel } from '@/components/settings-panel';
-import type { Activity } from '@/generated/models/activity-model';import type { Opportunity } from '@/generated/models/opportunity-model';import type { Account } from '@/generated/models/account-model';import { useCopilotConfigured } from '@/hooks/use-copilot-configured';
+import type { Activity } from '@/generated/models/activity-model';import type { Opportunity } from '@/generated/models/opportunity-model';import type { Account } from '@/generated/models/account-model';import type { Contact } from '@/generated/models/contact-model';import { useCopilotConfigured } from '@/hooks/use-copilot-configured';
 import { useFirstMount } from '@/hooks/use-first-mount';
 import { maybeStartOnboarding } from '@/lib/onboarding';
 import { DynamicDataRenderer, tryParseJson } from '@/components/dynamic-data-renderer';
@@ -48,6 +52,7 @@ import {
 const EMPTY_ACTIVITIES: Activity[] = [];
 const EMPTY_OPPORTUNITIES: Opportunity[] = [];
 const EMPTY_ACCOUNTS: Account[] = [];
+const EMPTY_CONTACTS: Contact[] = [];
 
 // Use ChatMessage from context for unified type across all pages
 
@@ -160,9 +165,14 @@ function HomeHeaderWidgetDisplay({
     ? Math.round((kpiData.agendaCompleted / kpiData.agendaTotal) * 100)
     : 0;
 
+  // Configured business settings (quarterly targets, AI summary toggle, risk threshold).
+  const { settings: businessSettings } = useBusinessSettings();
+
   // Calculate quarterly forecast using quarterly performance data
   const quarterlyForecast = kpiData.quarterlyWonAmount;
-  const quarterlyTargetValue = kpiData.quarterlyTarget;
+  // Prefer the user's configured quarterly target; fall back to the heuristic estimate.
+  const { year: currentTargetYear, quarter: currentTargetQuarter } = currentQuarter();
+  const quarterlyTargetValue = quarterTargetFor(businessSettings, currentTargetYear, currentTargetQuarter) ?? kpiData.quarterlyTarget;
   const quarterlyProgress = quarterlyTargetValue > 0 ? Math.round((quarterlyForecast / quarterlyTargetValue) * 100) : 0;
 
   // Calculate performance percentage
@@ -330,7 +340,6 @@ export default function HomeDashboard() {
   // Drives the settings-icon status badge; react-query's refetchOnReconnect then
   // refreshes automatically once connectivity returns.
   const isOffline = useEffectiveOffline();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Use shared copilot context instead of local state
   
@@ -434,7 +443,8 @@ export default function HomeDashboard() {
   const { data: activities = EMPTY_ACTIVITIES, refetch: refetchActivities, isLoading: isLoadingActivities } = useActivityList();
   const { data: opportunities = EMPTY_OPPORTUNITIES, refetch: refetchOpportunities, isLoading: isLoadingOpportunities } = useOpportunityList();
   const { data: accounts = EMPTY_ACCOUNTS, refetch: refetchAccounts, isLoading: isLoadingAccounts } = useAccountList();
-  const isDataLoading = isLoadingActivities || isLoadingOpportunities || isLoadingAccounts;
+  const { data: contacts = EMPTY_CONTACTS, refetch: refetchContacts, isLoading: isLoadingContacts } = useContactList();
+  const isDataLoading = isLoadingActivities || isLoadingOpportunities || isLoadingAccounts || isLoadingContacts;
 
   // Prefetch all detail page chunks once home data starts loading — the user
   // will likely navigate to one of these from the agenda or copilot results.
@@ -549,7 +559,7 @@ export default function HomeDashboard() {
         .slice(0, 3);
     }
 
-    const hotOpportunitiesValue = hotOpps.reduce((sum: number, o: Opportunity) => sum + (o.totalamount || 0), 0);
+    const hotOpportunitiesValue = hotOpps.reduce((sum: number, o: Opportunity) => sum + (o.amountBase ?? o.totalamount ?? 0), 0);
 
     // Closing this week
     const closingThisWeek = activeOpps.filter((o: Opportunity) => {
@@ -557,46 +567,30 @@ export default function HomeDashboard() {
       return closeDate && closeDate <= weekEnd;
     }).length;
 
-    // Client coverage - contacted within last 7 days.
-    // `account.lastcontactedon` is not reliably maintained when activities are
-    // created/completed, so derive the effective last-contact date per account
-    // from the activity log (max scheduleddate among activities tied to that
-    // account) and merge with `lastcontactedon` as a fallback.
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const fourteenDaysAgo = new Date();
-    fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
-
-    const lastActivityByAccount = new Map<string, Date>();
-    for (const a of activities) {
-      const accId = a.account?.id;
-      if (!accId || !a.scheduleddate) continue;
-      const d = new Date(a.scheduleddate);
-      if (Number.isNaN(d.getTime())) continue;
-      const prev = lastActivityByAccount.get(accId);
-      if (!prev || d > prev) lastActivityByAccount.set(accId, d);
-    }
-    const effectiveLastContact = (a: Account): Date | null => {
-      const fromActivity = a.id ? lastActivityByAccount.get(a.id) : undefined;
-      return fromActivity || null;
-    };
+    // Client coverage and risk use the same relationship/date/status semantics
+    // as the account list and detail page. Future/cancelled activities do not
+    // count; today's logged activity is 0 days ago.
+    const latestContact = latestContactByAccount(activities, opportunities, contacts, today);
+    const daysByAccount = new Map(
+      accounts.map((account) => [
+        account.id,
+        daysSinceContact(latestContact.get(account.id), today),
+      ]),
+    );
 
     const clientsTouchedThisWeek = accounts.filter((a: Account) => {
-      const lastContact = effectiveLastContact(a);
-      return lastContact && lastContact >= sevenDaysAgo;
+      const days = daysByAccount.get(a.id);
+      return days !== null && days !== undefined && days <= 7;
     }).length;
 
-    // Clients at risk - not contacted in 14+ days
+    // At risk = canonical 30+ day band or no recorded contact.
     const clientsAtRiskFiltered = accounts.filter((a: Account) => {
-      const lastContact = effectiveLastContact(a);
-      return !lastContact || lastContact < fourteenDaysAgo;
+      const status = contactRecencyStatus(daysByAccount.get(a.id) ?? null);
+      return status === 'at-risk' || status === 'never';
     });
     const clientsAtRisk = clientsAtRiskFiltered.length;
     const clientsAtRiskList: AtRiskClient[] = clientsAtRiskFiltered.map((a: Account) => {
-      const lastContact = effectiveLastContact(a);
-      const lastContactDays = lastContact
-        ? Math.floor((Date.now() - lastContact.getTime()) / (24 * 60 * 60 * 1000))
-        : null;
+      const lastContactDays = daysByAccount.get(a.id) ?? null;
       return {
         id: a.id,
         name: a.name1 || 'Unnamed',
@@ -689,6 +683,7 @@ export default function HomeDashboard() {
         address: linkedAccount?.address,
         description: a.notes,
         scheduledDate: new Date(a.scheduleddate!),
+        durationMinutes: a.durationMinutes,
       };
     });
 
@@ -697,6 +692,8 @@ export default function HomeDashboard() {
     const agendaCompleted = todayActivities.filter((a: Activity) => isCompleted(a)).length;
     // Progress denominator = all non-cancelled today (open + completed).
     const agendaTotal = todayActivities.length;
+    // True count of pending to-dos today (the agenda list itself is capped at 5).
+    const agendaPendingTotal = todayActivities.filter((a: Activity) => isPending(a)).length;
 
     // Quarterly Performance calculation
     // Get current quarter boundaries
@@ -716,7 +713,7 @@ export default function HomeDashboard() {
       if (Number.isNaN(d.getTime())) return false;
       return d >= quarterStart && d <= quarterEnd;
     });
-    const quarterlyWonAmount = wonOpportunities.reduce((sum: number, o: Opportunity) => sum + (o.totalamount || 0), 0);
+    const quarterlyWonAmount = wonOpportunities.reduce((sum: number, o: Opportunity) => sum + (o.amountBase ?? o.totalamount ?? 0), 0);
     const quarterlyWonCount = wonOpportunities.length;
     
     // All opportunities in pipeline this quarter (active + won this quarter)
@@ -735,6 +732,7 @@ export default function HomeDashboard() {
       agendaItems,
       agendaCompleted: Math.min(agendaCompleted, agendaTotal),
       agendaTotal,
+      agendaPendingTotal,
       overdueItems: overdueItems.sort((a, b) => b.scheduledDate!.getTime() - a.scheduledDate!.getTime()), // Most recent first
       
       // Quarterly Performance (replaces Hot Opportunities)
@@ -756,7 +754,7 @@ export default function HomeDashboard() {
       visitCount: visitCount,
       callCount: callCount,
     };
-  }, [activities, opportunities, accounts, userId]);
+  }, [activities, opportunities, accounts, contacts, userId]);
 
   // Extract stable primitive values from kpiData to avoid object reference changes
   const kpiSummary = useMemo(() => ({
@@ -1015,8 +1013,8 @@ export default function HomeDashboard() {
 
   // Pull to refresh
   const handleRefresh = useCallback(async () => {
-    await Promise.all([refetchActivities(), refetchOpportunities(), refetchAccounts()]);
-  }, [refetchActivities, refetchOpportunities, refetchAccounts, locale]);
+    await Promise.all([refetchActivities(), refetchOpportunities(), refetchAccounts(), refetchContacts()]);
+  }, [refetchActivities, refetchOpportunities, refetchAccounts, refetchContacts]);
 
   // Overdue agenda handlers
   const handleMarkOverdueDone = useCallback(async (activityId: string) => {
@@ -1033,11 +1031,11 @@ export default function HomeDashboard() {
     }
   }, [updateActivity, refetchActivities, locale]);
 
-  const handleRescheduleOverdue = useCallback(async (activityId: string, newDate: Date) => {
+  const handleRescheduleOverdue = useCallback(async (activityId: string, scheduleddate: string, durationMinutes: number) => {
     try {
       await updateActivity.mutateAsync({
         id: activityId,
-        changedFields: { scheduleddate: newDate.toISOString() }
+        changedFields: { scheduleddate, durationMinutes }
       });
       // The item moves out of the overdue list on refetch; no toast.
       refetchActivities();
@@ -1296,9 +1294,7 @@ export default function HomeDashboard() {
       
       const atRiskClientsDetails = kpiData.clientsAtRiskList.slice(0, 5).map((client: AtRiskClient) => {
         const days = client.lastContactDays;
-        const reason = days == null
-          ? (t('neverContacted', locale))
-          : (t('noContactForDays', locale, { days }));
+        const reason = `${t('lastContact', locale)}: ${formatLastContact(days ?? null, locale)}`;
         return `${client.name} (${reason})`;
       }).join('; ');
       
@@ -1318,7 +1314,7 @@ ${todayAgendaDetails || 'No agenda items'}
 === Quarterly Performance ===
 Won $${(kpiData.quarterlyWonAmount / 1000).toFixed(0)}K / Target $${(kpiData.quarterlyTarget / 1000).toFixed(0)}K (${qProgress}% complete)
 
-=== At-Risk Clients (${kpiData.clientsAtRisk} need attention; criterion: no contact for 14+ days) ===
+=== At-Risk Clients (${kpiData.clientsAtRisk} need attention; criterion: no contact for 30+ days or no recorded contact) ===
 ${atRiskClientsDetails || 'No at-risk clients'}
 
 === Other Metrics ===
@@ -1355,7 +1351,7 @@ ${todayAgendaDetails || 'No agenda items'}
 === Quarterly Performance ===
 Won $${(kpiData.quarterlyWonAmount / 1000).toFixed(0)}K / Target $${(kpiData.quarterlyTarget / 1000).toFixed(0)}K (${qProgress}% complete)
 
-=== At-Risk Clients (${kpiData.clientsAtRisk} need attention; criterion: no contact for 14+ days) ===
+=== At-Risk Clients (${kpiData.clientsAtRisk} need attention; criterion: no contact for 30+ days or no recorded contact) ===
 ${atRiskClientsDetails || 'No at-risk clients'}
 
 === Other Metrics ===
@@ -1379,7 +1375,7 @@ ${atRiskClientsDetails || 'No at-risk clients'}
 Each insight must include:
 1. insight: A one-line, specific statement of the problem or opportunity (max 12 words) — concrete, not vague
 2. rationale: Coaching-grade analysis (80-150 words) that MUST include:
-   - [Root cause] Use the data to explain WHY — e.g. for an at-risk client, state "no contact for X days, past the 14-day warning line"; for performance, state the exact gap amount and percentage
+  - [Root cause] Use the data to explain WHY — e.g. for an at-risk client, state "no contact for X days, past the 30-day warning line"; for performance, state the exact gap amount and percentage
    - [Impact] What happens if this is left unaddressed (churn, missed closing window, target gap, etc.)
    - [Action] 1-2 concrete steps the rep can take TODAY (call / email / schedule a visit / what to prepare), naming the specific client or opportunity
 3. type: Insight type (followup/closing/risk/revisit/performance/opportunity/client/activity)
@@ -1387,7 +1383,7 @@ Each insight must include:
 [BAD EXAMPLE - DO NOT write like this]
 - ✗ "Rush University and others are at risk and need attention" (doesn't say what the risk is, why, or what to do)
 [GOOD EXAMPLE - write like this]
-- ✓ "Rush University has had no contact for 21 days, well past the 14-day warning line — the relationship is cooling. Send a value-led re-engagement email today, and book a 15-minute call this week to check whether their procurement plan has shifted."
+- ✓ "Rush University has had no contact for 35 days, past the 30-day warning line — the relationship is at risk. Send a value-led re-engagement email today, and book a 15-minute call this week to check whether their procurement plan has shifted."
 
 Return JSON array format:
 [
@@ -1712,13 +1708,6 @@ ${agentResponse}`;
 
 
 
-  // Avatar initial - first name first letter (used in sidebar)
-  const getInitial = (name?: string) => {
-    if (!name) return 'U';
-    const parts = name.trim().split(' ');
-    return parts[0][0].toUpperCase();
-  };
-
   // Get context-aware quick actions based on conversation
   const getQuickActions = useCallback(() => {
     const lastMessages = chatMessages.slice(-3);
@@ -1819,6 +1808,7 @@ ${agentResponse}`;
                 refetchActivities(),
                 refetchOpportunities(),
                 refetchAccounts(),
+                refetchContacts(),
                 refetchBusinessInsights()
               ]);
               toast.success(t('refreshed', locale));
@@ -2243,69 +2233,7 @@ ${agentResponse}`;
           </>
         )}
       </AnimatePresence>
-      {/* Sidebar Overlay */}
-      <AnimatePresence>
-        {sidebarOpen && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/60 z-50"
-              onClick={() => setSidebarOpen(false)}
-            />
-            <motion.nav
-              initial={{ x: '-100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '-100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-              className="fixed top-0 left-0 bottom-0 w-72 bg-card border-r border-border/30 z-50 safe-area-top safe-area-bottom"
-            >
-              <div className="p-4 pt-6">
-                <div className="flex items-center gap-3 mb-8">
-                  <div
-                    className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-semibold text-white bg-avatar-brand"
-                  >
-                    {getInitial(user?.fullName)}
-                  </div>
-                  <div>
-                    <p className="text-title text-foreground">{user?.fullName || 'Sales User'}</p>
-                    <p className="text-helper text-muted-foreground">{user?.userPrincipalName || ''}</p>
-                  </div>
-                </div>
 
-                <div className="space-y-1">
-                  {[
-                    { label: t('home', locale), path: '/home', active: true },
-                    { label: t('accounts', locale), path: '/accounts' },
-                    { label: t('opportunities', locale), path: '/opportunities' },
-                    { label: t('activities', locale), path: '/activities' },
-                    { label: t('contacts', locale), path: '/contacts' },
-                    { label: t('settings', locale), path: '/settings' },
-                  ].map((item: { label: string; path: string; active?: boolean }) => (
-                    <button
-                      key={item.path}
-                      onClick={() => {
-                        setSidebarOpen(false);
-                        navigate(item.path);
-                      }}
-                      className={cn(
-                        'w-full text-left px-4 py-3 rounded-xl text-body transition-colors',
-                        item.active
-                          ? 'bg-primary/20 text-primary font-medium'
-                          : 'text-foreground hover:bg-white/5'
-                      )}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </motion.nav>
-          </>
-        )}
-      </AnimatePresence>
-      
       {/* Settings Panel Sheet (tablet/desktop) */}
       <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
         <SheetContent side="right" className="w-[420px] max-w-[90vw] p-0 overflow-hidden">

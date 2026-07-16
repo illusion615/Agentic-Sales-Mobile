@@ -21,6 +21,7 @@ import type { PipelineResult } from './orchestrator';
 import type { DagPlan, SingleIntent } from './dag-schema';
 import { isDagPlan } from './dag-schema';
 import { fallbackUserFacingLabel, type UserFacingLabel, type IntentItem } from './frame';
+import { temporalModeFromFrame } from './activity-draft-mode';
 
 export interface TranslatedIntent {
   function: string;
@@ -56,6 +57,7 @@ const DRAFT_FUNCTIONS = new Set([
   'draftAccount',
   'draftContact',
   'draftOpportunity',
+  'draftFeedback',
 ]);
 
 /** True when a string field is a DAG `$ref.field` placeholder (resolved at execution time, not a literal name). */
@@ -147,6 +149,20 @@ function stepToIntentSlot(
   return { function: fnName, arguments: { ...args }, ...(usePageContext ? { usePageContext } : {}) };
 }
 
+function injectActivityTemporalMode(
+  fnName: string,
+  args: Record<string, unknown>,
+  frameIntent: IntentItem | undefined,
+): Record<string, unknown> {
+  if (fnName !== 'draftActivity') return args;
+  return {
+    ...args,
+    // Frame owns semantic tense. This intentionally overrides a conflicting
+    // Orchestrator value; `none` becomes unspecified and is date-resolved later.
+    temporalMode: temporalModeFromFrame(frameIntent?.temporal),
+  };
+}
+
 /**
  * Translate a PipelineResult into a legacy IntentResult shape, or null when
  * the pipeline result has no actionable plan.
@@ -154,6 +170,8 @@ function stepToIntentSlot(
 export function frameToIntent(pipeline: PipelineResult): TranslatedIntent | null {
   const plan = pipeline.plan;
   if (!plan) return null;
+
+  const frameIntents = pipeline.frame.intents as IntentItem[] | undefined;
 
   let primaryFn: string;
   let primaryArgs: Record<string, unknown>;
@@ -166,20 +184,32 @@ export function frameToIntent(pipeline: PipelineResult): TranslatedIntent | null
     const head = sorted[0];
     if (!head.function) return null;
     primaryFn = head.function;
-    primaryArgs = stripRefPlaceholders({ ...(head.arguments as Record<string, unknown>) });
+    primaryArgs = injectActivityTemporalMode(
+      primaryFn,
+      stripRefPlaceholders({ ...(head.arguments as Record<string, unknown>) }),
+      frameIntents?.[0],
+    );
     const headUsePageContext = head.usePageContext;
     extras = sorted.slice(1)
       .filter((s) => s.function)
-      .map((s) => ({
+      .map((s, index) => ({
         function: s.function,
-        arguments: stripRefPlaceholders({ ...(s.arguments as Record<string, unknown>) }),
+        arguments: injectActivityTemporalMode(
+          s.function,
+          stripRefPlaceholders({ ...(s.arguments as Record<string, unknown>) }),
+          frameIntents?.[index + 1],
+        ),
         ...(s.usePageContext ? { usePageContext: true } : {}),
       }));
   } else {
     const single = plan as SingleIntent;
     if (!single.function) return null;
     primaryFn = single.function;
-    primaryArgs = stripRefPlaceholders({ ...(single.arguments as Record<string, unknown>) });
+    primaryArgs = injectActivityTemporalMode(
+      primaryFn,
+      stripRefPlaceholders({ ...(single.arguments as Record<string, unknown>) }),
+      frameIntents?.[0],
+    );
   }
 
   // Correct-architecture routing (query → think): a single read intent whose
@@ -215,7 +245,6 @@ export function frameToIntent(pipeline: PipelineResult): TranslatedIntent | null
 
   // Frame intent labels: map by index. DAG sort by seq aligns 1:1 with frame.intents[]
   // in the common case; we tolerate length mismatch by falling back to template.
-  const frameIntents = pipeline.frame.intents as IntentItem[] | undefined;
   const labelFor = (i: number): UserFacingLabel | undefined => {
     const it = frameIntents?.[i];
     if (!it) return undefined;

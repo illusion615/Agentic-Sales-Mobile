@@ -16,6 +16,7 @@ import { useCreateContact } from '@/generated/hooks/use-contact';
 import { useAccountList } from '@/generated/hooks/use-account';
 import type { Account } from '@/generated/models/account-model';
 import type { Activity, ActivityType } from '@/generated/models/activity-model';
+import { recordDetailRoute } from '@/lib/record-route';
 
 export interface AdditionalIntentForm {
   type: 'activity' | 'opportunity' | 'account' | 'contact';
@@ -54,6 +55,7 @@ const EntityTypeLabels: Record<string, { zh: string; en: string; de: string; fr:
   opportunity: { zh: '商机', en: 'Opportunity', de: 'Verkaufschance', fr: 'Opportunité', es: 'Oportunidad' },
   account: { zh: '客户', en: 'Account', de: 'Konto', fr: 'Compte', es: 'Cuenta' },
   contact: { zh: '联系人', en: 'Contact', de: 'Kontakt', fr: 'Contact', es: 'Contacto' },
+  feedback: { zh: '反馈', en: 'Feedback', de: 'Feedback', fr: 'Retour', es: 'Comentarios' },
 };
 
 export function AdditionalIntentsCard({ messageId, additionalIntents }: AdditionalIntentsCardProps) {
@@ -82,7 +84,7 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
   // Created record ids per form index, so a confirmed card can deep-link to the
   // real record detail (also serves as proof the create actually persisted).
   const createdKey = `intent-created-${messageId}`;
-  const [createdRecords, setCreatedRecords] = useState<Record<number, { id: string; type: string }>>(() => {
+  const [createdRecords, setCreatedRecords] = useState<Record<number, { id: string; type: AdditionalIntentForm['type'] }>>(() => {
     try {
       const stored = localStorage.getItem(createdKey);
       if (stored) return JSON.parse(stored);
@@ -210,18 +212,12 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
     fireFeedback('warning');
   };
 
-  // Deep-link a confirmed card to its record detail. Contacts have no detail
-  // route, so they land on the accounts list.
+  // Deep-link every confirmed card through the canonical record route map.
   const openRecord = (index: number) => {
     const rec = createdRecords[index];
     if (!rec) return;
     closePanel();
-    switch (rec.type) {
-      case 'activity': navigate(`/activities/${rec.id}`); break;
-      case 'opportunity': navigate(`/opportunities/${rec.id}`); break;
-      case 'account': navigate(`/accounts/${rec.id}`); break;
-      case 'contact': navigate('/accounts'); break;
-    }
+    navigate(recordDetailRoute(rec.type, rec.id));
   };
   
   // Get display info for an activity type
@@ -300,7 +296,7 @@ export function AdditionalIntentsCard({ messageId, additionalIntents }: Addition
       <div className="space-y-2 pl-10">
           {additionalIntents.forms.map((form: AdditionalIntentForm, idx: number) => {
             const status = formStatuses[idx];
-            const Icon = form.type === 'activity' ? getActivityIcon(form.data) : EntityTypeIcons[form.type];
+            const Icon = form.type === 'activity' ? getActivityIcon(form.data) : (EntityTypeIcons[form.type] ?? Building2);
             const title = getFormTitle(form);
             const subtitle = getFormSubtitle(form);
             const isLoading = isSubmitting === idx;

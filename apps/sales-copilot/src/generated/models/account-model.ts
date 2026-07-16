@@ -12,6 +12,16 @@ export interface Account {
   name1: string;
   /** @displayName Address */
   address?: string;
+  /** @displayName Address Line 1 */
+  addressLine1?: string;
+  /** @displayName City */
+  addressCity?: string;
+  /** @displayName State / Province */
+  addressStateOrProvince?: string;
+  /** @displayName Country */
+  addressCountry?: string;
+  /** @displayName Postal Code */
+  addressPostalCode?: string;
   /** @displayName Email */
   email?: string;
   /** @displayName Industry */

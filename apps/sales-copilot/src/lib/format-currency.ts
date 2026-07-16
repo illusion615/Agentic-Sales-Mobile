@@ -1,10 +1,12 @@
 /**
  * Currency Formatting Utility
- * Based on Dataverse base language (1033 = English US), we use USD ($) as the standard currency.
- * This applies regardless of locale or data language (e.g., Chinese region names).
+ * Formats amounts in the environment BASE currency. The base-currency symbol is
+ * sourced dynamically from Dataverse `transactioncurrency` (see lib/base-currency),
+ * never hardcoded. Number grouping follows the active locale.
  */
 
 import { getLocale, localeBcp47 } from '@/lib/i18n';
+import { getBaseCurrencySymbol } from '@/lib/base-currency';
 
 /**
  * Format a numeric value as USD currency.
@@ -24,21 +26,22 @@ export function formatCurrency(
   }
 ): string {
   const locale = getLocale();
+  const sym = getBaseCurrencySymbol();
   const abbreviated = options?.abbreviated ?? true;
   
   if (abbreviated && value >= 1_000_000) {
     const decimals = options?.decimals ?? 1;
-    return `$${(value / 1_000_000).toFixed(decimals)}M`;
+    return `${sym}${(value / 1_000_000).toFixed(decimals)}M`;
   }
   
   if (abbreviated && value >= 1_000) {
     const decimals = options?.decimals ?? 0;
-    return `$${(value / 1_000).toFixed(decimals)}K`;
+    return `${sym}${(value / 1_000).toFixed(decimals)}K`;
   }
   
   // Full format with locale-appropriate thousand separators
   const localeCode = localeBcp47(locale);
-  return '$' + value.toLocaleString(localeCode, {
+  return sym + value.toLocaleString(localeCode, {
     minimumFractionDigits: options?.decimals ?? 0,
     maximumFractionDigits: options?.decimals ?? 0,
   });
@@ -49,18 +52,19 @@ export function formatCurrency(
  * Always uses abbreviated format for readability.
  */
 export function formatCurrencyCompact(value: number): string {
+  const sym = getBaseCurrencySymbol();
   if (value >= 1_000_000) {
-    return `$${(value / 1_000_000).toFixed(1)}M`;
+    return `${sym}${(value / 1_000_000).toFixed(1)}M`;
   }
   if (value >= 1_000) {
-    return `$${(value / 1_000).toFixed(0)}K`;
+    return `${sym}${(value / 1_000).toFixed(0)}K`;
   }
-  return `$${value.toLocaleString()}`;
+  return `${sym}${value.toLocaleString()}`;
 }
 
 /**
  * Format currency for detailed views (full number with separators).
  */
 export function formatCurrencyFull(value: number): string {
-  return '$' + value.toLocaleString();
+  return getBaseCurrencySymbol() + value.toLocaleString();
 }

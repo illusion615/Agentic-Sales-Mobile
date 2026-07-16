@@ -33,6 +33,7 @@ export const FrameSalesObjectSchema = z.enum([
   'Opportunity',
   'Activity',
   'Product',
+  'Feedback',
   'None',
 ]);
 export type FrameSalesObject = z.infer<typeof FrameSalesObjectSchema>;
@@ -196,6 +197,7 @@ The conversation history is provided as prior chat turns. When the user's messag
     WRONG   (Product):  "I demoed the X200 yesterday"                  → Activity, Log
     WRONG   (Product):  "the customer wants new devices"               → this is the Opportunity itself, fold into the Opportunity summary
   Rule of thumb: if the audience of the action is the CUSTOMER, it's an Activity. Only when the audience is the ASSISTANT is it Product.
+- Feedback    — a bug report or product improvement request ABOUT THIS SALES COPILOT APP. Use when the user reports that the app is broken, behaves incorrectly, is hard to use, or asks the product team to add/change app behavior. Do NOT use for customer complaints, sales feedback, or CRM record updates.
 - None        — the intent is not about a sales record (greeting, system question, smalltalk)
 
 # Cognitive tasks (each intent picks exactly one)
@@ -222,7 +224,7 @@ Return a single JSON object with this exact shape. Do not wrap in markdown.
 {
   "intents": [
     {
-      "salesObject": "Account|Contact|Opportunity|Activity|Product|None",
+      "salesObject": "Account|Contact|Opportunity|Activity|Product|Feedback|None",
       "cognitiveTask": "Log|Plan|Find|Update|Recommend|Analyze|Knowledge|Report|Chat",
       "temporal": "past|future|none",
       "summary": "one short sentence in the user's own language describing this single intent",
@@ -516,6 +518,7 @@ export function fallbackUserFacingLabel(intent: Pick<IntentItem, 'salesObject' |
     'Contact|Find': { zh: '查找联系人', en: 'Find contact' },
     'Product|Knowledge': { zh: '产品咨询', en: 'Product question' },
     'Product|Recommend': { zh: '推荐产品', en: 'Recommend product' },
+    'Feedback|Log': { zh: '提交产品反馈', en: 'Submit feedback' },
     'Opportunity|Analyze': { zh: '商机策略分析', en: 'Analyze opportunity' },
     'Account|Analyze': { zh: '客户分析建议', en: 'Analyze account' },
     'Activity|Analyze': { zh: '活动策略建议', en: 'Activity strategy' },
@@ -622,6 +625,7 @@ export function suggestSkillForIntent(intent: IntentItem): string | null {
   const obj = salesObject;
   switch (cognitiveTask) {
     case 'Log':
+      if (obj === 'Feedback') return 'draftFeedback';
       if (obj === 'Activity') return 'draftActivity';
       if (obj === 'Account') return 'draftAccount';
       if (obj === 'Contact') return 'draftContact';

@@ -8,6 +8,7 @@ import { FeedbackHost } from '@/components/feedback/feedback-host';
 import { useTrackNavDepth } from '@/lib/nav-depth';
 import { useOutboxSync } from '@/lib/use-outbox-sync';
 import { useKeyboardInset } from '@/hooks/use-keyboard-inset';
+import { useCurrencyCatalog } from '@/hooks/use-currencies';
 import { WhatsNew } from '@/components/whats-new';
 
 function LayoutInner() {
@@ -18,6 +19,9 @@ function LayoutInner() {
   // Publish the soft-keyboard height as --keyboard-inset so bottom-docked fixed
   // surfaces (copilot composer) can lift above the IME on Android/iOS.
   useKeyboardInset();
+  // Load the Dataverse currency catalog once so amounts display in the environment
+  // base currency symbol dynamically (never hardcoded).
+  useCurrencyCatalog();
   const { docked, side } = useCopilotSideDocked();
 
   // Non-docked (mobile/float): simple container, pages handle their own scrolling.

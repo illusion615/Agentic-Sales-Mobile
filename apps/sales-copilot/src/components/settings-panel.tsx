@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { ArrowLeft, Moon, Sun, Globe, HelpCircle, LogOut, Volume2, Play, Type, Palette, CircleDot, LayoutGrid, Speech, X, Zap, LayoutDashboard, Database, ChevronRight, Monitor, Calendar, Maximize, Sparkles, Compass, Rows3, Activity } from 'lucide-react';
+import { ArrowLeft, Moon, Sun, Globe, HelpCircle, LogOut, Volume2, Play, Type, Palette, CircleDot, LayoutGrid, Speech, X, Zap, LayoutDashboard, Database, ChevronRight, Monitor, Calendar, Maximize, Sparkles, Compass, Rows3, Activity, MessageSquareWarning } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
 import { ThinkingIndicator } from '@/components/thinking-indicator';
@@ -1008,6 +1008,26 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {t('skillsGuideDesc', locale)}
+                  </p>
+                </div>
+                <ChevronRight className="w-5 h-5 text-muted-foreground" />
+              </button>
+              <button
+                onClick={() => {
+                  if (onClose) onClose();
+                  navigate('/my-feedback');
+                }}
+                className="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-muted/50 transition-colors"
+              >
+                <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                  <MessageSquareWarning className="w-5 h-5 text-primary" />
+                </div>
+                <div className="flex-1 text-left">
+                  <p className="text-sm font-medium text-foreground">
+                    {locale === 'zh-Hans' ? '我的反馈' : 'My Feedback'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {locale === 'zh-Hans' ? '查看通过 Copilot 提交的问题和建议' : 'View bugs and improvements submitted through Copilot'}
                   </p>
                 </div>
                 <ChevronRight className="w-5 h-5 text-muted-foreground" />

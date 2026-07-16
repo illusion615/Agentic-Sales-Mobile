@@ -94,7 +94,9 @@ function buildAIPrompt(
           }).join('\n')
         : 'None';
 
-      return `Produce actionable Sales Insight for this account.
+      // Context only — the generateEntityInsight skill owns the output structure
+      // (grounded narrative + a small set of explained, actionable next steps).
+      return `Analyze this account in its full business context.
 
 ACCOUNT: ${entityName}
 - Industry: ${industryLabel(entityData.industry as string | number | null | undefined) || 'Not specified'}
@@ -111,19 +113,7 @@ ${actList}
 
 CONTACTS: ${contacts?.length || 0}
 
-Interpret the PUBLIC INTELLIGENCE above in light of this account's own pipeline and activities. Do not merely restate the facts; turn them into selling guidance.
-
-IMPORTANT: Respond with plain Markdown text directly. Do NOT wrap your response in markdown code blocks. Just write the content directly.
-
-Structure your response as:
-
-### Summary
-A brief summary (2-3 sentences) of where the account stands and the near-term opportunity.
-
-### Action Items
-3-4 specific, prioritized action items (sales angles to pursue and concrete next steps), each tied to a fact, opportunity, or activity above.
-
-${ACTION_ITEMS_FORMAT}`;
+Interpret the public intelligence in light of this account's own pipeline and activities — turn the facts into specific selling guidance, never a restatement.`;
     }
     
     case 'opportunity': {
@@ -218,9 +208,9 @@ async function triggerFlowInBackground(
 ) {
   try {
     const { executeFunction } = await import('@/lib/function-executor');
-    // Activity insights use the structured skill (narrative + explained actions);
-    // other entities keep the markdown summary skill.
-    const useStructured = entityType === 'activity';
+    // Activity + account insights use the structured skill (narrative + explained
+    // actions); other entities keep the markdown summary skill.
+    const useStructured = entityType === 'activity' || entityType === 'account';
     const result = await executeFunction(useStructured ? 'generateEntityInsight' : 'generateEntitySummary', {
       data: userPrompt,
       entityType,

@@ -12,7 +12,9 @@ import { t, type Locale } from '@/lib/i18n';
 type ChatMessage = import('./copilot-context').ChatMessage;
 type IntentsOverview = NonNullable<AgentResponse['intentsOverview']>;
 
-export function pickLabel(label: { zh: string; en: string }, isZh: boolean): string {
+export function pickLabel(label: { zh: string; en: string } | undefined | null, isZh: boolean): string {
+  // Null-safe: a missing bilingual label must degrade to '' rather than throw.
+  if (!label) return '';
   return isZh ? label.zh : label.en;
 }
 const ZH_ORDINALS = ['第一', '第二', '第三', '第四', '第五', '第六', '第七', '第八', '第九'];

@@ -44,6 +44,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useAccount } from '@/generated/hooks/use-account';
 import { useActivityList } from '@/generated/hooks/use-activity';
 import { useEntityAISummary, useWithAISummaryTrigger } from '@/hooks/use-ai-summary-trigger';
+import { useBusinessSettings } from '@/hooks/use-business-settings';
 import {  } from '@/generated/models/opportunity-model';
 import type { Activity } from '@/generated/models/activity-model';import { toast } from '@/lib/toast-utils';
 import { getLocale, t } from '@/lib/i18n';
@@ -173,6 +174,7 @@ export default function OpportunityDetailPage() {
   // AI Summary hooks
   const { summary: aiSummary, isLoading: isLoadingAISummary, isGenerating, isExpired, isFailed, localeMismatch, refetch: refetchAISummary } = useEntityAISummary('opportunity', id || '');
   const { triggerForEntity, isTriggering } = useWithAISummaryTrigger();
+  const { settings: businessSettings } = useBusinessSettings();
 
   // Filter activities for this opportunity
   const activities = useMemo(() => 
@@ -215,7 +217,7 @@ export default function OpportunityDetailPage() {
     try {
       await deleteOpportunity.mutateAsync(id);
       // Returning to the list (item now gone) is the feedback; no toast.
-      navigate('/opportunities');
+      navigate('/opportunity-review');
     } catch (error: unknown) {
       // Toast is shown by the global MutationCache.onError handler.
       console.error('Failed to delete opportunity:', error);
@@ -348,7 +350,7 @@ export default function OpportunityDetailPage() {
               {t('recordMayBeDeleted', locale)}
             </EmptyDescription>
           </EmptyHeader>
-          <Button variant="outline" className="mt-4" onClick={() => navigate('/opportunities')}>
+          <Button variant="outline" className="mt-4" onClick={() => navigate('/opportunity-review')}>
             {t('backToList', locale)}
           </Button>
         </Empty>
@@ -436,7 +438,7 @@ export default function OpportunityDetailPage() {
           <div className="grid grid-cols-3 gap-3 mt-4 pt-4 border-t border-border/50">
             <div className="text-center">
               <p className="text-lg font-bold text-foreground">
-                {formatCurrency(opportunity.totalamount || 0)}
+                {formatCurrency(opportunity.amountBase ?? opportunity.totalamount ?? 0)}
               </p>
               <p className="text-xs text-muted-foreground">
                 {t('amount', locale)}
@@ -488,6 +490,7 @@ export default function OpportunityDetailPage() {
             {/* Overview Tab */}
             <TabsContent value="overview" className="mt-4 space-y-4">
               {/* AI Insights */}
+              {businessSettings.aiSummaryEnabled && (
               <AISummaryCard
                 summary={aiSummary}
                 isLoading={isLoadingAISummary}
@@ -497,6 +500,7 @@ export default function OpportunityDetailPage() {
                 isRefreshing={isRefreshingAI || isTriggering}
                 onRefresh={handleRefreshAISummary}
               />
+              )}
 
               {/* Key Dates */}
               <div className="glass-card p-4" style={{ borderRadius: 16 }}>

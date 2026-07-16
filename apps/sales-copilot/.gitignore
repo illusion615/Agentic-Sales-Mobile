@@ -1,5 +1,6 @@
 e2e/.auth/
 test-results/
+.test-runtime/
 
 # Generated translation-review workbooks (transient)
 i18n-review/

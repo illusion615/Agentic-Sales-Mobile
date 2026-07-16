@@ -8,6 +8,7 @@ import {
   isOverdue,
   daysOverdue,
   groupByStatus,
+  normalizeQueryStatus,
 } from '@/lib/activity-status';
 
 const NOW = new Date('2026-07-14T09:00:00');
@@ -23,6 +24,29 @@ describe('activityStatus normalization', () => {
   it('treats unknown/missing status as open (pending)', () => {
     expect(activityStatus({})).toBe('open');
     expect(activityStatus({ status: 'weird' })).toBe('open');
+  });
+});
+
+describe('normalizeQueryStatus — reconciles agent status words with Activity.status', () => {
+  it('maps the OBSOLETE draft/confirmed vocabulary to open (the today-agenda bug)', () => {
+    expect(normalizeQueryStatus('draft')).toBe('open');
+    expect(normalizeQueryStatus('confirmed')).toBe('open');
+    expect(normalizeQueryStatus('pending')).toBe('open');
+    expect(normalizeQueryStatus('open')).toBe('open');
+  });
+  it('maps completed and canceled variants (incl. cancelled + Chinese)', () => {
+    expect(normalizeQueryStatus('completed')).toBe('completed');
+    expect(normalizeQueryStatus('done')).toBe('completed');
+    expect(normalizeQueryStatus('cancelled')).toBe('canceled');
+    expect(normalizeQueryStatus('canceled')).toBe('canceled');
+    expect(normalizeQueryStatus('\u5df2\u5b8c\u6210')).toBe('completed');
+    expect(normalizeQueryStatus('\u5f85\u529e')).toBe('open');
+  });
+  it('returns undefined for empty/all/unknown so the query does not over-filter', () => {
+    expect(normalizeQueryStatus('')).toBeUndefined();
+    expect(normalizeQueryStatus('all')).toBeUndefined();
+    expect(normalizeQueryStatus(undefined)).toBeUndefined();
+    expect(normalizeQueryStatus('banana')).toBeUndefined();
   });
 });
 

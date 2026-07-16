@@ -40,6 +40,8 @@ import { generateProposal } from './propose-changes';
 import { applyProposal, type ChangeProposal } from './change-proposal';
 import { getLocale, LOCALE_META } from './i18n';
 import { buildChartCard, inferChartFromRequest, type ChartSpec } from './chart-aggregation';
+import { buildQueueSummaryMarkdown } from './queue-summary';
+import { formCardPrimaryText } from './form-card-display';
 
 // ---------- card-message shapes (shared with copilot-context) ----------
 // Kept loose (Record<string, unknown>) here to avoid an import cycle; the
@@ -91,6 +93,7 @@ function labelFor(intent: QueueIntent, isZh: boolean): string {
     draftOpportunity: ['新建商机', 'Create opportunity'],
     draftAccount: ['新建客户', 'Create account'],
     draftContact: ['新建联系人', 'Create contact'],
+    draftFeedback: ['提交产品反馈', 'Submit feedback'],
     updateActivity: ['更新活动', 'Update activity'],
     updateOpportunity: ['更新商机', 'Update opportunity'],
     updateAccount: ['更新客户', 'Update account'],
@@ -104,7 +107,9 @@ function labelFor(intent: QueueIntent, isZh: boolean): string {
 /** Short one-liner describing what this step will do (for the announce message). */
 function describeStep(intent: QueueIntent, isZh: boolean): string {
   const args = intent.arguments;
-  const title = (args.title ?? args.name ?? args.fullName ?? '') as string;
+  const title = intent.function === 'draftContact'
+    ? formCardPrimaryText('contact', args)
+    : (args.title ?? args.name ?? args.fullName ?? '') as string;
   const account = (args.accountName ?? '') as string;
   switch (intent.function) {
     case 'draftActivity':
@@ -123,6 +128,10 @@ function describeStep(intent: QueueIntent, isZh: boolean): string {
       return isZh
         ? (title ? `新建客户「${title}」` : '将为你准备客户草稿')
         : (title ? `Create account "${title}"` : 'Prepare account draft');
+    case 'draftFeedback':
+      return isZh
+        ? (title ? `提交产品反馈「${title}」` : '将为你准备反馈草稿')
+        : (title ? `Submit feedback "${title}"` : 'Prepare feedback draft');
     default:
       return '';
   }
@@ -289,66 +298,17 @@ async function emitSummary(queue: IntentQueue, deps: RuntimeDeps): Promise<Inten
   }
 
   // ---- Default summary for draft/create workflows ----
-  const done = top.filter((i) => i.status === 'confirmed');
-  const skipped = top.filter((i) => i.status === 'cancelled' || i.status === 'skipped');
-  const failed = top.filter((i) => i.status === 'failed');
-
-  const parts: string[] = [];
-
-  // Headline
-  if (done.length === top.length) {
-    parts.push(isZh ? `✅ 全部 ${top.length} 项已完成。` : `✅ All ${top.length} items done.`);
-  } else {
-    const counts: string[] = [];
-    if (done.length) counts.push(isZh ? `${done.length} 项已完成` : `${done.length} completed`);
-    if (skipped.length) counts.push(isZh ? `${skipped.length} 项跳过` : `${skipped.length} skipped`);
-    if (failed.length) counts.push(isZh ? `${failed.length} 项失败` : `${failed.length} failed`);
-    parts.push(counts.join(isZh ? '，' : ', ') + '。');
-  }
-
-  // "What was recorded" — bullet list with key details from intent arguments
-  // Only include items that have a meaningful title (created records, not queries)
-  if (done.length > 0) {
-    const bullets = done.map((i) => {
-      const a = i.arguments;
-      const title = (a.title ?? a.name ?? a.fullName ?? i.result?.recordName ?? '') as string;
-      if (!title) return null;
-      const account = (a.accountName ?? queue.resolvedContext.accountName ?? '') as string;
-      const date = (a.scheduledStart ?? a.scheduledDate ?? '') as string;
-      const contact = (a.contactName ?? '') as string;
-      let detail = title;
-      const extras: string[] = [];
-      if (date) extras.push(date);
-      if (account && !title.toLowerCase().includes(account.toLowerCase())) extras.push(account);
-      if (contact && !title.toLowerCase().includes(contact.toLowerCase())) extras.push(contact);
-      if (extras.length) detail += ` (${extras.join(' · ')})`;
-      return `• ${detail}`;
-    }).filter((b): b is string => b !== null);
-    if (bullets.length > 0) {
-      parts.push(isZh ? '已记录：' : 'Recorded:');
-      parts.push(...bullets);
-    }
-  }
-
-  // "Skipped items" — brief note so salesperson knows what wasn't done
-  if (skipped.length > 0) {
-    const items = skipped.map((i) => {
-      const title = (i.arguments.title ?? i.arguments.name ?? labelFor(i, isZh)) as string;
-      return title;
-    });
-    parts.push(isZh
-      ? `⚠️ 未创建：${items.join('、')}。如需跟进请手动操作。`
-      : `⚠️ Skipped: ${items.join(', ')}. Create manually if needed.`);
-  }
-
-  if (failed.length > 0) {
-    parts.push(isZh ? `❌ ${failed.length} 项执行失败，请稍后重试。` : `❌ ${failed.length} item(s) failed — retry later.`);
-  }
+  const content = buildQueueSummaryMarkdown({
+    intents: top,
+    resolvedContext: queue.resolvedContext,
+    locale: deps.locale,
+    labelForIntent: labelFor,
+  });
 
   deps.pushMessage({
     id: `narrate-${queue.id}-summary-${Date.now()}`,
     type: 'agent',
-    content: parts.join('\n'),
+    content,
     timestamp: Date.now(),
     queueId: queue.id,
     queueIntentId: 'summary',
@@ -1174,7 +1134,7 @@ async function renderFormCard(
       q = advanceCursor(q);
       return await runQueue(q, deps);
     }
-    const draftData = res.data as { type: 'activity' | 'opportunity' | 'account' | 'contact'; isNew?: boolean; data: Record<string, unknown> };
+    const draftData = res.data as { type: 'activity' | 'opportunity' | 'account' | 'contact' | 'feedback'; isNew?: boolean; data: Record<string, unknown> };
     const messageId = `card-${queue.id}-${intent.id}-form-${Date.now()}`;
     const attachmentIds = effectiveArgs[ATTACHMENT_IDS_KEY] as string[] | undefined;
     deps.pushMessage({
@@ -1223,7 +1183,7 @@ export async function handleSave(
   payload: {
     recordId: string;
     recordName?: string;
-    type: 'activity' | 'opportunity' | 'account' | 'contact';
+    type: 'activity' | 'opportunity' | 'account' | 'contact' | 'feedback';
     accountId?: string;
     accountName?: string;
     contactId?: string;
@@ -1256,6 +1216,8 @@ export async function handleSave(
     patch.activityId = payload.recordId;
     if (payload.accountId) patch.accountId = payload.accountId;
     if (payload.accountName) patch.accountName = payload.accountName;
+  } else if (payload.type === 'feedback') {
+    // Feedback does not seed CRM entity context for downstream sales intents.
   }
 
   let q = patchIntent(queue, intentId, {

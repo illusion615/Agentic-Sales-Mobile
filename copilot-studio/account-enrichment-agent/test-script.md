@@ -26,31 +26,18 @@ Expected:
   background enrichment job.
 - If the account cannot be resolved strongly, it skips or returns a low
   confidence result instead of writing speculative data.
+- For a successful run, `account.description` contains only a concise profile
+  and one matching `crf5c_aisummary` row has `biz_type = marketing`.
 
-## B. Dataverse row-change workflow
+## B. Dataverse row-change workflow guard
 
 Workflow: `Account Enrichment - Account Changed`
 
-Steps:
-1. Open an active `account` row in Dataverse. Put a short human note in
-   `description`, for example `Met the CFO in Q2`.
-2. Change one trigger column, for example `websiteurl` or `address1_city`.
-3. Wait for the workflow run.
-4. Re-open the account row.
-
 Expected:
-- Public master fields such as `websiteurl`, `telephone1`, `emailaddress1`, and
-  address fields are filled when they were empty, or refreshed only from an
-  official source.
-- `industrycode` is set only when a Dataverse option matches; otherwise the
-  public industry appears inside the description block.
-- The `description` field now contains a managed block delimited by
-  `[AI-ENRICHMENT:START]` and `[AI-ENRICHMENT:END]`.
-- The human note `Met the CFO in Q2` is still present, outside the markers.
-- The block includes the sections Profile, Industry trends, Signals, Risks,
-  Sales angles, Next actions, Field updates, Sources, and Updated.
-- The `Field updates` section lists every field the run changed, as old to new.
-- `name`, owner, and status are unchanged.
+- The workflow remains inactive.
+- Updating an account through the app does not start this workflow.
+- On-demand refresh produces exactly one write path: Support Agent response →
+  app validation → account and Marketing Insight persistence.
 
 ## C. Weekly workflow smoke test
 
@@ -63,24 +50,25 @@ Steps:
 
 Expected:
 - The agent processes at most 25 active accounts.
-- Accounts whose enrichment block `Updated` timestamp is under 7 days old are
+- Accounts whose Marketing Insight `crf5c_generatedon` is under 7 days old are
   skipped.
-- Each processed account has its public fields updated and its description block
-  refreshed.
+- Each processed account has its public fields/profile updated and its canonical
+  Marketing Insight row created or updated.
 
 ## D. Freshness and note-safety checks
 
 - Re-run test A with `forceRefresh: false` immediately after a successful run.
-  Expected: the run is skipped because the block `Updated` timestamp is under
-  7 days old.
-- Confirm any text outside the `[AI-ENRICHMENT:START]` / `[AI-ENRICHMENT:END]`
-  markers is never modified across runs.
+  Expected: the run is skipped because the matching Marketing Insight row is
+  under 7 days old.
+- Confirm `account.description` contains no `[AI-ENRICHMENT]` marker, Markdown
+  source list, or field-change log.
 
 ## E. Regression checks
 
-- Trigger columns do not include `description` or system-only fields, so the
-  agent rewriting its own snapshot does not re-trigger the row-change workflow.
-- Published workflows show `Your flow is ready to go`.
+- `Account Enrichment - Account Changed` is inactive.
+- `Account Enrichment - Weekly Batch` is published and ready.
 - Agent tools include `Microsoft Dataverse MCP Server` and `Search all websites`.
-- The agent does not write to `crf5c_businessinsights`, `contact`,
-  `crf5c_opportunity1`, or activity tables.
+- The agent writes only to `account` and `crf5c_aisummary`; it does not write to
+  `crf5c_businessinsights`, `contact`, `crf5c_opportunity1`, or activity tables.
+- Re-running the batch updates the same `(accountid, biz_type=marketing)` row and
+  never creates a duplicate Marketing Insight row.

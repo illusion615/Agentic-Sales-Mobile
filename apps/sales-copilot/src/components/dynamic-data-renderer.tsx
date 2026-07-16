@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { cn } from '@/lib/utils';
+import { recordDetailRoute, recordListRoute } from '@/lib/record-route';
 import { ChevronRight, Building2, Target, Calendar, Users, FileText, Package } from 'lucide-react';
 import { getLocale, t, localeBcp47, type Locale } from '@/lib/i18n';
 import { formatCurrencyFull } from '@/lib/format-currency';
@@ -578,7 +579,7 @@ function getNavigationPath(entityType: EntityType, item: DataItem): string | nul
     case 'activity': {
       // Navigate to activity detail using the activity's own id
       if (id) {
-        return `/activities/${id}`;
+        return recordDetailRoute('activity', id);
       }
       return `/activity-capture`;
     }
@@ -591,12 +592,12 @@ function getNavigationPath(entityType: EntityType, item: DataItem): string | nul
     }
     case 'account': {
       if (id) {
-        return `/accounts/${id}`;
+        return recordDetailRoute('account', id);
       }
-      return `/accounts`;
+      return recordListRoute('account');
     }
     case 'contact':  
-      return id ? `/contacts/${id}` : `/contacts`;
+      return id ? recordDetailRoute('contact', id) : recordListRoute('contact');
     default:
       // For unknown types, try to navigate based on available data
       if (id) {
@@ -668,7 +669,8 @@ export function DynamicDataRenderer({ content }: DynamicDataRendererProps) {
   
   const { entityType, data } = parsedResult;
   const resolvedEntityType: EntityType = entityType || 'unknown';
-  const Icon = entityIcons[resolvedEntityType];
+  // Fall back to the generic icon when the (LLM-supplied) entity type is not one we map.
+  const Icon = entityIcons[resolvedEntityType] || entityIcons.unknown;
   
   // Handle item click - collapse panel smoothly then navigate
   const handleItemClick = (item: DataItem) => {

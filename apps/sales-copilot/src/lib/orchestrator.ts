@@ -183,11 +183,12 @@ ${describeBoundEntities(frame)}
 - "function" should normally equal the suggestedFunction. Override only if the suggested skill is missing from the available skills list.
 - "arguments" must obey the parameter schema of the chosen skill.
 - For queryCopilotStudio / externalKnowledgeQuery: "query" is REQUIRED — use the intent summary as the query text.
+- For draftFeedback: preserve the user's own language and facts. Set feedbackType="bug" for broken/incorrect behavior and "enhancement" for a requested improvement. Title and description are REQUIRED. Include expectedOutcome and reproductionSteps only when stated or directly inferable from the reported expected-vs-actual behavior; never invent steps.
 - For Activity steps: temporal=past → temporalMode="completed"; temporal=future → temporalMode="planned".
 - For draftActivity/updateActivity: when the user mentions a date or relative day ("today", "yesterday", "next Tuesday", "明天"), set scheduledDate to the resolved YYYY-MM-DD using the Current date above. For a past activity with no explicit date ("visited the customer", "called them"), default scheduledDate to today (${todayIso}). Omit scheduledDate only when truly unknown.
 - For draftActivity: "type" is REQUIRED. Infer from context: 拜访/visit/went to/现场 → "visit", 电话/call/phoned/rang → "call", 会议/meeting/met with/讨论会 → "meeting", 邮件/email/sent mail → "email", otherwise → "meeting".
 - For draftActivity/updateActivity: "title" is REQUIRED and must be NON-EMPTY, specific, and meaningful — include key info (account name, topic, and/or product), e.g. "Royal London Hospital - BeneVision N22 Demo", "Cedars-Sinai pricing follow-up". NEVER leave title blank, and never use a generic title like "Customer Visit", "Phone Call", or "Meeting". When several activity steps exist (multi-step plans), EVERY step must carry its own specific title.
-- For queryActivities: always set date filters. "today" → dateRange="today" OR scheduledDate=${todayIso}. "this week" → dateRange="7days" OR dateFrom/dateTo. "completed today" → dateRange="today" + status="completed". "pending" → status="draft" or "confirmed".
+- For queryActivities: always set date filters. "today" → dateRange="today" OR scheduledDate=${todayIso}. "this week" → dateRange="7days" OR dateFrom/dateTo. "completed today" → dateRange="today" + status="completed". "pending"/"待办"/"to-do" → status="open" (open IS the actionable pending state; NEVER use draft/confirmed).
 - For queryOpportunities: "active/pipeline" → stage != won/lost. "at risk" → minConfidence=0 maxConfidence=49.
 
 # Page context data reuse

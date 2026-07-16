@@ -18,6 +18,7 @@ import { MatchSelectionCard, buildMatchReasonText } from '@/components/match-sel
 import { MarkdownContent } from '@/components/markdown-content';
 import { RecordListCard } from '@/components/record-list-card';
 import { AdditionalIntentsCard } from '@/components/additional-intents-card';
+import { composerHeight, isComposerMultiline } from '@/lib/composer-input';
 import { PipelineViewer } from '@/components/frame-viewer';
 import { TaskAnnounceBubble } from '@/components/task-announce-bubble';
 import { MessageAttachments } from '@/components/message-attachments';
@@ -157,6 +158,11 @@ export function CopilotPanel() {
   const locale: Locale = getLocale();
   
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const inputMeasureRef = useRef<HTMLTextAreaElement>(null);
+  const composerShellRef = useRef<HTMLDivElement>(null);
+  // Multi-line composer: text spans full width and the action buttons drop to a
+  // row beneath it (single-line keeps the compact inline layout).
+  const [inputMultiline, setInputMultiline] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   // True while we programmatically focus the composer after opening, so the
   // resulting onFocus isn't mistaken for a user tap (which would escalate to
@@ -236,6 +242,8 @@ export function CopilotPanel() {
   const [playingInlineId, setPlayingInlineId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<Array<{ file: File; preview: string; type: 'image' | 'file' }>>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+  const MAX_ATTACHMENTS = 5;
   
   // Context chips that user can dismiss
   const [dismissedContexts, setDismissedContexts] = useState<Set<string>>(new Set());
@@ -265,13 +273,23 @@ export function CopilotPanel() {
     if (!files || files.length === 0) return;
 
     Array.from(files).forEach((file: File) => {
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        toast.error(locale === 'zh-Hans' ? `${file.name} 超过 5 MB` : `${file.name} exceeds 5 MB`);
+        return;
+      }
       const reader = new FileReader();
       reader.onload = (event) => {
-        setAttachments((prev) => [...prev, {
-          file,
-          preview: event.target?.result as string,
-          type: file.type.startsWith('image/') ? 'image' as const : 'file' as const,
-        }]);
+        setAttachments((prev) => {
+          if (prev.length >= MAX_ATTACHMENTS) {
+            toast.error(locale === 'zh-Hans' ? '最多上传 5 个附件' : 'You can attach up to 5 files');
+            return prev;
+          }
+          return [...prev, {
+            file,
+            preview: event.target?.result as string,
+            type: file.type.startsWith('image/') ? 'image' as const : 'file' as const,
+          }];
+        });
       };
       reader.readAsDataURL(file);
     });
@@ -279,7 +297,7 @@ export function CopilotPanel() {
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
-  }, []);
+  }, [locale]);
 
   // Handle remove attachment
   const handleRemoveAttachment = useCallback((index: number) => {
@@ -409,26 +427,74 @@ export function CopilotPanel() {
     return () => window.clearTimeout(id);
   }, [isOpen]);
 
-  // Auto-grow the input textarea up to 4 lines, then scroll inside.
+  // Auto-grow the input textarea with its content up to a viewport-relative cap
+  // (keyboard-aware via the visual viewport), then scroll internally. Multiline
+  // classification is measured against a hidden textarea fixed to the COMPACT
+  // row width. This keeps the decision stable: switching the visible textarea
+  // to full width cannot make the same content look single-line again and cause
+  // compact/full-width flicker on alternating keystrokes.
   const autoResizeInput = useCallback(() => {
     const el = inputRef.current;
-    if (!el) return;
-    // Reset height to measure the true scroll height, then clamp to maxHeight.
-    el.style.height = 'auto';
+    const measure = inputMeasureRef.current;
+    const shell = composerShellRef.current;
+    if (!el || !measure || !shell) return;
+
     const cs = window.getComputedStyle(el);
     const lineHeight = parseFloat(cs.lineHeight) || 20;
     const padTop = parseFloat(cs.paddingTop) || 0;
     const padBottom = parseFloat(cs.paddingBottom) || 0;
-    const maxHeight = lineHeight * 4 + padTop + padBottom;
-    const next = Math.min(el.scrollHeight, maxHeight);
-    el.style.height = `${next}px`;
-    el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden';
+
+    // Derive the exact compact textarea width from the shell and both action
+    // controls rather than from the textarea's current (possibly full) width.
+    const shellCs = window.getComputedStyle(shell);
+    const padInline = (parseFloat(shellCs.paddingLeft) || 0)
+      + (parseFloat(shellCs.paddingRight) || 0);
+    const gap = parseFloat(shellCs.columnGap) || 0;
+    const attachmentWidth = shell.querySelector<HTMLElement>('[data-composer-attachment]')?.offsetWidth ?? 40;
+    const actionWidth = shell.querySelector<HTMLElement>('[data-composer-action]')?.offsetWidth ?? 40;
+    const compactWidth = Math.max(
+      80,
+      shell.clientWidth - padInline - attachmentWidth - actionWidth - gap * 2,
+    );
+    measure.style.width = `${compactWidth}px`;
+    measure.style.height = 'auto';
+    const shouldBeMultiline = isComposerMultiline({
+      scrollHeight: measure.scrollHeight,
+      lineHeight,
+      padTop,
+      padBottom,
+    });
+    setInputMultiline((current) => current === shouldBeMultiline ? current : shouldBeMultiline);
+
+    // Reset the VISIBLE textarea to measure its true content height at its
+    // current layout width, then clamp. If classification changed, React runs
+    // this layout effect once more with the final width before the browser paints.
+    el.style.height = 'auto';
+    const scrollHeight = el.scrollHeight;
+    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+    const { height, scroll } = composerHeight({
+      scrollHeight, lineHeight, padTop, padBottom, viewportHeight,
+      maxViewportRatio: 0.45,
+    });
+    el.style.height = `${height}px`;
+    el.style.overflowY = scroll ? 'auto' : 'hidden';
   }, []);
 
-  // Re-measure whenever the value changes (typing, dictation, programmatic set).
-  useEffect(() => {
+  // Re-measure whenever content or the selected compact/multiline layout changes.
+  // Layout effect completes both passes before paint, eliminating transition flash.
+  useLayoutEffect(() => {
     autoResizeInput();
-  }, [inputValue, autoResizeInput]);
+  }, [inputValue, inputMultiline, autoResizeInput]);
+
+  // Re-measure when the visual viewport changes (keyboard open/close, rotation)
+  // so the viewport-relative cap stays correct.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const onResize = () => autoResizeInput();
+    vv.addEventListener('resize', onResize);
+    return () => vv.removeEventListener('resize', onResize);
+  }, [autoResizeInput]);
 
   // Handle enter key - IME-safe (skip Enter during IME composition)
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -580,13 +646,28 @@ export function CopilotPanel() {
 
             // Messages inside a queue step (not announce/summary/overview) are "substeps".
             const isQueueSubstep = !!message.queueId && message.taskRole !== 'announce' && message.taskRole !== 'summary' && message.taskRole !== 'overview';
+            // The text-message action bar (timestamp + copy + play) renders as the
+            // LAST child of the message wrapper so it sits BELOW any card/control that
+            // appears with the same message (e.g. query record lists). A footer above
+            // the card left users unsure whether their interaction was complete.
+            const isAgentTextMessage = message.type === 'agent'
+              || (message.type === 'awaiting-clarification' && !message.awaitingClarification);
+            const showMessageActions = isAgentTextMessage
+              && !!message.content
+              && !message.isThinking && !message.isStreaming && !isQueueSubstep
+              && message.taskRole !== 'overview' && message.taskRole !== 'announce'
+              && !tryParseJson(message.content).isJson;
             return (
             <div key={message.id} id={`message-${message.id}`} className={cn(
               message.taskRole === 'announce' ? 'mb-1' : 'mb-3',
               message.type === 'user' ? 'flex justify-end' : '',
               // Indent sub-content under a task header for visual hierarchy.
               message.queueId && message.taskRole !== 'announce' && message.taskRole !== 'summary' && 'pl-3 border-l-2 border-primary/10',
-            )}>
+            )}
+              data-message-type={message.type}
+              data-message-role={message.role}
+              data-message-function={message.functionCalled}
+            >
               {/* Phase B: Task overview — "识别到 N 个意图：A、B、C" (plain text, no bubble) */}
               {message.taskRole === 'overview' && message.taskOverview && (
                 <div className="text-sm text-muted-foreground px-1">
@@ -946,43 +1027,6 @@ export function CopilotPanel() {
                         additionalIntents={message.additionalIntents}
                       />
                     )}
-                    {/* Action bar: timestamp + copy + play — hidden for queue substeps */}
-                    {message.content && !isJson && !message.isThinking && !message.isStreaming && !isQueueSubstep && (
-                      <div className="flex items-center justify-between mt-0.5">
-                        <p className="text-[9px] text-muted-foreground">
-                          {new Date(message.timestamp).toLocaleTimeString(localeBcp47(locale), { hour: '2-digit', minute: '2-digit' })}
-                        </p>
-                        <div className="flex items-center gap-0.5">
-                          <button
-                            onClick={() => {
-                              navigator.clipboard.writeText(message.content);
-                            }}
-                            className="p-1 rounded hover:bg-muted/50 transition-colors text-muted-foreground hover:text-foreground"
-                            aria-label="Copy"
-                          >
-                            <Copy className="w-3 h-3" />
-                          </button>
-                          <button
-                            onClick={() => speakMessage(message.id, message.content)}
-                            className="p-1 rounded hover:bg-muted/50 transition-colors inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
-                            aria-label={speakingMessageId === message.id ? 'Stop' : 'Play'}
-                          >
-                            {speakingMessageId === message.id ? (
-                              <>
-                                <span className="flex items-end gap-0.5 h-3">
-                                  <span className="w-0.5 bg-primary rounded-full animate-pulse h-[60%]" />
-                                  <span className="w-0.5 bg-primary rounded-full animate-pulse h-full [animation-delay:0.15s]" />
-                                  <span className="w-0.5 bg-primary rounded-full animate-pulse h-[40%] [animation-delay:0.3s]" />
-                                </span>
-                                <span className="text-[10px] text-primary">Stop</span>
-                              </>
-                            ) : (
-                              <Volume2 className="w-3 h-3" />
-                            )}
-                          </button>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 );
               })()}
@@ -1022,6 +1066,46 @@ export function CopilotPanel() {
                     records={message.recordList.records.map((r) => ({ ...r, type: message.recordList!.type }))}
                     title={message.recordList.title}
                   />
+                </div>
+              )}
+
+              {/* Message action bar — timestamp + copy + play. Rendered LAST so it sits
+                  below any card/control (e.g. the record list above) that appears with
+                  this message, giving a clear end-of-message marker after interaction. */}
+              {showMessageActions && (
+                <div className="flex items-center justify-between mt-0.5">
+                  <p className="text-[9px] text-muted-foreground">
+                    {new Date(message.timestamp).toLocaleTimeString(localeBcp47(locale), { hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                  <div className="flex items-center gap-0.5">
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(message.content);
+                      }}
+                      className="p-1 rounded hover:bg-muted/50 transition-colors text-muted-foreground hover:text-foreground"
+                      aria-label="Copy"
+                    >
+                      <Copy className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={() => speakMessage(message.id, message.content)}
+                      className="p-1 rounded hover:bg-muted/50 transition-colors inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                      aria-label={speakingMessageId === message.id ? 'Stop' : 'Play'}
+                    >
+                      {speakingMessageId === message.id ? (
+                        <>
+                          <span className="flex items-end gap-0.5 h-3">
+                            <span className="w-0.5 bg-primary rounded-full animate-pulse h-[60%]" />
+                            <span className="w-0.5 bg-primary rounded-full animate-pulse h-full [animation-delay:0.15s]" />
+                            <span className="w-0.5 bg-primary rounded-full animate-pulse h-[40%] [animation-delay:0.3s]" />
+                          </span>
+                          <span className="text-[10px] text-primary">Stop</span>
+                        </>
+                      ) : (
+                        <Volume2 className="w-3 h-3" />
+                      )}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -1215,7 +1299,10 @@ export function CopilotPanel() {
         </div>
       )}
 
-      <div className="relative flex items-end gap-2 p-2 rounded-[14px] bg-background">
+      <div
+        ref={composerShellRef}
+        className={cn('relative flex flex-wrap items-end gap-2 p-2 rounded-[14px] bg-background', inputMultiline && 'gap-y-1.5')}
+      >
         {/* Hidden input: file/photo picker. On mobile the native sheet already
             offers "Take Photo" as an option, so a separate camera shortcut is
             redundant — a single attachment button covers both. */}
@@ -1232,10 +1319,12 @@ export function CopilotPanel() {
         {/* Attachment button — opens the native picker directly (no popup menu) */}
         <button
           type="button"
+          data-composer-attachment
           onClick={() => { if (offline) return; if (inputLocked) { guideToBlockingCard(); return; } fileInputRef.current?.click(); }}
           disabled={composerLocked}
           className={cn(
             'w-10 h-10 flex items-center justify-center rounded-full transition-colors shrink-0',
+            inputMultiline ? 'order-2' : 'order-1',
             composerLocked
               ? 'text-muted-foreground/40 cursor-not-allowed'
               : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
@@ -1245,7 +1334,20 @@ export function CopilotPanel() {
         >
           <Paperclip className="w-5 h-5" />
         </button>
-        {/* Input Field — auto-grows up to 4 lines, then scrolls internally */}
+        {/* Invisible compact-width measurement mirror. It is removed from layout
+            and accessibility, but uses the same typography/padding as the real
+            textarea so wrapping is classified independently of visible mode. */}
+        <textarea
+          ref={inputMeasureRef}
+          value={inputValue}
+          readOnly
+          aria-hidden="true"
+          tabIndex={-1}
+          rows={1}
+          className="absolute invisible pointer-events-none border-0 text-sm leading-5 py-2 resize-none"
+          style={{ left: '-9999px', top: 0, overflow: 'hidden' }}
+        />
+        {/* Input Field — auto-grows to a viewport-relative cap, then scrolls. */}
         <textarea
           ref={inputRef}
           data-tour="copilot-input"
@@ -1264,12 +1366,17 @@ export function CopilotPanel() {
             ? t('completeCardAbove', locale)
             : t('askCopilotPlaceholder', locale)}
           className={cn(
-            'flex-1 bg-transparent border-0 outline-none text-sm text-foreground placeholder:text-muted-foreground resize-none leading-5 py-2 self-end',
+            'bg-transparent border-0 outline-none text-sm text-foreground placeholder:text-muted-foreground resize-none leading-5 py-2 self-end',
+            inputMultiline ? 'order-1 basis-full w-full' : 'order-2 flex-1',
             composerLocked && 'cursor-not-allowed opacity-60'
           )}
         />
 
         {/* Right action — mutually exclusive: Stop / Send / Mic */}
+        <div
+          data-composer-action
+          className={cn('flex items-center shrink-0', inputMultiline ? 'order-3 ml-auto' : 'order-3')}
+        >
         {isSending ? (
           <button
             onClick={cancelSend}
@@ -1331,6 +1438,7 @@ export function CopilotPanel() {
             <ArrowUp className="w-5 h-5" />
           </button>
         )}
+        </div>
       </div>
     </div>
   );

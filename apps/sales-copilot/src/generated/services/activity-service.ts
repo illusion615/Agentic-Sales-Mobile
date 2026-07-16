@@ -46,6 +46,22 @@ function fromDv(dv: ActivityEntityBase, type: ActivityType): Activity {
     // Account will be resolved by the UI from the opportunity record
   } else if (regardingType === 'account') {
     account = { id: regardingId, name1: regardingName };
+  } else if (regardingType === 'contact') {
+    // The related account is resolved by the shared UI relationship boundary
+    // from Contact.account, just as opportunity-backed activities use
+    // Opportunity.account.
+    return {
+      id: dv.activityid,
+      title: dv.subject ?? '',
+      type,
+      contact: { id: regardingId, fullname: regardingName },
+      notes: dv.description,
+      scheduleddate: dv.scheduledstart ?? dv.createdon ?? '',
+      durationMinutes: d.scheduleddurationminutes as number | undefined,
+      status: statusFromCode(dv.statecode),
+      ownerid: (d._ownerid_value as string) ?? '',
+      createdon: dv.createdon,
+    };
   }
 
   return {
@@ -57,6 +73,7 @@ function fromDv(dv: ActivityEntityBase, type: ActivityType): Activity {
     contact: undefined, // Activity Party requires separate query; omit for now
     notes: dv.description,
     scheduleddate: dv.scheduledstart ?? dv.createdon ?? '',
+    durationMinutes: d.scheduleddurationminutes as number | undefined,
     status: statusFromCode(dv.statecode),
     ownerid: (d._ownerid_value as string) ?? '',
     createdon: dv.createdon,
@@ -115,11 +132,17 @@ function toDv(r: Partial<Omit<Activity, 'id'>>, type: ActivityType): Record<stri
   }
   if (r.scheduleddate !== undefined) {
     dv.scheduledstart = r.scheduleddate;
-    // Set end = start + 1 hour for appointment
+    // Persist the chosen duration natively (all three tables expose it) and keep
+    // the appointment end consistent with start + duration (was a hard-coded 1h).
+    const durationMin = r.durationMinutes && r.durationMinutes > 0 ? r.durationMinutes : 60;
+    dv.scheduleddurationminutes = durationMin;
     if (type === 'visit' || type === 'meeting') {
       const start = new Date(r.scheduleddate);
-      dv.scheduledend = new Date(start.getTime() + 3600000).toISOString();
+      dv.scheduledend = new Date(start.getTime() + durationMin * 60000).toISOString();
     }
+  } else if (r.durationMinutes !== undefined && r.durationMinutes > 0) {
+    // Duration-only edit: keep the native duration field in sync.
+    dv.scheduleddurationminutes = r.durationMinutes;
   }
 
   // Attendees: ActivityParty rows CANNOT be created directly (restricted table).
@@ -160,10 +183,45 @@ export class ActivityService {
   static async create(record: Omit<Activity, 'id'>): Promise<Activity> {
     const type = (record.type || 'visit') as ActivityType;
     const { svc } = getService(type);
-    const dvPayload = toDv(record, type);
+    const requestedStatus = record.status;
+    // Dataverse validates a new native activity in Open state before it accepts
+    // a closed status reason. Creating directly as Completed/Canceled fails with
+    // 0x80048408, so closed records use a compensated two-phase transition.
+    const createRecord = requestedStatus === 'open'
+      ? record
+      : { ...record, status: 'open' as const };
+    const dvPayload = toDv(createRecord, type);
     const result = await svc.create(dvPayload);
     if (!result.success) throw result.error ?? new Error('Activity create failed');
     const created = fromDv(result.data as ActivityEntityBase, type);
+    if (!created.id) {
+      throw new Error(`Activity create succeeded without an id for ${type}`);
+    }
+
+    if (requestedStatus !== 'open') {
+      try {
+        const transition = await svc.update(created.id, toDv({ status: requestedStatus }, type));
+        if (!transition.success) {
+          throw transition.error ?? new Error(`Activity status transition to ${requestedStatus} failed`);
+        }
+        created.status = requestedStatus;
+      } catch (transitionError) {
+        try {
+          await svc.delete(created.id);
+        } catch (cleanupError) {
+          // Keep this ES2017-compatible: AggregateError/Error.cause are newer
+          // built-ins and are not guaranteed on supported legacy WebViews.
+          const error = new Error(
+            `Activity ${created.id} could not transition to ${requestedStatus}, and compensation delete failed`,
+          ) as Error & { transitionError?: unknown; cleanupError?: unknown };
+          error.transitionError = transitionError;
+          error.cleanupError = cleanupError;
+          throw error;
+        }
+        throw transitionError;
+      }
+    }
+
     // Attendees were deep-inserted via the appointment payload (appointment_activity_parties).
     if (supportsParticipants(type) && record.contacts && record.contacts.length > 0) {
       created.contacts = record.contacts;
@@ -211,6 +269,7 @@ export class ActivityService {
       contacts: changedFields.contacts,
       notes: changedFields.notes,
       scheduleddate: changedFields.scheduleddate ?? '',
+      durationMinutes: changedFields.durationMinutes,
       status: changedFields.status ?? 'open',
       ownerid: changedFields.ownerid ?? '',
       createdon: undefined,

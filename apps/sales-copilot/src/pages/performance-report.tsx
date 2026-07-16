@@ -110,8 +110,8 @@ export default function PerformanceReportPage() {
     (opp: Opportunity) => !['won', 'lost'].includes(opp.stage)
   );
 
-  const totalWonValue = wonDeals.reduce((sum: number, opp: Opportunity) => sum + (opp.totalamount || 0), 0);
-  const totalPipelineValue = activeDeals.reduce((sum: number, opp: Opportunity) => sum + (opp.totalamount || 0), 0);
+  const totalWonValue = wonDeals.reduce((sum: number, opp: Opportunity) => sum + (opp.amountBase ?? opp.totalamount ?? 0), 0);
+  const totalPipelineValue = activeDeals.reduce((sum: number, opp: Opportunity) => sum + (opp.amountBase ?? opp.totalamount ?? 0), 0);
   const winRate = wonDeals.length + lostDeals.length > 0
     ? Math.round((wonDeals.length / (wonDeals.length + lostDeals.length)) * 100)
     : 0;

@@ -25,6 +25,7 @@ const SKILL_OBJECT_MAP: Record<string, FrameSalesObject[]> = {
   draftContact: ['Contact'],
   draftOpportunity: ['Opportunity'],
   draftActivity: ['Activity'],
+  draftFeedback: ['Feedback'],
 
   // Planning
   suggestPlan: ['Activity'],

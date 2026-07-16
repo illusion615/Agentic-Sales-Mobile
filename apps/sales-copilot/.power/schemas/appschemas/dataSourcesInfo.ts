@@ -40,6 +40,13 @@ export const dataSourcesInfo = {
     "dataSourceType": "Dataverse",
     "apis": {}
   },
+  "biz_appfeedbacks": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "biz_appfeedbackid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
   "appointments": {
     "tableId": "",
     "version": "",
@@ -86,6 +93,13 @@ export const dataSourcesInfo = {
     "tableId": "",
     "version": "",
     "primaryKey": "crf5c_copilotconversationid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
+  "transactioncurrencies": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "transactioncurrencyid",
     "dataSourceType": "Dataverse",
     "apis": {}
   },

@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, Cell, ResponsiveContainer, Tooltip, PieChart, Pie, LineChart, Line } from 'recharts';
 import { ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { formatCompactAmount, entityRoute, type ChartCardData, type BucketRecord } from '@/lib/chart-aggregation';
+import { formatCompactAmount, type ChartCardData, type BucketRecord } from '@/lib/chart-aggregation';
+import { recordDetailRoute } from '@/lib/record-route';
 
 const FALLBACK_PALETTE = ['#008a7a', '#2d6cdf', '#17a899', '#4e84ea', '#006d61', '#1f57bd'];
 const OTHER_COLOR = '#94a3b8';
@@ -103,7 +104,7 @@ export function ChartCard({ chartCard, locale }: ChartCardProps) {
       key={r.id || `${r.name}-${i}`}
       type="button"
       disabled={!r.id}
-      onClick={() => r.id && navigate(entityRoute(r.entity, r.id))}
+      onClick={() => r.id && navigate(recordDetailRoute(r.entity, r.id))}
       className={cn(
         'w-full text-left flex items-center justify-between gap-2 rounded-lg px-2 py-2 text-xs',
         r.id ? 'hover:bg-muted active:bg-muted cursor-pointer' : 'opacity-70',

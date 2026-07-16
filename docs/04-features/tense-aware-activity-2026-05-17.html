@@ -335,11 +335,44 @@ IntentResultSchema = z.object({
               <tbody>
                 <tr><td>planned</td><td>open</td><td>用户给的未来日期或今天</td><td>显示</td><td>是（目的/议程/背景）</td></tr>
                 <tr><td>completed</td><td>completed</td><td>用户给的过去/今天</td><td>显示</td><td>是（结果/讨论要点）</td></tr>
-                <tr><td>unspecified</td><td>open</td><td>今天</td><td>显示（不预填）</td><td>否</td></tr>
+                <tr><td>unspecified</td><td>由日期后备规则解析</td><td>今天</td><td>显示（不预填）</td><td>否</td></tr>
               </tbody>
             </table>
             <p>"显示/隐藏"在 Activity Draft 表单组件层判定，单测可覆盖三个分支。</p>
             <div class="callout"><strong>2026-06-13 修订：</strong> 原 Slice A 设计在 <code>planned</code> 时<strong>隐藏</strong>该字段（理由：未来任务还没有"结果"）。真机使用后发现弊端——未来计划任务保存后，用户日后打开只能靠 <code>subject</code> 回忆上下文，缺少目的/议程。现改为：<strong>三种时态均显示该字段</strong>，且对 <code>planned</code> 也由 LLM 预填（写入目的/议程/背景，而非结果）。同时把 UI 标签从"结果 / Result"改为中性的"<strong>详情 / Details</strong>"——该字段在 Dataverse 落到活动表标准列 <code>description</code>，并非只承载拜访结果，旧标签把语义起窄了。改动落点：<code>form-card.tsx</code>（去掉 <code>temporalMode==='planned'</code> 的隐藏分支 + 改标签 + 按时态切换 placeholder）、<code>function-registry.ts</code>（<code>draftActivity.result</code> 描述指示 LLM 对未来任务填写目的/议程/背景）。</div>
+            <div class="callout"><strong>2026-07-15 修订：</strong> Draft Activity 表单把原本不可见的 <code>temporalMode</code> 暴露为单选分段控件 <strong>Planned / Completed</strong>（中文：<strong>计划 / 已完成</strong>）。Frame 的 <code>past</code>/<code>future</code> 是默认值第一来源；语义缺失时，早于今天的日期默认为 Completed，晚于今天默认为 Planned，今天保守默认为 Planned。默认值只在草稿初始化时解析一次；用户切换后拥有最高优先级，日期编辑与重渲染不得把选择改回。保存映射保持唯一：<code>planned → Activity.status=open</code>，<code>completed → Activity.status=completed</code>，并继续由原生 Activity adapter 写入各 Dataverse 表匹配的 statecode/statuscode。</div>
+            <div class="callout"><strong>Dataverse 原生约束（真实环境验证）：</strong>Phone Call、Appointment、Email 不能在 Create 请求中直接带关闭状态；平台会先按 Open 校验 status reason，并以 <code>0x80048408</code> 拒绝 Completed reason。Adapter 因此对非 Open 新活动执行 <strong>Create as Open → Transition to Completed</strong>。第二步失败时必须补偿删除刚创建的 Open 记录并把原错误返回，禁止留下幽灵待办。该两阶段过程是 adapter 的持久化细节，不改变 UI/Activity 模型的最终状态合同。</div>
+          </div>
+        </details>
+
+        <details open>
+          <summary>
+            <span class="summary-left"><span class="severity low">UX</span><strong>可编辑状态与边界</strong></span>
+            <span class="summary-arrow">+</span>
+          </summary>
+          <div class="body">
+            <table class="compare">
+              <thead><tr><th>场景</th><th>默认选择</th><th>用户可切换</th><th>保存状态</th></tr></thead>
+              <tbody>
+                <tr><td>已发生的 Draft Activity</td><td>Completed</td><td>是</td><td>completed</td></tr>
+                <tr><td>未来的 Draft Activity</td><td>Planned</td><td>是</td><td>open</td></tr>
+                <tr><td>时态不明、日期早于今天</td><td>Completed</td><td>是</td><td>completed</td></tr>
+                <tr><td>时态不明、日期为今天或未来</td><td>Planned</td><td>是</td><td>open</td></tr>
+              </tbody>
+            </table>
+            <p>控件位于 Type 与 Account 之间，使用现有单选 ToggleGroup，两个选项等宽且不允许取消全部选择。切换只改变业务状态和状态相关文案：Planned 使用“计划日期”与目的/议程 placeholder；Completed 使用“日期”与结果/讨论 placeholder。系统不自动修改用户输入的日期。</p>
+            <p><strong>确认后的会话一致性：</strong>保存时必须在同一次聊天消息更新中原子持久化 <code>status + createdRecordId + final form data</code>。最终表单快照包含用户修改后的 <code>temporalMode</code>、标题、日期和关系字段；宿主刷新后保存卡从该快照重建，禁止退回 AI 的原始草稿。单卡与 BatchFormCard 共用同一消息更新边界。</p>
+            <p><strong>包含：</strong>单条 FormCard 与复用它的 BatchFormCard。<strong>不包含：</strong>Suggest Plan 推荐卡（产品语义始终是未来计划，继续固定 planned）、手工 Activity Capture、详情页的完成/重开/取消快捷操作，以及“创建即取消”。</p>
+          </div>
+        </details>
+
+        <details>
+          <summary>
+            <span class="summary-left"><span class="severity low">Test</span><strong>2026-07-15 回归计划</strong></span>
+            <span class="summary-arrow">+</span>
+          </summary>
+          <div class="body">
+            <p>纯逻辑覆盖：past/future 明确语义、无语义的昨天/今天/明天、无效日期、用户显式模式，以及 <code>planned/completed → open/completed</code>。组件覆盖：初始选中、不可清空、切换后日期标签与 Details placeholder、确认后摘要与展开 Status 行。真实环境执行四个可逆用例：过去默认完成、未来默认计划，以及两者手动反向切换；逐条核验 Dataverse 状态后删除测试活动。</p>
           </div>
         </details>
 

@@ -143,6 +143,16 @@
           "entitySetName": "environmentvariablevalues",
           "logicalName": "environmentvariablevalue",
           "isHidden": false
+        },
+        "appfeedback": {
+          "entitySetName": "biz_appfeedbacks",
+          "logicalName": "biz_appfeedback",
+          "isHidden": false
+        },
+        "currencies": {
+          "entitySetName": "transactioncurrencies",
+          "logicalName": "transactioncurrency",
+          "isHidden": false
         }
       },
       "version": "v9.0",

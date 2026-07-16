@@ -62,13 +62,6 @@ function formatCurrency(value: number): string {
   return `$${value.toLocaleString()}`;
 }
 
-function getDaysSince(dateStr?: string): number {
-  if (!dateStr) return 999;
-  const date = new Date(dateStr);
-  const now = new Date();
-  return Math.ceil(Math.abs(now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
-}
-
 export function ClientProfileSheet({ accountId, open, onOpenChange }: ClientProfileSheetProps) {
   const [currentScreen, setCurrentScreen] = useState(0);
   const [swipeDirection, setSwipeDirection] = useState<'left' | 'right' | null>(null);

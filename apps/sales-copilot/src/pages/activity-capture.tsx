@@ -25,7 +25,10 @@ import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useContactList } from '@/generated/hooks/use-contact';
 import { useWithAISummaryTrigger } from '@/hooks/use-ai-summary-trigger';
 import { touchAccountLastContacted } from '@/lib/account-touch';
+import { resolveActivityRelations } from '@/lib/activity-relations';
 import { getLocale, t, type Locale } from '@/lib/i18n';
+import { TimeDurationFields } from '@/components/schedule-picker';
+import { combineDateTime, timeFromISO, DEFAULT_TIME, DEFAULT_DURATION_MINUTES } from '@/lib/activity-schedule';
 import { isFlowAvailable } from '@/services/power-automate-service';
 import { useCopilot } from '@/contexts/copilot-context';
 import {
@@ -72,6 +75,15 @@ export default function ActivityCapturePage() {
   } = useActivity(editActivityId || '');
   const { data: opportunities = [] } = useOpportunityList();
   const { data: contacts = [] } = useContactList();
+  // The edit route can be opened directly from a saved Copilot card, so it
+  // cannot rely on an account route parameter. Resolve the form's relationship
+  // context from Activity → Opportunity/Contact → Account instead.
+  const resolvedActivity = useMemo(
+    () => existingActivity
+      ? resolveActivityRelations(existingActivity, opportunities, contacts)
+      : undefined,
+    [existingActivity, opportunities, contacts],
+  );
   const createActivity = useCreateActivity();
   const updateActivity = useUpdateActivity();
   const { triggerForEntity } = useWithAISummaryTrigger();
@@ -80,7 +92,7 @@ export default function ActivityCapturePage() {
   const account = accounts.find((a) => a.id === accountId);
 
   // The canonical activity ID - always use this, never the URL param directly
-  const activityId = existingActivity?.id;
+  const activityId = resolvedActivity?.id;
 
   // State
   const isOffline = useEffectiveOffline();
@@ -97,6 +109,8 @@ export default function ActivityCapturePage() {
     opportunityId: '',
     opportunityName: '',
     visitDate: new Date().toISOString().split('T')[0],
+    visitTime: DEFAULT_TIME,
+    durationMinutes: DEFAULT_DURATION_MINUTES,
     visitType: 'client-visit',
     result: '',
   });
@@ -130,6 +144,9 @@ export default function ActivityCapturePage() {
         opportunityId: (draftData.opportunityId as string) || '',
         opportunityName: (draftData.opportunityName as string) || '',
         visitDate: (draftData.scheduledDate as string)?.split('T')[0] || new Date().toISOString().split('T')[0],
+        visitTime: (draftData.scheduledTime as string)
+          || ((draftData.scheduledDate as string) ? timeFromISO(draftData.scheduledDate as string) : DEFAULT_TIME),
+        durationMinutes: (draftData.durationMinutes as number) || DEFAULT_DURATION_MINUTES,
         visitType: (draftData.type as string) || 'client-visit',
         result: (draftData.result as string) || '',
       });
@@ -138,17 +155,19 @@ export default function ActivityCapturePage() {
     }
     
     // Priority 2: Edit mode - load existing activity
-    if (isEditMode && existingActivity) {
-      const parsedNotes = parseNotesData(existingActivity.notes);
+    if (isEditMode && resolvedActivity) {
+      const parsedNotes = parseNotesData(resolvedActivity.notes);
       setFormData({
-        title: existingActivity.title || '',
-        accountId: existingActivity.account?.id || accountId || '',
-        accountName: existingActivity.account?.name1 || account?.name1 || '',
-        contactId: existingActivity.contact?.id || '',
-        contactName: existingActivity.contact?.fullname || parsedNotes.contactName,
-        opportunityId: existingActivity.opportunity?.id || '',
-        opportunityName: existingActivity.opportunity?.name1 || '',
-        visitDate: existingActivity.scheduleddate ? existingActivity.scheduleddate.split('T')[0] : new Date().toISOString().split('T')[0],
+        title: resolvedActivity.title || '',
+        accountId: resolvedActivity.account?.id || accountId || '',
+        accountName: resolvedActivity.account?.name1 || account?.name1 || '',
+        contactId: resolvedActivity.contact?.id || '',
+        contactName: resolvedActivity.contact?.fullname || parsedNotes.contactName,
+        opportunityId: resolvedActivity.opportunity?.id || '',
+        opportunityName: resolvedActivity.opportunity?.name1 || '',
+        visitDate: resolvedActivity.scheduleddate ? resolvedActivity.scheduleddate.split('T')[0] : new Date().toISOString().split('T')[0],
+        visitTime: resolvedActivity.scheduleddate ? timeFromISO(resolvedActivity.scheduleddate) : DEFAULT_TIME,
+        durationMinutes: resolvedActivity.durationMinutes || DEFAULT_DURATION_MINUTES,
         visitType: 'client-visit',
         result: parsedNotes.result,
       });
@@ -156,7 +175,7 @@ export default function ActivityCapturePage() {
       // Priority 3: Account from URL param
       setFormData((prev) => ({ ...prev, accountId, accountName: account.name1 }));
     }
-  }, [draftData, isEditMode, existingActivity, account, accountId]);
+  }, [draftData, isEditMode, resolvedActivity, account, accountId]);
 
   // Filter contacts based on selected account
   const filteredContacts = useMemo(() => {
@@ -239,7 +258,8 @@ export default function ActivityCapturePage() {
         type: 'visit',
         status: 'open',
         ownerid: user?.objectId || '',
-        scheduleddate: new Date(formData.visitDate).toISOString(),
+        scheduleddate: combineDateTime(formData.visitDate, formData.visitTime),
+        durationMinutes: formData.durationMinutes,
         notes,
         ...(targetAccount ? { account: { id: targetAccount.id, name1: targetAccount.name1 } } : {}),
         ...(targetContact ? { contact: { id: targetContact.id, fullname: targetContact.fullname } } : {}),
@@ -260,7 +280,8 @@ export default function ActivityCapturePage() {
           id: activityId,
           changedFields: {
             title,
-            scheduleddate: new Date(formData.visitDate).toISOString(),
+            scheduleddate: combineDateTime(formData.visitDate, formData.visitTime),
+            durationMinutes: formData.durationMinutes,
             notes,
             // Update account lookup
             ...(targetAccount ? { account: { id: targetAccount.id, name1: targetAccount.name1 } } : { account: undefined }),
@@ -385,7 +406,7 @@ export default function ActivityCapturePage() {
             <ArrowLeft className="w-5 h-5 text-foreground" />
           </button>
           <h1 className="text-title text-foreground truncate max-w-[200px]">
-            {pageTitle} · {existingActivity?.account?.name1 || account?.name1 || '...'}
+            {pageTitle} · {resolvedActivity?.account?.name1 || account?.name1 || '...'}
           </h1>
           <button
             className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-muted active:bg-muted/80 transition-colors"
@@ -576,6 +597,15 @@ export default function ActivityCapturePage() {
                 )}
               />
             </div>
+
+            {/* Visit Time & Duration */}
+            <TimeDurationFields
+              time={formData.visitTime}
+              durationMinutes={formData.durationMinutes}
+              onTimeChange={(v) => setFormData((prev) => ({ ...prev, visitTime: v }))}
+              onDurationChange={(v) => setFormData((prev) => ({ ...prev, durationMinutes: v }))}
+              locale={locale}
+            />
 
             {/* Visit Result */}
             <div className="space-y-2">

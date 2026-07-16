@@ -4,6 +4,26 @@
  */
 
 import { registerHandlers, type FunctionHandler } from './handler-registry';
+import { resolveActivityDraftMode } from '@/lib/activity-draft-mode';
+
+const draftFeedback: FunctionHandler = async (args, ctx) => ({
+  success: true,
+  data: {
+    type: 'feedback' as const,
+    isNew: true,
+    data: {
+      feedbackType: args.feedbackType === 'enhancement' ? 'enhancement' : 'bug',
+      title: String(args.title || '').trim(),
+      description: String(args.description || '').trim(),
+      expectedOutcome: String(args.expectedOutcome || '').trim(),
+      reproductionSteps: String(args.reproductionSteps || '').trim(),
+      currentPage: ctx.pageContext?.currentPage || '',
+      clientRequestId: typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `feedback-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    },
+  },
+});
 
 const draftActivity: FunctionHandler = async (args) => {
   const type = (args.type as string) || 'visit';
@@ -21,6 +41,11 @@ const draftActivity: FunctionHandler = async (args) => {
     const label = typeLabel[type] || 'Activity';
     title = who ? `${who} - ${label}` : label;
   }
+  const scheduledDate = args.scheduledDate as string || new Date().toISOString().split('T')[0];
+  const temporalMode = resolveActivityDraftMode({
+    temporalMode: args.temporalMode,
+    scheduledDate,
+  });
   return {
     success: true,
     data: {
@@ -35,12 +60,12 @@ const draftActivity: FunctionHandler = async (args) => {
         contactName,
         contactNames: (args.contactNames as string[]) || [],
         contactTitle: args.contactTitle as string || '',
-        scheduledDate: args.scheduledDate as string || new Date().toISOString().split('T')[0],
+        scheduledDate,
         result: args.result as string || '',
         opportunityId: args.opportunityId as string || '',
         opportunityName: args.opportunityName as string || '',
         notes: args.notes as string || '',
-        temporalMode: args.temporalMode as string || '',
+        temporalMode,
       },
     },
   };
@@ -99,6 +124,7 @@ const draftContact: FunctionHandler = async (args) => ({
 });
 
 registerHandlers({
+  draftFeedback,
   draftActivity,
   draftOpportunity,
   draftAccount,

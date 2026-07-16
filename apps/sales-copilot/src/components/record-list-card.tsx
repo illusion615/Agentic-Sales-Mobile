@@ -6,8 +6,9 @@ import { getLocale, getCopilotListDefaultView, getCopilotListTopN, t } from '@/l
 import { useCopilot } from '@/contexts/copilot-context';
 import { useCopilotSideDocked } from '@/components/global-copilot';
 import { prefetchForEntityType } from '@/lib/prefetch';
+import { recordDetailRoute, type RecordEntityType } from '@/lib/record-route';
 
-export type RecordType = 'account' | 'opportunity' | 'activity' | 'contact';
+export type RecordType = RecordEntityType;
 
 export interface RecordItem {
   id: string;
@@ -28,25 +29,21 @@ const typeConfig = {
     icon: Building2,
     labelZh: '客户列表',
     labelEn: 'Accounts',
-    route: '/accounts',
   },
   opportunity: {
     icon: Target,
     labelZh: '商机列表',
     labelEn: 'Opportunities',
-    route: '/opportunities',
   },
   activity: {
     icon: Calendar,
     labelZh: '活动列表',
     labelEn: 'Activities',
-    route: '/activities',
   },
   contact: {
     icon: User,
     labelZh: '联系人列表',
     labelEn: 'Contacts',
-    route: '/contacts',
   },
 };
 
@@ -63,7 +60,7 @@ export function RecordListCard({ type, records, title }: RecordListCardProps) {
   // Prefetch the detail page chunk when this record list renders
   useEffect(() => { prefetchForEntityType(type); }, [type]);
   
-  const config = typeConfig[type];
+  const config = typeConfig[type] ?? typeConfig.account;
   const Icon = config.icon;
   const displayTitle = title || (isZh ? config.labelZh : config.labelEn);
   const visibleRecords = showAll ? records : records.slice(0, topN);
@@ -79,7 +76,7 @@ export function RecordListCard({ type, records, title }: RecordListCardProps) {
 
   const handleRecordClick = (record: RecordItem) => {
     // Immediately set page context so the copilot panel updates before data loads
-    const label = pageLabels[type];
+    const label = pageLabels[type] ?? pageLabels.account;
     setPageContext({
       currentPage: isZh ? label.zh : label.en,
       summary: isZh ? `查看: ${record.title}` : `Viewing: ${record.title}`,
@@ -91,7 +88,7 @@ export function RecordListCard({ type, records, title }: RecordListCardProps) {
       closePanel();
     }
     setTimeout(() => {
-      navigate(`${config.route}/${record.id}`);
+      navigate(recordDetailRoute(type, record.id));
     }, docked ? 0 : 150);
   };
   

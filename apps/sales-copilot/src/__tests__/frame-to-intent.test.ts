@@ -2,11 +2,15 @@ import { describe, it, expect } from 'vitest';
 import { frameToIntent, type TranslatedIntent } from '@/lib/frame-to-intent';
 import type { PipelineResult } from '@/lib/orchestrator';
 
-function makePipeline(plan: PipelineResult['plan'], reasoning = ''): PipelineResult {
+function makePipeline(
+  plan: PipelineResult['plan'],
+  reasoning = '',
+  frameIntents: Array<Record<string, unknown>> = [{ salesObject: 'Activity' }],
+): PipelineResult {
   // Cast via unknown — frame-to-intent only reads `reasoning` and `confidence`
   // from the frame payload, so a partial mock is sufficient for these tests.
   const frame = {
-    intents: [{ salesObject: 'Activity' }],
+    intents: frameIntents,
     explicitNames: [],
     reasoning,
     confidence: 80,
@@ -37,6 +41,29 @@ describe('frameToIntent', () => {
     expect(out.arguments.title).toBe('Follow up');
     expect(out.additionalActions).toBeUndefined();
     expect(out.multiIntentAnalysis).toBeUndefined();
+  });
+
+  it('injects deterministic completed/planned modes from Frame temporal semantics', () => {
+    const past = frameToIntent(makePipeline({
+      function: 'draftActivity',
+      arguments: { title: 'Completed visit', temporalMode: 'planned' },
+    }, '', [{ salesObject: 'Activity', temporal: 'past' }]))!;
+    expect(past.arguments.temporalMode).toBe('completed');
+
+    const future = frameToIntent(makePipeline({
+      function: 'draftActivity',
+      arguments: { title: 'Future visit', temporalMode: 'completed' },
+    }, '', [{ salesObject: 'Activity', temporal: 'future' }]))!;
+    expect(future.arguments.temporalMode).toBe('planned');
+  });
+
+  it('injects unspecified when Frame has no tense so the draft handler can use the date fallback', () => {
+    const out = frameToIntent(makePipeline({
+      function: 'draftActivity',
+      arguments: { title: 'Ambiguous visit', scheduledDate: '2026-07-14' },
+    }, '', [{ salesObject: 'Activity', temporal: 'none' }]))!;
+
+    expect(out.arguments.temporalMode).toBe('unspecified');
   });
 
   it('emits resolutions[] for draft entity-name fields without ids', () => {
@@ -102,6 +129,22 @@ describe('frameToIntent', () => {
     // unless this flag is true. See traps.md.
     expect(out.multiIntentAnalysis?.hasMultipleIntents).toBe(true);
     expect(out.multiIntentAnalysis?.summary).toBe('Three intents detected');
+  });
+
+  it('injects each DAG activity mode from its matching Frame intent', () => {
+    const pipeline = makePipeline({
+      steps: [
+        { seq: 1, function: 'draftActivity', arguments: { title: 'Past visit' } },
+        { seq: 2, function: 'draftActivity', arguments: { title: 'Future call' } },
+      ],
+    }, '', [
+      { salesObject: 'Activity', temporal: 'past' },
+      { salesObject: 'Activity', temporal: 'future' },
+    ]);
+
+    const out = frameToIntent(pipeline)!;
+    expect(out.arguments.temporalMode).toBe('completed');
+    expect(out.additionalActions?.[0].arguments.temporalMode).toBe('planned');
   });
 
   it('orders DAG steps by seq before slotting primary/additionalActions', () => {

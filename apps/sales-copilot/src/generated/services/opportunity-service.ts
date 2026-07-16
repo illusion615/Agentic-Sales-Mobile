@@ -22,7 +22,9 @@ const FIELD_MAP: Record<string, string> = {
   expectedclosedate: 'crf5c_expectedclosedate',
   lastaction: 'crf5c_lastaction',
   ownerid: 'crf5c_ownerid',
-  totalamount: 'crf5c_totalamount',
+  totalamount: 'crf5c_amount',
+  amountBase: 'crf5c_amount_base',
+  currencyId: '_transactioncurrencyid_value',
 };
 
 function fromDv(dv: Crf5c_opportunity1s): Opportunity {
@@ -43,7 +45,12 @@ function fromDv(dv: Crf5c_opportunity1s): Opportunity {
     lastaction: dv.crf5c_lastaction,
     ownerid: (d._ownerid_value as string) ?? '',
     stage: dvChoice(d, 'crf5c_stage', Crf5c_opportunity1scrf5c_stage),
-    totalamount: dv.crf5c_totalamount ?? 0,
+    // Prefer the native currency (Money) field; fall back to the legacy decimal for any
+    // not-yet-migrated row. amountBase is the Dataverse-computed base-currency value.
+    totalamount: dv.crf5c_amount ?? dv.crf5c_totalamount ?? 0,
+    amountBase: dv.crf5c_amount_base ?? dv.crf5c_amount ?? dv.crf5c_totalamount ?? 0,
+    currencyId: dv._transactioncurrencyid_value || undefined,
+    currencyName: dv.transactioncurrencyidname || undefined,
   };
 }
 
@@ -58,7 +65,12 @@ function toDv(r: Partial<Omit<Opportunity, 'id'>>): Record<string, unknown> {
   if (r.expectedclosedate !== undefined) dv.crf5c_expectedclosedate = r.expectedclosedate;
   if (r.lastaction !== undefined) dv.crf5c_lastaction = r.lastaction;
   if (r.stage !== undefined) dv.crf5c_stage = labelToDv(OpportunityStageKeyToLabel, r.stage);
-  if (r.totalamount !== undefined) dv.crf5c_totalamount = numToDv(r.totalamount);
+  if (r.totalamount !== undefined) {
+    // Write the native currency (Money) field; keep the legacy decimal in sync during the transition.
+    dv.crf5c_amount = numToDv(r.totalamount);
+    dv.crf5c_totalamount = numToDv(r.totalamount);
+  }
+  if (r.currencyId) dv['TransactionCurrencyId@odata.bind'] = `/transactioncurrencies(${r.currencyId})`;
   return dv;
 }
 

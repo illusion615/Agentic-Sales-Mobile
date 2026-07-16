@@ -9,7 +9,9 @@
  * kind (opportunity / account / activity / contact), not just opportunities.
  */
 
-export type EntityKind = 'opportunity' | 'account' | 'activity' | 'contact';
+import type { RecordEntityType } from '@/lib/record-route';
+
+export type EntityKind = RecordEntityType;
 export type ChartType = 'bar' | 'donut' | 'line';
 export type ChartMetric = 'amount' | 'count';
 
@@ -64,15 +66,6 @@ const STAGE_LABEL: Record<string, { zh: string; en: string }> = {
 
 const OTHER_KEY = '__other__';
 const MAX_BUCKETS = 10;
-
-const ROUTE: Record<EntityKind, string> = {
-  opportunity: 'opportunities', account: 'accounts', activity: 'activities', contact: 'contacts',
-};
-
-/** Detail route for a drill-down record. */
-export function entityRoute(kind: EntityKind, id: string): string {
-  return `/${ROUTE[kind]}/${id}`;
-}
 
 function asRecord(v: unknown): Record<string, unknown> | null {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;

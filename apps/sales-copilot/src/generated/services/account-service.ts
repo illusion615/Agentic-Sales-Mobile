@@ -11,6 +11,11 @@ const FIELD_MAP: Record<string, string> = {
   id: 'accountid',
   name1: 'name',
   address: 'address1_composite',
+  addressLine1: 'address1_line1',
+  addressCity: 'address1_city',
+  addressStateOrProvince: 'address1_stateorprovince',
+  addressCountry: 'address1_country',
+  addressPostalCode: 'address1_postalcode',
   email: 'emailaddress1',
   industry: 'industrycode',
   website: 'websiteurl',
@@ -26,6 +31,11 @@ function fromDv(dv: AccountEntity): Account {
     id: dv.accountid,
     name1: dv.name,
     address: dv.address1_composite ?? dv.address1_line1,
+    addressLine1: dv.address1_line1,
+    addressCity: dv.address1_city,
+    addressStateOrProvince: dv.address1_stateorprovince,
+    addressCountry: dv.address1_country,
+    addressPostalCode: dv.address1_postalcode,
     email: dv.emailaddress1,
     industry: dv.industrycode != null ? String(dv.industrycode) : undefined,
     website: dv.websiteurl,
@@ -40,7 +50,12 @@ function fromDv(dv: AccountEntity): Account {
 function toDv(r: Partial<Omit<Account, 'id'>>): Record<string, unknown> {
   const dv: Record<string, unknown> = {};
   if (r.name1 !== undefined) dv.name = r.name1;
-  if (r.address !== undefined) dv.address1_line1 = r.address;
+  if (r.addressLine1 !== undefined) dv.address1_line1 = r.addressLine1;
+  else if (r.address !== undefined) dv.address1_line1 = r.address;
+  if (r.addressCity !== undefined) dv.address1_city = r.addressCity;
+  if (r.addressStateOrProvince !== undefined) dv.address1_stateorprovince = r.addressStateOrProvince;
+  if (r.addressCountry !== undefined) dv.address1_country = r.addressCountry;
+  if (r.addressPostalCode !== undefined) dv.address1_postalcode = r.addressPostalCode;
   if (r.email !== undefined) dv.emailaddress1 = r.email;
   if (r.notes !== undefined) dv.description = r.notes;
   if (r.phone !== undefined) dv.telephone1 = r.phone;

@@ -59,17 +59,20 @@ import { FloatingQuickActions } from '@/components/floating-quick-actions';
 import { AISummaryCard } from '@/components/ai-summary-card';
 import { MarkdownContent } from '@/components/markdown-content';
 import { useAccount, useUpdateAccount, useDeleteAccount } from '@/generated/hooks/use-account';
-import { useQueryClient } from '@tanstack/react-query';
+import { useMutation, useIsMutating, useQueryClient } from '@tanstack/react-query';
 import { useContactList } from '@/generated/hooks/use-contact';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
-import { useActivityList } from '@/generated/hooks/use-activity';
+import { useActivityList, useCreateActivity } from '@/generated/hooks/use-activity';
 import { useEntityAISummary, useWithAISummaryTrigger } from '@/hooks/use-ai-summary-trigger';
+import { useBusinessSettings } from '@/hooks/use-business-settings';
 import type { Opportunity } from '@/generated/models/opportunity-model';
 import type { Activity } from '@/generated/models/activity-model';
 import type { Contact } from '@/generated/models/contact-model';
+import type { InsightAction } from '@/lib/insight-actions';
 import { toast } from '@/lib/toast-utils';
 import { getLocale, t } from '@/lib/i18n';
 import { industryLabel } from '@/lib/industry';
+import { contactRecencyStatus, daysSinceContact as calculateDaysSinceContact, formatLastContact, latestContactByAccount } from '@/lib/account-engagement';
 import { useCopilot } from '@/contexts/copilot-context';
 import { PullToRefresh } from '@/components/pull-to-refresh';
 import {
@@ -101,13 +104,6 @@ function formatDate(dateStr?: string): string {
   return new Date(dateStr).toLocaleDateString();
 }
 
-function getDaysSince(dateStr?: string): number {
-  if (!dateStr) return 999;
-  const date = new Date(dateStr);
-  const now = new Date();
-  return Math.ceil(Math.abs(now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
-}
-
 function getActivityTypeIcon(type: string | null | undefined): React.ComponentType<{ className?: string }> {
   switch (type) {
     case 'visit': return Calendar;
@@ -130,7 +126,6 @@ export default function ClientDetailPage() {
   const [activeTab, setActiveTab] = useState('overview');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [isEditMode, setIsEditMode] = useState(searchParams.get('edit') === 'true');
-  const [isEnriching, setIsEnriching] = useState(false);
   const [enrichFeedback, setEnrichFeedback] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
   const [isMarketingExpanded, setIsMarketingExpanded] = useState(true);
   const locale = getLocale();
@@ -178,6 +173,7 @@ export default function ClientDetailPage() {
   const { data: allActivities = [] } = useActivityList();
   const updateAccount = useUpdateAccount();
   const deleteAccount = useDeleteAccount();
+  const createActivity = useCreateActivity();
   const queryClient = useQueryClient();
 
   // Pull to refresh handler
@@ -190,51 +186,15 @@ export default function ClientDetailPage() {
     ]);
   }, [queryClient, id]);
 
-  // After a Marketing Insight refresh, regenerate Sales Insight so it reflects
-  // the new public facts (combined with pipeline + activities).
-  const [salesRegenQueued, setSalesRegenQueued] = useState(false);
-
-  // On-demand enrichment: ask the Account Enrichment Agent to refresh this
-  // account's public master fields and description intelligence block.
-  const handleEnrich = useCallback(async () => {
-    if (!account || isEnriching) return;
-    setIsEnriching(true);
-    setEnrichFeedback(null);
-    try {
-      const res = await triggerAccountEnrichment(account, locale);
-      if (!res.success || !res.result) throw new Error(res.error || 'Enrichment failed');
-      if (res.result.status === 'skipped') {
-        setEnrichFeedback({
-          kind: 'error',
-          text: res.result.reason || (locale === 'zh-Hans' ? '未找到足够的公开信息。' : 'Not enough public information found.'),
-        });
-      } else {
-        await applyEnrichmentToAccount(account, res.result);
-        setEnrichFeedback({
-          kind: 'success',
-          text: locale === 'zh-Hans' ? '客户情报已更新。' : 'Customer intelligence updated.',
-        });
-        await queryClient.invalidateQueries({ queryKey: ['account', id] });
-        await queryClient.invalidateQueries({ queryKey: ['aISummary-list'] });
-        setSalesRegenQueued(true);
-      }
-    } catch (err: unknown) {
-      setEnrichFeedback({
-        kind: 'error',
-        text: err instanceof Error && err.message
-          ? err.message
-          : (locale === 'zh-Hans' ? '刷新失败，请稍后重试' : 'Refresh failed, please try again'),
-      });
-    } finally {
-      setIsEnriching(false);
-    }
-  }, [account, id, locale, isEnriching, queryClient]);
+  // On-demand account enrichment is defined below as a GLOBAL mutation (keyed by
+  // account id) so its running state survives navigation — see `handleEnrich`.
 
   // AI Summary hooks
   const { summary: aiSummary, isLoading: isLoadingAISummary, isGenerating, isExpired, isFailed, localeMismatch, refetch: refetchAISummary } = useEntityAISummary('account', id || '');
   // Marketing Insight is stored as a separate AISummary record (type='marketing').
   const { summary: marketingRecord } = useEntityAISummary('account', id || '', 'marketing');
   const { triggerForEntity, isTriggering } = useWithAISummaryTrigger();
+  const { settings: businessSettings } = useBusinessSettings();
 
   // Initialize edit form when account loads
   useMemo(() => {
@@ -277,6 +237,71 @@ export default function ClientDetailPage() {
     }, 500);
   }, [account, opportunities, activities, contacts, triggerForEntity, refetchAISummary, marketingRecord]);
 
+  // Create a follow-up activity from a structured insight action, linked to this
+  // account (closes the loop insight → action → record). Mirrors activity detail.
+  const handleCreateInsightTask = useCallback(async (action: InsightAction, scheduledDate: string): Promise<string | null> => {
+    if (!account) return null;
+    try {
+      const created = await createActivity.mutateAsync({
+        title: action.title,
+        type: action.type,
+        scheduleddate: scheduledDate,
+        status: 'open',
+        ownerid: '',
+        ...(action.explanation ? { notes: action.explanation } : {}),
+        account: { id: account.id, name1: account.name1 },
+      } as Parameters<typeof createActivity.mutateAsync>[0]);
+      return (created as { id?: string })?.id ?? null;
+    } catch {
+      toast.error(t('suggestedTasksFailed', locale));
+      return null;
+    }
+  }, [account, createActivity, locale]);
+
+  // Account enrichment as a GLOBAL mutation keyed by account id: the running
+  // state (read via useIsMutating) survives navigating away and back, so the
+  // button stays disabled / shows "fetching…" and the user can't launch a
+  // duplicate run. The whole flow — apply + invalidate + Sales Insight regen —
+  // lives in the mutationFn so it finishes even if the page unmounts.
+  const enrichMutation = useMutation({
+    mutationKey: ['account-enrichment', id],
+    mutationFn: async (): Promise<{ kind: 'ok' } | { kind: 'skipped'; reason?: string }> => {
+      if (!account) throw new Error('Account not loaded');
+      const res = await triggerAccountEnrichment(account, locale);
+      if (!res.success || !res.result) throw new Error(res.error || 'Enrichment failed');
+      if (res.result.status === 'skipped') return { kind: 'skipped', reason: res.result.reason };
+      await applyEnrichmentToAccount(account, res.result);
+      await queryClient.invalidateQueries({ queryKey: ['account', id] });
+      await queryClient.invalidateQueries({ queryKey: ['aISummary-list'] });
+      // Regenerate Sales Insight from the fresh public facts + pipeline + activities.
+      triggerForEntity('account', account.id, { ...account } as Record<string, unknown>, {
+        opportunities: opportunities.map((o: Opportunity) => ({ id: o.id, name: o.name1, stage: o.stage, amount: o.totalamount })),
+        activities: activities.map((a: Activity) => ({ id: a.id, title: a.title, type: a.type, date: a.scheduleddate })),
+        contacts: contacts.map((c: Contact) => ({ id: c.id, name: c.fullname, title: c.title })),
+        marketingInsight: marketingRecord?.summary || '',
+      });
+      return { kind: 'ok' };
+    },
+    onSuccess: (r) => {
+      if (r.kind === 'skipped') {
+        setEnrichFeedback({ kind: 'error', text: r.reason || (locale === 'zh-Hans' ? '未找到足够的公开信息。' : 'Not enough public information found.') });
+      } else {
+        setEnrichFeedback({ kind: 'success', text: locale === 'zh-Hans' ? '客户情报已更新。' : 'Customer intelligence updated.' });
+      }
+    },
+    onError: (err: unknown) => {
+      setEnrichFeedback({ kind: 'error', text: err instanceof Error && err.message ? err.message : (locale === 'zh-Hans' ? '刷新失败，请稍后重试' : 'Refresh failed, please try again') });
+    },
+  });
+  // Global running flag — reads the mutation cache, so it stays true across an
+  // unmount/remount while the same account's enrichment is still in flight.
+  const isEnriching = useIsMutating({ mutationKey: ['account-enrichment', id] }) > 0;
+  const handleEnrich = useCallback(() => {
+    if (!account || isEnriching) return;
+    setEnrichFeedback(null);
+    enrichMutation.mutate();
+  }, [account, isEnriching, enrichMutation]);
+
   // Regenerate the insight when the user switched language since it was generated.
   useEffect(() => {
     if (localeMismatch && account && !isGenerating && !isTriggering && !isRefreshingAI) {
@@ -284,18 +309,9 @@ export default function ClientDetailPage() {
     }
   }, [localeMismatch, account, isGenerating, isTriggering, isRefreshingAI, handleRefreshAISummary]);
 
-  // After enrichment refreshes the Marketing Insight facts, regenerate Sales
-  // Insight so it is derived from the latest facts + pipeline + activities.
-  useEffect(() => {
-    if (salesRegenQueued && account && !isEnriching && !isTriggering && !isRefreshingAI) {
-      setSalesRegenQueued(false);
-      handleRefreshAISummary();
-    }
-  }, [salesRegenQueued, account, isEnriching, isTriggering, isRefreshingAI, handleRefreshAISummary]);
-
   // Calculate stats
   const totalPipelineValue = opportunities.reduce(
-    (sum: number, opp: Opportunity) => sum + (opp.totalamount || 0),
+    (sum: number, opp: Opportunity) => sum + (opp.amountBase ?? opp.totalamount ?? 0),
     0
   );
   const wonStage = 'won';
@@ -304,7 +320,13 @@ export default function ClientDetailPage() {
     (opp: Opportunity) => opp.stage !== wonStage && opp.stage !== lostStage
   );
 
-  const daysSinceContact = 999; // computed from activities instead
+  const latestContact = useMemo(
+    () => latestContactByAccount(allActivities, allOpportunities, allContacts).get(id || ''),
+    [allActivities, allOpportunities, allContacts, id],
+  );
+  const daysSinceContact = calculateDaysSinceContact(latestContact);
+  const contactStatus = contactRecencyStatus(daysSinceContact);
+  const lastContactText = formatLastContact(daysSinceContact, locale);
 
   // Copilot context for agent awareness
   const copilot = useCopilot();
@@ -329,6 +351,8 @@ export default function ClientDetailPage() {
         contactsCount: contacts.length,
         opportunitiesCount: opportunities.length,
         activitiesCount: activities.length,
+        daysSinceContact,
+        lastContact: lastContactText,
         totalPipelineValue,
         notes: account.notes,
       },
@@ -337,7 +361,7 @@ export default function ClientDetailPage() {
     return () => {
       copilot.setPageContext(null);
     };
-  }, [account, contacts.length, opportunities.length, activities.length, totalPipelineValue, daysSinceContact, activeDeals.length, locale, copilot.setPageContext]);
+  }, [account, contacts.length, opportunities.length, activities.length, totalPipelineValue, daysSinceContact, lastContactText, activeDeals.length, locale, copilot.setPageContext]);
 
   const handleDelete = async () => {
     if (!account) return;
@@ -664,12 +688,12 @@ export default function ClientDetailPage() {
                 {industryLabel(account.industry) || 'Uncategorized'}
               </p>
               <div className="flex flex-wrap gap-2">
-                {daysSinceContact <= 14 ? (
+                {contactStatus === 'recent' || contactStatus === 'active' ? (
                   <Badge variant="outline" className="gap-1 text-emerald-600 border-emerald-200 dark:border-emerald-900">
                     <CheckCircle2 className="w-3 h-3" />
                     Active
                   </Badge>
-                ) : daysSinceContact > 30 ? (
+                ) : contactStatus === 'at-risk' || contactStatus === 'never' ? (
                   <Badge variant="outline" className="gap-1 text-rose-600 border-rose-200 dark:border-rose-900">
                     <AlertTriangle className="w-3 h-3" />
                     At Risk
@@ -754,8 +778,10 @@ export default function ClientDetailPage() {
               <p className="text-xs text-muted-foreground">Active Deals</p>
             </div>
             <div className="text-center">
-              <p className="text-lg font-bold text-foreground">{daysSinceContact}d</p>
-              <p className="text-xs text-muted-foreground">Since Contact</p>
+              <p className="text-lg font-bold text-foreground">
+                {lastContactText}
+              </p>
+              <p className="text-xs text-muted-foreground">{t('lastContact', locale)}</p>
             </div>
           </div>
         </GlassCard>
@@ -863,6 +889,7 @@ export default function ClientDetailPage() {
             </GlassCard>
 
             {/* AI Insights */}
+            {businessSettings.aiSummaryEnabled && (
             <AISummaryCard
               title={locale === 'zh-Hans' ? '销售洞察' : 'Sales Insight'}
               summary={aiSummary}
@@ -872,7 +899,10 @@ export default function ClientDetailPage() {
               isFailed={isFailed}
               isRefreshing={isRefreshingAI || isTriggering}
               onRefresh={handleRefreshAISummary}
+              entityId={account.id}
+              onCreateTask={handleCreateInsightTask}
             />
+            )}
           </TabsContent>
 
           {/* Contacts Tab */}
