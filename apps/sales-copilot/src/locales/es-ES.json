@@ -120,8 +120,6 @@
   "voicePremium": "Premium",
   "homeHeaderWidget": "Mostrar en la parte superior del inicio",
   "notFound": "No encontrado",
-  "pageNotFound": "Página no encontrada",
-  "pageNotFoundDesc": "La página solicitada no existe o se ha eliminado",
   "backToHome": "Volver al inicio",
   "slideUpCancelRecording": "Desliza hacia arriba para cancelar · Grabando...",
   "stepLabel": "Paso {index}/{total}",

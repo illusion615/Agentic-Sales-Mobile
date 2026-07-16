@@ -120,8 +120,6 @@
   "voicePremium": "Premium",
   "homeHeaderWidget": "Affichage en haut de l'accueil",
   "notFound": "Introuvable",
-  "pageNotFound": "Page introuvable",
-  "pageNotFoundDesc": "La page demandée n'existe pas ou a été supprimée",
   "backToHome": "Retour à l'accueil",
   "slideUpCancelRecording": "Balayez vers le haut pour annuler · Enregistrement...",
   "stepLabel": "Étape {index}/{total}",
