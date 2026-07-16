@@ -28,6 +28,15 @@ const itemVariants = {
   show: { opacity: 1, y: 0 },
 } as const;
 
+// Collapsible stage-group body. Uses the SAME variant labels as the page
+// container so that, when it re-mounts on expand, it forwards the 'show' state
+// to the opportunity cards inside (variants={itemVariants}) — otherwise those
+// cards stay stuck at 'hidden' (opacity 0) and the expanded group looks empty.
+const groupBodyVariants = {
+  hidden: { height: 0, opacity: 0 },
+  show: { height: 'auto', opacity: 1 },
+} as const;
+
 const stageConfig: Record<string, { zh: string; en: string; de: string; fr: string; es: string; color: string; bgLight: string }> = {
   prospecting: { zh: '探索', en: 'Prospecting', de: 'Akquise', fr: 'Prospection', es: 'Prospección', color: 'bg-blue-500', bgLight: 'bg-blue-500/20' },
   qualification: { zh: '资质', en: 'Qualification', de: 'Qualifizierung', fr: 'Qualification', es: 'Calificación', color: 'bg-cyan-500', bgLight: 'bg-cyan-500/20' },
@@ -571,9 +580,10 @@ export default function OpportunityReviewPage() {
                       <AnimatePresence initial={false}>
                         {!collapsed && (
                           <motion.div
-                            initial={{ height: 0, opacity: 0 }}
-                            animate={{ height: 'auto', opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }}
+                            variants={groupBodyVariants}
+                            initial="hidden"
+                            animate="show"
+                            exit="hidden"
                             transition={{ duration: 0.2 }}
                             className="overflow-hidden"
                           >
