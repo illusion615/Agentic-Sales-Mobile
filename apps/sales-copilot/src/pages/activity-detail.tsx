@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect } from 'react';
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { industryLabel } from '@/lib/industry';
@@ -39,7 +39,7 @@ import { useContactList } from '@/generated/hooks/use-contact';
 import { useAccountList } from '@/generated/hooks/use-account';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import type { Contact } from '@/generated/models/contact-model';import type { Account } from '@/generated/models/account-model';import type { Opportunity, OpportunityStageKeyToLabel as OpportunityStageKeyToLabelType } from '@/generated/models/opportunity-model';import { useEntityAISummary, useWithAISummaryTrigger } from '@/hooks/use-ai-summary-trigger';
-import { useBusinessSettings } from '@/hooks/use-business-settings';
+import { useAiInsightSettings } from '@/hooks/use-ai-insight-settings';
 import type { Activity as DataverseActivity } from '@/generated/models/activity-model';import { toast } from '@/lib/toast-utils';
 import {
   AlertDialog,
@@ -155,7 +155,7 @@ export default function ActivityDetailPage() {
   // AI Summary hooks
   const { summary: aiSummary, isLoading: isLoadingAISummary, isGenerating, isExpired, isFailed, localeMismatch, refetch: refetchAISummary } = useEntityAISummary('activity', id || '');
   const { triggerForEntity, isTriggering } = useWithAISummaryTrigger();
-  const { settings: businessSettings } = useBusinessSettings();
+  const { showInsights, autoGenerate } = useAiInsightSettings();
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [profileSheetOpen, setProfileSheetOpen] = useState(false);
@@ -259,6 +259,17 @@ export default function ActivityDetailPage() {
       handleRefreshAISummary();
     }
   }, [localeMismatch, activity, isGenerating, isTriggering, isRefreshingAI, handleRefreshAISummary]);
+
+  // Auto-generate the insight on open when the user opted into auto-generation
+  // and this record has none yet (settings → AI assistant). One shot per record.
+  const autoGenForIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!showInsights || !autoGenerate || !activity) return;
+    if (aiSummary || isLoadingAISummary || isGenerating || isTriggering || isRefreshingAI) return;
+    if (autoGenForIdRef.current === activity.id) return;
+    autoGenForIdRef.current = activity.id;
+    handleRefreshAISummary();
+  }, [showInsights, autoGenerate, activity, aiSummary, isLoadingAISummary, isGenerating, isTriggering, isRefreshingAI, handleRefreshAISummary]);
 
   const handleMarkComplete = async () => {
     if (!activity) return;
@@ -816,7 +827,7 @@ export default function ActivityDetailPage() {
         </GlassCard>
 
         {/* AI Insight — narrative + structured, explained next actions (closed loop) */}
-        {businessSettings.aiSummaryEnabled && (
+        {showInsights && (
         <AISummaryCard
           summary={aiSummary}
           isLoading={isLoadingAISummary}

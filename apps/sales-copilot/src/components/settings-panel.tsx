@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { ArrowLeft, Moon, Sun, Globe, HelpCircle, LogOut, Volume2, Play, Type, Palette, CircleDot, LayoutGrid, Speech, X, Zap, LayoutDashboard, Database, ChevronRight, Monitor, Calendar, Maximize, Sparkles, Compass, Rows3, Activity, MessageSquareWarning } from 'lucide-react';
+import { ArrowLeft, Moon, Sun, Globe, HelpCircle, LogOut, Volume2, Play, Type, Palette, CircleDot, LayoutGrid, Speech, X, Zap, LayoutDashboard, Database, ChevronRight, Monitor, Calendar, Maximize, Sparkles, Eye, Compass, Rows3, Activity, MessageSquareWarning } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
 import { ThinkingIndicator } from '@/components/thinking-indicator';
 import { Button } from '@/components/ui/button';
 
-import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, getAzureVoiceForLocale, setSelectedVoice, getVoiceEngine, setVoiceEngine, getSpeechInputMode, setSpeechInputMode, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, getCopilotDockLayout, setCopilotDockLayout, copilotDockLayoutLabels, getWeekStartDay, setWeekStartDay, getCopilotFullscreenDefault, setCopilotFullscreenDefault, getCompactDraftForms, setCompactDraftForms, getFollowupSuggestionsEnabled, setFollowupSuggestionsEnabled, getAgendaDefaultExpanded, setAgendaDefaultExpanded, getCopilotListDefaultView, setCopilotListDefaultView, getCopilotListTopN, setCopilotListTopN, SUPPORTED_LOCALES, LOCALE_META, speechLang, localeLangPrefix, pickLabel, type Locale, type VoiceOption, type VoiceEngine, type SpeechInputMode, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget, type CopilotDockLayout, type WeekStartDay, type CopilotListDefaultView } from '@/lib/i18n';
+import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, getAzureVoiceForLocale, setSelectedVoice, getVoiceEngine, setVoiceEngine, getSpeechInputMode, setSpeechInputMode, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, getCopilotDockLayout, setCopilotDockLayout, copilotDockLayoutLabels, getWeekStartDay, setWeekStartDay, getCopilotFullscreenDefault, setCopilotFullscreenDefault, getCompactDraftForms, setCompactDraftForms, getFollowupSuggestionsEnabled, setFollowupSuggestionsEnabled, getShowDataAiInsights, setShowDataAiInsights, getAutoGenerateAiInsights, setAutoGenerateAiInsights, getAgendaDefaultExpanded, setAgendaDefaultExpanded, getCopilotListDefaultView, setCopilotListDefaultView, getCopilotListTopN, setCopilotListTopN, SUPPORTED_LOCALES, LOCALE_META, speechLang, localeLangPrefix, pickLabel, type Locale, type VoiceOption, type VoiceEngine, type SpeechInputMode, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget, type CopilotDockLayout, type WeekStartDay, type CopilotListDefaultView } from '@/lib/i18n';
 import { useNavigate } from 'react-router-dom';
 import { toast } from '@/lib/toast-utils';
 import { useSpeechPlayer } from '@/hooks/use-speech-player';
@@ -132,6 +132,8 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const [copilotFullscreenDefault, setCopilotFullscreenDefaultState] = useState(() => getCopilotFullscreenDefault());
   const [compactDraftForms, setCompactDraftFormsState] = useState(() => getCompactDraftForms());
   const [followupSuggestions, setFollowupSuggestionsState] = useState(() => getFollowupSuggestionsEnabled());
+  const [showDataAiInsights, setShowDataAiInsightsState] = useState(() => getShowDataAiInsights());
+  const [autoGenerateAiInsights, setAutoGenerateAiInsightsState] = useState(() => getAutoGenerateAiInsights());
   const [agendaDefaultExpanded, setAgendaDefaultExpandedState] = useState(() => getAgendaDefaultExpanded());
   const [copilotListDefaultView, setCopilotListDefaultViewState] = useState<CopilotListDefaultView>(() => getCopilotListDefaultView());
   const [copilotListTopN, setCopilotListTopNState] = useState<number>(() => getCopilotListTopN());
@@ -310,6 +312,16 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const handleFollowupSuggestionsChange = (enabled: boolean) => {
     setFollowupSuggestionsState(enabled);
     setFollowupSuggestionsEnabled(enabled);
+  };
+
+  const handleShowDataAiInsightsChange = (enabled: boolean) => {
+    setShowDataAiInsightsState(enabled);
+    setShowDataAiInsights(enabled);
+  };
+
+  const handleAutoGenerateAiInsightsChange = (enabled: boolean) => {
+    setAutoGenerateAiInsightsState(enabled);
+    setAutoGenerateAiInsights(enabled);
   };
 
   const handleAgendaDefaultExpandedChange = (enabled: boolean) => {
@@ -797,6 +809,40 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                 />
                 <p className="text-xs text-muted-foreground mt-1 pl-8">
                   {t('followupSuggestionsDesc', locale)}
+                </p>
+              </div>
+
+              {/* AI data insights — show module */}
+              <div className="pt-3 border-t border-border/30">
+                <SettingsItem
+                  icon={Eye}
+                  label={t('showDataAiInsights', locale)}
+                  rightElement={
+                    <Switch
+                      checked={showDataAiInsights}
+                      onCheckedChange={handleShowDataAiInsightsChange}
+                    />
+                  }
+                />
+                <p className="text-xs text-muted-foreground mt-1 pl-8">
+                  {t('showDataAiInsightsDesc', locale)}
+                </p>
+              </div>
+
+              {/* AI data insights — auto-generate */}
+              <div className="pt-3 border-t border-border/30">
+                <SettingsItem
+                  icon={Sparkles}
+                  label={t('autoGenerateAiInsights', locale)}
+                  rightElement={
+                    <Switch
+                      checked={autoGenerateAiInsights}
+                      onCheckedChange={handleAutoGenerateAiInsightsChange}
+                    />
+                  }
+                />
+                <p className="text-xs text-muted-foreground mt-1 pl-8">
+                  {t('autoGenerateAiInsightsDesc', locale)}
                 </p>
               </div>
 

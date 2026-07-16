@@ -9,7 +9,6 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getLocale, t } from '@/lib/i18n';
 import { useBusinessSettings } from '@/hooks/use-business-settings';
@@ -33,14 +32,12 @@ export function OpportunitySettingsSheet({
 
   const [year, setYear] = useState<number>(thisYear);
   const [targets, setTargets] = useState<Record<string, number>>({});
-  const [aiSummaryEnabled, setAiSummaryEnabled] = useState(true);
   const [riskThreshold, setRiskThreshold] = useState<number>(DEFAULT_RISK_THRESHOLD);
 
   // Seed the editable copy from stored settings each time the sheet opens.
   useEffect(() => {
     if (!open) return;
     setTargets({ ...settings.targets });
-    setAiSummaryEnabled(settings.aiSummaryEnabled);
     setRiskThreshold(settings.riskThreshold);
     setYear(thisYear);
     // Intentionally seed only when `open` flips true.
@@ -61,7 +58,7 @@ export function OpportunitySettingsSheet({
   };
 
   const handleSave = async () => {
-    const next: BusinessSettings = { targets, aiSummaryEnabled, riskThreshold };
+    const next: BusinessSettings = { targets, riskThreshold };
     await save(next);
     onOpenChange(false);
   };
@@ -107,15 +104,6 @@ export function OpportunitySettingsSheet({
                 </div>
               ))}
             </div>
-          </div>
-
-          {/* AI summary generation */}
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <Label>{t('aiSummaryGeneration', locale)}</Label>
-              <p className="text-xs text-muted-foreground mt-0.5">{t('aiSummaryGenerationDesc', locale)}</p>
-            </div>
-            <Switch checked={aiSummaryEnabled} onCheckedChange={setAiSummaryEnabled} />
           </div>
 
           {/* Risk threshold */}

@@ -12,14 +12,13 @@ import {
 
 describe('business-settings parse/defaults', () => {
   it('returns safe defaults for empty/invalid input', () => {
-    expect(parseBusinessSettings(undefined)).toEqual({ targets: {}, aiSummaryEnabled: true, riskThreshold: DEFAULT_RISK_THRESHOLD });
-    expect(parseBusinessSettings('not json')).toEqual({ targets: {}, aiSummaryEnabled: true, riskThreshold: DEFAULT_RISK_THRESHOLD });
+    expect(parseBusinessSettings(undefined)).toEqual({ targets: {}, riskThreshold: DEFAULT_RISK_THRESHOLD });
+    expect(parseBusinessSettings('not json')).toEqual({ targets: {}, riskThreshold: DEFAULT_RISK_THRESHOLD });
   });
 
   it('keeps valid targets and drops invalid ones', () => {
-    const s = parseBusinessSettings(JSON.stringify({ targets: { '2026-Q3': 500000, '2026-Q4': -1, bad: 'x' }, aiSummaryEnabled: false, riskThreshold: 40 }));
+    const s = parseBusinessSettings(JSON.stringify({ targets: { '2026-Q3': 500000, '2026-Q4': -1, bad: 'x' }, riskThreshold: 40 }));
     expect(s.targets).toEqual({ '2026-Q3': 500000 });
-    expect(s.aiSummaryEnabled).toBe(false);
     expect(s.riskThreshold).toBe(40);
   });
 
@@ -30,7 +29,7 @@ describe('business-settings parse/defaults', () => {
   });
 
   it('round-trips through serialize', () => {
-    const s: BusinessSettings = { targets: { '2026-Q1': 100 }, aiSummaryEnabled: false, riskThreshold: 60 };
+    const s: BusinessSettings = { targets: { '2026-Q1': 100 }, riskThreshold: 60 };
     expect(parseBusinessSettings(serializeBusinessSettings(s))).toEqual(s);
   });
 });

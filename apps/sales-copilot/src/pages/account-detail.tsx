@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -64,7 +64,7 @@ import { useContactList } from '@/generated/hooks/use-contact';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useActivityList, useCreateActivity } from '@/generated/hooks/use-activity';
 import { useEntityAISummary, useWithAISummaryTrigger } from '@/hooks/use-ai-summary-trigger';
-import { useBusinessSettings } from '@/hooks/use-business-settings';
+import { useAiInsightSettings } from '@/hooks/use-ai-insight-settings';
 import type { Opportunity } from '@/generated/models/opportunity-model';
 import type { Activity } from '@/generated/models/activity-model';
 import type { Contact } from '@/generated/models/contact-model';
@@ -194,7 +194,7 @@ export default function ClientDetailPage() {
   // Marketing Insight is stored as a separate AISummary record (type='marketing').
   const { summary: marketingRecord } = useEntityAISummary('account', id || '', 'marketing');
   const { triggerForEntity, isTriggering } = useWithAISummaryTrigger();
-  const { settings: businessSettings } = useBusinessSettings();
+  const { showInsights, autoGenerate } = useAiInsightSettings();
 
   // Initialize edit form when account loads
   useMemo(() => {
@@ -308,6 +308,17 @@ export default function ClientDetailPage() {
       handleRefreshAISummary();
     }
   }, [localeMismatch, account, isGenerating, isTriggering, isRefreshingAI, handleRefreshAISummary]);
+
+  // Auto-generate the insight on open when the user opted into auto-generation
+  // and this record has none yet (settings → AI assistant). One shot per record.
+  const autoGenForIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!showInsights || !autoGenerate || !account) return;
+    if (aiSummary || isLoadingAISummary || isGenerating || isTriggering || isRefreshingAI) return;
+    if (autoGenForIdRef.current === account.id) return;
+    autoGenForIdRef.current = account.id;
+    handleRefreshAISummary();
+  }, [showInsights, autoGenerate, account, aiSummary, isLoadingAISummary, isGenerating, isTriggering, isRefreshingAI, handleRefreshAISummary]);
 
   // Calculate stats
   const totalPipelineValue = opportunities.reduce(
@@ -889,7 +900,7 @@ export default function ClientDetailPage() {
             </GlassCard>
 
             {/* AI Insights */}
-            {businessSettings.aiSummaryEnabled && (
+            {showInsights && (
             <AISummaryCard
               title={locale === 'zh-Hans' ? '销售洞察' : 'Sales Insight'}
               summary={aiSummary}

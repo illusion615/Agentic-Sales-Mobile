@@ -1318,6 +1318,28 @@ export function setFollowupSuggestionsEnabled(enabled: boolean): void {
   window.dispatchEvent(new CustomEvent('followupsuggestions-changed', { detail: enabled }));
 }
 
+// ── AI data insights (global) ──
+// Whether the AI insight modules (account Sales Insight, activity insight,
+// pipeline AI summary) are DISPLAYED on record pages at all. Default ON.
+export function getShowDataAiInsights(): boolean {
+  return localStorage.getItem('showDataAiInsights') !== 'false'; // default true
+}
+export function setShowDataAiInsights(enabled: boolean): void {
+  localStorage.setItem('showDataAiInsights', String(enabled));
+  window.dispatchEvent(new CustomEvent('aiinsights-changed', { detail: enabled }));
+}
+
+// Whether to AUTO-GENERATE an AI insight when a record has none yet (costs AI
+// credits). Off = the module shows empty with a manual "generate" button.
+// Default OFF (opt-in) — no AI call is made until the user turns this on.
+export function getAutoGenerateAiInsights(): boolean {
+  return localStorage.getItem('autoGenerateAiInsights') === 'true'; // default false
+}
+export function setAutoGenerateAiInsights(enabled: boolean): void {
+  localStorage.setItem('autoGenerateAiInsights', String(enabled));
+  window.dispatchEvent(new CustomEvent('aiinsights-changed', { detail: enabled }));
+}
+
 // Agenda default expanded on home page
 export function getAgendaDefaultExpanded(): boolean {
   return localStorage.getItem('agendaDefaultExpanded') !== 'false'; // default true

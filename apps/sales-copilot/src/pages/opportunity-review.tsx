@@ -8,6 +8,7 @@ import { useUser } from '@/hooks/use-user';
 import { getLocale, t, pickLabel, type Locale } from '@/lib/i18n';
 import { useFirstMount } from '@/hooks/use-first-mount';
 import { useBusinessSettings } from '@/hooks/use-business-settings';
+import { useAiInsightSettings } from '@/hooks/use-ai-insight-settings';
 import { OpportunitySettingsSheet } from '@/components/opportunity-settings-sheet';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -96,6 +97,7 @@ export default function OpportunityReviewPage() {
   const { data: opportunities = [] } = useOpportunityList();
   const { data: user } = useUser();
   const { settings } = useBusinessSettings();
+  const { showInsights, autoGenerate } = useAiInsightSettings();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<OpportunitySortKey>('closeDate');
@@ -161,7 +163,7 @@ export default function OpportunityReviewPage() {
   const atRiskCount = activeOpps.filter((o) => (o.confidence ?? 100) < settings.riskThreshold).length;
 
   const generateAISummary = useCallback(async () => {
-    if (activeOpps.length === 0 || !settings.aiSummaryEnabled) return;
+    if (activeOpps.length === 0) return;
     setAiLoading(true);
     try {
       const pipelineData = activeOpps.map((o) => ({
@@ -205,13 +207,14 @@ export default function OpportunityReviewPage() {
     } finally {
       setAiLoading(false);
     }
-  }, [activeOpps, locale, settings.aiSummaryEnabled]);
+  }, [activeOpps, locale]);
 
-  // Load cached summary or auto-generate. Cache is locale-scoped: insights in a
-  // different language are ignored so switching language regenerates them.
-  // Skips entirely when the user has disabled AI summary generation (no cost).
+  // Load cached summary always (no AI cost); only auto-generate a fresh insight
+  // when the module is visible and the user opted into auto-generation. Cache is
+  // locale-scoped: insights in a different language are ignored so switching
+  // language regenerates them.
   useEffect(() => {
-    if (activeOpps.length === 0 || !settings.aiSummaryEnabled) return;
+    if (activeOpps.length === 0) return;
     try {
       const cached = localStorage.getItem(AI_SUMMARY_CACHE_KEY);
       if (cached) {
@@ -222,8 +225,8 @@ export default function OpportunityReviewPage() {
         }
       }
     } catch { /* ignore */ }
-    generateAISummary();
-  }, [activeOpps.length > 0, locale, settings.aiSummaryEnabled]); // regenerate when data arrives or language changes
+    if (showInsights && autoGenerate) generateAISummary();
+  }, [activeOpps.length > 0, locale, showInsights, autoGenerate]); // regenerate when data arrives or language changes
 
   // Carousel scroll sync
   const handleCarouselScroll = () => {
@@ -428,8 +431,8 @@ export default function OpportunityReviewPage() {
             )}
           </motion.div>
 
-          {/* ─── AI Summary Carousel (gated on the AI summary generation setting) ─── */}
-          {settings.aiSummaryEnabled && (
+          {/* ─── AI Summary Carousel (gated on the "show data AI insights" setting) ─── */}
+          {showInsights && (
           <motion.div variants={itemVariants} className="mx-4">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-1.5">

@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import {
@@ -44,7 +44,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useAccount } from '@/generated/hooks/use-account';
 import { useActivityList } from '@/generated/hooks/use-activity';
 import { useEntityAISummary, useWithAISummaryTrigger } from '@/hooks/use-ai-summary-trigger';
-import { useBusinessSettings } from '@/hooks/use-business-settings';
+import { useAiInsightSettings } from '@/hooks/use-ai-insight-settings';
 import {  } from '@/generated/models/opportunity-model';
 import type { Activity } from '@/generated/models/activity-model';import { toast } from '@/lib/toast-utils';
 import { getLocale, t } from '@/lib/i18n';
@@ -174,7 +174,7 @@ export default function OpportunityDetailPage() {
   // AI Summary hooks
   const { summary: aiSummary, isLoading: isLoadingAISummary, isGenerating, isExpired, isFailed, localeMismatch, refetch: refetchAISummary } = useEntityAISummary('opportunity', id || '');
   const { triggerForEntity, isTriggering } = useWithAISummaryTrigger();
-  const { settings: businessSettings } = useBusinessSettings();
+  const { showInsights, autoGenerate } = useAiInsightSettings();
 
   // Filter activities for this opportunity
   const activities = useMemo(() => 
@@ -202,6 +202,17 @@ export default function OpportunityDetailPage() {
       handleRefreshAISummary();
     }
   }, [localeMismatch, opportunity, isGenerating, isTriggering, isRefreshingAI, handleRefreshAISummary]);
+
+  // Auto-generate the insight on open when the user opted into auto-generation
+  // and this record has none yet (settings → AI assistant). One shot per record.
+  const autoGenForIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!showInsights || !autoGenerate || !opportunity) return;
+    if (aiSummary || isLoadingAISummary || isGenerating || isTriggering || isRefreshingAI) return;
+    if (autoGenForIdRef.current === opportunity.id) return;
+    autoGenForIdRef.current = opportunity.id;
+    handleRefreshAISummary();
+  }, [showInsights, autoGenerate, opportunity, aiSummary, isLoadingAISummary, isGenerating, isTriggering, isRefreshingAI, handleRefreshAISummary]);
 
   // Calculate days until close
   const daysUntilClose = opportunity?.expectedclosedate
@@ -490,7 +501,7 @@ export default function OpportunityDetailPage() {
             {/* Overview Tab */}
             <TabsContent value="overview" className="mt-4 space-y-4">
               {/* AI Insights */}
-              {businessSettings.aiSummaryEnabled && (
+              {showInsights && (
               <AISummaryCard
                 summary={aiSummary}
                 isLoading={isLoadingAISummary}

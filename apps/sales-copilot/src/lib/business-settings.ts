@@ -1,7 +1,6 @@
 /**
  * Per-user opportunity business settings — the single source for how a sales rep
- * configures their quarterly targets, at-risk threshold, and whether AI summaries
- * are generated.
+ * configures their quarterly targets and at-risk threshold.
  *
  * Storage: reuses the existing Dataverse `crf5c_setting` (key/value) table. One
  * row per user, `settingKey = business_settings:<Entra objectId>`, the value is
@@ -12,8 +11,6 @@
 export interface BusinessSettings {
   /** Quarterly sales targets keyed by `${year}-Q${1-4}` (e.g. "2026-Q3"). */
   targets: Record<string, number>;
-  /** When false, AI insight modules are hidden and never auto-generate. */
-  aiSummaryEnabled: boolean;
   /** Confidence % (1-99) BELOW which an opportunity counts as at-risk. */
   riskThreshold: number;
 }
@@ -22,7 +19,6 @@ export const DEFAULT_RISK_THRESHOLD = 50;
 
 export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
   targets: {},
-  aiSummaryEnabled: true,
   riskThreshold: DEFAULT_RISK_THRESHOLD,
 };
 
@@ -60,8 +56,7 @@ export function parseBusinessSettings(json: string | undefined | null): Business
       typeof raw.riskThreshold === 'number' && raw.riskThreshold >= 1 && raw.riskThreshold <= 99
         ? Math.round(raw.riskThreshold)
         : DEFAULT_RISK_THRESHOLD;
-    const aiSummaryEnabled = typeof raw.aiSummaryEnabled === 'boolean' ? raw.aiSummaryEnabled : true;
-    return { targets, aiSummaryEnabled, riskThreshold };
+    return { targets, riskThreshold };
   } catch {
     return { ...DEFAULT_BUSINESS_SETTINGS, targets: {} };
   }
