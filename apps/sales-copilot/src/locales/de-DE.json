@@ -501,6 +501,8 @@
   "sourceDetails": "Quellendetails",
   "accountName": "Kontoname",
   "viewDetails": "Details anzeigen",
+  "taskCompletedToast": "{name} ist bereit",
+  "taskFailedToast": "{name} fehlgeschlagen",
   "opportunityName": "Name der Verkaufschance",
   "totalAmount": "Gesamtbetrag",
   "activitySubject": "Aktivitätsbetreff",

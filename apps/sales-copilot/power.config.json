@@ -153,6 +153,11 @@
           "entitySetName": "transactioncurrencies",
           "logicalName": "transactioncurrency",
           "isHidden": false
+        },
+        "backgroundtasks": {
+          "entitySetName": "crf5c_backgroundtasks",
+          "logicalName": "crf5c_backgroundtask",
+          "isHidden": false
         }
       },
       "version": "v9.0",

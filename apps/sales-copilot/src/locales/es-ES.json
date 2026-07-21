@@ -501,6 +501,8 @@
   "sourceDetails": "Detalles de la fuente",
   "accountName": "Nombre de la cuenta",
   "viewDetails": "Ver detalles",
+  "taskCompletedToast": "{name} está listo",
+  "taskFailedToast": "{name} ha fallado",
   "opportunityName": "Nombre de la oportunidad",
   "totalAmount": "Importe total",
   "activitySubject": "Asunto de la actividad",

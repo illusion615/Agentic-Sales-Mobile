@@ -501,6 +501,8 @@
   "sourceDetails": "来源详情",
   "accountName": "客户名称",
   "viewDetails": "查看详情",
+  "taskCompletedToast": "{name} 已就绪",
+  "taskFailedToast": "{name} 处理失败",
   "opportunityName": "商机名称",
   "totalAmount": "总金额",
   "activitySubject": "活动主题",

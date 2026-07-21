@@ -105,6 +105,14 @@ export interface KPIData {
 }
 
 
+export interface TaskNotification {
+  id: string;
+  title: string;
+  summary: string;
+  status: 'succeeded' | 'failed';
+  route: string | null;
+}
+
 interface KPICardsProps {
   data: KPIData;
   isLoading?: boolean;
@@ -124,6 +132,9 @@ interface KPICardsProps {
   // override the internal state; otherwise the component manages it itself.
   insightsSheetOpen?: boolean;
   onInsightsSheetOpenChange?: (open: boolean) => void;
+  /** Completed/failed background-task notifications shown atop the bell sheet. */
+  taskNotifications?: TaskNotification[];
+  onOpenTaskNotification?: (notification: TaskNotification) => void;
   onRefreshInsights?: () => void;
   isRefreshingInsights?: boolean;
   insightRefreshStatus?: string;
@@ -234,6 +245,8 @@ export function KPICards({
   onProcessOverdue,
   insightsSheetOpen: insightsSheetOpenProp,
   onInsightsSheetOpenChange,
+  taskNotifications = [],
+  onOpenTaskNotification,
   onRefreshInsights,
   isRefreshingInsights = false,
   insightRefreshStatus = '',
@@ -1529,7 +1542,31 @@ export function KPICards({
               </div>
             </SheetTitle>
           </SheetHeader>
-          
+
+          {taskNotifications.length > 0 && (
+            <div className="mt-1 mb-3 space-y-2">
+              {taskNotifications.map((n) => (
+                <button
+                  key={n.id}
+                  type="button"
+                  onClick={() => onOpenTaskNotification?.(n)}
+                  className="w-full rounded-xl border border-border/60 bg-muted/40 px-3 py-2.5 text-left transition-colors hover:bg-muted"
+                >
+                  <div className="flex items-start gap-2.5">
+                    <div className={cn('mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg', n.status === 'failed' ? 'bg-rose-500/15 text-rose-500' : 'bg-emerald-500/15 text-emerald-500')}>
+                      {n.status === 'failed' ? <X className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-foreground">{n.title}</p>
+                      <p className="line-clamp-2 text-xs text-muted-foreground">{n.summary}</p>
+                    </div>
+                    {n.route && <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* Swipeable insight card */}
           {(() => {
             const currentInsight = parsedActivityInsights[insightsSheetIndex];

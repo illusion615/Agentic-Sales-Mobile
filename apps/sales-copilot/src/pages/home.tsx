@@ -13,6 +13,8 @@ import { useContactList } from '@/generated/hooks/use-contact';
 
 import { useUpdateCopilotConversation, useCreateCopilotConversation } from '@/generated/hooks/use-copilot-conversation';
 import { useCreateBusinessInsight, useBusinessInsightList, useDeleteBusinessInsight } from '@/generated/hooks/use-business-insight';
+import { useWatchedBackgroundTasks, useUpdateBackgroundTask } from '@/generated/hooks/use-background-task';
+import { taskDeepLink } from '@/lib/background-tasks';
 import { useLocale } from '@/lib/i18n';
 import { t, getGreeting, getChatFontClass, getThinkingDotStyle, getAutoPlayAgentResponse, getSelectedVoice, getAzureVoiceForLocale, getVoiceEngine, findMatchingSystemVoice, getVoiceSummaryEnabled, generateVoiceSummary, getAgentFramework, getHomeHeaderWidget, speechLang, localeBcp47, type Locale, type ThinkingDotStyle, type HomeHeaderWidget } from '@/lib/i18n';
 import { splitIntoSegments } from '@/lib/speech';
@@ -33,7 +35,7 @@ import { FormCard } from '@/components/form-card';
 import { RecordListCard } from '@/components/record-list-card';
 // InsightCarousel removed from home page (insights are now shown inside the
 // bell-triggered Insights sheet). Keep the path available via brief-me page.
-import { KPICards, type KPIData, type AgendaItem, type AtRiskClient } from '@/components/kpi-card';
+import { KPICards, type KPIData, type AgendaItem, type AtRiskClient, type TaskNotification } from '@/components/kpi-card';
 import { MarkdownContent } from '@/components/markdown-content';
 import type { BusinessInsight } from '@/generated/models/business-insight-model';import { useCopilot, type ChatMessage } from '@/contexts/copilot-context';
 import { useCopilotSideDocked } from '@/components/global-copilot';
@@ -499,6 +501,31 @@ export default function HomeDashboard() {
   const userId = user?.objectId?.toLowerCase();
 
   const unreadInsightCount = businessInsights.filter((i: { id: string }) => !readInsightIds.has(i.id)).length;
+
+  // Completed/failed background tasks not yet seen — surfaced in the bell as a
+  // notification strip; tapping marks the task seen (crf5c_seenon) and jumps to
+  // the produced record.
+  const { data: watchedTasks = [] } = useWatchedBackgroundTasks();
+  const updateBackgroundTask = useUpdateBackgroundTask();
+  const taskNotifications: TaskNotification[] = useMemo(() => watchedTasks
+    .filter((task) => (task.status === 'succeeded' || task.status === 'failed') && !task.seenOn && !!task.id)
+    .map((task) => ({
+      id: task.id,
+      title: task.targetName || task.name || '',
+      summary: task.status === 'failed'
+        ? (task.error || (locale === 'zh-Hans' ? '处理失败' : 'Failed'))
+        : (task.resultSummary && task.resultSummary !== 'Done'
+            ? task.resultSummary
+            : (locale === 'zh-Hans' ? '已就绪，点击查看' : 'Ready — tap to view')),
+      status: task.status as 'succeeded' | 'failed',
+      route: taskDeepLink(task),
+    })), [watchedTasks, locale]);
+  const bellBadgeCount = unreadInsightCount + taskNotifications.length;
+  const handleOpenTaskNotification = useCallback((notif: TaskNotification) => {
+    if (notif.id) updateBackgroundTask.mutate({ id: notif.id, changedFields: { seenOn: new Date().toISOString() } });
+    setInsightsSheetOpen(false);
+    if (notif.route) navigate(notif.route);
+  }, [updateBackgroundTask, navigate]);
 
 
   // Activity-related filtering removed: the unified Insights sheet now shows
@@ -1898,11 +1925,11 @@ ${agentResponse}`;
                   aria-label={t('insights', locale)}
                 >
                   <Bell className="w-5 h-5 text-foreground" />
-                  {unreadInsightCount > 0 && (
+                  {bellBadgeCount > 0 && (
                     <span
                       className="absolute top-0.5 right-0 min-w-[16px] h-[16px] px-0.5 inline-flex items-center justify-center rounded-full bg-red-500 text-white text-[9px] font-bold border-[1.5px] border-background"
                     >
-                      {unreadInsightCount > 99 ? '99+' : unreadInsightCount}
+                      {bellBadgeCount > 99 ? '99+' : bellBadgeCount}
                     </span>
                   )}
                 </button>
@@ -1959,6 +1986,8 @@ ${agentResponse}`;
               allActivities={activities}
               insightsSheetOpen={insightsSheetOpen}
               onInsightsSheetOpenChange={handleInsightsSheetOpenChange}
+              taskNotifications={taskNotifications}
+              onOpenTaskNotification={handleOpenTaskNotification}
               onRefreshInsights={handleRefreshInsight}
               isRefreshingInsights={isRefreshingInsight}
               insightRefreshStatus={insightRefreshStatus}

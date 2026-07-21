@@ -59,7 +59,7 @@ import { FloatingQuickActions } from '@/components/floating-quick-actions';
 import { AISummaryCard } from '@/components/ai-summary-card';
 import { MarkdownContent } from '@/components/markdown-content';
 import { useAccount, useUpdateAccount, useDeleteAccount } from '@/generated/hooks/use-account';
-import { useMutation, useIsMutating, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { useContactList } from '@/generated/hooks/use-contact';
 import { useOpportunityList } from '@/generated/hooks/use-opportunity';
 import { useActivityList, useCreateActivity } from '@/generated/hooks/use-activity';
@@ -75,11 +75,9 @@ import { industryLabel } from '@/lib/industry';
 import { contactRecencyStatus, daysSinceContact as calculateDaysSinceContact, formatLastContact, latestContactByAccount } from '@/lib/account-engagement';
 import { useCopilot } from '@/contexts/copilot-context';
 import { PullToRefresh } from '@/components/pull-to-refresh';
-import {
-  triggerAccountEnrichment,
-  applyEnrichmentToAccount,
-  splitEnrichment,
-} from '@/services/account-enrichment-service';
+import { splitEnrichment } from '@/services/account-enrichment-service';
+import { enqueueTask } from '@/lib/background-tasks';
+import { useWatchedBackgroundTasks } from '@/generated/hooks/use-background-task';
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -258,49 +256,45 @@ export default function ClientDetailPage() {
     }
   }, [account, createActivity, locale]);
 
-  // Account enrichment as a GLOBAL mutation keyed by account id: the running
-  // state (read via useIsMutating) survives navigating away and back, so the
-  // button stays disabled / shows "fetching…" and the user can't launch a
-  // duplicate run. The whole flow — apply + invalidate + Sales Insight regen —
-  // lives in the mutationFn so it finishes even if the page unmounts.
-  const enrichMutation = useMutation({
-    mutationKey: ['account-enrichment', id],
-    mutationFn: async (): Promise<{ kind: 'ok' } | { kind: 'skipped'; reason?: string }> => {
-      if (!account) throw new Error('Account not loaded');
-      const res = await triggerAccountEnrichment(account, locale);
-      if (!res.success || !res.result) throw new Error(res.error || 'Enrichment failed');
-      if (res.result.status === 'skipped') return { kind: 'skipped', reason: res.result.reason };
-      await applyEnrichmentToAccount(account, res.result);
-      await queryClient.invalidateQueries({ queryKey: ['account', id] });
-      await queryClient.invalidateQueries({ queryKey: ['aISummary-list'] });
-      // Regenerate Sales Insight from the fresh public facts + pipeline + activities.
-      triggerForEntity('account', account.id, { ...account } as Record<string, unknown>, {
-        opportunities: opportunities.map((o: Opportunity) => ({ id: o.id, name: o.name1, stage: o.stage, amount: o.totalamount })),
-        activities: activities.map((a: Activity) => ({ id: a.id, title: a.title, type: a.type, date: a.scheduleddate })),
-        contacts: contacts.map((c: Contact) => ({ id: c.id, name: c.fullname, title: c.title })),
-        marketingInsight: marketingRecord?.summary || '',
-      });
-      return { kind: 'ok' };
-    },
-    onSuccess: (r) => {
-      if (r.kind === 'skipped') {
-        setEnrichFeedback({ kind: 'error', text: r.reason || (locale === 'zh-Hans' ? '未找到足够的公开信息。' : 'Not enough public information found.') });
-      } else {
-        setEnrichFeedback({ kind: 'success', text: locale === 'zh-Hans' ? '客户情报已更新。' : 'Customer intelligence updated.' });
-      }
-    },
-    onError: (err: unknown) => {
-      setEnrichFeedback({ kind: 'error', text: err instanceof Error && err.message ? err.message : (locale === 'zh-Hans' ? '刷新失败，请稍后重试' : 'Refresh failed, please try again') });
-    },
-  });
-  // Global running flag — reads the mutation cache, so it stays true across an
-  // unmount/remount while the same account's enrichment is still in flight.
-  const isEnriching = useIsMutating({ mutationKey: ['account-enrichment', id] }) > 0;
-  const handleEnrich = useCallback(() => {
+  // Fire-and-forget enrichment: enqueue a background task instead of blocking on
+  // the agent call (which times out on the mobile player). A server-side Runner
+  // flow invokes the enrichment agent, which writes the results to Dataverse; the
+  // global task watcher surfaces completion (toast + bell). The "researching…"
+  // state is derived from the task table so it survives navigation and refresh.
+  const { data: watchedTasks = [] } = useWatchedBackgroundTasks();
+  const [submittingEnrich, setSubmittingEnrich] = useState(false);
+  const hasActiveEnrichTask = watchedTasks.some(
+    (task) => task.targetEntityId === account?.id && (task.status === 'queued' || task.status === 'running'),
+  );
+  const isEnriching = submittingEnrich || hasActiveEnrichTask;
+  const handleEnrich = useCallback(async () => {
     if (!account || isEnriching) return;
     setEnrichFeedback(null);
-    enrichMutation.mutate();
-  }, [account, isEnriching, enrichMutation]);
+    setSubmittingEnrich(true);
+    try {
+      await enqueueTask({
+        taskType: 'enrichment',
+        name: `${account.name1} · ${locale === 'zh-Hans' ? '市场情报' : 'Marketing Insight'}`,
+        targetEntityType: 'account',
+        targetEntityId: account.id,
+        targetName: account.name1,
+        payload: { accountName: account.name1, website: account.website || '', outputLanguage: locale },
+      });
+      toast.success(
+        locale === 'zh-Hans'
+          ? '已发起客户情报刷新，完成后会通知你，可先去忙别的。'
+          : "Enrichment started — you'll be notified when it's ready.",
+      );
+      await queryClient.invalidateQueries({ queryKey: ['backgroundTask-watch'] });
+    } catch (err) {
+      setEnrichFeedback({
+        kind: 'error',
+        text: err instanceof Error && err.message ? err.message : (locale === 'zh-Hans' ? '发起失败，请稍后重试' : 'Failed to start, please try again'),
+      });
+    } finally {
+      setSubmittingEnrich(false);
+    }
+  }, [account, isEnriching, locale, queryClient]);
 
   // Regenerate the insight when the user switched language since it was generated.
   useEffect(() => {

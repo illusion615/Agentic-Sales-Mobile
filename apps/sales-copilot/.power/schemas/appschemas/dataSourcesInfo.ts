@@ -61,6 +61,13 @@ export const dataSourcesInfo = {
     "dataSourceType": "Dataverse",
     "apis": {}
   },
+  "crf5c_backgroundtasks": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "crf5c_backgroundtaskid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
   "crf5c_briefings": {
     "tableId": "",
     "version": "",

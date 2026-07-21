@@ -501,6 +501,8 @@
   "sourceDetails": "Source Details",
   "accountName": "Account Name",
   "viewDetails": "View Details",
+  "taskCompletedToast": "{name} is ready",
+  "taskFailedToast": "{name} failed",
   "opportunityName": "Opportunity Name",
   "totalAmount": "Total Amount",
   "activitySubject": "Activity Subject",

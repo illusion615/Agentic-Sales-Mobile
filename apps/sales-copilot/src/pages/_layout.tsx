@@ -9,6 +9,7 @@ import { useTrackNavDepth } from '@/lib/nav-depth';
 import { useOutboxSync } from '@/lib/use-outbox-sync';
 import { useKeyboardInset } from '@/hooks/use-keyboard-inset';
 import { useCurrencyCatalog } from '@/hooks/use-currencies';
+import { useBackgroundTaskWatcher } from '@/components/background-task-watcher';
 import { WhatsNew } from '@/components/whats-new';
 
 function LayoutInner() {
@@ -22,6 +23,9 @@ function LayoutInner() {
   // Load the Dataverse currency catalog once so amounts display in the environment
   // base currency symbol dynamically (never hardcoded).
   useCurrencyCatalog();
+  // Surface fire-and-forget background-task completions (toast + deep-link) no
+  // matter which page the user is on, including tasks finished while away.
+  useBackgroundTaskWatcher();
   const { docked, side } = useCopilotSideDocked();
 
   // Non-docked (mobile/float): simple container, pages handle their own scrolling.
