@@ -13,6 +13,7 @@ import type { IGetAllOptions } from '../models/CommonModels';
 import type { Activity, ActivityType } from '../models/activity-model';
 import { requireId, withReadTimeout } from './_adapter-utils';
 import { fetchActivityParticipants, fetchPrimaryActivityContact } from '@/lib/activity-party';
+import { withRetry } from '@/lib/retry';
 
 /** Participation only applies to appointment-backed activities. */
 function supportsParticipants(type: ActivityType): boolean {
@@ -178,6 +179,35 @@ function toDv(r: Partial<Omit<Activity, 'id'>>, type: ActivityType): Record<stri
   return dv;
 }
 
+/**
+ * The mobile native player returns success with NO representation body
+ * (HTTP 204) on create, so the SDK result omits the primary key even though
+ * the row WAS written. Read the just-created row back by its subject (newest
+ * first) to recover the real id — the same read-back recovery the shared
+ * createWithReadback helper applies to the other generated services. Returns
+ * null when the row can't be located; the caller decides whether that is fatal.
+ */
+async function readBackCreatedActivity(
+  svc: ServiceClass,
+  record: Omit<Activity, 'id'>,
+  type: ActivityType,
+): Promise<Activity | null> {
+  const subject = (record.title ?? '').replace(/'/g, "''");
+  if (!subject) return null;
+  try {
+    const readback = await withRetry(
+      () => svc.getAll({ filter: `subject eq '${subject}'`, orderBy: ['createdon desc'], top: 1 }),
+      { attempts: 3, backoffMs: 300, jitterMs: 200 },
+    );
+    if (readback.success && readback.data && readback.data.length > 0) {
+      return fromDv(readback.data[0] as ActivityEntityBase, type);
+    }
+  } catch (e) {
+    console.warn('[Activity] create read-back failed:', e);
+  }
+  return null;
+}
+
 export class ActivityService {
   /** Create a new activity in the correct native table. */
   static async create(record: Omit<Activity, 'id'>): Promise<Activity> {
@@ -193,12 +223,23 @@ export class ActivityService {
     const dvPayload = toDv(createRecord, type);
     const result = await svc.create(dvPayload);
     if (!result.success) throw result.error ?? new Error('Activity create failed');
-    const created = fromDv(result.data as ActivityEntityBase, type);
+    let created = fromDv((result.data ?? {}) as ActivityEntityBase, type);
+
+    // Browser dev mode echoes the row (with PK); the mobile native player
+    // returns success with an empty/absent body (HTTP 204), so `created.id` is
+    // blank even though the write succeeded. Recover the id by reading the row
+    // back instead of surfacing a successful create as a failure.
     if (!created.id) {
-      throw new Error(`Activity create succeeded without an id for ${type}`);
+      const readBack = await readBackCreatedActivity(svc, record, type);
+      if (readBack) created = readBack;
     }
 
     if (requestedStatus !== 'open') {
+      if (!created.id) {
+        throw new Error(
+          `Activity create for ${type} succeeded but its id could not be resolved, so the ${requestedStatus} status could not be finalized.`,
+        );
+      }
       try {
         const transition = await svc.update(created.id, toDv({ status: requestedStatus }, type));
         if (!transition.success) {

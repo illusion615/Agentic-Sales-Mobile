@@ -170,6 +170,41 @@ describe('ActivityService', () => {
     });
   });
 
+  it('recovers the id via read-back when create returns an empty body (mobile 204)', async () => {
+    // The mobile native player returns success with NO representation body,
+    // so the create result omits the primary key even though the row exists.
+    mocks.createRecordAsync.mockResolvedValueOnce({ success: true, data: undefined });
+    mocks.retrieveMultipleRecordsAsync.mockResolvedValueOnce({
+      success: true,
+      data: [
+        {
+          activityid: 'appointment-42',
+          subject: '完成给金唯智的相关方案',
+          scheduledstart: '2026-07-19T14:00:00Z',
+          statecode: 0,
+          _regardingobjectid_value: 'account-1',
+          regardingobjectidtypecode: 'account',
+          regardingobjectidname: '金唯智',
+        },
+      ],
+    });
+
+    const created = await ActivityService.create({
+      title: '完成给金唯智的相关方案',
+      type: 'meeting',
+      scheduleddate: '2026-07-19T14:00:00Z',
+      status: 'open',
+      ownerid: 'user-1',
+      account: { id: 'account-1', name1: '金唯智' },
+    });
+
+    expect(created.id).toBe('appointment-42');
+    expect(mocks.retrieveMultipleRecordsAsync).toHaveBeenCalledWith(
+      'appointments',
+      expect.objectContaining({ filter: "subject eq '完成给金唯智的相关方案'" }),
+    );
+  });
+
   it('maps a contact Regarding lookup so the UI can derive its account', async () => {
     mocks.retrieveRecordAsync.mockResolvedValueOnce({
       success: true,
