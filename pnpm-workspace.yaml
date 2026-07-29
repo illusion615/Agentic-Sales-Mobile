@@ -1,8 +1,16 @@
-# Repo-root workspace for shared packages and new apps.
+# Single workspace for every app and shared package.
 #
-# `apps/sales-copilot` is INTENTIONALLY absent: it still owns its own
-# pnpm-workspace.yaml + lockfile, so pnpm resolves it independently and its
-# TypeScript incremental cache (.tsbuildinfo) is untouched by anything here.
-# Folding it in is a separate, scheduled step that costs one cold rebuild.
+# Apps MUST be members rather than separately-installed projects: the shared
+# packages declare react and react-query as peers, and only one dependency tree
+# can guarantee a single copy of each. Two trees produce two React contexts, so
+# a hook from a shared package would look up a QueryClientProvider the app never
+# rendered and throw at runtime.
 packages:
+  - 'apps/*'
   - 'packages/*'
+
+allowBuilds:
+  '@azure/msal-node-extensions': true
+  '@azure/msal-node-runtime': true
+  esbuild: true
+  keytar: true

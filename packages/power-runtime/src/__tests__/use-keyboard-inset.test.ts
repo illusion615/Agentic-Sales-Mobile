@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
-import { useKeyboardInset } from '@/hooks/use-keyboard-inset';
+import { useKeyboardInset } from '../react/use-keyboard-inset';
 
 /** Controllable fake VisualViewport — jsdom does not implement one. */
 class FakeVisualViewport extends EventTarget {
