@@ -1,13 +1,14 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+import { powerApps } from '@microsoft/power-apps-vite';
 import path from 'node:path';
 
-// The Power Apps plugin and power.config.json are added by `power-apps init`,
-// once the target environment is chosen. Until then this runs as a plain web
-// app against the local data adapter.
+// Hosted as a Power Apps code app so the field crew can exercise camera, voice
+// and offline capture on a real device. The app still reads and writes through
+// the local IndexedDB adapter, so `power.config.json` declares no data sources.
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), powerApps()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

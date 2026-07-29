@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "appId": "8a760bf7-dd92-4891-9311-1b0655498539",
+  "appDisplayName": "Field Service Mobile",
+  "region": "prod",
+  "environmentId": "efcd2d46-3d9e-e31a-a9d8-5481ddae951c",
+  "description": "现场服务移动端应用：SLA 工单看板、行前 AI 简报、语音与拍照采集、AI 预填与完成度审阅提交",
+  "buildPath": "./dist",
+  "buildEntryPoint": "index.html",
+  "localAppUrl": "http://localhost:5174/",
+  "logoPath": "Default",
+  "connectionReferences": {},
+  "databaseReferences": {}
+}
