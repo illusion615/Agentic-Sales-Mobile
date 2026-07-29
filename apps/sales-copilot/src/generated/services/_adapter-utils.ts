@@ -130,7 +130,26 @@ export async function createWithReadback<TDv, TApp>(
   mapFn: (row: TDv) => TApp,
 ): Promise<TApp> {
   const result = await createFn(dvPayload);
-  if (!result.success) throw result.error;
+  if (!result.success) {
+    // The Power Apps SDK surfaces HTTP failures as a PLAIN object
+    // ({ message, status, requestId }), not an Error — rethrowing it as-is makes
+    // every downstream `console.error(...)` print a useless "Object" and hides the
+    // Dataverse message. Normalize to a real Error so the reason is always visible.
+    const raw = result.error as { message?: unknown; status?: unknown; requestId?: unknown } | undefined;
+    const message =
+      result.error instanceof Error ? result.error.message
+      : typeof raw?.message === 'string' && raw.message ? raw.message
+      : typeof result.error === 'string' ? result.error
+      : 'unknown error';
+    const detail = [
+      typeof raw?.status === 'number' ? `HTTP ${raw.status}` : '',
+      typeof raw?.requestId === 'string' && raw.requestId ? `requestId ${raw.requestId}` : '',
+    ].filter(Boolean).join(', ');
+    const err = new Error(`Dataverse create for ${entity} failed: ${message}${detail ? ` (${detail})` : ''}`, { cause: result.error });
+    (err as Error & { agentErrorType: string; agentErrorContext: Record<string, unknown> }).agentErrorType = 'dataverse';
+    (err as Error & { agentErrorContext: Record<string, unknown> }).agentErrorContext = { entity, op: 'create', payloadKeys: Object.keys(dvPayload) };
+    throw err;
+  }
 
   // Best case: SDK returned the full row with PK (browser dev mode)
   if (result.data && typeof result.data === 'object') {

@@ -70,7 +70,14 @@ function toDv(r: Partial<Omit<Opportunity, 'id'>>): Record<string, unknown> {
     dv.crf5c_amount = numToDv(r.totalamount);
     dv.crf5c_totalamount = numToDv(r.totalamount);
   }
-  if (r.currencyId) dv['TransactionCurrencyId@odata.bind'] = `/transactioncurrencies(${r.currencyId})`;
+  // `@odata.bind` keys must use the relationship's NAVIGATION PROPERTY name, which
+  // OData matches case-sensitively. For the currency lookup that name is the
+  // all-lowercase `transactioncurrencyid` — NOT the `TransactionCurrencyId` schema
+  // name the PAC-generated model declares. Sending the capitalized form makes
+  // Dataverse reject the whole write with 0x80048d19 "undeclared property".
+  // (`biz_Account` above is different: that custom lookup's navigation property
+  // really is capitalized.)
+  if (r.currencyId) dv['transactioncurrencyid@odata.bind'] = `/transactioncurrencies(${r.currencyId})`;
   return dv;
 }
 
