@@ -1,534 +1,95 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
+@import '@agentic/app-shell/theme.css';
 
-@custom-variant dark (&:is(.dark *));
-
-/* ========================================
-   Sales Copilot Mobile - Design System
-   Glassmorphism + Orange/Teal Palette
-   ======================================== */
-
-@theme inline {
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-skeleton: var(--skeleton);
-  --color-destructive: var(--destructive);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-ring: var(--sidebar-ring);
+html,
+body,
+#root {
+  overflow: hidden;
 }
 
-/* ========================================
-   Color Tokens - Sales Copilot Mobile
-   ======================================== */
-
-:root {
-  /* Core radius */
-  --radius: 0.75rem;
-  
-  /* Brand colors - default orange/teal */
-  --scm-orange: var(--theme-primary, #FF7A00);
-  --scm-orange-light: var(--theme-primary-light, #FF9933);
-  --scm-orange-dark: var(--theme-primary-dark, #E06A00);
-  --scm-teal: var(--theme-accent, #0D8F8C);
-  --scm-teal-light: var(--theme-accent-light, #14B8B4);
-  --scm-teal-dark: var(--theme-accent-dark, #0A7270);
-  
-  /* UI Font sizes - default medium (overridden by JS based on settings) */
-  --scm-font-title: 1rem;
-  --scm-font-body: 0.875rem;
-  --scm-font-helper: 0.8125rem;
-}
-
-/* Color Theme: Sunset (default orange/teal) */
-:root[data-theme="sunset"],
-:root:not([data-theme]) {
-  --theme-primary: #008a7a;
-  --theme-primary-light: #17a899;
-  --theme-primary-dark: #006d61;
-  --theme-accent: #2d6cdf;
-  --theme-accent-light: #4e84ea;
-  --theme-accent-dark: #1f57bd;
-}
-
-/* Color Theme: Ocean */
-:root[data-theme="ocean"] {
-  --theme-primary: #0EA5E9;
-  --theme-primary-light: #38BDF8;
-  --theme-primary-dark: #0284C7;
-  --theme-accent: #8B5CF6;
-  --theme-accent-light: #A78BFA;
-  --theme-accent-dark: #7C3AED;
-}
-
-/* Color Theme: Forest */
-:root[data-theme="forest"] {
-  --theme-primary: #22C55E;
-  --theme-primary-light: #4ADE80;
-  --theme-primary-dark: #16A34A;
-  --theme-accent: #F97316;
-  --theme-accent-light: #FB923C;
-  --theme-accent-dark: #EA580C;
-}
-
-/* Color Theme: Berry */
-:root[data-theme="berry"] {
-  --theme-primary: #EC4899;
-  --theme-primary-light: #F472B6;
-  --theme-primary-dark: #DB2777;
-  --theme-accent: #6366F1;
-  --theme-accent-light: #818CF8;
-  --theme-accent-dark: #4F46E5;
-}
-
-/* Color Theme: Monochrome */
-:root[data-theme="mono"] {
-  --theme-primary: #71717A;
-  --theme-primary-light: #A1A1AA;
-  --theme-primary-dark: #52525B;
-  --theme-accent: #18181B;
-  --theme-accent-light: #3F3F46;
-  --theme-accent-dark: #09090B;
-}
-
-/* Update primary/accent in dark theme based on color theme */
-
-/* Dark theme - default */
-:root.dark,
-html.dark {
-  --background: #0c1320;
-  --foreground: #f3f7fb;
-  --card: rgba(15, 25, 42, 0.82);
-  --card-foreground: #f3f7fb;
-  --popover: rgba(15, 25, 42, 0.96);
-  --popover-foreground: #f3f7fb;
-  --primary: var(--theme-primary, #008a7a);
-  --primary-foreground: #ffffff;
-  --secondary: rgba(45, 108, 223, 0.16);
-  --secondary-foreground: #dfeafe;
-  --muted: rgba(255, 255, 255, 0.06);
-  --muted-foreground: oklch(0.88 0.02 240);
-  --accent: var(--theme-accent, #2d6cdf);
-  --accent-foreground: #ffffff;
-  --skeleton: rgba(255, 255, 255, 0.08);
-  --destructive: #f87171;
-  --border: rgba(164, 186, 214, 0.18);
-  --input: rgba(255, 255, 255, 0.08);
-  --ring: rgba(45, 108, 223, 0.45);
-  --chart-1: #17a899;
-  --chart-2: #4e84ea;
-  --chart-3: #f59e0b;
-  --chart-4: #c084fc;
-  --chart-5: #fb7185;
-  --sidebar: rgba(12, 19, 32, 0.9);
-  --sidebar-foreground: #f3f7fb;
-  --sidebar-primary: var(--theme-primary, #008a7a);
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: rgba(45, 108, 223, 0.18);
-  --sidebar-accent-foreground: #dfeafe;
-  --sidebar-border: rgba(164, 186, 214, 0.16);
-  --sidebar-ring: rgba(45, 108, 223, 0.38);
-  
-  /* Dark mode gradient */
-  --scm-gradient-start: #0F1424;
-  --scm-gradient-end: #161B2C;
-  --scm-glass-bg: rgba(255, 255, 255, 0.06);
-  --scm-glass-border: rgba(255, 255, 255, 0.10);
-  --scm-glass-highlight: rgba(255, 255, 255, 0.15);
-  --scm-text-primary: #E6E9F4;
-  --scm-text-secondary: rgba(230, 233, 244, 0.7);
-  --scm-text-muted: rgba(230, 233, 244, 0.5);
-}
-
-/* Light theme */
-:root.light,
-html.light {
-  --background: #f4f8fb;
-  --foreground: oklch(0.2 0.02 230);
-  --card: rgba(255, 255, 255, 0.92);
-  --card-foreground: oklch(0.2 0.02 230);
-  --popover: rgba(255, 255, 255, 0.98);
-  --popover-foreground: oklch(0.2 0.02 230);
-  --primary: var(--theme-primary, #008a7a);
-  --primary-foreground: #ffffff;
-  --secondary: rgba(45, 108, 223, 0.1);
-  --secondary-foreground: #1f57bd;
-  --muted: rgba(18, 32, 56, 0.06);
-  --muted-foreground: oklch(0.4 0.02 230);
-  --accent: var(--theme-accent, #2d6cdf);
-  --accent-foreground: #ffffff;
-  --skeleton: rgba(18, 32, 56, 0.08);
-  --destructive: #ef4444;
-  --border: rgba(18, 32, 56, 0.12);
-  --input: rgba(18, 32, 56, 0.08);
-  --ring: rgba(45, 108, 223, 0.28);
-  --chart-1: #008a7a;
-  --chart-2: #2d6cdf;
-  --chart-3: #f59e0b;
-  --chart-4: #8b5cf6;
-  --chart-5: #f43f5e;
-  --sidebar: #ffffff;
-  --sidebar-foreground: oklch(0.2 0.02 230);
-  --sidebar-primary: var(--theme-primary, #008a7a);
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: rgba(45, 108, 223, 0.1);
-  --sidebar-accent-foreground: #1f57bd;
-  --sidebar-border: rgba(18, 32, 56, 0.1);
-  --sidebar-ring: rgba(45, 108, 223, 0.24);
-  
-  /* Light mode gradient & glass */
-  --scm-gradient-start: #F0F2F5;
-  --scm-gradient-end: #FAFBFC;
-  --scm-glass-bg: rgba(0, 0, 0, 0.03);
-  --scm-glass-border: rgba(0, 0, 0, 0.08);
-  --scm-glass-highlight: rgba(0, 0, 0, 0.06);
-  --scm-text-primary: #1A1D29;
-  --scm-text-secondary: rgba(26, 29, 41, 0.7);
-  --scm-text-muted: rgba(26, 29, 41, 0.5);
-}
-
-@layer base {
-  * {
-    @apply border-border outline-ring/50;
-  }
-  html, body {
-    @apply bg-background text-foreground antialiased;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    height: 100%;
-    overflow: hidden;
-  }
-  html {
-    background: linear-gradient(180deg, var(--scm-gradient-start) 0%, var(--scm-gradient-end) 100%);
-  }
-  #root {
-    height: 100%;
-    overflow: hidden;
-  }
-
-  /*
-   * iOS auto-zoom-on-focus fix.
-   * iOS Safari ignores `user-scalable=no` for input focus and force-zooms the
-   * viewport whenever the focused input has a computed font-size < 16px. The
-   * zoom shifts the layout under the keyboard, the focused control scrolls
-   * out of view, and the focus is effectively lost.
-   * Forcing >=16px on all form controls is the only reliable way to suppress
-   * that zoom. We override the Tailwind text-sm (14px) the Copilot composer
-   * uses on mobile only — desktop keeps the original sizing.
-   */
-  @media (max-width: 768px) {
-    input,
-    textarea,
-    select,
-    [contenteditable="true"] {
-      font-size: 16px !important;
-    }
-  }
-
-  /*
-   * Native date/time inputs in dark mode.
-   * `<input type="date">` renders its calendar-picker indicator using the
-   * browser's UA palette. With the default (light) color-scheme the icon is
-   * BLACK and nearly invisible on a dark background. Setting `color-scheme: dark`
-   * is sufficient — Chromium/WebKit then render a LIGHT picker glyph that matches
-   * the surrounding shadcn controls. (Do NOT also `filter: invert()` the
-   * indicator: color-scheme already lightens it, and inverting would turn the
-   * now-light glyph black again — that double-negative was the original bug.)
-   */
-  input[type="date"],
-  input[type="time"],
-  input[type="datetime-local"],
-  input[type="month"],
-  input[type="week"] {
-    color-scheme: light;
-  }
-  .dark input[type="date"],
-  .dark input[type="time"],
-  .dark input[type="datetime-local"],
-  .dark input[type="month"],
-  .dark input[type="week"] {
-    color-scheme: dark;
-  }
-  .dark input[type="date"]::-webkit-calendar-picker-indicator,
-  .dark input[type="time"]::-webkit-calendar-picker-indicator,
-  .dark input[type="datetime-local"]::-webkit-calendar-picker-indicator,
-  .dark input[type="month"]::-webkit-calendar-picker-indicator,
-  .dark input[type="week"]::-webkit-calendar-picker-indicator {
-    opacity: 0.8;
-    cursor: pointer;
-  }
-  .dark input[type="date"]::-webkit-calendar-picker-indicator:hover,
-  .dark input[type="time"]::-webkit-calendar-picker-indicator:hover,
-  .dark input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover,
-  .dark input[type="month"]::-webkit-calendar-picker-indicator:hover,
-  .dark input[type="week"]::-webkit-calendar-picker-indicator:hover {
-    opacity: 1;
-  }
-}
-
-/* ========================================
-   Glassmorphism Utility Classes
-   ======================================== */
-
+/* Sales-only chat treatments; the family design tokens come from app-shell. */
 @layer components {
-  .glass-card {
-    background: var(--scm-glass-bg);
-    border: 1px solid var(--scm-glass-border);
-    border-radius: 12px;
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-  }
-  
-  .glass-card-hover {
-    background: var(--scm-glass-bg);
-    border: 1px solid var(--scm-glass-border);
-    border-radius: 12px;
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    transition: all 0.2s ease;
-  }
-  .glass-card-hover:hover {
-    background: var(--scm-glass-highlight);
-    border-color: var(--scm-glass-border);
-  }
-  
-  .glass-surface {
-    background: var(--scm-glass-bg);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-  }
-  
-  /* Typography classes */
-  .text-title {
-    font-size: var(--scm-font-title);
-    font-weight: 600;
-    line-height: 1.3;
-    color: var(--scm-text-primary);
-  }
-  
-  .text-body {
-    font-size: var(--scm-font-body);
-    font-weight: 400;
-    line-height: 1.5;
-    color: var(--scm-text-primary);
-  }
-  
-  .text-helper {
-    font-size: var(--scm-font-helper);
-    font-weight: 400;
-    line-height: 1.4;
-    color: var(--scm-text-secondary);
-  }
-  
-  /* Orange gradient accent */
-  .accent-gradient {
-    background: linear-gradient(135deg, var(--scm-orange) 0%, var(--scm-orange-light) 100%);
-  }
-  
-  /* Teal gradient accent */
-  .accent-teal-gradient {
-    background: linear-gradient(135deg, var(--scm-teal) 0%, var(--scm-teal-light) 100%);
-  }
-  
-  /* Mobile safe area padding */
-  .safe-area-top {
-    padding-top: env(safe-area-inset-top, 0px);
-  }
-  .safe-area-bottom {
-    padding-bottom: env(safe-area-inset-bottom, 0px);
-  }
-
-  /*
-   * Lift a bottom-docked fixed surface above the on-screen keyboard (IME).
-   * `--keyboard-inset` is published by the useKeyboardInset hook (0 while the
-   * keyboard is closed), so this falls back to the safe-area inset at rest and
-   * grows to clear the keyboard while it is open. The transition keeps the lift
-   * smooth on hosts that report the keyboard height in a single step.
-   */
-  .keyboard-inset-bottom {
-    padding-bottom: max(env(safe-area-inset-bottom, 0px), var(--keyboard-inset, 0px));
-    transition: padding-bottom 0.2s ease;
-  }
-  
-  /* Neon flow animation */
-  @keyframes neon-flow {
-    0%, 100% {
-      background-position: 0% 50%;
-    }
-    50% {
-      background-position: 100% 50%;
-    }
-  }
-  
-  .neon-glow {
-    background: linear-gradient(90deg, var(--scm-orange), var(--scm-teal), var(--scm-orange-light), var(--scm-teal-light), var(--scm-orange));
-    background-size: 300% 100%;
-    animation: neon-flow 4s ease-in-out infinite;
-  }
-  
-  .neon-glow-blur {
-    background: linear-gradient(90deg, var(--scm-orange), var(--scm-teal), var(--scm-orange-light), var(--scm-teal-light), var(--scm-orange));
-    background-size: 300% 100%;
-    animation: neon-flow 4s ease-in-out infinite;
-    filter: blur(8px);
-    opacity: 0.6;
-  }
-  
-  /* Auto-hide scrollbar - only show when scrolling */
-  .scrollbar-auto-hide {
-    scrollbar-width: thin;
-    scrollbar-color: transparent transparent;
-  }
-  .scrollbar-auto-hide:hover {
-    scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
-  }
-  
-  /* WebKit browsers (Chrome, Safari, Edge) */
-  .scrollbar-auto-hide::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-  .scrollbar-auto-hide::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  .scrollbar-auto-hide::-webkit-scrollbar-thumb {
-    background: transparent;
-    border-radius: 3px;
-  }
-  .scrollbar-auto-hide:hover::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.2);
-  }
-  
-  /* Light mode scrollbar */
-  :root.light .scrollbar-auto-hide:hover {
-    scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
-  }
-  :root.light .scrollbar-auto-hide:hover::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.15);
-  }
-  
-  /* Hide scrollbar completely */
-  .scrollbar-hide {
-    -ms-overflow-style: none;  /* IE and Edge */
-    scrollbar-width: none;  /* Firefox */
-  }
-  .scrollbar-hide::-webkit-scrollbar {
-    display: none;  /* Chrome, Safari, Opera */
-  }
-
-  /* Page root gradient background */
-  .bg-scm-gradient {
-    background: linear-gradient(180deg, var(--scm-gradient-start) 0%, var(--scm-gradient-end) 100%);
-  }
-
-  /* Bottom fade gradient for fixed overlays */
-  .bg-scm-fade-up {
-    background: linear-gradient(to top, var(--scm-gradient-start) 70%, transparent);
-  }
-
-  /* User message bubble styling */
   .user-message-bubble {
-    background: rgba(255, 122, 0, 0.08);
-    border: 2px solid rgba(255, 122, 0, 0.4);
+    background: var(--secondary);
+    border: 2px solid var(--primary);
   }
 
-  /* Avatar brand gradient */
   .bg-avatar-brand {
-    background: linear-gradient(135deg, #FF7A00 0%, #FF9933 100%);
+    background: linear-gradient(135deg, var(--theme-primary), var(--theme-primary-light));
   }
 }
 
-/* ========================================
-   Onboarding tour (driver.js) — brand + dark-mode theme
-   ======================================== */
+/* Onboarding is a Sales-only surface. */
 .driver-popover.sc-onboarding {
-  border-radius: 14px;
-  padding: 18px 18px 14px;
   max-width: 320px;
+  padding: 18px 18px 14px;
+  border-radius: 14px;
   box-shadow: 0 14px 44px rgba(0, 0, 0, 0.22);
 }
+
 .driver-popover.sc-onboarding .driver-popover-title {
   font-size: 16px;
   font-weight: 600;
   line-height: 1.35;
 }
+
 .driver-popover.sc-onboarding .driver-popover-description {
   font-size: 13px;
   line-height: 1.55;
 }
+
 .driver-popover.sc-onboarding .driver-popover-progress-text {
   font-size: 12px;
   opacity: 0.55;
 }
+
 .driver-popover.sc-onboarding .driver-popover-next-btn,
 .driver-popover.sc-onboarding .driver-popover-prev-btn {
-  text-shadow: none;
+  padding: 7px 16px;
   border: none;
   border-radius: 8px;
   font-size: 13px;
   font-weight: 500;
-  padding: 7px 16px;
-}
-.driver-popover.sc-onboarding .driver-popover-next-btn {
-  background: var(--scm-orange, #008a7a);
-  color: #fff;
-}
-.driver-popover.sc-onboarding .driver-popover-prev-btn {
-  background: transparent;
-  color: var(--scm-orange, #008a7a);
+  text-shadow: none;
 }
 
-/* Dark mode */
+.driver-popover.sc-onboarding .driver-popover-next-btn {
+  color: white;
+  background: var(--primary);
+}
+
+.driver-popover.sc-onboarding .driver-popover-prev-btn {
+  color: var(--primary);
+  background: transparent;
+}
+
 .dark .driver-popover.sc-onboarding {
+  color: var(--foreground);
   background: #161b2c;
-  color: #e6e9f4;
 }
+
 .dark .driver-popover.sc-onboarding .driver-popover-title {
-  color: #ffffff;
+  color: white;
 }
-.dark .driver-popover.sc-onboarding .driver-popover-description {
+
+.dark .driver-popover.sc-onboarding .driver-popover-description,
+.dark .driver-popover.sc-onboarding .driver-popover-close-btn {
   color: rgba(230, 233, 244, 0.72);
 }
-.dark .driver-popover.sc-onboarding .driver-popover-close-btn {
-  color: rgba(230, 233, 244, 0.6);
-}
+
 .dark .driver-popover.sc-onboarding .driver-popover-arrow-side-left.driver-popover-arrow {
   border-left-color: #161b2c;
 }
+
 .dark .driver-popover.sc-onboarding .driver-popover-arrow-side-right.driver-popover-arrow {
   border-right-color: #161b2c;
 }
+
 .dark .driver-popover.sc-onboarding .driver-popover-arrow-side-top.driver-popover-arrow {
   border-top-color: #161b2c;
 }
+
 .dark .driver-popover.sc-onboarding .driver-popover-arrow-side-bottom.driver-popover-arrow {
   border-bottom-color: #161b2c;
 }

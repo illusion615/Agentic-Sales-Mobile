@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { ArrowLeft, Moon, Sun, Globe, HelpCircle, LogOut, Volume2, Play, Type, Palette, CircleDot, LayoutGrid, Speech, X, Zap, LayoutDashboard, Database, ChevronRight, Monitor, Calendar, Maximize, Sparkles, Eye, Compass, Rows3, Activity, MessageSquareWarning } from 'lucide-react';
+import { ArrowLeft, Globe, HelpCircle, LogOut, Volume2, Play, Type, CircleDot, LayoutGrid, Speech, X, Zap, LayoutDashboard, Database, ChevronRight, Monitor, Calendar, Maximize, Sparkles, Eye, Compass, Rows3, Activity, MessageSquareWarning } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
 import { ThinkingIndicator } from '@/components/thinking-indicator';
 import { Button } from '@/components/ui/button';
 
-import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, getAzureVoiceForLocale, setSelectedVoice, getVoiceEngine, setVoiceEngine, getSpeechInputMode, setSpeechInputMode, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, getColorTheme, setColorTheme, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, getCopilotDockLayout, setCopilotDockLayout, copilotDockLayoutLabels, getWeekStartDay, setWeekStartDay, getCopilotFullscreenDefault, setCopilotFullscreenDefault, getCompactDraftForms, setCompactDraftForms, getFollowupSuggestionsEnabled, setFollowupSuggestionsEnabled, getShowDataAiInsights, setShowDataAiInsights, getAutoGenerateAiInsights, setAutoGenerateAiInsights, getAgendaDefaultExpanded, setAgendaDefaultExpanded, getCopilotListDefaultView, setCopilotListDefaultView, getCopilotListTopN, setCopilotListTopN, SUPPORTED_LOCALES, LOCALE_META, speechLang, localeLangPrefix, pickLabel, type Locale, type VoiceOption, type VoiceEngine, type SpeechInputMode, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget, type CopilotDockLayout, type WeekStartDay, type CopilotListDefaultView } from '@/lib/i18n';
+import { getLocale, setLocale, t, getVoicesForLocale, getSelectedVoice, getAzureVoiceForLocale, setSelectedVoice, getVoiceEngine, setVoiceEngine, getSpeechInputMode, setSpeechInputMode, getFontSizeConfig, setFontSizeConfig, getAutoPlayAgentResponse, setAutoPlayAgentResponse, colorThemeLabels, getThinkingDotStyle, setThinkingDotStyle, thinkingDotStyleLabels, getVoiceSummaryEnabled, setVoiceSummaryEnabled, getCopilotInAllScreens, setCopilotInAllScreens, getSelectedSystemVoiceName, setSelectedSystemVoiceName, getSimulateStreaming, setSimulateStreaming, getHomeHeaderWidget, setHomeHeaderWidget, homeHeaderWidgetLabels, extractVoiceName, getCopilotDockLayout, setCopilotDockLayout, copilotDockLayoutLabels, getWeekStartDay, setWeekStartDay, getCopilotFullscreenDefault, setCopilotFullscreenDefault, getCompactDraftForms, setCompactDraftForms, getFollowupSuggestionsEnabled, setFollowupSuggestionsEnabled, getShowDataAiInsights, setShowDataAiInsights, getAutoGenerateAiInsights, setAutoGenerateAiInsights, getAgendaDefaultExpanded, setAgendaDefaultExpanded, getCopilotListDefaultView, setCopilotListDefaultView, getCopilotListTopN, setCopilotListTopN, SUPPORTED_LOCALES, LOCALE_META, speechLang, localeLangPrefix, pickLabel, type Locale, type VoiceOption, type VoiceEngine, type SpeechInputMode, type FontSizeOption, type ColorTheme, type ThinkingDotStyle, type HomeHeaderWidget, type CopilotDockLayout, type WeekStartDay, type CopilotListDefaultView } from '@/lib/i18n';
+import { AppearanceSettings, type AppearanceLabels } from '@agentic/app-shell/react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from '@/lib/toast-utils';
 import { useSpeechPlayer } from '@/hooks/use-speech-player';
@@ -82,7 +83,6 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const navigate = useNavigate();
 
   const [locale, setLocaleState] = useState<Locale>(getLocale);
-  const [isDark, setIsDark] = useState(true);
   const [selectedVoice, setSelectedVoiceState] = useState(getSelectedVoice);
   const [systemVoicesLoaded, setSystemVoicesLoaded] = useState(false);
   const [systemVoices, setSystemVoices] = useState<SpeechSynthesisVoice[]>([]);
@@ -114,9 +114,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
 
   // Font size state
   const [chatFontSize, setChatFontSize] = useState<FontSizeOption>(() => getFontSizeConfig().chat);
-  const [uiFontSize, setUIFontSize] = useState<FontSizeOption>(() => getFontSizeConfig().ui);
   const [autoPlayResponse, setAutoPlayResponseState] = useState(getAutoPlayAgentResponse);
-  const [colorTheme, setColorThemeState] = useState<ColorTheme>(() => getColorTheme());
   const [thinkingDotStyle, setThinkingDotStyleState] = useState<ThinkingDotStyle>(() => getThinkingDotStyle());
   const [feedbackEnabled, setFeedbackEnabledState] = useState(() => getFeedbackEnabled());
   const [feedbackStyles, setFeedbackStylesState] = useState<Record<FeedbackScenario, FeedbackStyleId>>(() => ({
@@ -220,19 +218,7 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
   const handleChatFontSizeChange = (size: string) => {
     const newSize = size as FontSizeOption;
     setChatFontSize(newSize);
-    setFontSizeConfig({ chat: newSize, ui: uiFontSize });
-  };
-
-  const handleUIFontSizeChange = (size: string) => {
-    const newSize = size as FontSizeOption;
-    setUIFontSize(newSize);
-    setFontSizeConfig({ chat: chatFontSize, ui: newSize });
-  };
-
-  const handleColorThemeChange = (theme: string) => {
-    const newTheme = theme as ColorTheme;
-    setColorThemeState(newTheme);
-    setColorTheme(newTheme);
+    setFontSizeConfig({ ...getFontSizeConfig(), chat: newSize });
   };
 
   const handleThinkingDotStyleChange = (style: ThinkingDotStyle) => {
@@ -363,6 +349,22 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
     voicePreviewPlayer.play([{ id: 'voice-preview', text: sampleText }]);
   };
 
+  const appearanceLabels: AppearanceLabels = {
+    section: t('styleSection', locale),
+    darkMode: t('darkMode', locale),
+    fontSize: t('uiFontSize', locale),
+    colorTheme: t('colorTheme', locale),
+    small: t('fontSizeSmall', locale),
+    medium: t('fontSizeMedium', locale),
+    large: t('fontSizeLarge', locale),
+    themes: Object.fromEntries(
+      (Object.keys(colorThemeLabels) as ColorTheme[]).map((theme) => [
+        theme,
+        pickLabel(colorThemeLabels[theme], locale),
+      ]),
+    ) as AppearanceLabels['themes'],
+  };
+
   // Update voice when locale changes
   useEffect(() => {
     const voices = getVoicesForLocale(locale);
@@ -371,44 +373,6 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
       handleVoiceChange(voices[0].id);
     }
   }, [locale, selectedVoice]);
-
-  useEffect(() => {
-    const savedTheme = localStorage.getItem('theme');
-    if (savedTheme === 'light' || savedTheme === 'dark') {
-      setIsDark(savedTheme === 'dark');
-      document.documentElement.classList.remove('dark', 'light');
-      document.documentElement.classList.add(savedTheme);
-    } else {
-      const root = document.documentElement;
-      const isDarkMode = root.classList.contains('dark');
-      setIsDark(isDarkMode);
-      if (!isDarkMode && !root.classList.contains('light')) {
-        root.classList.add('dark');
-        setIsDark(true);
-        localStorage.setItem('theme', 'dark');
-      }
-    }
-  }, []);
-
-  const toggleTheme = () => {
-    const newIsDark = !isDark;
-    setIsDark(newIsDark);
-    
-    const html = document.documentElement;
-    html.classList.remove('dark', 'light');
-    html.classList.add(newIsDark ? 'dark' : 'light');
-    
-    document.body.classList.remove('dark', 'light');
-    document.body.classList.add(newIsDark ? 'dark' : 'light');
-    
-    localStorage.setItem('theme', newIsDark ? 'dark' : 'light');
-    
-    document.body.style.display = 'none';
-    document.body.offsetHeight;
-    document.body.style.display = '';
-  };
-
-
 
   return (
     <div className="flex flex-col h-full overflow-hidden" style={{ background: 'linear-gradient(180deg, var(--scm-gradient-start) 0%, var(--scm-gradient-end) 100%)' }}>
@@ -517,18 +481,8 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
               {t('styleSection', locale)}
             </h3>
+            <AppearanceSettings labels={appearanceLabels} showHeading={false} />
             <div className="glass-card p-4 space-y-2">
-              <SettingsItem
-                icon={isDark ? Moon : Sun}
-                label={t('darkMode', locale)}
-                rightElement={
-                  <Switch
-                    checked={isDark}
-                    onCheckedChange={toggleTheme}
-                    className="data-[state=checked]:bg-primary"
-                  />
-                }
-              />
               <SettingsItem
                 icon={Type}
                 label={t('chatFontSize', locale)}
@@ -545,50 +499,6 @@ export function SettingsPanel({ onClose, isOverlay = false }: SettingsPanelProps
                   </Select>
                 }
               />
-              <SettingsItem
-                icon={Type}
-                label={t('uiFontSize', locale)}
-                rightElement={
-                  <Select value={uiFontSize} onValueChange={handleUIFontSizeChange}>
-                    <SelectTrigger className="w-28 h-8 text-sm bg-transparent border-border/50">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="small">{t('fontSizeSmall', locale)}</SelectItem>
-                      <SelectItem value="medium">{t('fontSizeMedium', locale)}</SelectItem>
-                      <SelectItem value="large">{t('fontSizeLarge', locale)}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                }
-              />
-              <div className="w-full flex items-center gap-3 px-1 py-2">
-                <Palette className="w-5 h-5" />
-                <span className="text-body flex-1">{t('colorTheme', locale)}</span>
-                <div className="flex gap-1.5">
-                  {(Object.keys(colorThemeLabels) as ColorTheme[]).map((theme: ColorTheme) => (
-                    <button
-                      key={theme}
-                      onClick={() => handleColorThemeChange(theme)}
-                      className={cn(
-                        'w-8 h-8 rounded-full flex items-center justify-center transition-all border-2',
-                        colorTheme === theme
-                          ? 'border-foreground scale-110'
-                          : 'border-transparent hover:scale-105'
-                      )}
-
-                      title={pickLabel(colorThemeLabels[theme], locale)}
-                      aria-label={pickLabel(colorThemeLabels[theme], locale)}
-                    >
-                      <div
-                        className="w-6 h-6 rounded-full"
-                        style={{
-                          background: `linear-gradient(135deg, ${colorThemeLabels[theme].colors[0]} 0%, ${colorThemeLabels[theme].colors[1]} 100%)`
-                        }}
-                      />
-                    </button>
-                  ))}
-                </div>
-              </div>
               <SettingsItem
                 icon={CircleDot}
                 label={t('thinkingDotStyle', locale)}

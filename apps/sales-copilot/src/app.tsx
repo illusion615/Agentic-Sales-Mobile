@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 // MemoryRouter (not HashRouter): the Power Apps mobile player mishandles the URL
 // hash and hangs on load. MemoryRouter keeps all routing state in memory and
 // never touches window.location, which is the correct model for an embedded app.
@@ -32,23 +31,7 @@ import MyFeedbackPage from '@/pages/my-feedback';
 import { queryClient } from '@/lib/query-client';
 
 import ErrorBoundary from '@/components/system/error-boundary';
-import { initColorTheme, initFontSize } from '@/lib/i18n';
-
 function App() {
-  useEffect(() => {
-    // Initialize settings from localStorage
-    initColorTheme();
-    initFontSize();
-    // Restore dark/light mode from localStorage, defaulting to light
-    const savedTheme = localStorage.getItem('theme');
-    const resolvedTheme = savedTheme === 'dark' ? 'dark' : 'light';
-    document.documentElement.classList.remove('dark', 'light');
-    document.documentElement.classList.add(resolvedTheme);
-    if (!savedTheme) {
-      localStorage.setItem('theme', 'light');
-    }
-  }, []);
-
   return (
     <QueryClientProvider client={queryClient}>
       <ErrorBoundary resetQueryCache>

@@ -14,12 +14,18 @@ importers:
 
   apps/field-service:
     dependencies:
+      '@agentic/app-shell':
+        specifier: workspace:*
+        version: link:../../packages/app-shell
       '@agentic/power-runtime':
         specifier: workspace:*
         version: link:../../packages/power-runtime
       '@tanstack/react-query':
         specifier: ^5.59.0
         version: 5.101.4(react@18.3.1)
+      lucide-react:
+        specifier: ^0.460.0
+        version: 0.460.0(react@18.3.1)
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -63,6 +69,9 @@ importers:
 
   apps/sales-copilot:
     dependencies:
+      '@agentic/app-shell':
+        specifier: workspace:*
+        version: link:../../packages/app-shell
       '@agentic/power-runtime':
         specifier: workspace:*
         version: link:../../packages/power-runtime
@@ -289,6 +298,27 @@ importers:
       vitest:
         specifier: ^4.1.6
         version: 4.1.10(@types/node@22.20.1)(@vitest/coverage-v8@4.1.10)(jsdom@29.1.1)(vite@6.4.3(@types/node@22.20.1)(jiti@2.7.0)(lightningcss@1.33.0))
+
+  packages/app-shell:
+    devDependencies:
+      '@types/react':
+        specifier: ^18.3.12
+        version: 18.3.31
+      jsdom:
+        specifier: ^29.1.1
+        version: 29.1.1
+      lucide-react:
+        specifier: ^0.460.0
+        version: 0.460.0(react@18.3.1)
+      react:
+        specifier: ^18.3.1
+        version: 18.3.1
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.6
+        version: 4.1.10(@types/node@22.20.1)(@vitest/coverage-v8@4.1.10)(jsdom@29.1.1)(vite@8.1.5(@types/node@22.20.1)(jiti@2.7.0))
 
   packages/power-runtime:
     devDependencies:

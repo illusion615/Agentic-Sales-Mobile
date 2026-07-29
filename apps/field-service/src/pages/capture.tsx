@@ -48,9 +48,9 @@ export function CapturePage() {
 
   if (isClosed) {
     return (
-      <div className="mx-auto flex min-h-full max-w-2xl flex-col items-center justify-center gap-4 bg-slate-50 p-6 text-center">
-        <p className="text-slate-900">该工单已提交关闭。</p>
-        <Link to="/" className="rounded-lg bg-slate-900 px-4 py-2 text-sm text-white">
+      <div className="app-shell mx-auto flex min-h-full max-w-2xl flex-col items-center justify-center gap-4 p-6 text-center">
+        <p className="text-foreground">该工单已提交关闭。</p>
+        <Link to="/" className="rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground">
           返回工单列表
         </Link>
       </div>
@@ -58,16 +58,16 @@ export function CapturePage() {
   }
 
   return (
-    <div className="mx-auto flex min-h-full max-w-2xl flex-col gap-4 bg-slate-50 p-4">
-      <Link to={`/work-orders/${id}`} className="text-sm text-blue-600">
+    <div className="app-shell mx-auto flex min-h-full max-w-2xl flex-col gap-4 p-4">
+      <Link to={`/work-orders/${id}`} className="text-sm text-primary">
         ← 返回工单
       </Link>
 
-      <section className="rounded-xl bg-white p-4 shadow-sm">
-        <h1 className="font-semibold text-slate-900">
+      <section className="glass-card p-4 shadow-sm">
+        <h1 className="font-semibold text-foreground">
           现场记录{workOrder ? ` · ${workOrder.customerName}` : ''}
         </h1>
-        <p className="mt-1 text-sm text-slate-500">
+        <p className="mt-1 text-sm text-muted-foreground">
           {workOrder?.number} · {schema?.title ?? '加载中…'}
         </p>
 
@@ -80,14 +80,14 @@ export function CapturePage() {
         {completeness && (
         <div className="mt-3">
           <div className="flex items-baseline justify-between text-sm">
-            <span className="text-slate-700">
+            <span className="text-foreground/80">
               信息完整度 {completeness.answeredRequired}/{completeness.totalRequired}
             </span>
             <span className={completeness.submittable ? 'text-emerald-600' : 'text-amber-600'}>
               {completeness.submittable ? '必填项已齐全' : '仍有必填项缺失'}
             </span>
           </div>
-          <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-200">
+          <div className="mt-1 h-2 overflow-hidden rounded-full bg-muted">
             <div
               className={`h-full transition-all ${completeness.submittable ? 'bg-emerald-500' : 'bg-amber-500'}`}
               style={{ width: `${Math.round(completeness.ratio * 100)}%` }}
@@ -106,13 +106,13 @@ export function CapturePage() {
         )}
       </section>
 
-      <section className="rounded-xl bg-white p-4 shadow-sm">
-        <h2 className="font-medium text-slate-900">随手记录</h2>
-        <p className="mt-1 text-xs text-slate-500">想到什么记什么，稍后由系统整理进工单。</p>
+      <section className="glass-card p-4 shadow-sm">
+        <h2 className="font-medium text-foreground">随手记录</h2>
+        <p className="mt-1 text-xs text-muted-foreground">想到什么记什么，稍后由系统整理进工单。</p>
 
         <div className="mt-3 flex gap-2">
           <input
-            className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            className="min-w-0 flex-1 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground"
             placeholder="例如：报警代码 E-12，电导率 13.8"
             value={note}
             onChange={(event) => setNote(event.target.value)}
@@ -120,7 +120,7 @@ export function CapturePage() {
               if (event.key === 'Enter') addNote();
             }}
           />
-          <button type="button" onClick={addNote} className="rounded-lg bg-slate-900 px-3 text-sm text-white">
+          <button type="button" onClick={addNote} className="rounded-lg bg-primary px-3 text-sm text-primary-foreground">
             添加
           </button>
         </div>
@@ -129,7 +129,7 @@ export function CapturePage() {
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="rounded-lg bg-white px-3 py-1.5 text-sm text-slate-700 ring-1 ring-slate-200"
+            className="rounded-lg bg-card px-3 py-1.5 text-sm text-foreground ring-1 ring-border"
           >
             拍照
           </button>
@@ -149,7 +149,9 @@ export function CapturePage() {
               type="button"
               onClick={dictation.listening ? dictation.stop : dictation.start}
               className={`rounded-lg px-3 py-1.5 text-sm ring-1 ${
-                dictation.listening ? 'bg-rose-600 text-white ring-rose-600' : 'bg-white text-slate-700 ring-slate-200'
+                dictation.listening
+                  ? 'bg-rose-600 text-white ring-rose-600'
+                  : 'bg-card text-foreground ring-border'
               }`}
             >
               {dictation.listening ? '停止录音' : '语音记录'}
@@ -158,21 +160,21 @@ export function CapturePage() {
         </div>
       </section>
 
-      <section className="rounded-xl bg-white p-4 shadow-sm">
+      <section className="glass-card p-4 shadow-sm">
         <div className="flex items-baseline justify-between">
-          <h2 className="font-medium text-slate-900">已采集 ({evidence.length})</h2>
+          <h2 className="font-medium text-foreground">已采集 ({evidence.length})</h2>
           <button
             type="button"
             disabled={evidence.length === 0 || runExtraction.isPending}
             onClick={() => runExtraction.mutate()}
-            className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-40"
+            className="rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-40"
           >
             {runExtraction.isPending ? '整理中…' : '整理进工单'}
           </button>
         </div>
 
         {runExtraction.data && (
-          <p className="mt-2 text-xs text-slate-500">
+          <p className="mt-2 text-xs text-muted-foreground">
             已填入 {runExtraction.data.fields.length} 个字段
             {runExtraction.data.customerUpdates.length > 0
               ? `，另发现 ${runExtraction.data.customerUpdates.length} 条客户信息更新`
@@ -181,20 +183,20 @@ export function CapturePage() {
         )}
 
         {evidence.length === 0 ? (
-          <p className="mt-3 text-sm text-slate-500">还没有记录。</p>
+          <p className="mt-3 text-sm text-muted-foreground">还没有记录。</p>
         ) : (
           <ol className="mt-3 flex flex-col gap-3">
             {evidence.map((item) => (
-              <li key={item.id} className="flex gap-3 border-l-2 border-slate-200 pl-3">
-                <span className="mt-0.5 shrink-0 text-xs text-slate-400">
+              <li key={item.id} className="flex gap-3 border-l-2 border-border pl-3">
+                <span className="mt-0.5 shrink-0 text-xs text-muted-foreground">
                   {new Date(item.capturedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
                 </span>
                 <div className="min-w-0">
                   {item.image && (
                     <img src={item.image} alt="现场照片" className="mb-1 max-h-40 rounded-lg object-contain" />
                   )}
-                  {item.text && <p className="text-sm text-slate-700">{item.text}</p>}
-                  <span className="text-xs text-slate-400">
+                  {item.text && <p className="text-sm text-foreground/80">{item.text}</p>}
+                  <span className="text-xs text-muted-foreground">
                     {item.kind === 'voice' ? '语音' : item.kind === 'photo' ? '照片' : '文字'}
                   </span>
                 </div>
@@ -206,7 +208,7 @@ export function CapturePage() {
 
       <Link
         to={`/work-orders/${id}/review`}
-        className="rounded-xl bg-slate-900 py-3 text-center text-sm text-white"
+        className="rounded-xl bg-primary py-3 text-center text-sm text-primary-foreground"
       >
         查看并提交工单
       </Link>

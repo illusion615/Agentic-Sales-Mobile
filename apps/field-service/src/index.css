@@ -1,16 +1,2 @@
 @import 'tailwindcss';
-
-@layer utilities {
-  /* Lifts a bottom-docked surface above the on-screen keyboard. The inset is
-     published by useKeyboardInset from the shared runtime. */
-  .keyboard-inset-bottom {
-    padding-bottom: max(env(safe-area-inset-bottom), var(--keyboard-inset, 0px));
-    transition: padding-bottom 0.2s ease;
-  }
-}
-
-html,
-body,
-#root {
-  height: 100%;
-}
+@import '@agentic/app-shell/theme.css';

@@ -7,6 +7,15 @@ import enUS from '@/locales/en-US.json';
 import deDE from '@/locales/de-DE.json';
 import frFR from '@/locales/fr-FR.json';
 import esES from '@/locales/es-ES.json';
+import {
+  THEME_META,
+  applyAppearance,
+  getAppearance,
+  initAppearance,
+  updateAppearance,
+  type ColorTheme as ShellColorTheme,
+  type FontSize as ShellFontSize,
+} from '@agentic/app-shell';
 
 export type Locale = 'zh-Hans' | 'en-US' | 'de-DE' | 'fr-FR' | 'es-ES';
 
@@ -234,10 +243,10 @@ export async function fetchAvailableModels(config: LLMConfig): Promise<FetchMode
 }
 
 // Font size options
-export type FontSizeOption = 'small' | 'medium' | 'large';
+export type FontSizeOption = ShellFontSize;
 
 // Color theme options
-export type ColorTheme = 'sunset' | 'ocean' | 'forest' | 'berry' | 'mono';
+export type ColorTheme = ShellColorTheme;
 
 // Thinking dot style options
 export type ThinkingDotStyle = 'bounce' | 'pulse' | 'wave' | 'fade' | 'orbit';
@@ -361,25 +370,6 @@ export interface FontSizeConfig {
   ui: FontSizeOption;
 }
 
-// Font size CSS variable values (in rem)
-const fontSizeValues = {
-  small: {
-    title: '0.875rem',   // 14px
-    body: '0.8125rem',   // 13px
-    helper: '0.75rem',   // 12px
-  },
-  medium: {
-    title: '1rem',        // 16px
-    body: '0.875rem',    // 14px
-    helper: '0.8125rem', // 13px
-  },
-  large: {
-    title: '1.125rem',   // 18px
-    body: '1rem',        // 16px
-    helper: '0.875rem',  // 14px
-  },
-} as const;
-
 const fontSizeClasses = {
   small: {
     chat: 'text-sm',
@@ -395,51 +385,32 @@ const fontSizeClasses = {
   },
 } as const;
 
-// Root font-size in px per UI size — scales ALL rem-based sizes
-// (including Tailwind text-xs/sm/base/lg) so the setting actually
-// propagates to every page, not just `.text-title/.text-body/.text-helper`.
-const rootFontSizePx = {
-  small: '14px',
-  medium: '16px',
-  large: '18px',
-} as const;
-
-// Apply font size CSS variables to the document
 export function applyFontSizeToDocument(config: FontSizeConfig): void {
-  const root = document.documentElement;
-  const uiSizes = fontSizeValues[config.ui];
-
-  root.style.setProperty('--scm-font-title', uiSizes.title);
-  root.style.setProperty('--scm-font-body', uiSizes.body);
-  root.style.setProperty('--scm-font-helper', uiSizes.helper);
-
-  // Scale the entire UI by adjusting the root font-size, so every
-  // rem-based size (including Tailwind utilities) follows the setting.
-  root.style.fontSize = rootFontSizePx[config.ui];
+  applyAppearance({ ...getAppearance(), fontSize: config.ui });
 }
 
 // Initialize font size from localStorage (call on app startup)
 export function initFontSize(): void {
-  const config = getFontSizeConfig();
-  applyFontSizeToDocument(config);
+  applyAppearance(getAppearance());
 }
 
 export function getFontSizeConfig(): FontSizeConfig {
+  let chat: FontSizeOption = 'small';
   const saved = localStorage.getItem('fontSizeConfig');
   if (saved) {
     try {
-      return JSON.parse(saved);
+      const parsed = JSON.parse(saved) as Partial<FontSizeConfig>;
+      if (parsed.chat && ['small', 'medium', 'large'].includes(parsed.chat)) chat = parsed.chat;
     } catch {
-      // Invalid JSON, use defaults
+      /* invalid chat setting — use the default */
     }
   }
-  return { chat: 'small', ui: 'medium' };
+  return { chat, ui: getAppearance().fontSize };
 }
 
 export function setFontSizeConfig(config: FontSizeConfig): void {
   localStorage.setItem('fontSizeConfig', JSON.stringify(config));
-  // Apply CSS variables immediately for real-time update
-  applyFontSizeToDocument(config);
+  updateAppearance({ fontSize: config.ui });
   window.dispatchEvent(new CustomEvent('fontsize-changed', { detail: config }));
 }
 
@@ -449,28 +420,21 @@ export function getChatFontClass(): string {
 }
 
 export function getUIFontClass(): string {
-  const config = getFontSizeConfig();
-  return fontSizeClasses[config.ui].ui;
+  return fontSizeClasses[getAppearance().fontSize].ui;
 }
 
 // Color theme management
 export function getColorTheme(): ColorTheme {
-  const saved = localStorage.getItem('colorTheme');
-  if (saved && ['sunset', 'ocean', 'forest', 'berry', 'mono'].includes(saved)) {
-    return saved as ColorTheme;
-  }
-  return 'sunset'; // Default to sunset (orange) theme
+  return getAppearance().colorTheme;
 }
 
 export function setColorTheme(theme: ColorTheme): void {
-  localStorage.setItem('colorTheme', theme);
-  document.documentElement.setAttribute('data-theme', theme);
+  updateAppearance({ colorTheme: theme });
   window.dispatchEvent(new CustomEvent('colortheme-changed', { detail: theme }));
 }
 
 export function initColorTheme(): void {
-  const theme = getColorTheme();
-  document.documentElement.setAttribute('data-theme', theme);
+  initAppearance();
 }
 
 // Thinking dot style management
@@ -496,11 +460,11 @@ export const thinkingDotStyleLabels: Record<ThinkingDotStyle, { zh: string; en: 
 };
 
 export const colorThemeLabels: Record<ColorTheme, { zh: string; en: string; de: string; fr: string; es: string; colors: [string, string] }> = {
-  sunset: { zh: '日落橙', en: 'Sunset', de: 'Sonnenuntergang', fr: 'Coucher de soleil', es: 'Atardecer', colors: ['#FF7A00', '#0D8F8C'] },
-  ocean: { zh: '海洋蓝', en: 'Ocean', de: 'Ozean', fr: 'Océan', es: 'Océano', colors: ['#0EA5E9', '#8B5CF6'] },
-  forest: { zh: '森林绿', en: 'Forest', de: 'Wald', fr: 'Forêt', es: 'Bosque', colors: ['#22C55E', '#F97316'] },
-  berry: { zh: '浆果粉', en: 'Berry', de: 'Beere', fr: 'Baie', es: 'Baya', colors: ['#EC4899', '#6366F1'] },
-  mono: { zh: '极简灰', en: 'Monochrome', de: 'Monochrom', fr: 'Monochrome', es: 'Monocromo', colors: ['#71717A', '#18181B'] },
+  sunset: { zh: '青蓝', en: 'Teal', de: 'Petrol', fr: 'Sarcelle', es: 'Verde azulado', colors: [...THEME_META[0].colors] },
+  ocean: { zh: '海洋蓝', en: 'Ocean', de: 'Ozean', fr: 'Océan', es: 'Océano', colors: [...THEME_META[1].colors] },
+  forest: { zh: '森林绿', en: 'Forest', de: 'Wald', fr: 'Forêt', es: 'Bosque', colors: [...THEME_META[2].colors] },
+  berry: { zh: '浆果粉', en: 'Berry', de: 'Beere', fr: 'Baie', es: 'Baya', colors: [...THEME_META[3].colors] },
+  mono: { zh: '极简灰', en: 'Monochrome', de: 'Monochrom', fr: 'Monochrome', es: 'Monocromo', colors: [...THEME_META[4].colors] },
 };
 
 // Voice options per locale

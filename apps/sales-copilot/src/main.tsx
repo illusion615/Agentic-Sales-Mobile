@@ -2,27 +2,14 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import './index.css';
 import App from '@/app.tsx';
-import { initColorTheme } from '@/lib/i18n';
+import { configureAppearanceScope, initAppearance } from '@agentic/app-shell';
 import { refreshPromptResolution } from '@/services/prompt-resolver';
 import { queryClient } from '@/lib/query-client';
 import { restoreQueryCache, startQueryPersistence } from '@/lib/query-persist';
 
-// Initialize theme from localStorage or default to light
-const savedTheme = localStorage.getItem('theme');
-const root = document.documentElement;
-// Clear any existing theme classes first
-root.classList.remove('dark', 'light');
-if (savedTheme === 'dark') {
-  root.classList.add('dark');
-} else {
-  root.classList.add('light');
-  if (!savedTheme) {
-    localStorage.setItem('theme', 'light');
-  }
-}
-
-// Initialize color theme
-initColorTheme();
+// Apply the shared family appearance before React paints.
+configureAppearanceScope('sales-copilot', { migrateLegacy: true });
+initAppearance();
 
 // Build fingerprint — changes on every build
 const BUILD_ID = __BUILD_TIMESTAMP__;

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Settings } from 'lucide-react';
 import { useDataCapabilities, useMyWorkOrders } from '@/hooks/use-work-orders';
 import { assessSla, sortWorkOrders, suggestVisitOrder, type SortMode, type SlaState } from '@/domain/scheduling';
 import type { WorkOrderSummary } from '@/domain/work-order';
@@ -14,11 +15,11 @@ const SORT_LABELS: Record<SortMode, string> = {
 };
 
 const SLA_STYLES: Record<SlaState, { label: string; className: string }> = {
-  breached: { label: '已超时', className: 'bg-rose-100 text-rose-700' },
-  critical: { label: '紧急', className: 'bg-orange-100 text-orange-700' },
-  'at-risk': { label: '有风险', className: 'bg-amber-100 text-amber-700' },
-  ok: { label: '正常', className: 'bg-emerald-100 text-emerald-700' },
-  none: { label: '无 SLA', className: 'bg-slate-100 text-slate-600' },
+  breached: { label: '已超时', className: 'bg-rose-500/12 text-rose-600 dark:text-rose-300' },
+  critical: { label: '紧急', className: 'bg-orange-500/12 text-orange-600 dark:text-orange-300' },
+  'at-risk': { label: '有风险', className: 'bg-amber-500/12 text-amber-700 dark:text-amber-300' },
+  ok: { label: '正常', className: 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-300' },
+  none: { label: '无 SLA', className: 'bg-muted text-muted-foreground' },
 };
 
 function todayRange() {
@@ -62,17 +63,24 @@ export function DashboardPage() {
   const breached = workOrders.filter((w) => assessSla(w).state === 'breached').length;
 
   return (
-    <div className="mx-auto flex min-h-full max-w-2xl flex-col gap-4 bg-slate-50 p-4">
-      <header className="flex items-baseline justify-between">
+    <div className="app-shell mx-auto flex min-h-full max-w-2xl flex-col gap-4 p-4">
+      <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-slate-900">我的工单</h1>
-          <p className="text-sm text-slate-500">
+          <h1 className="text-xl font-semibold text-foreground">我的工单</h1>
+          <p className="text-sm text-muted-foreground">
             {workOrders.length} 个待办{breached > 0 ? ` · ${breached} 个已超时` : ''}
           </p>
         </div>
-        <span className="rounded-full bg-slate-200 px-2 py-1 text-xs text-slate-600">
-          数据源：{capabilities.id}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">数据源：{capabilities.id}</span>
+          <Link
+            to="/settings"
+            aria-label="设置"
+            className="flex h-9 w-9 items-center justify-center rounded-xl bg-card text-muted-foreground ring-1 ring-border"
+          >
+            <Settings className="h-4 w-4" />
+          </Link>
+        </div>
       </header>
 
       <div className="flex flex-wrap gap-2">
@@ -85,7 +93,9 @@ export function DashboardPage() {
             disabled={planning}
             onClick={() => setSortMode(mode)}
             className={`rounded-full px-3 py-1 text-sm disabled:opacity-40 ${
-              sortMode === mode && !planning ? 'bg-slate-900 text-white' : 'bg-white text-slate-700'
+              sortMode === mode && !planning
+                ? 'bg-primary text-primary-foreground'
+                : 'bg-card text-foreground ring-1 ring-border'
             }`}
           >
             {SORT_LABELS[mode]}
@@ -95,7 +105,7 @@ export function DashboardPage() {
           type="button"
           onClick={() => setPlanning((v) => !v)}
           className={`rounded-full px-3 py-1 text-sm ${
-            planning ? 'bg-blue-600 text-white' : 'bg-white text-blue-700'
+            planning ? 'bg-accent text-accent-foreground' : 'bg-card text-primary ring-1 ring-border'
           }`}
         >
           {planning ? '退出排程' : '规划路线'}
@@ -103,12 +113,12 @@ export function DashboardPage() {
       </div>
 
       {!capabilities.selfScheduling && planning && (
-        <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+        <p className="rounded-lg bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
           当前数据源不支持自主改期，以下顺序仅供参考，需由调度确认。
         </p>
       )}
 
-      {isLoading && <p className="text-sm text-slate-500">加载中…</p>}
+      {isLoading && <p className="text-sm text-muted-foreground">加载中…</p>}
 
       <ol className="flex flex-col gap-3">
         {(plan ? plan.map((stop) => stop.workOrder) : sorted).map((workOrder, index) => (
@@ -137,39 +147,39 @@ function WorkOrderCard({
   const style = SLA_STYLES[sla.state];
 
   return (
-    <li className="rounded-xl bg-white p-4 shadow-sm">
+    <li className="glass-card p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             {sequence !== null && (
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-semibold text-white">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
                 {sequence}
               </span>
             )}
-            <h2 className="truncate font-medium text-slate-900">{workOrder.customerName}</h2>
+            <h2 className="truncate font-medium text-foreground">{workOrder.customerName}</h2>
           </div>
-          <p className="mt-1 truncate text-sm text-slate-500">
+          <p className="mt-1 truncate text-sm text-muted-foreground">
             {workOrder.number} · {workOrder.incidentType ?? '未分类'}
           </p>
-          <p className="mt-1 truncate text-sm text-slate-500">{workOrder.address.line1}</p>
+          <p className="mt-1 truncate text-sm text-muted-foreground">{workOrder.address.line1}</p>
         </div>
         <span className={`shrink-0 rounded-full px-2 py-1 text-xs ${style.className}`}>{style.label}</span>
       </div>
 
-      <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
+      <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
         <span>{formatRemaining(sla.minutesRemaining)}</span>
         <span>{legKm !== null ? `行程 ${legKm.toFixed(1)} km` : ''}</span>
       </div>
 
       <div className="mt-3 flex items-center gap-2">
         <Link
-          className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm text-white"
+          className="rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground"
           to={`/work-orders/${workOrder.id}`}
         >
           查看详情
         </Link>
         <a
-          className="rounded-lg bg-white px-3 py-1.5 text-sm text-slate-700 ring-1 ring-slate-200"
+          className="rounded-lg bg-card px-3 py-1.5 text-sm text-foreground ring-1 ring-border"
           href={navigationUrl(workOrder.address)}
           target="_blank"
           rel="noopener noreferrer"

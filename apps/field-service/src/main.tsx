@@ -1,8 +1,12 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { configureAppearanceScope, initAppearance } from '@agentic/app-shell';
 import { App } from './app';
 import './index.css';
+
+configureAppearanceScope('field-service');
+initAppearance();
 
 const queryClient = new QueryClient({
   defaultOptions: {

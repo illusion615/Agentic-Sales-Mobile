@@ -16,6 +16,7 @@
     "i18n:import": "node scripts/i18n-import.mjs"
   },
   "dependencies": {
+    "@agentic/app-shell": "workspace:*",
     "@agentic/power-runtime": "workspace:*",
     "@microsoft/power-apps": "^1.1.3",
     "@microsoft/power-apps-vite": "^1.0.2",

@@ -28,7 +28,7 @@ function CustomerProfileLink({ context }: CustomWidgetProps) {
   return (
     <Link
       to={`/work-orders/${context.workOrderId}`}
-      className="inline-flex items-center gap-1 rounded-lg bg-white px-3 py-1.5 text-sm text-blue-700 ring-1 ring-slate-200"
+      className="inline-flex items-center gap-1 rounded-lg bg-card px-3 py-1.5 text-sm text-primary ring-1 ring-border"
     >
       查看{context.customerName ?? '客户'}档案 →
     </Link>
@@ -55,9 +55,9 @@ export function FormFieldRow({
   const proposed = entry?.source === 'ai';
 
   return (
-    <div className={`flex flex-col gap-1.5 ${proposed ? '-mx-2 rounded-lg bg-blue-50/60 px-2 py-2' : ''}`}>
+    <div className={`flex flex-col gap-1.5 ${proposed ? '-mx-2 rounded-lg bg-secondary px-2 py-2' : ''}`}>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm text-slate-700">{field.label}</span>
+        <span className="text-sm text-foreground/80">{field.label}</span>
         {field.required && <span className="-ml-1 text-rose-500">*</span>}
 
         {proposed && (
@@ -67,13 +67,13 @@ export function FormFieldRow({
           <button
             type="button"
             onClick={() => onConfirm(field.name)}
-            className="rounded-full bg-blue-600 px-2 py-0.5 text-xs text-white"
+            className="rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground"
           >
             ✓ 确认{entry?.confidence ? ` · 建议 ${Math.round(entry.confidence * 100)}%` : ''}
           </button>
         )}
         {entry?.source === 'prefill' && (
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">自动带入</span>
+          <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">自动带入</span>
         )}
       </div>
 
@@ -96,7 +96,7 @@ function FieldControl({
   const value = entry?.value;
   const set = (next: FormValue) => onChange(field.name, next);
   const inputClass =
-    'w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400 disabled:bg-slate-50';
+    'w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground outline-none focus:border-primary disabled:bg-muted';
 
   switch (field.type) {
     case 'textarea':
@@ -240,14 +240,17 @@ function Chip({
   disabled?: boolean;
   onClick: () => void;
 }) {
-  const active = tone === 'emerald' ? 'bg-emerald-600 text-white ring-emerald-600' : 'bg-slate-900 text-white ring-slate-900';
+  const active =
+    tone === 'emerald'
+      ? 'bg-emerald-600 text-white ring-emerald-600'
+      : 'bg-primary text-primary-foreground ring-primary';
   return (
     <button
       type="button"
       disabled={disabled}
       onClick={onClick}
       className={`rounded-full px-3 py-1 text-sm ring-1 transition-colors ${
-        on ? active : 'bg-white text-slate-600 ring-slate-200'
+        on ? active : 'bg-card text-muted-foreground ring-border'
       }`}
     >
       {label}
