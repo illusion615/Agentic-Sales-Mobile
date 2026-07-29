@@ -15,6 +15,7 @@ import type {
   DataSourceId,
   FieldExtractor,
   FormSchemaRepository,
+  VisitSummaryProvider,
   WorkOrderRepository,
 } from '@/domain/ports';
 import { createLocalWorkOrderRepository } from './local/local-repository';
@@ -23,6 +24,7 @@ import { createLocalCaptureRepository } from './local/capture-repository';
 import { createLocalFormSchemaRepository } from './local/form-schema-repository';
 import { createRuleBasedBriefingProvider } from './local/briefing-provider';
 import { createRuleBasedFieldExtractor } from './local/field-extractor';
+import { createRuleBasedVisitSummaryProvider } from './local/visit-summary-provider';
 
 function resolveConfiguredSource(): DataSourceId {
   const configured = import.meta.env.VITE_DATA_SOURCE;
@@ -80,9 +82,14 @@ export function createFieldExtractor(): FieldExtractor {
   return createRuleBasedFieldExtractor();
 }
 
+export function createVisitSummaryProvider(): VisitSummaryProvider {
+  return createRuleBasedVisitSummaryProvider();
+}
+
 export const workOrderRepository = createWorkOrderRepository();
 export const customerRepository = createCustomerRepository();
 export const captureRepository = createCaptureRepository();
 export const formSchemaRepository = createFormSchemaRepository();
 export const briefingProvider = createBriefingProvider();
 export const fieldExtractor = createFieldExtractor();
+export const visitSummaryProvider = createVisitSummaryProvider();

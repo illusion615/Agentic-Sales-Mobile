@@ -19,6 +19,7 @@
 import type { DateRange, TimeSlot, WorkOrderDetail, WorkOrderSummary } from './work-order';
 import type { CustomerProfile, ServiceHistoryEntry } from './customer';
 import type { Briefing, BriefingContext } from './briefing';
+import type { VisitSummary, VisitSummaryInput } from './visit-summary';
 import type { Evidence, WorkSession } from './capture';
 import type { FieldValue, FormSchema } from './form-schema';
 import type { ExtractionInput, ExtractionResult, CustomerUpdateCandidate } from './extraction';
@@ -125,4 +126,9 @@ export interface FieldExtractor {
  */
 export interface FormSchemaRepository {
   getSchemaForWorkOrder(workOrder: WorkOrderDetail): Promise<FormSchema>;
+}
+
+/** Writes the review summary. A model in production; rule-based locally. */
+export interface VisitSummaryProvider {
+  summarise(input: VisitSummaryInput): Promise<VisitSummary>;
 }

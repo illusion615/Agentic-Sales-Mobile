@@ -5,6 +5,7 @@ import {
   customerRepository,
   fieldExtractor,
   formSchemaRepository,
+  visitSummaryProvider,
   workOrderRepository,
 } from '@/data';
 import type { Evidence } from '@/domain/capture';
@@ -145,6 +146,28 @@ export function useRunExtraction(workOrderId: string, sessionId: string | undefi
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['answers', sessionId] });
       queryClient.invalidateQueries({ queryKey: ['customer-updates', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['visit-summary', sessionId] });
+    },
+  });
+}
+
+/**
+ * The summary shown at the top of review.
+ *
+ * Reads the STORED answers rather than the page's editable copy, so it does not
+ * rewrite itself on every keystroke; it refreshes when extraction lands.
+ */
+export function useVisitSummary(workOrderId: string, sessionId: string | undefined) {
+  return useQuery({
+    queryKey: ['visit-summary', sessionId],
+    enabled: !!sessionId,
+    queryFn: async () => {
+      const workOrder = await workOrderRepository.getWorkOrder(workOrderId);
+      const [schema, values] = await Promise.all([
+        formSchemaRepository.getSchemaForWorkOrder(workOrder),
+        captureRepository.getAnswers(sessionId!),
+      ]);
+      return visitSummaryProvider.summarise({ workOrder, schema, values });
     },
   });
 }

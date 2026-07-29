@@ -139,3 +139,13 @@ export function setUserValue(
   // An edit drops the proposal's confidence and provenance along with it.
   return [...values.filter((v) => v.name !== name), { name, value, source: 'user' }];
 }
+
+/**
+ * Accept a proposal as it stands. The value does not change; who stands behind
+ * it does, which is the whole point of review.
+ */
+export function confirmValue(values: readonly FieldValue[], name: string): FieldValue[] {
+  const entry = values.find((v) => v.name === name);
+  if (!entry) return [...values];
+  return [...values.filter((v) => v.name !== name), { name, value: entry.value, source: 'user' }];
+}

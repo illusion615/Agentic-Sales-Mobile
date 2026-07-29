@@ -1,15 +1,15 @@
 import type { ComponentType } from 'react';
 import { Link } from 'react-router-dom';
-import type { FieldValue, FormField, FormSchema, FormValue } from '@/domain/form-schema';
-import { valueOf } from '@/domain/form-schema';
+import type { FieldValue, FormField, FormValue } from '@/domain/form-schema';
 
 /**
- * Renders a form from its definition.
+ * One field of a data-defined form.
  *
- * The definition is data, so this component knows nothing about any particular
- * form. Widgets the platform does not provide are resolved through a registry,
- * and an unrecognised one renders a visible notice rather than disappearing:
- * a field silently missing from a service report is worse than an ugly one.
+ * Knows nothing about any particular form: everything it renders comes from the
+ * definition. Widgets the platform does not provide are resolved through a
+ * registry, and an unrecognised one renders a visible notice rather than
+ * disappearing — a field silently missing from a service report is worse than
+ * an ugly one.
  */
 
 export interface FormContext {
@@ -28,9 +28,9 @@ function CustomerProfileLink({ context }: CustomWidgetProps) {
   return (
     <Link
       to={`/work-orders/${context.workOrderId}`}
-      className="inline-block rounded-lg bg-white px-3 py-1.5 text-sm text-blue-700 ring-1 ring-slate-200"
+      className="inline-flex items-center gap-1 rounded-lg bg-white px-3 py-1.5 text-sm text-blue-700 ring-1 ring-slate-200"
     >
-      查看{context.customerName ?? '客户'}档案
+      查看{context.customerName ?? '客户'}档案 →
     </Link>
   );
 }
@@ -39,40 +39,50 @@ const CUSTOM_WIDGETS: Record<string, ComponentType<CustomWidgetProps>> = {
   CustomerProfileLink,
 };
 
-export function FormRenderer({
-  schema,
-  values,
+export function FormFieldRow({
+  field,
+  entry,
   onChange,
+  onConfirm,
   context,
 }: {
-  schema: FormSchema;
-  values: readonly FieldValue[];
+  field: FormField;
+  entry: FieldValue | undefined;
   onChange: (name: string, value: FormValue) => void;
+  onConfirm: (name: string) => void;
   context: FormContext;
 }) {
+  const proposed = entry?.source === 'ai';
+
   return (
-    <div className="flex flex-col gap-4">
-      {schema.sections.map((section) => (
-        <section key={section.key} className="rounded-xl bg-white p-4 shadow-sm">
-          <h2 className="font-medium text-slate-900">{section.title}</h2>
-          <div className="mt-3 flex flex-col gap-4">
-            {section.fields.map((field) => (
-              <FieldRow
-                key={field.name}
-                field={field}
-                entry={valueOf(values, field.name)}
-                onChange={onChange}
-                context={context}
-              />
-            ))}
-          </div>
-        </section>
-      ))}
+    <div className={`flex flex-col gap-1.5 ${proposed ? '-mx-2 rounded-lg bg-blue-50/60 px-2 py-2' : ''}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm text-slate-700">{field.label}</span>
+        {field.required && <span className="-ml-1 text-rose-500">*</span>}
+
+        {proposed && (
+          // Accepting is one tap: review is mostly agreeing, and making the
+          // technician retype a correct value to own it would guarantee
+          // rubber-stamping instead.
+          <button
+            type="button"
+            onClick={() => onConfirm(field.name)}
+            className="rounded-full bg-blue-600 px-2 py-0.5 text-xs text-white"
+          >
+            ✓ 确认{entry?.confidence ? ` · 建议 ${Math.round(entry.confidence * 100)}%` : ''}
+          </button>
+        )}
+        {entry?.source === 'prefill' && (
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">自动带入</span>
+        )}
+      </div>
+
+      <FieldControl field={field} entry={entry} onChange={onChange} context={context} />
     </div>
   );
 }
 
-function FieldRow({
+function FieldControl({
   field,
   entry,
   onChange,
@@ -85,40 +95,8 @@ function FieldRow({
 }) {
   const value = entry?.value;
   const set = (next: FormValue) => onChange(field.name, next);
-
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="flex flex-wrap items-center gap-2 text-sm text-slate-700">
-        {field.label}
-        {field.required && <span className="text-rose-500">*</span>}
-        {entry?.source === 'ai' && (
-          <span className="rounded bg-blue-50 px-1.5 py-0.5 text-xs text-blue-700">
-            建议{entry.confidence ? ` ${Math.round(entry.confidence * 100)}%` : ''}
-          </span>
-        )}
-        {entry?.source === 'prefill' && (
-          <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">自动带入</span>
-        )}
-      </span>
-      <FieldControl field={field} value={value} set={set} context={context} onChange={onChange} />
-    </div>
-  );
-}
-
-function FieldControl({
-  field,
-  value,
-  set,
-  context,
-  onChange,
-}: {
-  field: FormField;
-  value: FormValue | undefined;
-  set: (value: FormValue) => void;
-  context: FormContext;
-  onChange: (name: string, value: FormValue) => void;
-}) {
-  const inputClass = 'rounded-lg border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-50';
+  const inputClass =
+    'w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400 disabled:bg-slate-50';
 
   switch (field.type) {
     case 'textarea':
@@ -172,7 +150,7 @@ function FieldControl({
     case 'single-select': {
       const options = field.options ?? [];
       const selected = typeof value === 'string' ? value : '';
-      // Beyond a handful of choices a list of radios stops being scannable.
+      // Beyond a handful of choices a row of chips stops being scannable.
       if (options.length > 6) {
         return (
           <select className={inputClass} disabled={field.readonly} value={selected} onChange={(e) => set(e.target.value)}>
@@ -186,21 +164,16 @@ function FieldControl({
         );
       }
       return (
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-1.5">
           {options.map((option) => (
-            <button
+            <Chip
               key={option.key}
-              type="button"
+              label={option.label}
+              on={selected === option.key}
               disabled={field.readonly}
+              tone="slate"
               onClick={() => set(selected === option.key ? '' : option.key)}
-              className={`rounded-full px-3 py-1 text-sm ring-1 ${
-                selected === option.key
-                  ? 'bg-slate-900 text-white ring-slate-900'
-                  : 'bg-white text-slate-700 ring-slate-200'
-              }`}
-            >
-              {option.label}
-            </button>
+            />
           ))}
         </div>
       );
@@ -209,23 +182,23 @@ function FieldControl({
     case 'multi-select': {
       const selected = Array.isArray(value) ? value : [];
       return (
-        <div className="flex flex-wrap gap-2">
-          {(field.options ?? []).map((option) => {
-            const on = selected.includes(option.key);
-            return (
-              <button
-                key={option.key}
-                type="button"
-                disabled={field.readonly}
-                onClick={() => set(on ? selected.filter((k) => k !== option.key) : [...selected, option.key])}
-                className={`rounded-full px-3 py-1 text-sm ring-1 ${
-                  on ? 'bg-emerald-600 text-white ring-emerald-600' : 'bg-white text-slate-700 ring-slate-200'
-                }`}
-              >
-                {option.label}
-              </button>
-            );
-          })}
+        <div className="flex flex-wrap gap-1.5">
+          {(field.options ?? []).map((option) => (
+            <Chip
+              key={option.key}
+              label={option.label}
+              on={selected.includes(option.key)}
+              disabled={field.readonly}
+              tone="emerald"
+              onClick={() =>
+                set(
+                  selected.includes(option.key)
+                    ? selected.filter((k) => k !== option.key)
+                    : [...selected, option.key],
+                )
+              }
+            />
+          ))}
         </div>
       );
     }
@@ -239,7 +212,7 @@ function FieldControl({
           </p>
         );
       }
-      return <Widget field={field} value={value} onChange={(next) => onChange(field.name, next)} context={context} />;
+      return <Widget field={field} value={value} onChange={set} context={context} />;
     }
 
     default:
@@ -252,4 +225,32 @@ function FieldControl({
         />
       );
   }
+}
+
+function Chip({
+  label,
+  on,
+  tone,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  on: boolean;
+  tone: 'slate' | 'emerald';
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  const active = tone === 'emerald' ? 'bg-emerald-600 text-white ring-emerald-600' : 'bg-slate-900 text-white ring-slate-900';
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={`rounded-full px-3 py-1 text-sm ring-1 transition-colors ${
+        on ? active : 'bg-white text-slate-600 ring-slate-200'
+      }`}
+    >
+      {label}
+    </button>
+  );
 }
