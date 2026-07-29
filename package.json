@@ -1,0 +1,18 @@
+{
+  "name": "agentic-power-apps",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Monorepo for Power Apps code apps and the shared runtime packages they build on.",
+  "engines": {
+    "node": ">=20 <23"
+  },
+  "scripts": {
+    "typecheck": "pnpm -r --filter './packages/**' run typecheck",
+    "test": "pnpm -r --filter './packages/**' run test"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  },
+  "packageManager": "pnpm@11.0.8+sha512.4c4097e1dd2d42372c4e7fa5a791ff28fc75a484c7ac192e64b1df0fdef17594ba982f9b4fed9adfb3c757846f565b799b2763fb3733d1de1bcb82cf46684912"
+}

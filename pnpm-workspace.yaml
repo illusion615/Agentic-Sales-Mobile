@@ -1,0 +1,8 @@
+# Repo-root workspace for shared packages and new apps.
+#
+# `apps/sales-copilot` is INTENTIONALLY absent: it still owns its own
+# pnpm-workspace.yaml + lockfile, so pnpm resolves it independently and its
+# TypeScript incremental cache (.tsbuildinfo) is untouched by anything here.
+# Folding it in is a separate, scheduled step that costs one cold rebuild.
+packages:
+  - 'packages/*'

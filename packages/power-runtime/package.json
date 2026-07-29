@@ -1,0 +1,36 @@
+{
+  "name": "@agentic/power-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Host-agnostic runtime building blocks shared by Power Apps code apps: background tasks, AI cost accounting, Dataverse guards.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./react": "./src/react/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "peerDependencies": {
+    "@tanstack/react-query": ">=5",
+    "react": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "@tanstack/react-query": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@tanstack/react-query": "^5.59.0",
+    "@types/react": "^18.3.12",
+    "jsdom": "^29.1.1",
+    "react": "^18.3.1",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.6"
+  }
+}
