@@ -12,7 +12,17 @@ import { cn } from '@/lib/utils';
 import { getLocale, t, type Locale } from '@/lib/i18n';
 import { DURATION_PRESETS, type ScheduleValue } from '@/lib/activity-schedule';
 
-/** Native time-of-day input, styled to match the app's inputs. */
+/**
+ * Native time-of-day input, styled to match the app's inputs.
+ *
+ * `w-full min-w-0` is load-bearing, not cosmetic: flex/grid items default to
+ * `min-width: auto`, and a native `<input type="time">` has a large intrinsic
+ * min-width on mobile WebKit/Chromium (hour/minute/AM-PM segments + the clock
+ * glyph). Without `min-w-0` the input refuses to shrink and spills OUT of its
+ * track, visually colliding with whatever sits next to it. Same failure mode the
+ * date field hit in form-card.tsx. Horizontal padding stays tight for the same
+ * reason — every pixel counts in a narrow mobile column.
+ */
 export function TimeInput({
   value,
   onChange,
@@ -31,7 +41,7 @@ export function TimeInput({
       onChange={(e) => onChange(e.target.value)}
       aria-label={ariaLabel}
       className={cn(
-        'h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground',
+        'h-9 w-full min-w-0 rounded-md border border-input bg-background px-2 text-sm text-foreground',
         'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-0',
         className,
       )}
@@ -85,19 +95,19 @@ export function TimeDurationFields({
 }) {
   return (
     <div className={cn('grid grid-cols-2 gap-2', className)}>
-      <div>
+      <div className="min-w-0">
         <span className="text-[11px] text-muted-foreground flex items-center gap-1 mb-1">
           <Clock className="w-3 h-3" />
           {t('fieldTime', locale)}
         </span>
-        <TimeInput value={time} onChange={onTimeChange} className="w-full" ariaLabel={t('fieldTime', locale)} />
+        <TimeInput value={time} onChange={onTimeChange} ariaLabel={t('fieldTime', locale)} />
       </div>
-      <div>
+      <div className="min-w-0">
         <span className="text-[11px] text-muted-foreground flex items-center gap-1 mb-1">
           <Timer className="w-3 h-3" />
           {t('fieldDuration', locale)}
         </span>
-        <DurationSelect value={durationMinutes} onChange={onDurationChange} locale={locale} className="w-full" />
+        <DurationSelect value={durationMinutes} onChange={onDurationChange} locale={locale} className="w-full min-w-0" />
       </div>
     </div>
   );

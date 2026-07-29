@@ -7,7 +7,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { Check, X, Calendar, User, Users, Building2, Phone, Mail, MapPin, DollarSign, TrendingUp, FileText, Tag, ChevronRight, ChevronDown, Target, Sparkles, Bug, Lightbulb, Image, CircleDot } from 'lucide-react';
+import { Check, X, Calendar, Clock, Timer, User, Users, Building2, Phone, Mail, MapPin, DollarSign, TrendingUp, FileText, Tag, ChevronRight, ChevronDown, Target, Sparkles, Bug, Lightbulb, Image, CircleDot } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -47,7 +47,7 @@ import {
   activityStatusForDraftMode,
   resolveActivityDraftMode,
 } from '@/lib/activity-draft-mode';
-import { TimeDurationFields } from '@/components/schedule-picker';
+import { TimeInput, DurationSelect } from '@/components/schedule-picker';
 import { combineDateTime, timeFromISO, DEFAULT_DURATION_MINUTES } from '@/lib/activity-schedule';
 
 export interface FormCardData {
@@ -657,14 +657,25 @@ function ActivityFormCard({ data, formData, setFormData, onConfirm, onCancel, is
           type="date"
           placeholder={t('selectDate', locale)}
         />
-        <TimeDurationFields
-          time={(formData.scheduledTime as string) || timeFromISO(formData.scheduledDate as string)}
-          durationMinutes={(formData.durationMinutes as number) || DEFAULT_DURATION_MINUTES}
-          onTimeChange={(v) => setFormData((prev: Record<string, unknown>) => ({ ...prev, scheduledTime: v }))}
-          onDurationChange={(v) => setFormData((prev: Record<string, unknown>) => ({ ...prev, durationMinutes: v }))}
-          locale={locale}
-          className="px-0.5"
-        />
+        {/* Time and duration are ordinary field rows, not a side-by-side pair: the
+            draft card renders inside a narrow mobile sheet where a native time
+            input plus a select cannot share one row without colliding. */}
+        <FieldShell icon={Clock} label={t('fieldTime', locale)} compact={compact}>
+          <TimeInput
+            value={(formData.scheduledTime as string) || timeFromISO(formData.scheduledDate as string)}
+            onChange={(v: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, scheduledTime: v }))}
+            ariaLabel={t('fieldTime', locale)}
+            className={compact ? 'h-7' : 'h-8 mt-0.5'}
+          />
+        </FieldShell>
+        <FieldShell icon={Timer} label={t('fieldDuration', locale)} compact={compact}>
+          <DurationSelect
+            value={(formData.durationMinutes as number) || DEFAULT_DURATION_MINUTES}
+            onChange={(v: number) => setFormData((prev: Record<string, unknown>) => ({ ...prev, durationMinutes: v }))}
+            locale={locale}
+            className={cn('w-full min-w-0 text-sm', compact ? 'h-7' : 'h-8 mt-0.5')}
+          />
+        </FieldShell>
         <OpportunitySelector
           value={formData.opportunityId as string}
           onChange={(id: string, name: string) => setFormData((prev: Record<string, unknown>) => ({ ...prev, opportunityId: id, opportunityName: name }))}
