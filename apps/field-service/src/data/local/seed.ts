@@ -1,8 +1,14 @@
+import type { CustomerProfile, ServiceHistoryEntry } from '@/domain/customer';
 import type { WorkOrderDetail } from '@/domain/work-order';
 
 /** Hours from now, as an ISO string — keeps the fixture perpetually realistic. */
 function hoursFromNow(hours: number): string {
   return new Date(Date.now() + hours * 3_600_000).toISOString();
+}
+
+/** Days before now, for history entries. */
+function daysAgo(days: number): string {
+  return new Date(Date.now() - days * 86_400_000).toISOString();
 }
 
 /**
@@ -95,4 +101,85 @@ export function seedWorkOrders(): WorkOrderDetail[] {
       summary: '补充耗材并回收空瓶。',
     },
   ];
+}
+
+export function seedCustomers(): CustomerProfile[] {
+  return [
+    {
+      id: 'acc-1',
+      name: '南山人民医院',
+      industry: '公立医院',
+      siteAccessNotes: '设备科在住院楼 B1，需在门岗登记并换鞋；夜间从急诊入口进。',
+      cautions: ['血透室为洁净区，进入前需穿戴鞋套与口罩', '设备停机需科室主任签字确认'],
+      contacts: [
+        { name: '王主任', role: '设备科主任', phone: '13800000001' },
+        { name: '陈护士长', role: '血透室', phone: '13800000011' },
+      ],
+    },
+    {
+      id: 'acc-2',
+      name: '深圳市第二人民医院',
+      industry: '公立医院',
+      siteAccessNotes: 'ICU 需提前 30 分钟报备，由李工陪同进入。',
+      contacts: [{ name: '李工', role: '临床工程师', phone: '13800000002' }],
+    },
+    {
+      id: 'acc-3',
+      name: '深圳大学附属医院',
+      industry: '教学医院',
+      contacts: [{ name: '张老师', role: '设备管理', phone: '13800000003' }],
+    },
+    {
+      id: 'acc-4',
+      name: '罗湖社区健康服务中心',
+      industry: '社区医疗',
+      contacts: [{ name: '周主任', role: '院办', phone: '13800000004' }],
+    },
+  ];
+}
+
+/** Keyed by customer id. */
+export function seedServiceHistory(): Record<string, ServiceHistoryEntry[]> {
+  return {
+    'acc-1': [
+      {
+        id: 'h-1',
+        workOrderNumber: 'WO-0912',
+        completedOn: daysAgo(21),
+        incidentType: '透析机停机',
+        resolution: '更换电导率传感器，校准后运行正常。判断为进水水质波动导致误报。',
+        technicianName: '李工',
+        assetName: '透析机 DX-200 #3',
+      },
+      {
+        id: 'h-2',
+        workOrderNumber: 'WO-0788',
+        completedOn: daysAgo(63),
+        incidentType: '透析机停机',
+        resolution: '清洗管路并更换滤芯，报警消除。已建议院方加装前置软水器。',
+        technicianName: '王工',
+        assetName: '透析机 DX-200 #3',
+      },
+      {
+        id: 'h-3',
+        workOrderNumber: 'WO-0651',
+        completedOn: daysAgo(120),
+        incidentType: '预防性维护',
+        resolution: '季度保养，更换密封圈，运行参数正常。',
+        technicianName: '李工',
+      },
+    ],
+    'acc-2': [
+      {
+        id: 'h-4',
+        workOrderNumber: 'WO-0834',
+        completedOn: daysAgo(180),
+        incidentType: '监护仪校准',
+        resolution: '完成 6 台监护仪年度校准，出具校准报告。',
+        technicianName: '赵工',
+      },
+    ],
+    'acc-3': [],
+    'acc-4': [],
+  };
 }

@@ -17,6 +17,8 @@
  *    must reject a call it has not declared support for.
  */
 import type { DateRange, TimeSlot, WorkOrderDetail, WorkOrderSummary } from './work-order';
+import type { CustomerProfile, ServiceHistoryEntry } from './customer';
+import type { Briefing, BriefingContext } from './briefing';
 
 export type DataSourceId = 'local' | 'custom' | 'field-service';
 
@@ -62,4 +64,22 @@ export class UnsupportedCapabilityError extends Error {
     super(`The ${source} data source does not support ${String(capability)}.`);
     this.name = 'UnsupportedCapabilityError';
   }
+}
+
+export interface CustomerRepository {
+  getProfile(customerId: string): Promise<CustomerProfile>;
+  /** Past visits to this customer, newest first, optionally capped. */
+  listServiceHistory(customerId: string, limit?: number): Promise<ServiceHistoryEntry[]>;
+}
+
+/**
+ * Produces the pre-visit briefing.
+ *
+ * Separate from the repositories because it is a different kind of dependency:
+ * a language model in production, a deterministic composer locally. The result
+ * carries its own provenance so the UI never implies more than was actually
+ * done.
+ */
+export interface BriefingProvider {
+  generate(context: BriefingContext): Promise<Briefing>;
 }

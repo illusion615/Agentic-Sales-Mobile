@@ -6,24 +6,46 @@
  * runtime where it would invite reuse it is not built for.
  */
 const DB_NAME = 'fs-local';
-const DB_VERSION = 1;
 
-function open(storeName: string): Promise<IDBDatabase | null> {
-  return new Promise((resolve) => {
+/**
+ * Every object store is declared here and created in one upgrade.
+ *
+ * The alternative — creating each store on demand — needs a version bump per
+ * store, and a bump is blocked while any other connection is open, so parallel
+ * first reads deadlock. Declaring them together avoids that entirely.
+ *
+ * Adding a store means adding it here AND bumping the version.
+ */
+const STORES = ['workorders', 'customers', 'sessions', 'evidence'] as const;
+const DB_VERSION = 2;
+
+type StoreName = (typeof STORES)[number];
+
+let connection: Promise<IDBDatabase | null> | null = null;
+
+function open(): Promise<IDBDatabase | null> {
+  if (connection) return connection;
+
+  connection = new Promise((resolve) => {
     try {
       if (typeof indexedDB === 'undefined') return resolve(null);
       const request = indexedDB.open(DB_NAME, DB_VERSION);
       request.onupgradeneeded = () => {
-        if (!request.result.objectStoreNames.contains(storeName)) {
-          request.result.createObjectStore(storeName, { keyPath: 'id' });
+        for (const store of STORES) {
+          if (!request.result.objectStoreNames.contains(store)) {
+            request.result.createObjectStore(store, { keyPath: 'id' });
+          }
         }
       };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => resolve(null);
+      request.onblocked = () => resolve(null);
     } catch {
       resolve(null);
     }
   });
+
+  return connection;
 }
 
 export interface IdbCollection<T extends { id: string }> {
@@ -33,10 +55,10 @@ export interface IdbCollection<T extends { id: string }> {
   putAll(values: readonly T[]): Promise<void>;
 }
 
-export function createIdbCollection<T extends { id: string }>(storeName: string): IdbCollection<T> {
+export function createIdbCollection<T extends { id: string }>(storeName: StoreName): IdbCollection<T> {
   return {
     all() {
-      return open(storeName).then(
+      return open().then(
         (db) =>
           new Promise<T[]>((resolve) => {
             if (!db) return resolve([]);
@@ -52,7 +74,7 @@ export function createIdbCollection<T extends { id: string }>(storeName: string)
     },
 
     get(id) {
-      return open(storeName).then(
+      return open().then(
         (db) =>
           new Promise<T | undefined>((resolve) => {
             if (!db) return resolve(undefined);
@@ -72,7 +94,7 @@ export function createIdbCollection<T extends { id: string }>(storeName: string)
     },
 
     putAll(values) {
-      return open(storeName).then(
+      return open().then(
         (db) =>
           new Promise<void>((resolve) => {
             if (!db) return resolve();

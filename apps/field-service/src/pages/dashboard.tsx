@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useDataCapabilities, useMyWorkOrders } from '@/hooks/use-work-orders';
 import { assessSla, sortWorkOrders, suggestVisitOrder, type SortMode, type SlaState } from '@/domain/scheduling';
 import type { WorkOrderSummary } from '@/domain/work-order';
@@ -156,14 +157,22 @@ function WorkOrderCard({
         <span>{legKm !== null ? `行程 ${legKm.toFixed(1)} km` : ''}</span>
       </div>
 
-      <a
-        className="mt-3 inline-block rounded-lg bg-slate-900 px-3 py-1.5 text-sm text-white"
-        href={navigationUrl(workOrder.address)}
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        导航前往
-      </a>
+      <div className="mt-3 flex items-center gap-2">
+        <Link
+          className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm text-white"
+          to={`/work-orders/${workOrder.id}`}
+        >
+          查看详情
+        </Link>
+        <a
+          className="rounded-lg bg-white px-3 py-1.5 text-sm text-slate-700 ring-1 ring-slate-200"
+          href={navigationUrl(workOrder.address)}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          导航前往
+        </a>
+      </div>
     </li>
   );
 }
