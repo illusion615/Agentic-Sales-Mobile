@@ -13,7 +13,8 @@ import type { BackgroundTask, BackgroundTaskDraft } from './model';
 export interface BackgroundTaskGateway {
   create(row: Record<string, unknown>): Promise<DataverseResult<unknown>>;
   update(id: string, row: Record<string, unknown>): Promise<DataverseResult<unknown>>;
-  delete(id: string): Promise<DataverseResult<unknown>>;
+  /** Generated services return void here, so the result shape is not constrained. */
+  delete(id: string): Promise<unknown>;
   get(id: string): Promise<DataverseResult<unknown>>;
   getAll(options?: DataverseListOptions): Promise<DataverseResult<unknown[]>>;
 }

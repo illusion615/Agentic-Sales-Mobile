@@ -1,4 +1,4 @@
-import { withRetry, withTimeout } from '@/lib/retry';
+import { withRetry, withTimeout } from '@agentic/power-runtime';
 
 /**
  * Shared adapter utilities for mapping between

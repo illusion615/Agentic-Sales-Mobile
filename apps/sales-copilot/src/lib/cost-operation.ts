@@ -2,41 +2,20 @@
  * Turn → business-operation mapping for AI cost analytics.
  * --------------------------------------------------------------------------
  * The cost model analyses spend along BUSINESS dimensions (time × user ×
- * operation type), not technical call sites. This module is the single,
- * deterministic source that turns a parsed turn intent (the Frame/Orchestrator
- * plan, `TranslatedIntent`) into the ordered list of business operations it
- * represents, and maps each operation's function to a stable `operationType`
- * label used for grouping and distribution stats.
+ * operation type), not technical call sites. The expansion MECHANISM is shared
+ * (`@agentic/power-runtime`); what lives here is this app's VOCABULARY — which
+ * skill function means which business operation.
  *
- * A single user turn can express multiple intents (multi-intent), producing
- * several operations that share one turn's AI cost — hence the per-operation
- * grain. Classification is done here from the ALREADY-parsed plan; it never
- * re-interprets free text (that is the Frame's job).
+ * Classification works from the ALREADY-parsed plan; it never re-interprets
+ * free text (that is the Frame's job).
  */
+import {
+  deriveTurnOperations as deriveOperations,
+  type IntentPlanLike,
+  type TurnOperation,
+} from '@agentic/power-runtime';
 
-/**
- * Minimal structural shape shared by the two intent representations a turn can
- * carry: `TranslatedIntent` (frame-to-intent) and `IntentResult`
- * (copilot-agent-types, whose `function` may be null). Kept local so this module
- * couples to neither.
- */
-export interface IntentPlanLike {
-  function?: string | null;
-  arguments?: Record<string, unknown>;
-  additionalActions?: Array<{ function?: string | null; arguments?: Record<string, unknown> }>;
-}
-
-/** One business operation extracted from a turn's intent plan. */
-export interface TurnOperation {
-  /**
-   * Stable business operation type used for grouping/distribution, e.g.
-   * "create.activity.visit", "update.opportunity", "query.account",
-   * "knowledge.product", "conversation.general".
-   */
-  operationType: string;
-  /** 0-based position among the turn's business operations (0 = head intent). */
-  operationIndex: number;
-}
+export type { IntentPlanLike, TurnOperation };
 
 /**
  * Plan steps that are internal continuations, NOT user-facing business
@@ -45,7 +24,7 @@ export interface TurnOperation {
  * operation, so it must not become a separate operation row (which would halve
  * the parent's per-operation cost sample).
  */
-const INTERNAL_STEP_FUNCTIONS = new Set<string>(['analyzeResults']);
+export const INTERNAL_STEP_FUNCTIONS: readonly string[] = ['analyzeResults'];
 
 /**
  * Map a resolved function name (+ its arguments) to a stable business
@@ -99,29 +78,11 @@ export function operationTypeFor(fnName: string, args: Record<string, unknown> =
 }
 
 /**
- * Expand a turn's intent plan into an ordered list of BUSINESS operations.
- *  - Head intent → index 0; each additionalAction → the next index.
- *  - Internal continuation steps (analyzeResults) are folded into their parent
- *    op (dropped), so a single read turn stays ONE operation.
- *  - A turn with no actionable plan (chat / small talk) → one
- *    `conversation.general` operation, so every billable turn maps to ≥1 row.
+ * Expand a turn's intent plan into an ordered list of BUSINESS operations,
+ * using this app's classifier.
  */
 export function deriveTurnOperations(rawIntent: IntentPlanLike | null | undefined): TurnOperation[] {
-  const fallback: TurnOperation[] = [{ operationType: 'conversation.general', operationIndex: 0 }];
-  if (!rawIntent || !rawIntent.function) return fallback;
-
-  const steps: Array<{ fn: string; args: Record<string, unknown> }> = [];
-  if (!INTERNAL_STEP_FUNCTIONS.has(rawIntent.function)) {
-    steps.push({ fn: rawIntent.function, args: rawIntent.arguments ?? {} });
-  }
-  for (const a of rawIntent.additionalActions ?? []) {
-    if (!a.function || INTERNAL_STEP_FUNCTIONS.has(a.function)) continue;
-    steps.push({ fn: a.function, args: a.arguments ?? {} });
-  }
-  if (steps.length === 0) return fallback;
-
-  return steps.map((s, i) => ({
-    operationType: operationTypeFor(s.fn, s.args),
-    operationIndex: i,
-  }));
+  return deriveOperations(rawIntent, operationTypeFor, {
+    internalStepFunctions: INTERNAL_STEP_FUNCTIONS,
+  });
 }

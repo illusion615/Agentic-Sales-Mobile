@@ -2,7 +2,7 @@
  * Retry utility tests — withRetry exponential backoff + jitter.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { withRetry, withTimeout } from '@/lib/retry';
+import { withRetry, withTimeout } from '../async/retry';
 
 describe('withRetry', () => {
   it('resolves on first success', async () => {

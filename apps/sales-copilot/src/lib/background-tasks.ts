@@ -1,55 +1,59 @@
 /**
- * Client entry point for the fire-and-forget background-task subsystem.
- * `enqueueTask` creates a queued task row (returns immediately); a server-side
- * Runner (Power Automate) executes it and flips its status. The global
- * BackgroundTaskWatcher surfaces completions as toasts + bell items.
+ * Composition root for the fire-and-forget background-task subsystem.
+ *
+ * The lifecycle, table mapping and read-back behaviour live in
+ * `@agentic/power-runtime`; this module supplies the two things that are
+ * specific to this app — the Dataverse data source and the route map — and
+ * re-exports the resulting API under the paths the app already uses.
  *
  * See docs/05-engineering/background-task-architecture-2026-07-20.md.
  */
-import { BackgroundTaskService } from '@/generated/services/background-task-service';
-import type { BackgroundTask, BackgroundTaskType } from '@/generated/models/background-task-model';
+import { createBackgroundTaskClient, type BackgroundTaskGateway } from '@agentic/power-runtime';
+import { Crf5c_backgroundtasksService } from '@/generated/services/Crf5c_backgroundtasksService';
 import { recordDetailRoute, type RecordEntityType } from '@/lib/record-route';
 
 const ROUTABLE_TYPES: readonly RecordEntityType[] = ['account', 'opportunity', 'activity', 'contact'];
 
-export interface EnqueueTaskInput {
-  /** Routes the server-side Runner (e.g. 'enrichment'). */
-  taskType: BackgroundTaskType;
-  /** Short human label — the notification title (e.g. "迈瑞 · 市场情报"). */
-  name: string;
-  /** Record this task acts on — drives the completion deep-link. */
-  targetEntityType?: RecordEntityType | string;
-  targetEntityId?: string;
-  targetName?: string;
-  /** Structured input for the Runner (serialized to JSON). */
-  payload?: Record<string, unknown>;
-}
+// Casts mirror the generated signatures, which demand a fully typed row.
+const gateway: BackgroundTaskGateway = {
+  create: (row) => Crf5c_backgroundtasksService.create(row as never),
+  update: (id, row) => Crf5c_backgroundtasksService.update(id, row as never),
+  delete: (id) => Crf5c_backgroundtasksService.delete(id),
+  get: (id) => Crf5c_backgroundtasksService.get(id),
+  getAll: (options) => Crf5c_backgroundtasksService.getAll(options),
+};
+
+export const backgroundTaskClient = createBackgroundTaskClient({
+  gateway,
+  resolveDeepLink: (task) => {
+    const type = task.targetEntityType as RecordEntityType | undefined;
+    if (!type || !task.targetEntityId || !ROUTABLE_TYPES.includes(type)) return null;
+    return recordDetailRoute(type, task.targetEntityId);
+  },
+});
+
+export const BackgroundTaskService = backgroundTaskClient.service;
 
 /**
- * Enqueue a background task. Resolves once the row is created (fire-and-forget);
- * the caller does NOT wait for execution. The id may be blank on the mobile
- * player until the watcher reconciles — callers should not depend on it.
+ * Enqueue a background task. Resolves once the row is created; the caller does
+ * NOT wait for execution.
  */
-export async function enqueueTask(input: EnqueueTaskInput): Promise<BackgroundTask> {
-  return BackgroundTaskService.create({
-    name: input.name,
-    taskType: input.taskType,
-    status: 'queued',
-    targetEntityType: input.targetEntityType,
-    targetEntityId: input.targetEntityId,
-    targetName: input.targetName,
-    requestPayload: input.payload ? JSON.stringify(input.payload) : undefined,
-  });
-}
+export const enqueueTask = backgroundTaskClient.enqueue;
 
 /** The in-app route to a completed task's result, or null when not routable. */
-export function taskDeepLink(task: Pick<BackgroundTask, 'targetEntityType' | 'targetEntityId'>): string | null {
-  const type = task.targetEntityType as RecordEntityType | undefined;
-  if (!type || !task.targetEntityId) return null;
-  if (!ROUTABLE_TYPES.includes(type)) return null;
-  try {
-    return recordDetailRoute(type, task.targetEntityId);
-  } catch {
-    return null;
-  }
-}
+export const taskDeepLink = backgroundTaskClient.deepLink;
+
+export {
+  TERMINAL_TASK_STATUSES,
+  ACTIVE_TASK_STATUSES,
+  isTerminalTask,
+  isActiveTask,
+} from '@agentic/power-runtime';
+
+export type {
+  BackgroundTask,
+  BackgroundTaskDraft,
+  BackgroundTaskStatus,
+  BackgroundTaskType,
+  EnqueueTaskInput,
+} from '@agentic/power-runtime';

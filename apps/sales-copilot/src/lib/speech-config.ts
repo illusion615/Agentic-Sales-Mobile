@@ -1,6 +1,6 @@
 import { EnvironmentvariabledefinitionsService } from '@/generated/services/EnvironmentvariabledefinitionsService';
 import { EnvironmentvariablevaluesService } from '@/generated/services/EnvironmentvariablevaluesService';
-import { withTimeout } from '@/lib/retry';
+import { withTimeout } from '@agentic/power-runtime';
 
 const VOICE_FUNCTION_HOST_SCHEMA = 'biz_VoiceFunctionHost';
 const VOICE_CONNECTOR_API_KEY_SCHEMA = 'biz_VoiceConnectorApiKey';

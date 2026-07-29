@@ -13,7 +13,7 @@ import type { IGetAllOptions } from '../models/CommonModels';
 import type { Activity, ActivityType } from '../models/activity-model';
 import { requireId, withReadTimeout } from './_adapter-utils';
 import { fetchActivityParticipants, fetchPrimaryActivityContact } from '@/lib/activity-party';
-import { withRetry } from '@/lib/retry';
+import { withRetry } from '@agentic/power-runtime';
 
 /** Participation only applies to appointment-backed activities. */
 function supportsParticipants(type: ActivityType): boolean {
