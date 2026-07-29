@@ -8,10 +8,19 @@
  * with the adapter their environment supports; everything above this file is
  * identical between them.
  */
-import type { BriefingProvider, CustomerRepository, DataSourceId, WorkOrderRepository } from '@/domain/ports';
+import type {
+  BriefingProvider,
+  CaptureRepository,
+  CustomerRepository,
+  DataSourceId,
+  FieldExtractor,
+  WorkOrderRepository,
+} from '@/domain/ports';
 import { createLocalWorkOrderRepository } from './local/local-repository';
 import { createLocalCustomerRepository } from './local/customer-repository';
+import { createLocalCaptureRepository } from './local/capture-repository';
 import { createRuleBasedBriefingProvider } from './local/briefing-provider';
+import { createRuleBasedFieldExtractor } from './local/field-extractor';
 
 function resolveConfiguredSource(): DataSourceId {
   const configured = import.meta.env.VITE_DATA_SOURCE;
@@ -38,6 +47,12 @@ export function createCustomerRepository(
   return source === 'local' ? createLocalCustomerRepository() : notImplemented(source);
 }
 
+export function createCaptureRepository(
+  source: DataSourceId = resolveConfiguredSource(),
+): CaptureRepository {
+  return source === 'local' ? createLocalCaptureRepository() : notImplemented(source);
+}
+
 /**
  * The briefing writer. Independent of the data source: a Dataverse-backed
  * deployment still falls back to the rule-based composer when no model is
@@ -47,6 +62,13 @@ export function createBriefingProvider(): BriefingProvider {
   return createRuleBasedBriefingProvider();
 }
 
+/** Same reasoning as the briefing provider: model in production, rules as the floor. */
+export function createFieldExtractor(): FieldExtractor {
+  return createRuleBasedFieldExtractor();
+}
+
 export const workOrderRepository = createWorkOrderRepository();
 export const customerRepository = createCustomerRepository();
+export const captureRepository = createCaptureRepository();
 export const briefingProvider = createBriefingProvider();
+export const fieldExtractor = createFieldExtractor();

@@ -1,5 +1,5 @@
-import { Link, useParams } from 'react-router-dom';
-import { useWorkOrderBriefing } from '@/hooks/use-work-orders';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useStartWorkOrder, useWorkOrderBriefing } from '@/hooks/use-work-orders';
 import { assessSla } from '@/domain/scheduling';
 import { navigationUrl } from '@/lib/navigation';
 
@@ -9,6 +9,8 @@ function formatDate(iso: string): string {
 
 export function WorkOrderDetailPage() {
   const { id = '' } = useParams();
+  const navigate = useNavigate();
+  const startWorkOrder = useStartWorkOrder(id);
   const { data, isLoading, isError } = useWorkOrderBriefing(id);
 
   if (isLoading) return <PageShell><p className="text-sm text-slate-500">加载中…</p></PageShell>;
@@ -34,6 +36,17 @@ export function WorkOrderDetailPage() {
           </p>
         )}
         <div className="mt-3 flex gap-2">
+          <button
+            type="button"
+            onClick={async () => {
+              await startWorkOrder.mutateAsync();
+              navigate(`/work-orders/${workOrder.id}/capture`);
+            }}
+            className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-40"
+            disabled={startWorkOrder.isPending}
+          >
+            {workOrder.status === 'in-progress' ? '继续服务' : '开始服务'}
+          </button>
           <a
             className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm text-white"
             href={navigationUrl(workOrder.address)}

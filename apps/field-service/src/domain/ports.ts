@@ -19,6 +19,9 @@
 import type { DateRange, TimeSlot, WorkOrderDetail, WorkOrderSummary } from './work-order';
 import type { CustomerProfile, ServiceHistoryEntry } from './customer';
 import type { Briefing, BriefingContext } from './briefing';
+import type { Evidence, WorkSession } from './capture';
+import type { FieldValue } from './questionnaire';
+import type { ExtractionInput, ExtractionResult, CustomerUpdateCandidate } from './extraction';
 
 export type DataSourceId = 'local' | 'custom' | 'field-service';
 
@@ -53,6 +56,9 @@ export interface WorkOrderRepository {
 
   /** Record that work has begun on site. */
   startWorkOrder(id: string, at: string): Promise<void>;
+
+  /** Close the job once its questionnaire has been submitted. */
+  completeWorkOrder(id: string, at: string): Promise<void>;
 }
 
 /** Thrown when a call exceeds what the configured backend declares it can do. */
@@ -70,6 +76,8 @@ export interface CustomerRepository {
   getProfile(customerId: string): Promise<CustomerProfile>;
   /** Past visits to this customer, newest first, optionally capped. */
   listServiceHistory(customerId: string, limit?: number): Promise<ServiceHistoryEntry[]>;
+  /** Apply the profile updates a technician accepted during review. */
+  applyProfileUpdates(customerId: string, updates: readonly CustomerUpdateCandidate[]): Promise<void>;
 }
 
 /**
@@ -82,4 +90,27 @@ export interface CustomerRepository {
  */
 export interface BriefingProvider {
   generate(context: BriefingContext): Promise<Briefing>;
+}
+
+export interface CaptureRepository {
+  /** Resume the visit's open session, or begin one. */
+  openSession(workOrderId: string): Promise<WorkSession>;
+  getSession(sessionId: string): Promise<WorkSession>;
+  /** Append-only: captured fragments are never edited or removed. */
+  appendEvidence(evidence: Omit<Evidence, 'id'>): Promise<Evidence>;
+  listEvidence(sessionId: string): Promise<Evidence[]>;
+  saveAnswers(sessionId: string, values: readonly FieldValue[]): Promise<void>;
+  getAnswers(sessionId: string): Promise<FieldValue[]>;
+  /** Proposed customer-profile changes, held until review accepts or drops them. */
+  saveCustomerUpdates(sessionId: string, updates: readonly CustomerUpdateCandidate[]): Promise<void>;
+  getCustomerUpdates(sessionId: string): Promise<CustomerUpdateCandidate[]>;
+  submitSession(sessionId: string, at: string): Promise<void>;
+}
+
+/**
+ * Proposes work order answers and customer-profile updates from captured
+ * fragments. A language model in production; rule-based locally.
+ */
+export interface FieldExtractor {
+  extract(input: ExtractionInput): Promise<ExtractionResult>;
 }

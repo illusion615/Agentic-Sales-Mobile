@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useDataCapabilities, useMyWorkOrders } from '@/hooks/use-work-orders';
 import { assessSla, sortWorkOrders, suggestVisitOrder, type SortMode, type SlaState } from '@/domain/scheduling';
 import type { WorkOrderSummary } from '@/domain/work-order';
+import { isOutstanding } from '@/domain/work-order';
 import { navigationUrl } from '@/lib/navigation';
 
 const SORT_LABELS: Record<SortMode, string> = {
@@ -37,8 +38,11 @@ function formatRemaining(minutes: number | null): string {
 
 export function DashboardPage() {
   const range = useMemo(todayRange, []);
-  const { data: workOrders = [], isLoading } = useMyWorkOrders(range);
+  const { data: allWorkOrders = [], isLoading } = useMyWorkOrders(range);
   const capabilities = useDataCapabilities();
+
+  // The dashboard is a to-do list, so closed jobs drop out of it entirely.
+  const workOrders = useMemo(() => allWorkOrders.filter(isOutstanding), [allWorkOrders]);
 
   const [sortMode, setSortMode] = useState<SortMode>('sla');
   const [planning, setPlanning] = useState(false);

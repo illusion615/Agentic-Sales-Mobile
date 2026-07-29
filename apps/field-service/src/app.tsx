@@ -2,6 +2,8 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { useKeyboardInset } from '@agentic/power-runtime/react';
 import { DashboardPage } from './pages/dashboard';
 import { WorkOrderDetailPage } from './pages/work-order-detail';
+import { CapturePage } from './pages/capture';
+import { ReviewPage } from './pages/review';
 
 export function App() {
   // The Power Apps mobile player mishandles the URL hash, so routing is held in
@@ -13,6 +15,8 @@ export function App() {
       <Routes>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/work-orders/:id" element={<WorkOrderDetailPage />} />
+        <Route path="/work-orders/:id/capture" element={<CapturePage />} />
+        <Route path="/work-orders/:id/review" element={<ReviewPage />} />
         <Route path="*" element={<DashboardPage />} />
       </Routes>
     </MemoryRouter>

@@ -74,5 +74,9 @@ export function createLocalWorkOrderRepository(): WorkOrderRepository {
     async startWorkOrder(id: string, at: string): Promise<void> {
       await mutate(id, (w) => ({ ...w, status: 'in-progress', scheduledStart: w.scheduledStart ?? at }));
     },
+
+    async completeWorkOrder(id: string): Promise<void> {
+      await mutate(id, (w) => ({ ...w, status: 'completed' }));
+    },
   };
 }

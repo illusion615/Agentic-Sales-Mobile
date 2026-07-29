@@ -70,3 +70,12 @@ export interface DateRange {
   from: string;
   to: string;
 }
+
+/**
+ * Work still owed to the customer. A closed job remains an assignment in the
+ * record, so "outstanding" is a domain judgement rather than something the
+ * repository should decide for every caller.
+ */
+export function isOutstanding(workOrder: Pick<WorkOrderSummary, 'status'>): boolean {
+  return workOrder.status !== 'completed' && workOrder.status !== 'cancelled';
+}

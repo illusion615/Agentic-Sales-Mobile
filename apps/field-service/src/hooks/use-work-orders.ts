@@ -1,6 +1,17 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { briefingProvider, customerRepository, workOrderRepository } from '@/data';
 import type { DateRange } from '@/domain/work-order';
+
+export function useStartWorkOrder(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => workOrderRepository.startWorkOrder(id, new Date().toISOString()),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['work-order', id] });
+      queryClient.invalidateQueries({ queryKey: ['work-orders'] });
+    },
+  });
+}
 
 export function useMyWorkOrders(range: DateRange) {
   return useQuery({
