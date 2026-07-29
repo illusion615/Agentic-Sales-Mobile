@@ -20,7 +20,7 @@ import type { DateRange, TimeSlot, WorkOrderDetail, WorkOrderSummary } from './w
 import type { CustomerProfile, ServiceHistoryEntry } from './customer';
 import type { Briefing, BriefingContext } from './briefing';
 import type { Evidence, WorkSession } from './capture';
-import type { FieldValue } from './questionnaire';
+import type { FieldValue, FormSchema } from './form-schema';
 import type { ExtractionInput, ExtractionResult, CustomerUpdateCandidate } from './extraction';
 
 export type DataSourceId = 'local' | 'custom' | 'field-service';
@@ -108,9 +108,21 @@ export interface CaptureRepository {
 }
 
 /**
- * Proposes work order answers and customer-profile updates from captured
- * fragments. A language model in production; rule-based locally.
+ * Proposes form answers and customer-profile updates from captured fragments.
+ * A language model in production; rule-based locally.
  */
 export interface FieldExtractor {
   extract(input: ExtractionInput): Promise<ExtractionResult>;
+}
+
+/**
+ * Where form definitions come from.
+ *
+ * Separate from the work order repository because a form's lifecycle is not the
+ * job's: definitions are authored centrally, versioned, and will be served from
+ * Dataverse. Which form a job uses is resolved here rather than assumed by the
+ * UI, so a customer-specific or job-type-specific form needs no app change.
+ */
+export interface FormSchemaRepository {
+  getSchemaForWorkOrder(workOrder: WorkOrderDetail): Promise<FormSchema>;
 }

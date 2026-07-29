@@ -14,11 +14,13 @@ import type {
   CustomerRepository,
   DataSourceId,
   FieldExtractor,
+  FormSchemaRepository,
   WorkOrderRepository,
 } from '@/domain/ports';
 import { createLocalWorkOrderRepository } from './local/local-repository';
 import { createLocalCustomerRepository } from './local/customer-repository';
 import { createLocalCaptureRepository } from './local/capture-repository';
+import { createLocalFormSchemaRepository } from './local/form-schema-repository';
 import { createRuleBasedBriefingProvider } from './local/briefing-provider';
 import { createRuleBasedFieldExtractor } from './local/field-extractor';
 
@@ -54,6 +56,17 @@ export function createCaptureRepository(
 }
 
 /**
+ * Form definitions are authored centrally and will be served from Dataverse.
+ * The local source parses bundled fixtures through the same parser, so the
+ * shape the app consumes is identical either way.
+ */
+export function createFormSchemaRepository(
+  source: DataSourceId = resolveConfiguredSource(),
+): FormSchemaRepository {
+  return source === 'local' ? createLocalFormSchemaRepository() : notImplemented(source);
+}
+
+/**
  * The briefing writer. Independent of the data source: a Dataverse-backed
  * deployment still falls back to the rule-based composer when no model is
  * reachable, which is why the result carries its provenance.
@@ -70,5 +83,6 @@ export function createFieldExtractor(): FieldExtractor {
 export const workOrderRepository = createWorkOrderRepository();
 export const customerRepository = createCustomerRepository();
 export const captureRepository = createCaptureRepository();
+export const formSchemaRepository = createFormSchemaRepository();
 export const briefingProvider = createBriefingProvider();
 export const fieldExtractor = createFieldExtractor();

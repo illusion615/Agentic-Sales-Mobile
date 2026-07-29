@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useWorkOrder } from '@/hooks/use-work-orders';
-import { useAnswers, useCustomerUpdates, useSubmitVisit, useWorkSession } from '@/hooks/use-capture';
-import { assessCompleteness, questionnaireFor, type FieldValue, type QuestionField } from '@/domain/questionnaire';
+import { useAnswers, useCustomerUpdates, useFormSchema, useSubmitVisit, useWorkSession } from '@/hooks/use-capture';
+import { assessCompleteness, setUserValue, type FieldValue, type FormValue } from '@/domain/form-schema';
 import type { CustomerUpdateCandidate } from '@/domain/extraction';
+import { FormRenderer } from '@/components/form-renderer';
 
 const UPDATE_LABELS: Record<CustomerUpdateCandidate['field'], string> = {
   siteAccessNotes: '进入与门禁',
@@ -19,11 +20,11 @@ export function ReviewPage() {
   const isClosed = workOrder?.status === 'completed';
   const { data: session } = useWorkSession(id, !isClosed);
   const sessionId = session?.id;
+
+  const { data: schema } = useFormSchema(id);
   const { data: storedAnswers = [], isLoading: answersLoading } = useAnswers(sessionId);
   const { data: proposedUpdates = [] } = useCustomerUpdates(sessionId);
   const submitVisit = useSubmitVisit(id, sessionId);
-
-  const questionnaire = useMemo(() => questionnaireFor(workOrder?.incidentType), [workOrder?.incidentType]);
 
   const [answers, setAnswers] = useState<FieldValue[]>([]);
   const [rejected, setRejected] = useState<Set<number>>(new Set());
@@ -34,18 +35,13 @@ export function ReviewPage() {
     if (!answersLoading) setAnswers(storedAnswers);
   }, [answersLoading, storedAnswers]);
 
-  const completeness = useMemo(() => assessCompleteness(questionnaire, answers), [questionnaire, answers]);
+  const completeness = useMemo(
+    () => (schema ? assessCompleteness(schema, answers) : null),
+    [schema, answers],
+  );
 
-  const valueFor = (key: string) => answers.find((a) => a.key === key);
-
-  const setValue = (key: string, value: string) => {
-    setAnswers((current) => {
-      const next = current.filter((a) => a.key !== key);
-      // Any edit makes the value the technician's own, dropping the proposal's
-      // confidence and provenance with it.
-      next.push({ key, value, source: 'user' });
-      return next;
-    });
+  const setValue = (name: string, value: FormValue) => {
+    setAnswers((current) => setUserValue(current, name, value));
   };
 
   const acceptedUpdates = proposedUpdates.filter((_, index) => !rejected.has(index));
@@ -85,21 +81,21 @@ export function ReviewPage() {
       <section className="rounded-xl bg-white p-4 shadow-sm">
         <h1 className="font-semibold text-slate-900">提交前确认</h1>
         <p className="mt-1 text-sm text-slate-500">
-          {workOrder?.number} · {questionnaire.incidentType}
+          {workOrder?.number} · {schema?.title ?? '加载中…'}
         </p>
         <p className="mt-2 text-xs text-slate-500">
           标有「建议」的内容由系统整理，请核对后再提交；直接修改即可覆盖。
         </p>
       </section>
 
-      <section className="rounded-xl bg-white p-4 shadow-sm">
-        <h2 className="font-medium text-slate-900">工单内容</h2>
-        <div className="mt-3 flex flex-col gap-4">
-          {questionnaire.fields.map((field) => (
-            <FieldRow key={field.key} field={field} value={valueFor(field.key)} onChange={setValue} />
-          ))}
-        </div>
-      </section>
+      {schema && (
+        <FormRenderer
+          schema={schema}
+          values={answers}
+          onChange={setValue}
+          context={{ workOrderId: id, customerName: workOrder?.customerName }}
+        />
+      )}
 
       {proposedUpdates.length > 0 && (
         <section className="rounded-xl bg-white p-4 shadow-sm">
@@ -136,82 +132,21 @@ export function ReviewPage() {
       )}
 
       <section className="rounded-xl bg-white p-4 shadow-sm">
-        {!completeness.submittable && (
+        {completeness && !completeness.submittable && (
           <p className="mb-2 text-sm text-amber-700">
             还缺 {completeness.missingRequired.map((f) => f.label).join('、')}，补齐后才能提交。
           </p>
         )}
         <button
           type="button"
-          disabled={!completeness.submittable || submitVisit.isPending || !sessionId}
+          disabled={!completeness?.submittable || submitVisit.isPending || !sessionId}
           onClick={() => submitVisit.mutate({ answers, acceptedUpdates })}
           className="w-full rounded-lg bg-slate-900 py-3 text-sm text-white disabled:opacity-40"
         >
           {submitVisit.isPending ? '提交中…' : '确认提交'}
         </button>
-        {submitVisit.isError && (
-          <p className="mt-2 text-sm text-rose-600">提交失败，请重试。</p>
-        )}
+        {submitVisit.isError && <p className="mt-2 text-sm text-rose-600">提交失败，请重试。</p>}
       </section>
     </div>
-  );
-}
-
-function FieldRow({
-  field,
-  value,
-  onChange,
-}: {
-  field: QuestionField;
-  value: FieldValue | undefined;
-  onChange: (key: string, value: string) => void;
-}) {
-  const proposed = value?.source === 'ai';
-
-  return (
-    <label className="flex flex-col gap-1">
-      <span className="flex items-center gap-2 text-sm text-slate-700">
-        {field.label}
-        {field.required && <span className="text-rose-500">*</span>}
-        {proposed && (
-          <span className="rounded bg-blue-50 px-1.5 py-0.5 text-xs text-blue-700">
-            建议{value?.confidence ? ` ${Math.round(value.confidence * 100)}%` : ''}
-          </span>
-        )}
-      </span>
-
-      {field.kind === 'choice' ? (
-        <select
-          className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-          value={value?.value ?? ''}
-          onChange={(event) => onChange(field.key, event.target.value)}
-        >
-          <option value="">请选择</option>
-          {(field.choices ?? []).map((choice) => (
-            <option key={choice} value={choice}>
-              {choice}
-            </option>
-          ))}
-        </select>
-      ) : field.kind === 'boolean' ? (
-        <select
-          className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-          value={value?.value ?? ''}
-          onChange={(event) => onChange(field.key, event.target.value)}
-        >
-          <option value="">请选择</option>
-          <option value="是">是</option>
-          <option value="否">否</option>
-        </select>
-      ) : (
-        <input
-          className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-          inputMode={field.kind === 'number' ? 'decimal' : 'text'}
-          placeholder={field.hint}
-          value={value?.value ?? ''}
-          onChange={(event) => onChange(field.key, event.target.value)}
-        />
-      )}
-    </label>
   );
 }

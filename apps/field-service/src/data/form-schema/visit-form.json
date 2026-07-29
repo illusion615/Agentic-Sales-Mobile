@@ -1,0 +1,181 @@
+[
+  {
+    "title": "基本信息",
+    "key": "id-1774854789433-745",
+    "items": [
+      {
+        "name": "id-1774854799612-750",
+        "label": "客户名称",
+        "required": false,
+        "readonly": false,
+        "expression": "#workorder?.customer?.name",
+        "value": "",
+        "type": "Input"
+      },
+      {
+        "name": "id-1774854812167-755",
+        "label": "科室名称",
+        "required": false,
+        "readonly": false,
+        "expression": "",
+        "value": "",
+        "type": "Input"
+      },
+      {
+        "name": "id-1774854844912-763",
+        "label": "被拜访人姓名",
+        "required": false,
+        "readonly": false,
+        "expression": "#workorder?.customerEquipment?.contactName",
+        "value": "",
+        "type": "Input"
+      },
+      {
+        "name": "id-1774854862671-774",
+        "label": "被拜访人职务",
+        "required": false,
+        "readonly": false,
+        "expression": "",
+        "value": "",
+        "type": "Input"
+      },
+      {
+        "name": "id-1774854878714-788",
+        "label": "拜访日期",
+        "required": false,
+        "readonly": false,
+        "expression": "new java.util.Date()",
+        "value": "",
+        "type": "DatePicker"
+      }
+    ]
+  },
+  {
+    "title": "专业信息",
+    "key": "id-1774854889122-804",
+    "items": [
+      {
+        "name": "id-1774854959490-815",
+        "label": "1、临床科室重点需求描述：",
+        "required": false,
+        "readonly": false,
+        "expression": "",
+        "value": "",
+        "type": "TextArea"
+      },
+      {
+        "name": "id-1774854992176-818",
+        "label": "2、PMLS重点推广产品",
+        "required": false,
+        "readonly": false,
+        "expression": "",
+        "value": "",
+        "type": "CheckBox",
+        "options": [
+          { "key": "一次性附件", "text": "一次性附件", "selected": false },
+          { "key": "保修", "text": "保修", "selected": false },
+          { "key": "mi-IoT", "text": "mi-IoT", "selected": false },
+          { "key": "常规附件", "text": "常规附件", "selected": false },
+          { "key": "大单升级", "text": "大单升级", "selected": false },
+          { "key": "瑞智联解决方案", "text": "瑞智联解决方案", "selected": false },
+          { "key": "其他", "text": "其他", "selected": false }
+        ]
+      },
+      {
+        "name": "id-1774855114650-826",
+        "label": "3、MIS重点推广产品：",
+        "required": false,
+        "readonly": false,
+        "expression": "",
+        "value": "",
+        "type": "CheckBox",
+        "options": [
+          { "key": "保修", "text": "保修", "selected": false },
+          { "key": "探头升级", "text": "探头升级", "selected": false },
+          { "key": "瑞影生态", "text": "瑞影生态", "selected": false },
+          { "key": "MIS咨询服务", "text": "MIS咨询服务", "selected": false },
+          { "key": "其他", "text": "其他", "selected": false }
+        ]
+      },
+      {
+        "name": "id-1774855193073-838",
+        "label": "4、方案推广阶段：",
+        "required": false,
+        "readonly": false,
+        "expression": "",
+        "value": "",
+        "type": "Radio",
+        "options": [
+          { "key": "需求发展阶段", "text": "需求发展阶段", "selected": false },
+          { "key": "方案设计阶段", "text": "方案设计阶段", "selected": false },
+          { "key": "方案递交阶段", "text": "方案递交阶段", "selected": false },
+          { "key": "方案谈判阶段", "text": "方案谈判阶段", "selected": false },
+          { "key": "方案成交阶段", "text": "方案成交阶段", "selected": false },
+          { "key": "方案交付阶段", "text": "方案交付阶段", "selected": false }
+        ]
+      },
+      {
+        "name": "id-1774855255728-854",
+        "label": "方案推广进度内容描述：",
+        "required": false,
+        "readonly": false,
+        "expression": "",
+        "value": "",
+        "type": "TextArea"
+      }
+    ]
+  },
+  {
+    "title": "服务反馈",
+    "key": "id-1774855280694-872",
+    "items": [
+      {
+        "name": "id-1774855300653-877",
+        "label": "1、服务有无未解决的问题？",
+        "required": false,
+        "readonly": false,
+        "expression": "",
+        "value": "",
+        "type": "Radio",
+        "options": [
+          { "key": "有", "text": "有", "selected": false },
+          { "key": "无", "text": "无", "selected": false },
+          { "key": "不涉及", "text": "不涉及", "selected": false }
+        ]
+      },
+      {
+        "name": "id-1774855340104-897",
+        "label": "未解决问题描述（如有）：",
+        "required": false,
+        "readonly": false,
+        "expression": "",
+        "value": "",
+        "type": "TextArea"
+      },
+      {
+        "name": "id-1774855375385-913",
+        "label": "2、本次走访重点总结与待办事项：",
+        "required": true,
+        "readonly": false,
+        "expression": "",
+        "value": "",
+        "type": "TextArea"
+      }
+    ]
+  },
+  {
+    "title": "客户档案填写",
+    "key": "id-1774855393585-923",
+    "items": [
+      {
+        "name": "id-1774855405904-928",
+        "label": "客户档案",
+        "required": false,
+        "readonly": false,
+        "expression": "",
+        "value": "",
+        "type": "CustomerProfileLink"
+      }
+    ]
+  }
+]

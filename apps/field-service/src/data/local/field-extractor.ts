@@ -1,5 +1,6 @@
 import type { FieldExtractor } from '@/domain/ports';
 import { readableEvidence } from '@/domain/capture';
+import { allFields, type FormField } from '@/domain/form-schema';
 import type {
   CustomerUpdateCandidate,
   ExtractionInput,
@@ -10,17 +11,45 @@ import type {
 /**
  * Rule-based stand-in for the extraction model.
  *
+ * It is schema-driven, because the form is: field identifiers are opaque, so
+ * nothing here may key off them. Two strategies carry it, both of which work on
+ * a form this code has never seen:
+ *
+ *  - for choice fields, an option is selected when its own text appears in what
+ *    was captured. This needs no knowledge of the question at all, and is
+ *    scored highest because the match is exact.
+ *  - for free text, the label's topic words are looked for in the captured
+ *    fragments. This is a weak signal and is scored as such.
+ *
  * It produces the same shape the model will — a value, a confidence and the
  * fragments it came from — so review, merging and traceability are exercised
- * for real. What it cannot do is understand; it matches patterns. Confidence
- * is scored accordingly: an anchored measurement scores well above a sentence
- * picked for containing a keyword.
+ * for real.
  */
 
 interface Fragment {
   text: string;
   evidenceId: string;
 }
+
+/** Words that recur in service form labels, used to link a label to a remark. */
+const TOPIC_WORDS = [
+  '需求',
+  '总结',
+  '待办',
+  '跟进',
+  '问题',
+  '科室',
+  '职务',
+  '姓名',
+  '阶段',
+  '结论',
+  '原因',
+  '处理',
+  '结果',
+  '备注',
+  '建议',
+  '进度',
+];
 
 function toFragments(input: ExtractionInput): Fragment[] {
   return readableEvidence(input.evidence).flatMap((e) =>
@@ -32,68 +61,78 @@ function toFragments(input: ExtractionInput): Fragment[] {
   );
 }
 
-/** First fragment matching a pattern, with the chosen capture group. */
-function byPattern(
-  fragments: readonly Fragment[],
-  pattern: RegExp,
-  group = 1,
-): { value: string; evidenceId: string } | null {
-  for (const fragment of fragments) {
-    const match = fragment.text.match(pattern);
-    if (match && match[group]) return { value: match[group].trim(), evidenceId: fragment.evidenceId };
-  }
-  return null;
+/** Strip the authoring ornaments so the label reads as a topic. */
+function cleanLabel(label: string): string {
+  return label.replace(/^\s*\d+\s*[、.．)）]\s*/, '').replace(/[：:？?\s]+$/, '');
 }
 
-/** First fragment containing any keyword, returned whole. */
+function topicsOf(field: FormField): string[] {
+  const label = cleanLabel(field.label);
+  return TOPIC_WORDS.filter((word) => label.includes(word));
+}
+
 function byKeyword(
   fragments: readonly Fragment[],
   keywords: readonly string[],
-): { value: string; evidenceId: string } | null {
+  used: ReadonlySet<string>,
+): Fragment | null {
   for (const fragment of fragments) {
-    if (keywords.some((k) => fragment.text.includes(k))) {
-      return { value: fragment.text, evidenceId: fragment.evidenceId };
-    }
+    if (used.has(fragment.text)) continue;
+    if (keywords.some((k) => fragment.text.includes(k))) return fragment;
   }
   return null;
 }
 
-type Rule = (fragments: readonly Fragment[]) => Omit<FieldCandidate, 'key'> | null;
+/** Options whose own text appears verbatim in what was captured. */
+function matchedOptions(field: FormField, fragments: readonly Fragment[]) {
+  const hits: Array<{ key: string; evidenceId: string }> = [];
+  for (const option of field.options ?? []) {
+    const fragment = fragments.find((f) => f.text.includes(option.label));
+    if (fragment) hits.push({ key: option.key, evidenceId: fragment.evidenceId });
+  }
+  return hits;
+}
 
-const anchored = (hit: { value: string; evidenceId: string } | null, confidence: number) =>
-  hit ? { value: hit.value, confidence, evidenceIds: [hit.evidenceId] } : null;
+function extractField(
+  field: FormField,
+  fragments: readonly Fragment[],
+  used: Set<string>,
+): FieldCandidate | null {
+  if (field.readonly || field.type === 'custom' || field.type === 'date') return null;
 
-const FIELD_RULES: Record<string, Rule> = {
-  faultCode: (f) => anchored(byPattern(f, /(?:报警|故障)\s*(?:代码|码)?\s*[:：]?\s*([A-Za-z]{0,3}-?\d{2,4})/), 0.9),
-  conductivity: (f) => anchored(byPattern(f, /电导率[^\d]{0,6}([\d.]+)/), 0.9),
-  deviceCount: (f) => anchored(byPattern(f, /(\d+)\s*台/), 0.8),
-  reportNo: (f) => anchored(byPattern(f, /报告(?:编号)?\s*[:：]?\s*([A-Za-z0-9-]{4,})/), 0.85),
-  calibrationResult: (f) => {
-    const hit = byKeyword(f, ['不合格']) ?? byKeyword(f, ['合格']);
-    if (!hit) return null;
-    return { value: hit.value.includes('不合格') ? '不合格' : '合格', confidence: 0.8, evidenceIds: [hit.evidenceId] };
-  },
-  rootCause: (f) => anchored(byKeyword(f, ['原因', '由于', '因为', '导致']), 0.55),
-  partsReplaced: (f) => anchored(byKeyword(f, ['更换', '换了', '替换']), 0.6),
-  consumables: (f) => anchored(byKeyword(f, ['滤芯', '耗材', '密封圈']), 0.6),
-  followUp: (f) => anchored(byKeyword(f, ['后续', '建议', '下次', '待观察']), 0.5),
-  findings: (f) => anchored(byKeyword(f, ['现场', '检查', '发现']), 0.5),
-  resolution: (f) => {
-    const hit = byKeyword(f, ['处理', '恢复', '完成', '解决']);
-    return anchored(hit, 0.6);
-  },
-  resolved: (f) => {
-    const negative = byKeyword(f, ['未解决', '未恢复', '待观察', '需返修']);
-    if (negative) return { value: '否', confidence: 0.75, evidenceIds: [negative.evidenceId] };
-    const positive = byKeyword(f, ['恢复正常', '已解决', '运行正常', '测试通过']);
-    if (positive) return { value: '是', confidence: 0.75, evidenceIds: [positive.evidenceId] };
-    return null;
-  },
-  checklistDone: (f) => {
-    const hit = byKeyword(f, ['全部完成', '保养完成', '已完成']);
-    return hit ? { value: '是', confidence: 0.7, evidenceIds: [hit.evidenceId] } : null;
-  },
-};
+  if (field.type === 'single-select' || field.type === 'multi-select') {
+    const hits = matchedOptions(field, fragments);
+    if (hits.length === 0) return null;
+    const evidenceIds = [...new Set(hits.map((h) => h.evidenceId))];
+
+    if (field.type === 'multi-select') {
+      return { name: field.name, value: hits.map((h) => h.key), confidence: 0.8, evidenceIds };
+    }
+    // Several options matched a question that takes one answer. Short option
+    // wording makes this easy — "有无" contains both 有 and 无 — and a wrongly
+    // pre-selected radio is worse than a blank one, because a blank required
+    // field is flagged while a wrong answer can be signed off unnoticed.
+    if (hits.length > 1) return null;
+    return { name: field.name, value: hits[0].key, confidence: 0.8, evidenceIds };
+  }
+
+  const topics = topicsOf(field);
+  if (topics.length === 0) return null;
+
+  const fragment = byKeyword(fragments, topics, used);
+  if (!fragment) return null;
+
+  if (field.type === 'number') {
+    const number = fragment.text.match(/(\d+(?:\.\d+)?)/);
+    if (!number) return null;
+    used.add(fragment.text);
+    return { name: field.name, value: Number(number[1]), confidence: 0.6, evidenceIds: [fragment.evidenceId] };
+  }
+
+  // A whole remark answering a labelled question is a guess, not a reading.
+  used.add(fragment.text);
+  return { name: field.name, value: fragment.text, confidence: 0.45, evidenceIds: [fragment.evidenceId] };
+}
 
 const CUSTOMER_RULES: Array<{
   field: CustomerUpdateCandidate['field'];
@@ -108,12 +147,12 @@ export function createRuleBasedFieldExtractor(): FieldExtractor {
   return {
     async extract(input: ExtractionInput): Promise<ExtractionResult> {
       const fragments = toFragments(input);
+      const usedByFields = new Set<string>();
 
       const fields: FieldCandidate[] = [];
-      for (const question of input.questionnaire.fields) {
-        const rule = FIELD_RULES[question.key];
-        const hit = rule?.(fragments);
-        if (hit) fields.push({ key: question.key, ...hit });
+      for (const field of allFields(input.schema)) {
+        const candidate = extractField(field, fragments, usedByFields);
+        if (candidate) fields.push(candidate);
       }
 
       const customerUpdates: CustomerUpdateCandidate[] = [];
@@ -122,26 +161,30 @@ export function createRuleBasedFieldExtractor(): FieldExtractor {
       const proposed = new Set<string>();
 
       for (const rule of CUSTOMER_RULES) {
-        const hit = byKeyword(fragments, rule.keywords);
-        if (hit && !proposed.has(hit.value)) {
-          proposed.add(hit.value);
+        const hit = byKeyword(fragments, rule.keywords, new Set());
+        if (hit && !proposed.has(hit.text)) {
+          proposed.add(hit.text);
           customerUpdates.push({
             field: rule.field,
-            value: hit.value,
+            value: hit.text,
             confidence: rule.confidence,
             evidenceIds: [hit.evidenceId],
           });
         }
       }
 
-      const contact = byPattern(fragments, /([\u4e00-\u9fa5]{2,4})\s*(?:主任|工程师|护士长|老师|经理)?[^\d]{0,4}(1\d{10})/, 0);
-      if (contact && !proposed.has(contact.value)) {
-        customerUpdates.push({
-          field: 'contact',
-          value: contact.value,
-          confidence: 0.7,
-          evidenceIds: [contact.evidenceId],
-        });
+      const contactPattern = /[\u4e00-\u9fa5]{2,4}\s*(?:主任|工程师|护士长|老师|经理)?[^\d]{0,4}1\d{10}/;
+      const contact = fragments.find((f) => contactPattern.test(f.text));
+      if (contact && !proposed.has(contact.text)) {
+        const matched = contact.text.match(contactPattern);
+        if (matched) {
+          customerUpdates.push({
+            field: 'contact',
+            value: matched[0],
+            confidence: 0.7,
+            evidenceIds: [contact.evidenceId],
+          });
+        }
       }
 
       return { fields, customerUpdates, source: 'rules' };

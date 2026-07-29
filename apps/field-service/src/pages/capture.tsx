@@ -1,9 +1,9 @@
 import { useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useWorkOrder } from '@/hooks/use-work-orders';
-import { useAnswers, useAppendEvidence, useEvidence, useRunExtraction, useWorkSession } from '@/hooks/use-capture';
+import { useAnswers, useAppendEvidence, useEvidence, useFormSchema, usePrefillOnce, useRunExtraction, useWorkSession } from '@/hooks/use-capture';
 import { useDictation } from '@/hooks/use-dictation';
-import { assessCompleteness, questionnaireFor } from '@/domain/questionnaire';
+import { assessCompleteness } from '@/domain/form-schema';
 import { fileToDownscaledDataUrl } from '@/lib/image';
 
 export function CapturePage() {
@@ -25,8 +25,13 @@ export function CapturePage() {
     appendEvidence.mutate({ kind: 'voice', text: transcript });
   });
 
-  const questionnaire = useMemo(() => questionnaireFor(workOrder?.incidentType), [workOrder?.incidentType]);
-  const completeness = useMemo(() => assessCompleteness(questionnaire, answers), [questionnaire, answers]);
+  const { data: schema } = useFormSchema(id);
+  const unsupportedPrefills = usePrefillOnce(id, sessionId, schema);
+
+  const completeness = useMemo(
+    () => (schema ? assessCompleteness(schema, answers) : null),
+    [schema, answers],
+  );
 
   const addNote = () => {
     const text = note.trim();
@@ -63,9 +68,16 @@ export function CapturePage() {
           现场记录{workOrder ? ` · ${workOrder.customerName}` : ''}
         </h1>
         <p className="mt-1 text-sm text-slate-500">
-          {workOrder?.number} · {questionnaire.incidentType}
+          {workOrder?.number} · {schema?.title ?? '加载中…'}
         </p>
 
+        {unsupportedPrefills.length > 0 && (
+          <p className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-800">
+            表单中有 {unsupportedPrefills.length} 个自动带入规则当前版本不支持，需手工填写。
+          </p>
+        )}
+
+        {completeness && (
         <div className="mt-3">
           <div className="flex items-baseline justify-between text-sm">
             <span className="text-slate-700">
@@ -84,13 +96,14 @@ export function CapturePage() {
           {completeness.missingRequired.length > 0 && (
             <ul className="mt-2 flex flex-wrap gap-1">
               {completeness.missingRequired.map((field) => (
-                <li key={field.key} className="rounded bg-amber-50 px-2 py-0.5 text-xs text-amber-800">
+                <li key={field.name} className="rounded bg-amber-50 px-2 py-0.5 text-xs text-amber-800">
                   缺 {field.label}
                 </li>
               ))}
             </ul>
           )}
         </div>
+        )}
       </section>
 
       <section className="rounded-xl bg-white p-4 shadow-sm">

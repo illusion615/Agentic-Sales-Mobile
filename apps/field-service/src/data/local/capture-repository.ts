@@ -1,6 +1,6 @@
 import type { CaptureRepository } from '@/domain/ports';
 import type { Evidence, WorkSession } from '@/domain/capture';
-import type { FieldValue } from '@/domain/questionnaire';
+import type { FieldValue } from '@/domain/form-schema';
 import type { CustomerUpdateCandidate } from '@/domain/extraction';
 import { createIdbCollection } from './idb';
 

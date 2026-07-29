@@ -1,9 +1,17 @@
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { captureRepository, customerRepository, fieldExtractor, workOrderRepository } from '@/data';
+import {
+  captureRepository,
+  customerRepository,
+  fieldExtractor,
+  formSchemaRepository,
+  workOrderRepository,
+} from '@/data';
 import type { Evidence } from '@/domain/capture';
-import type { FieldValue } from '@/domain/questionnaire';
-import { questionnaireFor } from '@/domain/questionnaire';
+import type { FieldValue, FormSchema } from '@/domain/form-schema';
 import { mergeCandidates, type CustomerUpdateCandidate, type ExtractionResult } from '@/domain/extraction';
+import { applyPrefills } from '@/domain/form-expression';
+import { buildPrefillContext } from '@/domain/prefill-context';
 
 /**
  * Resume the visit's open session, or begin one.
@@ -17,6 +25,18 @@ export function useWorkSession(workOrderId: string, enabled = true) {
     queryKey: ['session', workOrderId],
     queryFn: () => captureRepository.openSession(workOrderId),
     enabled: !!workOrderId && enabled,
+  });
+}
+
+/** The form definition this job must answer. */
+export function useFormSchema(workOrderId: string) {
+  return useQuery({
+    queryKey: ['form-schema', workOrderId],
+    enabled: !!workOrderId,
+    queryFn: async () => {
+      const workOrder = await workOrderRepository.getWorkOrder(workOrderId);
+      return formSchemaRepository.getSchemaForWorkOrder(workOrder);
+    },
   });
 }
 
@@ -58,24 +78,66 @@ export function useSaveAnswers(sessionId: string | undefined) {
 }
 
 /**
+ * Seed a new form from its prefill expressions, once per session.
+ *
+ * Returns the expressions the evaluator does not implement. Surfacing them is
+ * deliberate: an unsupported expression means a form author asked for
+ * something this app cannot yet provide, which should be a visible gap rather
+ * than a field that is quietly always empty.
+ */
+export function usePrefillOnce(
+  workOrderId: string,
+  sessionId: string | undefined,
+  schema: FormSchema | undefined,
+) {
+  const queryClient = useQueryClient();
+  const appliedFor = useRef<string | null>(null);
+  const [unsupported, setUnsupported] = useState<Array<{ field: string; expression: string }>>([]);
+
+  useEffect(() => {
+    if (!sessionId || !schema) return;
+    const key = `${sessionId}:${schema.id}`;
+    if (appliedFor.current === key) return;
+    appliedFor.current = key;
+
+    void (async () => {
+      const existing = await captureRepository.getAnswers(sessionId);
+      if (existing.length > 0) return; // the form has already been started
+
+      const workOrder = await workOrderRepository.getWorkOrder(workOrderId);
+      const customer = await customerRepository.getProfile(workOrder.customerId).catch(() => undefined);
+      const outcome = applyPrefills(schema, buildPrefillContext(workOrder, customer));
+
+      setUnsupported(outcome.unsupported);
+      if (outcome.values.length > 0) {
+        await captureRepository.saveAnswers(sessionId, outcome.values);
+        await queryClient.invalidateQueries({ queryKey: ['answers', sessionId] });
+      }
+    })();
+  }, [workOrderId, sessionId, schema, queryClient]);
+
+  return unsupported;
+}
+
+/**
  * Re-read the captured fragments and fill in whatever is still blank.
  *
  * Runs on demand rather than on every capture: the technician stays in control
- * of when proposals appear, and nothing they have typed is ever replaced.
+ * of when proposals appear, and nothing already entered is ever replaced.
  */
 export function useRunExtraction(workOrderId: string, sessionId: string | undefined) {
   const queryClient = useQueryClient();
 
   return useMutation<ExtractionResult>({
     mutationFn: async () => {
-      const [workOrder, evidence, answers] = await Promise.all([
-        workOrderRepository.getWorkOrder(workOrderId),
+      const workOrder = await workOrderRepository.getWorkOrder(workOrderId);
+      const [schema, evidence, answers] = await Promise.all([
+        formSchemaRepository.getSchemaForWorkOrder(workOrder),
         captureRepository.listEvidence(sessionId!),
         captureRepository.getAnswers(sessionId!),
       ]);
 
-      const questionnaire = questionnaireFor(workOrder.incidentType);
-      const result = await fieldExtractor.extract({ workOrder, questionnaire, evidence });
+      const result = await fieldExtractor.extract({ workOrder, schema, evidence });
       await captureRepository.saveAnswers(sessionId!, mergeCandidates(answers, result.fields));
       await captureRepository.saveCustomerUpdates(sessionId!, result.customerUpdates);
       return result;
@@ -96,9 +158,9 @@ export function useCustomerUpdates(sessionId: string | undefined) {
 }
 
 /**
- * Commit the visit as one action: the questionnaire, the customer-profile
- * changes the technician accepted, and closing the job. Ordered so the session
- * is only marked submitted once the records it feeds have been written.
+ * Commit the visit as one action: the form, the customer-profile changes the
+ * technician accepted, and closing the job. Ordered so the session is only
+ * marked submitted once the records it feeds have been written.
  */
 export function useSubmitVisit(workOrderId: string, sessionId: string | undefined) {
   const queryClient = useQueryClient();
