@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   assessSla,
+  buildTimeSlot,
   distanceKm,
+  slotDraftFor,
   sortWorkOrders,
   suggestVisitOrder,
 } from '@/domain/scheduling';
@@ -129,7 +131,7 @@ describe('suggestVisitOrder', () => {
 
     const plan = suggestVisitOrder([far, near], { now: NOW, origin });
     expect(plan.map((s) => s.workOrder.id)).toEqual(['near', 'far']);
-    expect(plan[0].legKm).toBeLessThan(plan[1].legKm!);
+    expect(plan[0].straightLineKm).toBeLessThan(plan[1].straightLineKm!);
   });
 
   it('still plans every stop when coordinates are missing', () => {
@@ -138,6 +140,44 @@ describe('suggestVisitOrder', () => {
       { now: NOW, origin },
     );
     expect(plan.map((s) => s.workOrder.id)).toEqual(['b', 'a']);
-    expect(plan.every((s) => s.legKm === null)).toBe(true);
+    expect(plan.every((s) => s.straightLineKm === null)).toBe(true);
+  });
+});
+
+describe('slotDraftFor', () => {
+  it('opens on the slot the job already has', () => {
+    const draft = slotDraftFor({
+      scheduledStart: new Date(2026, 6, 30, 14, 30).toISOString(),
+      scheduledEnd: new Date(2026, 6, 30, 16, 0).toISOString(),
+    });
+    expect(draft).toEqual({ date: '2026-07-30', time: '14:30', durationMinutes: 90 });
+  });
+
+  it('falls back to the window promised to the customer', () => {
+    const draft = slotDraftFor({
+      promisedWindowStart: new Date(2026, 6, 30, 9, 0).toISOString(),
+      estimatedDurationMinutes: 30,
+    });
+    expect(draft).toEqual({ date: '2026-07-30', time: '09:00', durationMinutes: 30 });
+  });
+
+  it('never opens blank — an unscheduled job proposes the next whole hour', () => {
+    const draft = slotDraftFor({}, new Date(2026, 6, 30, 10, 17));
+    expect(draft).toEqual({ date: '2026-07-30', time: '11:00', durationMinutes: 60 });
+  });
+});
+
+describe('buildTimeSlot', () => {
+  it('commits a local wall-clock slot of the chosen length', () => {
+    const slot = buildTimeSlot({ date: '2026-07-30', time: '14:00', durationMinutes: 90 });
+    expect(slot).not.toBeNull();
+    expect(new Date(slot!.start).getTime()).toBe(new Date(2026, 6, 30, 14, 0).getTime());
+    expect(new Date(slot!.end).getTime() - new Date(slot!.start).getTime()).toBe(90 * 60_000);
+  });
+
+  it('refuses to save a half-filled form as an appointment', () => {
+    expect(buildTimeSlot({ date: '', time: '14:00', durationMinutes: 60 })).toBeNull();
+    expect(buildTimeSlot({ date: '2026-07-30', time: '', durationMinutes: 60 })).toBeNull();
+    expect(buildTimeSlot({ date: '2026-07-30', time: '14:00', durationMinutes: 0 })).toBeNull();
   });
 });

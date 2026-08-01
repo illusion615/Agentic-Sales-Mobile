@@ -1,6 +1,7 @@
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { useStartWorkOrder, useWorkOrderBriefing } from '@/hooks/use-work-orders';
+import { useActiveWorkOrder, useBriefing, useStartWorkOrder, useWorkOrderBriefing } from '@/hooks/use-work-orders';
 import { assessSla } from '@/domain/scheduling';
+import { startRefusal } from '@/domain/work-order';
 import { navigationUrl } from '@/lib/navigation';
 
 function formatDate(iso: string): string {
@@ -11,13 +12,18 @@ export function WorkOrderDetailPage() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
   const startWorkOrder = useStartWorkOrder(id);
+  const active = useActiveWorkOrder();
   const { data, isLoading, isError } = useWorkOrderBriefing(id);
+  const briefingQuery = useBriefing(id);
 
   if (isLoading) return <PageShell><p className="text-sm text-muted-foreground">加载中…</p></PageShell>;
   if (isError || !data) return <PageShell><p className="text-sm text-rose-600">工单不存在或加载失败。</p></PageShell>;
 
-  const { workOrder, customer, history, briefing } = data;
+  const { workOrder, customer, history } = data;
+  const briefing = briefingQuery.data;
   const sla = assessSla(workOrder);
+  const refusal = startRefusal(workOrder, active);
+  const blockedByOther = refusal === 'another-underway';
 
   return (
     <PageShell>
@@ -43,9 +49,9 @@ export function WorkOrderDetailPage() {
               navigate(`/work-orders/${workOrder.id}/capture`);
             }}
             className="rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-40"
-            disabled={startWorkOrder.isPending}
+            disabled={startWorkOrder.isPending || blockedByOther}
           >
-            {workOrder.status === 'in-progress' ? '继续服务' : '开始服务'}
+            {refusal === 'already-underway' ? '继续服务' : '开始服务'}
           </button>
           <a
             className="rounded-lg bg-card px-3 py-1.5 text-sm text-foreground ring-1 ring-border"
@@ -56,36 +62,59 @@ export function WorkOrderDetailPage() {
             导航前往
           </a>
         </div>
+        {blockedByOther && active && (
+          <p className="mt-2 rounded-lg bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300">
+            {active.customerName}（{active.number}）正在进行中，完成后才能开始本单。
+          </p>
+        )}
       </section>
 
       <section className="glass-card p-4 shadow-sm">
         <div className="flex items-baseline justify-between">
           <h2 className="font-medium text-foreground">服务前简报</h2>
-          <span className="text-xs text-muted-foreground">
-            {briefing.source === 'ai' ? 'AI 生成' : '按记录整理'}
-          </span>
+          {briefingQuery.isError && (
+            <button
+              type="button"
+              onClick={() => void briefingQuery.refetch()}
+              className="rounded-full bg-card px-2.5 py-0.5 text-xs text-rose-600 ring-1 ring-rose-300"
+            >
+              重试
+            </button>
+          )}
         </div>
-        <p className="mt-2 text-sm leading-relaxed text-foreground/80">{briefing.background}</p>
 
-        {briefing.watchOuts.length > 0 && (
-          <>
-            <h3 className="mt-4 text-sm font-medium text-amber-700">注意事项</h3>
-            <ul className="mt-1 list-disc pl-5 text-sm text-foreground/80">
-              {briefing.watchOuts.map((item) => (
-                <li key={item} className="mt-1">{item}</li>
-              ))}
-            </ul>
-          </>
+        {briefingQuery.isPending && (
+          <p className="mt-2 text-sm text-muted-foreground">正在整理这次上门的背景…</p>
+        )}
+        {briefingQuery.isError && (
+          <p className="mt-2 text-sm text-rose-600">AI 暂时不可用，没能写出简报。工单信息与历史记录仍可查看。</p>
         )}
 
-        {briefing.preparation.length > 0 && (
+        {briefing && (
           <>
-            <h3 className="mt-4 text-sm font-medium text-emerald-700">出发前准备</h3>
-            <ul className="mt-1 list-disc pl-5 text-sm text-foreground/80">
-              {briefing.preparation.map((item) => (
-                <li key={item} className="mt-1">{item}</li>
-              ))}
-            </ul>
+            <p className="mt-2 text-sm leading-relaxed text-foreground/80">{briefing.background}</p>
+
+            {briefing.watchOuts.length > 0 && (
+              <>
+                <h3 className="mt-4 text-sm font-medium text-amber-700">注意事项</h3>
+                <ul className="mt-1 list-disc pl-5 text-sm text-foreground/80">
+                  {briefing.watchOuts.map((item) => (
+                    <li key={item} className="mt-1">{item}</li>
+                  ))}
+                </ul>
+              </>
+            )}
+
+            {briefing.preparation.length > 0 && (
+              <>
+                <h3 className="mt-4 text-sm font-medium text-emerald-700">出发前准备</h3>
+                <ul className="mt-1 list-disc pl-5 text-sm text-foreground/80">
+                  {briefing.preparation.map((item) => (
+                    <li key={item} className="mt-1">{item}</li>
+                  ))}
+                </ul>
+              </>
+            )}
           </>
         )}
       </section>

@@ -98,8 +98,10 @@
   --theme-accent-dark: #09090b;
 }
 
+/* Also matches a nested `.dark`, so a single surface can be dark on its own. */
 :root.dark,
-html.dark {
+html.dark,
+.dark {
   color-scheme: dark;
   --background: #0c1320;
   --foreground: #f3f7fb;

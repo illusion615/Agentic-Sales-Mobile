@@ -1,6 +1,7 @@
 import { UnsupportedCapabilityError, type DataSourceCapabilities, type WorkOrderRepository } from '@/domain/ports';
 import type { DateRange, TimeSlot, WorkOrderDetail, WorkOrderSummary } from '@/domain/work-order';
 import { createIdbCollection } from './idb';
+import { browserStorage, fixtureCycle } from './fixture-cycle';
 import { seedWorkOrders } from './seed';
 
 const STORE = 'workorders';
@@ -37,7 +38,17 @@ export function createLocalWorkOrderRepository(): WorkOrderRepository {
   function ready(): Promise<void> {
     if (!seeding) {
       seeding = collection.all().then(async (rows) => {
-        if (rows.length === 0) await collection.putAll(seedWorkOrders());
+        const cycle = fixtureCycle(STORE, browserStorage());
+        if (cycle.shouldReset) {
+          await collection.putAll(seedWorkOrders());
+          cycle.markReady();
+          return;
+        }
+
+        const existing = new Set(rows.map((row) => row.id));
+        const missing = seedWorkOrders().filter((row) => !existing.has(row.id));
+        if (missing.length > 0) await collection.putAll(missing);
+        cycle.markReady();
       });
     }
     return seeding;

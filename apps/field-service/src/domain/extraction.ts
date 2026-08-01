@@ -47,8 +47,6 @@ export interface ExtractionInput {
 export interface ExtractionResult {
   fields: FieldCandidate[];
   customerUpdates: CustomerUpdateCandidate[];
-  /** Provenance, shown in review so a rules-derived proposal is labelled as such. */
-  source: 'ai' | 'rules';
 }
 
 /**

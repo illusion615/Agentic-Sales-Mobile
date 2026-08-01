@@ -1,0 +1,133 @@
+[
+  {
+    "title": "现场确认",
+    "key": "sec-dialysis-onsite",
+    "items": [
+      {
+        "name": "fld-dialysis-customer",
+        "label": "客户名称",
+        "required": false,
+        "readonly": true,
+        "expression": "#workorder?.customer?.name",
+        "value": "",
+        "type": "Input"
+      },
+      {
+        "name": "fld-dialysis-asset",
+        "label": "设备编号",
+        "required": true,
+        "readonly": false,
+        "expression": "#workorder?.customerEquipment?.assetName",
+        "value": "",
+        "type": "Input"
+      },
+      {
+        "name": "fld-dialysis-arrival",
+        "label": "到场时间",
+        "required": false,
+        "readonly": false,
+        "expression": "new java.util.Date()",
+        "value": "",
+        "type": "DatePicker"
+      }
+    ]
+  },
+  {
+    "title": "故障判断",
+    "key": "sec-dialysis-fault",
+    "items": [
+      {
+        "name": "fld-dialysis-symptom",
+        "label": "1、报警现象描述：",
+        "required": true,
+        "readonly": false,
+        "expression": "",
+        "value": "",
+        "type": "TextArea"
+      },
+      {
+        "name": "fld-dialysis-category",
+        "label": "2、故障归类：",
+        "required": true,
+        "readonly": false,
+        "expression": "",
+        "value": "",
+        "type": "Radio",
+        "options": [
+          { "key": "水路", "text": "水路", "selected": false },
+          { "key": "电路", "text": "电路", "selected": false },
+          { "key": "传感器", "text": "传感器", "selected": false },
+          { "key": "软件", "text": "软件", "selected": false },
+          { "key": "其他", "text": "其他", "selected": false }
+        ]
+      },
+      {
+        "name": "fld-dialysis-repeat",
+        "label": "3、是否为重复故障：",
+        "required": true,
+        "readonly": false,
+        "expression": "",
+        "value": "",
+        "type": "Radio",
+        "options": [
+          { "key": "是", "text": "是", "selected": false },
+          { "key": "否", "text": "否", "selected": false }
+        ]
+      }
+    ]
+  },
+  {
+    "title": "处理与备件",
+    "key": "sec-dialysis-repair",
+    "items": [
+      {
+        "name": "fld-dialysis-actions",
+        "label": "1、已执行的处理措施：",
+        "required": true,
+        "readonly": false,
+        "expression": "",
+        "value": "",
+        "type": "CheckBox",
+        "options": [
+          { "key": "更换传感器", "text": "更换传感器", "selected": false },
+          { "key": "管路清洗", "text": "管路清洗", "selected": false },
+          { "key": "电导率校准", "text": "电导率校准", "selected": false },
+          { "key": "固件升级", "text": "固件升级", "selected": false },
+          { "key": "整机更换", "text": "整机更换", "selected": false }
+        ]
+      },
+      {
+        "name": "fld-dialysis-parts",
+        "label": "2、更换备件清单：",
+        "required": false,
+        "readonly": false,
+        "expression": "",
+        "value": "",
+        "type": "TextArea"
+      },
+      {
+        "name": "fld-dialysis-resolved",
+        "label": "3、设备是否已恢复运行：",
+        "required": true,
+        "readonly": false,
+        "expression": "",
+        "value": "",
+        "type": "Radio",
+        "options": [
+          { "key": "已恢复", "text": "已恢复", "selected": false },
+          { "key": "临时处理", "text": "临时处理", "selected": false },
+          { "key": "未恢复", "text": "未恢复", "selected": false }
+        ]
+      },
+      {
+        "name": "fld-dialysis-followup",
+        "label": "4、后续待办（如未恢复必填）：",
+        "required": false,
+        "readonly": false,
+        "expression": "",
+        "value": "",
+        "type": "TextArea"
+      }
+    ]
+  }
+]

@@ -12,7 +12,7 @@
  * has stood behind that value.
  */
 import type { FieldValue, FormField, FormSchema, FormSection } from './form-schema';
-import { isAnswered, valueOf } from './form-schema';
+import { answerText, isAnswered, valueOf } from './form-schema';
 
 export type SectionStatus =
   /** Required fields are still empty. Blocks submission. */
@@ -44,15 +44,7 @@ export interface SectionReview {
 }
 
 function labelForValue(field: FormField, value: FieldValue['value']): string {
-  if (Array.isArray(value)) {
-    const labels = value.map((key) => field.options?.find((o) => o.key === key)?.label ?? key);
-    return labels.join('、');
-  }
-  if (typeof value === 'boolean') return value ? '是' : '否';
-  if (field.options && typeof value === 'string') {
-    return field.options.find((o) => o.key === value)?.label ?? value;
-  }
-  const text = String(value ?? '');
+  const text = answerText(field, value);
   return text.length > 14 ? `${text.slice(0, 14)}…` : text;
 }
 

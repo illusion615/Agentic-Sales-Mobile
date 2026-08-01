@@ -24,7 +24,14 @@ import { buildPrefillContext } from '@/domain/prefill-context';
 export function useWorkSession(workOrderId: string, enabled = true) {
   return useQuery({
     queryKey: ['session', workOrderId],
-    queryFn: () => captureRepository.openSession(workOrderId),
+    queryFn: async () => {
+      const workOrder = await workOrderRepository.getWorkOrder(workOrderId);
+      const { definition } = await formSchemaRepository.resolveForWorkOrder(workOrder);
+      return captureRepository.openSession(workOrderId, {
+        formId: definition.formId,
+        version: definition.version,
+      });
+    },
     enabled: !!workOrderId && enabled,
   });
 }
@@ -74,7 +81,10 @@ export function useSaveAnswers(sessionId: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (values: FieldValue[]) => captureRepository.saveAnswers(sessionId!, values),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['answers', sessionId] }),
+    // The cache is the single copy being edited. Writing to it before the store
+    // means typing echoes immediately and, more importantly, that a background
+    // extraction merges against what was just typed rather than a stale read.
+    onMutate: (values) => queryClient.setQueryData(['answers', sessionId], values),
   });
 }
 

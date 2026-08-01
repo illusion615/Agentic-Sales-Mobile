@@ -22,9 +22,9 @@ import { createLocalWorkOrderRepository } from './local/local-repository';
 import { createLocalCustomerRepository } from './local/customer-repository';
 import { createLocalCaptureRepository } from './local/capture-repository';
 import { createLocalFormSchemaRepository } from './local/form-schema-repository';
-import { createRuleBasedBriefingProvider } from './local/briefing-provider';
-import { createRuleBasedFieldExtractor } from './local/field-extractor';
-import { createRuleBasedVisitSummaryProvider } from './local/visit-summary-provider';
+import { createAiFieldExtractor } from './ai/field-extractor';
+import { createAiBriefingProvider } from './ai/briefing-provider';
+import { createAiVisitSummaryProvider } from './ai/visit-summary-provider';
 
 function resolveConfiguredSource(): DataSourceId {
   const configured = import.meta.env.VITE_DATA_SOURCE;
@@ -69,21 +69,25 @@ export function createFormSchemaRepository(
 }
 
 /**
- * The briefing writer. Independent of the data source: a Dataverse-backed
- * deployment still falls back to the rule-based composer when no model is
- * reachable, which is why the result carries its provenance.
+ * Every judgement about words — the briefing, reading the captured notes, the
+ * visit summary — is the model's, and only the model's. There is no
+ * deterministic stand-in for any of them: a keyword matcher that quietly filled
+ * a service report with near-misses would be worse than an honest failure.
+ *
+ * Nor is one needed. The model is reached through Dataverse, so a model that is
+ * unreachable means a backend that is unreachable, and nothing could be stored
+ * anyway. Each provider therefore fails loudly and the UI says so.
  */
 export function createBriefingProvider(): BriefingProvider {
-  return createRuleBasedBriefingProvider();
+  return createAiBriefingProvider();
 }
 
-/** Same reasoning as the briefing provider: model in production, rules as the floor. */
 export function createFieldExtractor(): FieldExtractor {
-  return createRuleBasedFieldExtractor();
+  return createAiFieldExtractor();
 }
 
 export function createVisitSummaryProvider(): VisitSummaryProvider {
-  return createRuleBasedVisitSummaryProvider();
+  return createAiVisitSummaryProvider();
 }
 
 export const workOrderRepository = createWorkOrderRepository();

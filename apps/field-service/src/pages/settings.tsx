@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { AppearanceSettings } from '@agentic/app-shell/react';
+import { BasemapDiagnostics } from '@/components/basemap-diagnostics';
 
 export function SettingsPage() {
   return (
@@ -15,6 +16,8 @@ export function SettingsPage() {
 
       <main className="mx-auto flex max-w-2xl flex-col gap-5 p-4 pb-12">
         <AppearanceSettings />
+
+        <BasemapDiagnostics />
 
         <section>
           <h2 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">关于</h2>

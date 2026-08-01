@@ -71,6 +71,16 @@ export interface DateRange {
   to: string;
 }
 
+/** The technician's working day, in local time. */
+export function todayRange(now: Date = new Date()): DateRange {
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  end.setMilliseconds(-1);
+  return { from: start.toISOString(), to: end.toISOString() };
+}
+
 /**
  * Work still owed to the customer. A closed job remains an assignment in the
  * record, so "outstanding" is a domain judgement rather than something the
@@ -78,4 +88,53 @@ export interface DateRange {
  */
 export function isOutstanding(workOrder: Pick<WorkOrderSummary, 'status'>): boolean {
   return workOrder.status !== 'completed' && workOrder.status !== 'cancelled';
+}
+
+/**
+ * Whether the job can be placed on a map at all. An address that was never
+ * geocoded has no position, and inventing one would be worse than admitting it.
+ */
+export function hasCoordinates<T extends { address: ServiceAddress }>(
+  workOrder: T,
+): workOrder is T & { address: ServiceAddress & { location: GeoPoint } } {
+  return workOrder.address.location !== undefined;
+}
+
+/**
+ * Work the technician has already committed to and is physically occupied by —
+ * travelling to a site counts, because they cannot be somewhere else.
+ */
+export function isUnderway(workOrder: Pick<WorkOrderSummary, 'status'>): boolean {
+  return workOrder.status === 'in-progress' || workOrder.status === 'travelling';
+}
+
+/**
+ * The single job under way, if any.
+ *
+ * One technician can only be doing one thing, so the app treats a second start
+ * as a mistake rather than a choice. The earliest one wins if a backend ever
+ * reports several, since that is the one already reflected in the field.
+ */
+export function activeWorkOrder<T extends Pick<WorkOrderSummary, 'status' | 'scheduledStart'>>(
+  workOrders: readonly T[],
+): T | undefined {
+  const underway = workOrders.filter(isUnderway);
+  if (underway.length <= 1) return underway[0];
+  return [...underway].sort((a, b) => (a.scheduledStart ?? '').localeCompare(b.scheduledStart ?? ''))[0];
+}
+
+export type StartRefusal = 'already-underway' | 'another-underway' | 'closed';
+/**
+ * Why this job cannot be started now, or null when it can.
+ *
+ * Stated as a reason rather than a boolean so the screen can explain itself
+ * instead of presenting a dead button.
+ */
+export function startRefusal<T extends Pick<WorkOrderSummary, 'id' | 'status'>>(
+  workOrder: T,
+  active: Pick<WorkOrderSummary, 'id'> | undefined,
+): StartRefusal | null {
+  if (!isOutstanding(workOrder)) return 'closed';
+  if (active?.id === workOrder.id) return 'already-underway';
+  return active ? 'another-underway' : null;
 }

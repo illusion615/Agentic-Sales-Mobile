@@ -15,7 +15,6 @@ export interface VisitSummary {
   text: string;
   /** The few things worth pulling out, already phrased for display. */
   highlights: string[];
-  source: 'ai' | 'rules';
 }
 
 export interface VisitSummaryInput {

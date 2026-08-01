@@ -22,6 +22,7 @@ import type { Briefing, BriefingContext } from './briefing';
 import type { VisitSummary, VisitSummaryInput } from './visit-summary';
 import type { Evidence, WorkSession } from './capture';
 import type { FieldValue, FormSchema } from './form-schema';
+import type { FormDefinition, FormDefinitionRef } from './form-definition';
 import type { ExtractionInput, ExtractionResult, CustomerUpdateCandidate } from './extraction';
 
 export type DataSourceId = 'local' | 'custom' | 'field-service';
@@ -95,7 +96,7 @@ export interface BriefingProvider {
 
 export interface CaptureRepository {
   /** Resume the visit's open session, or begin one. */
-  openSession(workOrderId: string): Promise<WorkSession>;
+  openSession(workOrderId: string, form?: FormDefinitionRef): Promise<WorkSession>;
   getSession(sessionId: string): Promise<WorkSession>;
   /** Append-only: captured fragments are never edited or removed. */
   appendEvidence(evidence: Omit<Evidence, 'id'>): Promise<Evidence>;
@@ -125,6 +126,16 @@ export interface FieldExtractor {
  * UI, so a customer-specific or job-type-specific form needs no app change.
  */
 export interface FormSchemaRepository {
+  /** Every stored definition, including drafts and retired versions. */
+  listDefinitions(): Promise<FormDefinition[]>;
+  /**
+   * The questionnaire this job must answer, with the definition it came from.
+   * Callers persist the reference so the answers stay interpretable after the
+   * form is revised.
+   */
+  resolveForWorkOrder(
+    workOrder: WorkOrderDetail,
+  ): Promise<{ schema: FormSchema; definition: FormDefinition }>;
   getSchemaForWorkOrder(workOrder: WorkOrderDetail): Promise<FormSchema>;
 }
 

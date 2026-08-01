@@ -32,7 +32,8 @@ export function ReviewPage() {
   const { data: schema } = useFormSchema(id);
   const { data: storedAnswers = [], isLoading: answersLoading } = useAnswers(sessionId);
   const { data: proposedUpdates = [] } = useCustomerUpdates(sessionId);
-  const { data: summary } = useVisitSummary(id, sessionId);
+  const summaryQuery = useVisitSummary(id, sessionId);
+  const summary = summaryQuery.data;
   const submitVisit = useSubmitVisit(id, sessionId);
 
   const [answers, setAnswers] = useState<FieldValue[]>([]);
@@ -123,9 +124,21 @@ export function ReviewPage() {
         <section className="rounded-2xl bg-gradient-to-br from-primary to-accent p-4 text-primary-foreground shadow-sm">
           <div className="flex items-center justify-between">
             <h1 className="text-sm font-medium tracking-wide text-white/70">本次服务摘要</h1>
-            <span className="text-[11px] text-white/50">{summary?.source === 'ai' ? 'AI 生成' : '按记录整理'}</span>
+            {summaryQuery.isError && (
+              <button
+                type="button"
+                onClick={() => void summaryQuery.refetch()}
+                className="rounded-full bg-white/15 px-2.5 py-0.5 text-[11px] text-white"
+              >
+                重试
+              </button>
+            )}
           </div>
-          <p className="mt-2 text-sm leading-relaxed">{summary?.text ?? '正在整理…'}</p>
+          <p className="mt-2 text-sm leading-relaxed">
+            {summaryQuery.isError
+              ? 'AI 暂时不可用，没能写出摘要。下面的内容完整，不影响提交。'
+              : (summary?.text ?? '正在整理…')}
+          </p>
           {summary && summary.highlights.length > 0 && (
             <ul className="mt-3 flex flex-wrap gap-1.5">
               {summary.highlights.map((item) => (

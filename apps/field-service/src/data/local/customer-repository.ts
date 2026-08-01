@@ -1,6 +1,7 @@
 import type { CustomerRepository } from '@/domain/ports';
 import type { CustomerProfile, ServiceHistoryEntry } from '@/domain/customer';
 import { createIdbCollection } from './idb';
+import { browserStorage, fixtureCycle } from './fixture-cycle';
 import { seedCustomers, seedServiceHistory } from './seed';
 const STORE = 'customers';
 
@@ -17,7 +18,17 @@ export function createLocalCustomerRepository(): CustomerRepository {
   function ready(): Promise<void> {
     if (!seeding) {
       seeding = collection.all().then(async (rows) => {
-        if (rows.length === 0) await collection.putAll(seedCustomers());
+        const cycle = fixtureCycle(STORE, browserStorage());
+        if (cycle.shouldReset) {
+          await collection.putAll(seedCustomers());
+          cycle.markReady();
+          return;
+        }
+
+        const existing = new Set(rows.map((row) => row.id));
+        const missing = seedCustomers().filter((row) => !existing.has(row.id));
+        if (missing.length > 0) await collection.putAll(missing);
+        cycle.markReady();
       });
     }
     return seeding;

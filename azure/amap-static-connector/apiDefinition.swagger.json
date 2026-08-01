@@ -1,0 +1,177 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "AMap Static Map",
+    "description": "Server-side AMap (Gaode) proxy for the Field Service Mobile code app: static basemap images and driving routes. The app iframe blocks external calls, so both are fetched through this connector.",
+    "version": "1.0.0"
+  },
+  "host": "restapi.amap.com",
+  "basePath": "/v3",
+  "schemes": ["https"],
+  "consumes": [],
+  "produces": ["application/json"],
+  "securityDefinitions": {
+    "api_key": {
+      "type": "apiKey",
+      "in": "query",
+      "name": "key"
+    }
+  },
+  "security": [{ "api_key": [] }],
+  "paths": {
+    "/staticmap": {
+      "get": {
+        "operationId": "GetStaticMap",
+        "summary": "Get static map image",
+        "description": "Render one map image covering the requested view. Coordinates must be GCJ-02.",
+        "parameters": [
+          {
+            "name": "location",
+            "in": "query",
+            "required": true,
+            "type": "string",
+            "description": "Centre as longitude,latitude in GCJ-02, e.g. 114.0579,22.5431",
+            "x-ms-summary": "Centre"
+          },
+          {
+            "name": "zoom",
+            "in": "query",
+            "required": true,
+            "type": "integer",
+            "description": "Zoom level, 1-17",
+            "x-ms-summary": "Zoom"
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "required": true,
+            "type": "string",
+            "description": "Image size as width*height in pixels, each at most 1024",
+            "x-ms-summary": "Size"
+          },
+          {
+            "name": "scale",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "default": 2,
+            "description": "1 for standard density, 2 for high density",
+            "x-ms-summary": "Scale"
+          },
+          {
+            "name": "traffic",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "default": 0,
+            "description": "1 to draw live traffic on the basemap",
+            "x-ms-summary": "Traffic"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Map image encoded as JSON-safe base64 text",
+            "schema": { "$ref": "#/definitions/StaticMapResponse" }
+          },
+          "default": {
+            "description": "Request rejected by the map service"
+          }
+        }
+      }
+    },
+    "/direction/driving": {
+      "get": {
+        "operationId": "GetDrivingRoute",
+        "summary": "Get driving route",
+        "description": "Road distance, traffic-aware duration and a simplified polyline between two GCJ-02 points.",
+        "parameters": [
+          {
+            "name": "origin",
+            "in": "query",
+            "required": true,
+            "type": "string",
+            "description": "Start as longitude,latitude in GCJ-02",
+            "x-ms-summary": "Origin"
+          },
+          {
+            "name": "destination",
+            "in": "query",
+            "required": true,
+            "type": "string",
+            "description": "End as longitude,latitude in GCJ-02",
+            "x-ms-summary": "Destination"
+          },
+          {
+            "name": "strategy",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "default": 32,
+            "description": "AMap routing strategy; 32 balances time with live traffic",
+            "x-ms-summary": "Strategy"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Driving route summary",
+            "schema": { "$ref": "#/definitions/DrivingRouteResponse" }
+          },
+          "default": {
+            "description": "Request rejected by the map service"
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "StaticMapResponse": {
+      "type": "object",
+      "required": ["imageBase64", "contentType", "byteLength"],
+      "properties": {
+        "imageBase64": {
+          "type": "string",
+          "description": "Base64-encoded PNG bytes"
+        },
+        "contentType": {
+          "type": "string",
+          "description": "Upstream image media type"
+        },
+        "byteLength": {
+          "type": "integer",
+          "format": "int32",
+          "description": "Original PNG byte count"
+        }
+      }
+    },
+    "DrivingRouteResponse": {
+      "type": "object",
+      "required": ["distanceMetres", "durationSeconds", "polyline"],
+      "properties": {
+        "distanceMetres": {
+          "type": "integer",
+          "format": "int32",
+          "description": "Road distance in metres"
+        },
+        "durationSeconds": {
+          "type": "integer",
+          "format": "int32",
+          "description": "Traffic-aware driving time in seconds"
+        },
+        "trafficLights": {
+          "type": "integer",
+          "format": "int32",
+          "description": "Traffic lights along the route"
+        },
+        "polyline": {
+          "type": "string",
+          "description": "Simplified route geometry as lng,lat pairs separated by semicolons"
+        },
+        "pointCount": {
+          "type": "integer",
+          "format": "int32",
+          "description": "Number of points in the simplified polyline"
+        }
+      }
+    }
+  }
+}

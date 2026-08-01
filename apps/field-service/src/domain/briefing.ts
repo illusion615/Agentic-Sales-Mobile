@@ -23,11 +23,6 @@ export interface Briefing {
   watchOuts: string[];
   /** Concrete things to prepare or bring. */
   preparation: string[];
-  /**
-   * How this was produced. Surfaced in the UI so a rules-derived briefing is
-   * never passed off as an AI-written one.
-   */
-  source: 'ai' | 'rules';
 }
 
 /** Repeat visits for the same fault are the strongest signal in the history. */

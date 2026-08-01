@@ -1,5 +1,6 @@
 import type { CaptureRepository } from '@/domain/ports';
 import type { Evidence, WorkSession } from '@/domain/capture';
+import type { FormDefinitionRef } from '@/domain/form-definition';
 import type { FieldValue } from '@/domain/form-schema';
 import type { CustomerUpdateCandidate } from '@/domain/extraction';
 import { createIdbCollection } from './idb';
@@ -29,7 +30,7 @@ export function createLocalCaptureRepository(): CaptureRepository {
   }
 
   return {
-    async openSession(workOrderId: string): Promise<WorkSession> {
+    async openSession(workOrderId: string, form?: FormDefinitionRef): Promise<WorkSession> {
       const all = await sessions.all();
       const existing = all.find((s) => s.workOrderId === workOrderId && s.status === 'open');
       if (existing) return existing;
@@ -39,6 +40,7 @@ export function createLocalCaptureRepository(): CaptureRepository {
         workOrderId,
         startedAt: new Date().toISOString(),
         status: 'open',
+        form,
         answers: [],
         customerUpdates: [],
       };

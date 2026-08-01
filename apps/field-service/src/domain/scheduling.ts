@@ -5,7 +5,7 @@
  * the part of the dashboard that must behave identically whichever backend is
  * configured, which is why it lives here rather than in a repository.
  */
-import type { GeoPoint, WorkOrderSummary } from './work-order';
+import type { GeoPoint, TimeSlot, WorkOrderSummary } from './work-order';
 
 export type SlaState = 'breached' | 'critical' | 'at-risk' | 'ok' | 'none';
 
@@ -52,8 +52,26 @@ export function assessSla(
   return { state: 'ok', minutesRemaining };
 }
 
-/** Great-circle distance in kilometres. */
-export function distanceKm(a: GeoPoint, b: GeoPoint): number {
+/** How many jobs sit in each SLA state; the legend counts the map is read by. */
+export function slaBreakdown(
+  workOrders: readonly Pick<WorkOrderSummary, 'slaDueBy'>[],
+  now: Date = new Date(),
+  thresholds: SlaThresholds = DEFAULT_SLA_THRESHOLDS,
+): Record<SlaState, number> {
+  const counts: Record<SlaState, number> = {
+    breached: 0,
+    critical: 0,
+    'at-risk': 0,
+    ok: 0,
+    none: 0,
+  };
+  for (const workOrder of workOrders) {
+    counts[assessSla(workOrder, now, thresholds).state] += 1;
+  }
+  return counts;
+}
+
+/** Great-circle distance in kilometres. */export function distanceKm(a: GeoPoint, b: GeoPoint): number {
   const R = 6371;
   const toRad = (d: number) => (d * Math.PI) / 180;
   const dLat = toRad(b.latitude - a.latitude);
@@ -137,17 +155,18 @@ export function sortWorkOrders(
 export interface PlannedStop {
   workOrder: WorkOrderSummary;
   slaState: SlaState;
-  /** Travel from the previous stop, when both ends are geocoded. */
-  legKm: number | null;
+  /** Great-circle distance from the previous stop; never a road distance. */
+  straightLineKm: number | null;
 }
 
 /**
- * Propose a visit order.
+ * Propose a visit order, not a road route.
  *
  * Urgency wins over travel: jobs are grouped into SLA tiers and a tier is fully
- * served before the next one, so saving kilometres can never push a job past
- * its commitment. Within a tier the nearest job is taken next, which is where
- * the travel saving comes from.
+ * served before the next one, so proximity can never push a job past its
+ * commitment. Within a tier the nearest coordinate is taken next using
+ * great-circle distance. This does not know the road network, traffic or
+ * turn restrictions and must never be rendered or labelled as a driving route.
  *
  * This proposes only. Whether the technician may commit it depends on
  * `capabilities.selfScheduling`.
@@ -198,11 +217,92 @@ export function suggestVisitOrder(
       plan.push({
         workOrder: next,
         slaState: assessSla(next, now, context.thresholds).state,
-        legKm: bestKm,
+        straightLineKm: bestKm,
       });
       cursor = next.address.location ?? cursor;
     }
   }
 
   return plan;
+}
+
+/** Durations a technician can commit to from the card, in minutes. */
+export const SLOT_DURATION_CHOICES = [30, 60, 90, 120, 180, 240] as const;
+
+export const DEFAULT_SLOT_DURATION_MINUTES = 60;
+
+export interface SlotDraft {
+  /** Local calendar date, `YYYY-MM-DD`. */
+  date: string;
+  /** Local wall-clock start, `HH:mm`. */
+  time: string;
+  durationMinutes: number;
+}
+
+function pad(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+/**
+ * What the reschedule control should open on: the slot the job already has,
+ * failing that the window promised to the customer, failing that the next whole
+ * hour. Never a blank form — the technician is on site, not at a desk.
+ */
+export function slotDraftFor(
+  workOrder: Pick<
+    WorkOrderSummary,
+    'scheduledStart' | 'scheduledEnd' | 'promisedWindowStart' | 'estimatedDurationMinutes'
+  >,
+  now: Date = new Date(),
+): SlotDraft {
+  const anchor = workOrder.scheduledStart ?? workOrder.promisedWindowStart;
+  const start = anchor ? new Date(anchor) : null;
+  const valid = start && !Number.isNaN(start.getTime()) ? start : nextWholeHour(now);
+
+  const scheduledMinutes =
+    workOrder.scheduledStart && workOrder.scheduledEnd
+      ? Math.round(
+          (new Date(workOrder.scheduledEnd).getTime() - new Date(workOrder.scheduledStart).getTime()) /
+            60_000,
+        )
+      : null;
+
+  const duration =
+    scheduledMinutes && scheduledMinutes > 0
+      ? scheduledMinutes
+      : workOrder.estimatedDurationMinutes ?? DEFAULT_SLOT_DURATION_MINUTES;
+
+  return {
+    date: `${valid.getFullYear()}-${pad(valid.getMonth() + 1)}-${pad(valid.getDate())}`,
+    time: `${pad(valid.getHours())}:${pad(valid.getMinutes())}`,
+    durationMinutes: duration,
+  };
+}
+
+function nextWholeHour(now: Date): Date {
+  const next = new Date(now);
+  next.setMinutes(0, 0, 0);
+  next.setHours(next.getHours() + 1);
+  return next;
+}
+
+/**
+ * Turn the draft into a committed slot. Returns null for input the control
+ * could not produce a real time from, so a half-filled form can never be saved
+ * as an appointment.
+ */
+export function buildTimeSlot(draft: SlotDraft): TimeSlot | null {
+  const [year, month, day] = draft.date.split('-').map(Number);
+  const [hour, minute] = draft.time.split(':').map(Number);
+  if ([year, month, day, hour, minute].some((part) => !Number.isFinite(part))) return null;
+  if (draft.durationMinutes <= 0) return null;
+
+  // Local time on purpose: the appointment is a wall-clock commitment on site.
+  const start = new Date(year, month - 1, day, hour, minute, 0, 0);
+  if (Number.isNaN(start.getTime())) return null;
+
+  return {
+    start: start.toISOString(),
+    end: new Date(start.getTime() + draft.durationMinutes * 60_000).toISOString(),
+  };
 }

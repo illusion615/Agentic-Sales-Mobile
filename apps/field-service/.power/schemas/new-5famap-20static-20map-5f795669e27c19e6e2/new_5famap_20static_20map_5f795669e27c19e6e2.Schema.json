@@ -1,0 +1,310 @@
+{
+  "name": "shared_new-5famap-20static-20map-5f795669e27c19e6e2",
+  "id": "/providers/Microsoft.PowerApps/apis/shared_new-5famap-20static-20map-5f795669e27c19e6e2",
+  "type": "Microsoft.PowerApps/apis",
+  "properties": {
+    "xrmConnectorId": "e2163500-db8b-f111-8076-0022480b1888",
+    "displayName": "AMap Static Map",
+    "iconUri": "https://defaulticons.powerapps.com/defaulticons/api-dedicated.png",
+    "iconBrandColor": "#0f9d58",
+    "contact": {},
+    "license": {},
+    "apiEnvironment": "Shared",
+    "isCustomApi": true,
+    "blobUrisAreProxied": false,
+    "connectionParameters": {
+      "api_key": {
+        "type": "securestring",
+        "uiDefinition": {
+          "displayName": "AMap Web Service key",
+          "description": "AMap (Gaode) Web 服务 API key. Stored as a connection secret, never in the app bundle.",
+          "tooltip": "Console: console.amap.com → 应用管理 → Web服务",
+          "constraints": {
+            "tabIndex": 2,
+            "clearText": false,
+            "required": "true"
+          }
+        }
+      }
+    },
+    "swagger": {
+      "swagger": "2.0",
+      "info": {
+        "title": "AMap Static Map",
+        "description": "Server-side AMap (Gaode) proxy for the Field Service Mobile code app: static basemap images and driving routes. The app iframe blocks external calls, so both are fetched through this connector.",
+        "version": "1.0.0"
+      },
+      "host": "usa002-004.azure-apihub.net",
+      "basePath": "/apim/new-5famap-20static-20map-5f795669e27c19e6e2",
+      "schemes": [
+        "https",
+        "http"
+      ],
+      "consumes": [],
+      "produces": [
+        "application/json"
+      ],
+      "securityDefinitions": {
+        "api_key": {
+          "type": "apiKey",
+          "in": "query",
+          "name": "key"
+        }
+      },
+      "security": [
+        {
+          "api_key": []
+        }
+      ],
+      "paths": {
+        "/{connectionId}/staticmap": {
+          "get": {
+            "operationId": "GetStaticMap",
+            "summary": "Get static map image",
+            "description": "Render one map image covering the requested view. Coordinates must be GCJ-02.",
+            "parameters": [
+              {
+                "name": "connectionId",
+                "in": "path",
+                "required": true,
+                "x-ms-visibility": "internal",
+                "type": "string"
+              },
+              {
+                "name": "location",
+                "in": "query",
+                "required": true,
+                "type": "string",
+                "description": "Centre as longitude,latitude in GCJ-02, e.g. 114.0579,22.5431",
+                "x-ms-summary": "Centre"
+              },
+              {
+                "name": "zoom",
+                "in": "query",
+                "required": true,
+                "type": "integer",
+                "description": "Zoom level, 1-17",
+                "x-ms-summary": "Zoom"
+              },
+              {
+                "name": "size",
+                "in": "query",
+                "required": true,
+                "type": "string",
+                "description": "Image size as width*height in pixels, each at most 1024",
+                "x-ms-summary": "Size"
+              },
+              {
+                "name": "scale",
+                "in": "query",
+                "required": false,
+                "type": "integer",
+                "default": 2,
+                "description": "1 for standard density, 2 for high density",
+                "x-ms-summary": "Scale"
+              },
+              {
+                "name": "traffic",
+                "in": "query",
+                "required": false,
+                "type": "integer",
+                "default": 0,
+                "description": "1 to draw live traffic on the basemap",
+                "x-ms-summary": "Traffic"
+              }
+            ],
+            "responses": {
+              "200": {
+                "description": "Map image encoded as JSON-safe base64 text",
+                "schema": {
+                  "$ref": "#/definitions/StaticMapResponse"
+                }
+              },
+              "default": {
+                "description": "Request rejected by the map service"
+              }
+            }
+          }
+        },
+        "/{connectionId}/direction/driving": {
+          "get": {
+            "operationId": "GetDrivingRoute",
+            "summary": "Get driving route",
+            "description": "Road distance, traffic-aware duration and a simplified polyline between two GCJ-02 points.",
+            "parameters": [
+              {
+                "name": "connectionId",
+                "in": "path",
+                "required": true,
+                "x-ms-visibility": "internal",
+                "type": "string"
+              },
+              {
+                "name": "origin",
+                "in": "query",
+                "required": true,
+                "type": "string",
+                "description": "Start as longitude,latitude in GCJ-02",
+                "x-ms-summary": "Origin"
+              },
+              {
+                "name": "destination",
+                "in": "query",
+                "required": true,
+                "type": "string",
+                "description": "End as longitude,latitude in GCJ-02",
+                "x-ms-summary": "Destination"
+              },
+              {
+                "name": "strategy",
+                "in": "query",
+                "required": false,
+                "type": "integer",
+                "default": 32,
+                "description": "AMap routing strategy; 32 balances time with live traffic",
+                "x-ms-summary": "Strategy"
+              }
+            ],
+            "responses": {
+              "200": {
+                "description": "Driving route summary",
+                "schema": {
+                  "$ref": "#/definitions/DrivingRouteResponse"
+                }
+              },
+              "default": {
+                "description": "Request rejected by the map service"
+              }
+            }
+          }
+        }
+      },
+      "definitions": {
+        "StaticMapResponse": {
+          "type": "object",
+          "required": [
+            "imageBase64",
+            "contentType",
+            "byteLength"
+          ],
+          "properties": {
+            "imageBase64": {
+              "type": "string",
+              "description": "Base64-encoded PNG bytes"
+            },
+            "contentType": {
+              "type": "string",
+              "description": "Upstream image media type"
+            },
+            "byteLength": {
+              "type": "integer",
+              "format": "int32",
+              "description": "Original PNG byte count"
+            }
+          }
+        },
+        "DrivingRouteResponse": {
+          "type": "object",
+          "required": [
+            "distanceMetres",
+            "durationSeconds",
+            "polyline"
+          ],
+          "properties": {
+            "distanceMetres": {
+              "type": "integer",
+              "format": "int32",
+              "description": "Road distance in metres"
+            },
+            "durationSeconds": {
+              "type": "integer",
+              "format": "int32",
+              "description": "Traffic-aware driving time in seconds"
+            },
+            "trafficLights": {
+              "type": "integer",
+              "format": "int32",
+              "description": "Traffic lights along the route"
+            },
+            "polyline": {
+              "type": "string",
+              "description": "Simplified route geometry as lng,lat pairs separated by semicolons"
+            },
+            "pointCount": {
+              "type": "integer",
+              "format": "int32",
+              "description": "Number of points in the simplified polyline"
+            }
+          }
+        }
+      }
+    },
+    "runtimeUrls": [
+      "https://efcd2d46-3d9e-e31a-a9d8-5481ddae951c.01.custom.usa002.azure-apihub.net/apim/new-5famap-20static-20map-5f795669e27c19e6e2",
+      "http://efcd2d46-3d9e-e31a-a9d8-5481ddae951c.01.custom.usa002.azure-apihub.net/apim/new-5famap-20static-20map-5f795669e27c19e6e2"
+    ],
+    "primaryRuntimeUrl": "https://efcd2d46-3d9e-e31a-a9d8-5481ddae951c.01.custom.usa002.azure-apihub.net/apim/new-5famap-20static-20map-5f795669e27c19e6e2",
+    "doNotUseApiHubNetRuntimeUrl": "https://efcd2d46-3d9e-e31a-a9d8-5481ddae951c.01.custom.usa002.azure-apihub.net/apim/new-5famap-20static-20map-5f795669e27c19e6e2",
+    "metadata": {
+      "source": "powerapps-user-defined",
+      "brandColor": "#0f9d58",
+      "contact": {},
+      "license": {},
+      "publisherUrl": null,
+      "serviceUrl": null,
+      "documentationUrl": null,
+      "environmentName": "efcd2d46-3d9e-e31a-a9d8-5481ddae951c",
+      "xrmConnectorId": "e2163500-db8b-f111-8076-0022480b1888",
+      "almMode": "Solution",
+      "parameters": {},
+      "useNewApimVersion": "True",
+      "createdBy": "{\"id\":\"ccc69730-51cf-4703-94c4-5c49bf31082f\",\"displayName\":\"Wells Zhang\",\"email\":\"wellszhang@D365DemoTSCE49940039.OnMicrosoft.com\",\"type\":\"User\",\"userType\":\"NotSpecified\",\"tenantId\":\"899aca58-7bdc-45e9-bec6-1cc9d3f12894\",\"userPrincipalName\":\"wellszhang@D365DemoTSCE49940039.OnMicrosoft.com\"}",
+      "modifiedBy": "{\"id\":\"ccc69730-51cf-4703-94c4-5c49bf31082f\",\"displayName\":\"Wells Zhang\",\"email\":\"wellszhang@D365DemoTSCE49940039.OnMicrosoft.com\",\"type\":\"User\",\"userType\":\"NotSpecified\",\"tenantId\":\"899aca58-7bdc-45e9-bec6-1cc9d3f12894\",\"userPrincipalName\":\"wellszhang@D365DemoTSCE49940039.OnMicrosoft.com\"}",
+      "allowSharing": false,
+      "rateLimit": 0
+    },
+    "capabilities": [
+      "actions"
+    ],
+    "apiDefinitions": {
+      "originalSwaggerUrl": "https://usa002004wus3ext.blob.core.windows.net/api-swagger-files/unitedstates-002/new-5famap-20static-20map-5f795669e27c19e6e2.json_original?skoid=e6898b49-53e1-4e33-bbf3-f68cbec72336&sktid=33e01921-4d64-4f8c-a055-5bdaffd5e33d&skt=2026-07-30T13%3A13%3A21Z&ske=2026-07-31T13%3A13%3A21Z&sks=b&skv=2025-01-05&sv=2025-01-05&spr=https&se=2026-07-31T11%3A37%3A01Z&sr=b&sp=r&sig=KLnIj7WPjNyT7VGsS%2Fixnf5uuVrOhS5hW1fyA5ryZfw%3D",
+      "modifiedSwaggerUrl": "https://usa002004wus3ext.blob.core.windows.net/api-swagger-files/unitedstates-002/new-5famap-20static-20map-5f795669e27c19e6e2.json?skoid=e6898b49-53e1-4e33-bbf3-f68cbec72336&sktid=33e01921-4d64-4f8c-a055-5bdaffd5e33d&skt=2026-07-30T13%3A13%3A21Z&ske=2026-07-31T13%3A13%3A21Z&sks=b&skv=2025-01-05&sv=2025-01-05&spr=https&se=2026-07-31T11%3A37%3A01Z&sr=b&sp=r&sig=MEKohfqthKXFf8Fz85k38Tz6VJKosZhmltUdytl4Mak%3D"
+    },
+    "policyTemplateInstances": [],
+    "backendService": {
+      "serviceUrl": "https://restapi.amap.com/v3"
+    },
+    "createdBy": {
+      "id": "ccc69730-51cf-4703-94c4-5c49bf31082f",
+      "displayName": "Wells Zhang",
+      "email": "wellszhang@D365DemoTSCE49940039.OnMicrosoft.com",
+      "type": "User",
+      "userType": "NotSpecified",
+      "tenantId": "899aca58-7bdc-45e9-bec6-1cc9d3f12894",
+      "userPrincipalName": "wellszhang@D365DemoTSCE49940039.OnMicrosoft.com"
+    },
+    "modifiedBy": {
+      "id": "ccc69730-51cf-4703-94c4-5c49bf31082f",
+      "displayName": "Wells Zhang",
+      "email": "wellszhang@D365DemoTSCE49940039.OnMicrosoft.com",
+      "type": "User",
+      "userType": "NotSpecified",
+      "tenantId": "899aca58-7bdc-45e9-bec6-1cc9d3f12894",
+      "userPrincipalName": "wellszhang@D365DemoTSCE49940039.OnMicrosoft.com"
+    },
+    "createdTime": "2026-07-30T05:53:50.1958193Z",
+    "changedTime": "2026-07-31T10:26:06.8641876Z",
+    "environment": {
+      "id": "/providers/Microsoft.PowerApps/environments/efcd2d46-3d9e-e31a-a9d8-5481ddae951c",
+      "name": "efcd2d46-3d9e-e31a-a9d8-5481ddae951c"
+    },
+    "tier": "Standard",
+    "publisher": "Wells Zhang",
+    "almMode": "Solution",
+    "scriptDefinitionUrl": "https://usa002004wus3ext.blob.core.windows.net/api-swagger-files/unitedstates-002/new-5famap-20static-20map-5f795669e27c19e6e2-script.json?skoid=e6898b49-53e1-4e33-bbf3-f68cbec72336&sktid=33e01921-4d64-4f8c-a055-5bdaffd5e33d&skt=2026-07-30T13%3A13%3A21Z&ske=2026-07-31T13%3A13%3A21Z&sks=b&skv=2025-01-05&sv=2025-01-05&spr=https&se=2026-07-31T11%3A37%3A01Z&sr=b&sp=r&sig=A2S0%2B2du9tUxp%2BONTiROEq00XKN6m5vTPtIbZXr7Plo%3D",
+    "scriptOperations": [],
+    "parameters": {},
+    "rateLimit": 0,
+    "apiVersion": "None"
+  }
+}

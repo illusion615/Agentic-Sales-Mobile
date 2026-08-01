@@ -7,6 +7,7 @@
  * rather than replacing them. That is what makes every proposed field value
  * traceable back to what was actually observed.
  */
+import type { FormDefinitionRef } from './form-definition';
 
 export type EvidenceKind = 'text' | 'photo' | 'voice';
 
@@ -29,6 +30,11 @@ export interface WorkSession {
   startedAt: string;
   submittedAt?: string;
   status: WorkSessionStatus;
+  /**
+   * Which form version was answered. Answers are keyed by opaque field names,
+   * so without this they cannot be read back once the form is revised.
+   */
+  form?: FormDefinitionRef;
 }
 
 /** Evidence that carries readable content, oldest first. */

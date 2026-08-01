@@ -13,3 +13,4 @@ export * from './dataverse/types';
 export * from './dataverse/query';
 export * from './background-task';
 export * from './ai-cost';
+export * from './ai';

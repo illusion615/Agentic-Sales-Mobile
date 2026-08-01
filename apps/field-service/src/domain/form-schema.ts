@@ -82,6 +82,24 @@ export function findField(schema: FormSchema, name: string): FormField | undefin
   return allFields(schema).find((field) => field.name === name);
 }
 
+/** The label without its authoring ornaments — leading numbering, trailing punctuation. */
+export function plainLabel(field: FormField): string {
+  return field.label.replace(/^\s*\d+\s*[、.．)）]\s*/, '').replace(/[：:？?\s]+$/, '');
+}
+
+/** An answer as a person would read it: option labels, not stored keys. */
+export function answerText(field: FormField, value: FormValue | undefined): string {
+  if (value === null || value === undefined) return '';
+  if (Array.isArray(value)) {
+    return value.map((key) => field.options?.find((o) => o.key === key)?.label ?? key).join('、');
+  }
+  if (typeof value === 'boolean') return value ? '是' : '否';
+  if (field.options && typeof value === 'string') {
+    return field.options.find((o) => o.key === value)?.label ?? value;
+  }
+  return String(value);
+}
+
 /**
  * Whether a value counts as answered.
  *
