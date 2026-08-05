@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronDown, List, Map as MapIcon, Settings } from 'lucide-react';
 import { useDataCapabilities, useMyWorkOrders } from '@/hooks/use-work-orders';
 import { useCurrentLocation } from '@/hooks/use-current-location';
 import { useDayRoute } from '@/hooks/use-day-route';
+import { useWorkspaceLayout } from '@/hooks/use-workspace-layout';
 import { planDay, type DayPlanStop } from '@/domain/day-plan';
 import {
   assessSla,
@@ -17,6 +18,7 @@ import {
   activeWorkOrder,
   hasCoordinates,
   isOutstanding,
+  isPaused,
   isUnderway,
   todayRange,
   type GeoPoint,
@@ -60,6 +62,7 @@ function readViewMode(): ViewMode {
 }
 
 export function DashboardPage() {
+  const workspaceLayout = useWorkspaceLayout();
   const range = useMemo(() => todayRange(), []);
   // Titled from the range actually queried, so the heading can never claim a
   // different day from the work being shown.
@@ -77,6 +80,8 @@ export function DashboardPage() {
   const [sortMode, setSortMode] = useState<SortMode>('sla');
   const [ordering, setOrdering] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [mapFocus, setMapFocus] = useState<{ key: string; point: GeoPoint } | null>(null);
+  const mapFocusSequence = useRef(0);
   const [mapDark, setMapDark] = useState(false);
   const [planOpen, setPlanOpen] = useState(true);
   // One card at a time; several open cards would each fetch their own briefing.
@@ -149,6 +154,61 @@ export function DashboardPage() {
   const breakdown = useMemo(() => slaBreakdown(workOrders), [workOrders]);
   // One technician, one job at a time.
   const active = useMemo(() => activeWorkOrder(workOrders), [workOrders]);
+
+  const selectFromList = (workOrder: WorkOrderSummary) => {
+    setSelectedId(workOrder.id);
+    if (workOrder.address.location) {
+      mapFocusSequence.current += 1;
+      setMapFocus({ key: `${workOrder.id}-${mapFocusSequence.current}`, point: workOrder.address.location });
+    }
+  };
+
+  if (workspaceLayout === 'desktop' || workspaceLayout === 'dual') {
+    return (
+      <div className={`dashboard-workspace app-shell h-[100dvh] overflow-hidden ${mapDark ? 'dark' : ''}`} data-workspace-layout={workspaceLayout}>
+        <aside className="dashboard-list flex min-h-0 flex-col border-r border-border bg-background">
+          <div className="shrink-0 space-y-3 p-3">
+            <DashboardHeader title={dayLabel} outstanding={workOrders.length} breached={breached} breakdown={breakdown} overflow={ordering ? overflowIds.size : 0} viewMode="map" onViewModeChange={() => {}} showViewSwitch={false} />
+            <div className="flex flex-wrap items-center gap-2">
+              {(Object.keys(SORT_LABELS) as SortMode[]).map((mode) => (
+                <button key={mode} type="button" disabled={ordering} onClick={() => setSortMode(mode)} className={`rounded-full px-3 py-1 text-xs disabled:opacity-40 ${sortMode === mode && !ordering ? 'bg-primary text-primary-foreground' : 'bg-card text-foreground ring-1 ring-border'}`}>
+                  {SORT_LABELS[mode]}
+                </button>
+              ))}
+            </div>
+            {ordering && dayPlan && <DayPlanSummary plan={dayPlan} loading={route.status === 'loading'} compact expanded={planOpen} onToggle={() => setPlanOpen((open) => !open)} />}
+          </div>
+          <ol className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3 pt-0 [scrollbar-gutter:stable]">
+            {(visitOrder ?? sorted).map((workOrder, index) => (
+              <WorkOrderCard key={workOrder.id} workOrder={workOrder} sequence={visitOrder ? index + 1 : null} stop={stopByOrder[index] ?? null} active={active} expanded={false} onToggle={() => selectFromList(workOrder)} />
+            ))}
+          </ol>
+        </aside>
+
+        <main className="dashboard-map relative min-h-0 overflow-hidden">
+          <WorkOrderMap className="h-full w-full !rounded-none !ring-0" controlsTopClassName="top-3" workOrders={workOrders} origin={origin} visitOrder={visitOrder} routeSegments={ordering ? routeSegments : null} overflowIds={overflowIds} selectedId={selectedId} onSelect={setSelectedId} focusRequest={mapFocus} locationStatus={location.status} onRetryLocation={location.retry} routePlanned={ordering} planningRoute={planning} onToggleRoutePlan={() => setOrdering((value) => !value)} onDarkChange={setMapDark} />
+        </main>
+
+        <aside className={`dashboard-detail min-h-0 overflow-y-auto border-l border-border bg-background p-4 [scrollbar-gutter:stable] ${selected ? 'is-open' : 'is-empty flex items-center justify-center'}`}>
+          {selected ? (
+            <div className="mx-auto max-w-xl">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <WorkOrderHeadline workOrder={selected} />
+                <button type="button" onClick={() => setSelectedId(null)} className="shrink-0 rounded-lg px-2 py-1 text-xs text-muted-foreground ring-1 ring-border">关闭</button>
+              </div>
+              <WorkOrderDetails workOrder={selected} active={active} />
+              <div className="sticky bottom-0 mt-4 flex gap-2 bg-gradient-to-t from-background via-background to-transparent pb-2 pt-5">
+                <WorkOrderStartAction workOrder={selected} active={active} className="flex-1" />
+                <Link to={`/work-orders/${selected.id}`} className="rounded-xl bg-card px-3 py-2.5 text-sm text-foreground ring-1 ring-border">完整工单</Link>
+              </div>
+            </div>
+          ) : (
+            <p className="max-w-56 text-center text-sm text-muted-foreground">从列表或地图选择工单，在这里查看背景并开始服务。</p>
+          )}
+        </aside>
+      </div>
+    );
+  }
 
   if (viewMode === 'map') {
     return (
@@ -340,6 +400,7 @@ function DashboardHeader({
   overflow,
   viewMode,
   onViewModeChange,
+  showViewSwitch = true,
   className,
 }: {
   title: string;
@@ -349,6 +410,7 @@ function DashboardHeader({
   overflow: number;
   viewMode: ViewMode;
   onViewModeChange: (mode: ViewMode) => void;
+  showViewSwitch?: boolean;
   className?: string;
 }) {
   const present = SLA_ORDER.filter((state) => breakdown[state] > 0);
@@ -365,7 +427,7 @@ function DashboardHeader({
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <ViewModeSwitch mode={viewMode} onChange={onViewModeChange} />
+          {showViewSwitch && <ViewModeSwitch mode={viewMode} onChange={onViewModeChange} />}
           <Link
             to="/settings"
             aria-label="设置"
@@ -496,6 +558,7 @@ function WorkOrderCard({
         <p className="mt-1 truncate text-sm text-muted-foreground">{workOrder.address.line1}</p>
 
         {stop && <p className="mt-2 truncate text-xs text-muted-foreground">{stopTiming(stop)}</p>}
+        {isPaused(workOrder) && workOrder.pauseReason && <p className="mt-2 truncate text-xs text-amber-700">挂起原因：{workOrder.pauseReason}</p>}
 
         {stop && !stop.fitsInDay && (
           <p className="mt-2 rounded-lg bg-amber-500/10 px-2 py-1 text-xs text-amber-700 dark:text-amber-300">

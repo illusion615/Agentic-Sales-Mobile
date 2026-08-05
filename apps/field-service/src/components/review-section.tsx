@@ -15,8 +15,7 @@ export function ReviewSectionCard({
   open,
   onToggle,
   onChange,
-  onConfirm,
-  onConfirmSection,
+  onLock,
   context,
 }: {
   review: SectionReview;
@@ -24,8 +23,7 @@ export function ReviewSectionCard({
   open: boolean;
   onToggle: () => void;
   onChange: (name: string, value: FormValue) => void;
-  onConfirm: (name: string) => void;
-  onConfirmSection: (names: string[]) => void;
+  onLock: (name: string) => void;
   context: FormContext;
 }) {
   const tone = TONE[review.status];
@@ -65,23 +63,13 @@ export function ReviewSectionCard({
       >
         <div className="overflow-hidden">
           <div className="flex flex-col gap-4 border-t border-border p-4">
-            {review.unconfirmed.length > 1 && (
-              <button
-                type="button"
-                onClick={() => onConfirmSection(review.unconfirmed.map((f) => f.name))}
-                className="self-start rounded-full bg-primary px-3 py-1 text-xs text-primary-foreground"
-              >
-                ✓ 确认本节 {review.unconfirmed.length} 项建议
-              </button>
-            )}
-
             {review.section.fields.map((field) => (
               <FormFieldRow
                 key={field.name}
                 field={field}
                 entry={values.find((v) => v.name === field.name)}
                 onChange={onChange}
-                onConfirm={onConfirm}
+                onLock={onLock}
                 context={context}
               />
             ))}

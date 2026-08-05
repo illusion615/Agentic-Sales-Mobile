@@ -39,6 +39,11 @@ describe('activeWorkOrder', () => {
     expect(activeWorkOrder([workOrder('a', 'scheduled')])).toBeUndefined();
   });
 
+  it('does not let a paused job occupy the active slot', () => {
+    expect(activeWorkOrder([workOrder('a', 'paused'), workOrder('b', 'scheduled')])).toBeUndefined();
+    expect(startRefusal(workOrder('b', 'scheduled'), undefined)).toBeNull();
+  });
+
   it('returns the one job under way', () => {
     const active = activeWorkOrder([workOrder('a', 'scheduled'), workOrder('b', 'in-progress')]);
     expect(active?.id).toBe('b');
@@ -57,6 +62,10 @@ describe('activeWorkOrder', () => {
 describe('startRefusal', () => {
   it('allows a start when nothing else is under way', () => {
     expect(startRefusal(workOrder('a', 'scheduled'), undefined)).toBeNull();
+  });
+
+  it('allows a paused job to be resumed when no other job is active', () => {
+    expect(startRefusal(workOrder('a', 'paused'), undefined)).toBeNull();
   });
 
   it('lets the job already under way carry on', () => {

@@ -6,10 +6,9 @@
  * lives here — as data the UI renders, not as conditions scattered through a
  * component.
  *
- * Note the deliberate gap between "answered" and "settled". A field carrying an
- * unconfirmed proposal counts as answered for completeness — it has a value, so
- * it cannot block submission — but the section is not settled until a person
- * has stood behind that value.
+ * AI-written values are complete working content. They stay visibly attributed
+ * to AI and remain revisable until the technician optionally locks them, but
+ * they do not create a second review task.
  */
 import type { FieldValue, FormField, FormSchema, FormSection } from './form-schema';
 import { answerText, isAnswered, valueOf } from './form-schema';
@@ -17,9 +16,9 @@ import { answerText, isAnswered, valueOf } from './form-schema';
 export type SectionStatus =
   /** Required fields are still empty. Blocks submission. */
   | 'needs-input'
-  /** Complete, but holding values nobody has confirmed yet. */
+  /** Retained for compatibility with existing visual tokens. */
   | 'needs-review'
-  /** Complete and confirmed. */
+  /** Complete, whether written by AI or the technician. */
   | 'settled'
   /** Nothing required, nothing filled — there is simply nothing to see. */
   | 'blank';
@@ -30,7 +29,7 @@ export interface SectionReview {
   answered: number;
   total: number;
   missingRequired: FormField[];
-  /** Fields still holding a machine proposal. */
+  /** AI-written fields that are still unlocked. Informational only. */
   unconfirmed: FormField[];
   /** State in words: what this section wants, if anything. */
   headline: string;
@@ -65,7 +64,7 @@ function headlineOf(status: SectionStatus, missing: number, unconfirmed: number,
     case 'needs-input':
       return `缺 ${missing} 项必填`;
     case 'needs-review':
-      return `${unconfirmed} 项待确认`;
+      return `${unconfirmed} 项 AI 填写`;
     case 'blank':
       return '暂未填写';
     case 'settled':
@@ -84,11 +83,9 @@ export function reviewSection(section: FormSection, values: readonly FieldValue[
   const status: SectionStatus =
     missingRequired.length > 0
       ? 'needs-input'
-      : unconfirmed.length > 0
-        ? 'needs-review'
-        : answered === 0
-          ? 'blank'
-          : 'settled';
+      : answered === 0
+        ? 'blank'
+        : 'settled';
 
   return {
     section,
@@ -99,7 +96,7 @@ export function reviewSection(section: FormSection, values: readonly FieldValue[
     unconfirmed,
     headline: headlineOf(status, missingRequired.length, unconfirmed.length, answered, answerable.length),
     digest: digestOf(section, values),
-    defaultOpen: status === 'needs-input' || status === 'needs-review',
+    defaultOpen: status === 'needs-input',
   };
 }
 
@@ -109,5 +106,5 @@ export function reviewSections(schema: FormSchema, values: readonly FieldValue[]
 
 /** Sections still wanting something, in the order they appear. */
 export function sectionsNeedingAttention(reviews: readonly SectionReview[]): SectionReview[] {
-  return reviews.filter((review) => review.status === 'needs-input' || review.status === 'needs-review');
+  return reviews.filter((review) => review.status === 'needs-input');
 }

@@ -26,6 +26,7 @@ const MODEL_NAME = 'SalesCopilotCorePrompt';
 
 /** Build-time GUID, used until runtime resolution succeeds. */
 const FALLBACK_GUID = '104e526a-deab-4292-bf18-6b6180dfd75c';
+const FIELD_SERVICE_APP_ID = 'field-service';
 
 const resolver = createPromptResolver({
   dataSourcesInfo: dataSourcesInfo as unknown as Record<string, unknown>,
@@ -45,6 +46,8 @@ const resolver = createPromptResolver({
 });
 
 const invoke = createAiInvoker({
+  projectId: 'agentic-crm',
+  appId: FIELD_SERVICE_APP_ID,
   resolveOpName: resolver.getOpName,
   execute: (opName, text) =>
     getClient(dataSourcesInfo).executeAsync<{ prompt_20text: string }, Record<string, unknown>>({

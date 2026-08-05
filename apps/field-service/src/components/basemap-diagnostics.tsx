@@ -9,14 +9,16 @@ import {
   type ProbeResult,
 } from '@/lib/basemap-probe';
 import { AMapStaticMapService } from '@/generated/services/AMapStaticMapService';
+import { getAMapWebServiceKey } from '@/data/amap-config';
 import knownPngUrl from '@/assets/amap-known-probe.png?inline';
 import { drawPngDataUrl } from '@/lib/png-canvas';
 
 const CONNECTOR_PROBE_TIMEOUT_MS = 12_000;
 
 async function connectorProbeResponse() {
+  const serviceKey = await getAMapWebServiceKey();
   return Promise.race([
-    AMapStaticMapService.GetStaticMap('114.063700,22.545500', 11, '100*100', 1),
+    AMapStaticMapService.GetStaticMap(serviceKey, '114.063700,22.545500', 11, '100*100', 1),
     new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('连接器 12 秒内未返回')), CONNECTOR_PROBE_TIMEOUT_MS),
     ),

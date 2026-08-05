@@ -10,6 +10,7 @@
  */
 import type {
   BriefingProvider,
+  AcceptanceRepository,
   CaptureRepository,
   CustomerRepository,
   DataSourceId,
@@ -21,6 +22,7 @@ import type {
 import { createLocalWorkOrderRepository } from './local/local-repository';
 import { createLocalCustomerRepository } from './local/customer-repository';
 import { createLocalCaptureRepository } from './local/capture-repository';
+import { createLocalAcceptanceRepository } from './local/acceptance-repository';
 import { createLocalFormSchemaRepository } from './local/form-schema-repository';
 import { createAiFieldExtractor } from './ai/field-extractor';
 import { createAiBriefingProvider } from './ai/briefing-provider';
@@ -55,6 +57,12 @@ export function createCaptureRepository(
   source: DataSourceId = resolveConfiguredSource(),
 ): CaptureRepository {
   return source === 'local' ? createLocalCaptureRepository() : notImplemented(source);
+}
+
+export function createAcceptanceRepository(
+  source: DataSourceId = resolveConfiguredSource(),
+): AcceptanceRepository {
+  return source === 'local' ? createLocalAcceptanceRepository() : notImplemented(source);
 }
 
 /**
@@ -93,6 +101,7 @@ export function createVisitSummaryProvider(): VisitSummaryProvider {
 export const workOrderRepository = createWorkOrderRepository();
 export const customerRepository = createCustomerRepository();
 export const captureRepository = createCaptureRepository();
+export const acceptanceRepository = createAcceptanceRepository();
 export const formSchemaRepository = createFormSchemaRepository();
 export const briefingProvider = createBriefingProvider();
 export const fieldExtractor = createFieldExtractor();

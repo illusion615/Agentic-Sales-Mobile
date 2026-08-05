@@ -1,20 +1,6 @@
 {
   "properties": {
-    "connectionParameters": {
-      "api_key": {
-        "type": "securestring",
-        "uiDefinition": {
-          "displayName": "AMap Web Service key",
-          "description": "AMap (Gaode) Web 服务 API key. Stored as a connection secret, never in the app bundle.",
-          "tooltip": "Console: console.amap.com → 应用管理 → Web服务",
-          "constraints": {
-            "tabIndex": 2,
-            "clearText": false,
-            "required": "true"
-          }
-        }
-      }
-    },
+    "connectionParameters": {},
     "iconBrandColor": "#0f9d58",
     "capabilities": [],
     "scriptOperations": ["GetStaticMap", "GetDrivingRoute"],

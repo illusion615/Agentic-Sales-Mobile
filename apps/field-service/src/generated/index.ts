@@ -7,9 +7,15 @@
 export * as AMapStaticMapModel from './models/AMapStaticMapModel';
 export * as CommonModels from './models/CommonModels';
 export * as Crf5c_agentlogsModel from './models/Crf5c_agentlogsModel';
+export * as EnvironmentvariabledefinitionsModel from './models/EnvironmentvariabledefinitionsModel';
+export * as EnvironmentvariablevaluesModel from './models/EnvironmentvariablevaluesModel';
 export * as Msdyn_aimodelsModel from './models/Msdyn_aimodelsModel';
+export * as SalesCopilotSpeechModel from './models/SalesCopilotSpeechModel';
 
 // Services
 export * from './services/AMapStaticMapService';
 export * from './services/Crf5c_agentlogsService';
+export * from './services/EnvironmentvariabledefinitionsService';
+export * from './services/EnvironmentvariablevaluesService';
 export * from './services/Msdyn_aimodelsService';
+export * from './services/SalesCopilotSpeechService';

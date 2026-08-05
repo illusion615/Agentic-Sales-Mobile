@@ -16,6 +16,7 @@ import { startOfWeek } from 'date-fns/startOfWeek';
 import { endOfWeek } from 'date-fns/endOfWeek';
 import { addWeeks } from 'date-fns/addWeeks';
 import { getWeekStartDay, localeBcp47, outputLanguageDirective, type Locale } from '@/lib/i18n';
+import { renderPrompt } from '@/prompts';
 
 const CACHE_PREFIX = 'weekly-report:v1:';
 
@@ -102,20 +103,13 @@ export function buildWeeklyReportPrompt(
 
   const range = weekRangeLabel(weekStart, weekEnd, locale);
 
-  return `Using the activity list for this week (${range}), write a concise sales weekly report. ${totalCount} activities total, ${completedCount} completed.
-
-Activities:
-${lines || '(no activities this week)'}
-
-Respond in plain Markdown with these sections (use ### headings):
-### Overview
-### Key Wins
-### Pending & Overdue
-### Next Week
-
-Requirements: reference specific account/opportunity names; use bulleted lists; no JSON or code fences; professional and concise.
-
-${outputLanguageDirective(locale as Locale)}`;
+  return renderPrompt('report.weekly', {
+    range,
+    totalCount,
+    completedCount,
+    activityLines: lines || '(no activities this week)',
+    outputLanguage: outputLanguageDirective(locale as Locale),
+  });
 }
 
 /**

@@ -4,6 +4,7 @@ import type { AISummary } from '@/generated/models/ai-summary-model';
 import { getLocale, type Locale } from '@/lib/i18n';
 import { industryLabel } from '@/lib/industry';
 import { normalizeInsightActions } from '@/lib/insight-actions';
+import { renderPrompt } from '@/prompts';
 import { useAppSettings } from './use-app-settings';
 import { useUser } from './use-user';
 
@@ -58,22 +59,13 @@ function getEntityName(entityType: EntityType, entityData: Record<string, unknow
  * Build an AI-friendly prompt based on entity context
  * Converts key values to human-readable labels
  */
-/**
- * Shared formatting directive so every entity's Action Items render as a single,
- * correctly-numbered Markdown list (one self-contained item per line) instead of a
- * title-plus-separate-paragraph structure that Markdown splits into many 1-item lists.
- */
-const ACTION_ITEMS_FORMAT =
-  'Format the action items as ONE numbered Markdown list. Write each item on a single line as ' +
-  '`N. **Action title** — one or two sentences of specific guidance`, numbered sequentially ' +
-  '(1, 2, 3, 4). Do not put blank lines between items and do not split an item into a separate paragraph.';
-
 function buildAIPrompt(
   entityType: EntityType,
   entityData: Record<string, unknown>,
   relatedData?: Record<string, unknown>
 ): string {
   const entityName = getEntityName(entityType, entityData);
+  const actionItemsFormat = renderPrompt('entityInsight.actionItemsFormat');
   
   switch (entityType) {
     case 'account': {
@@ -96,78 +88,38 @@ function buildAIPrompt(
 
       // Context only — the generateEntityInsight skill owns the output structure
       // (grounded narrative + a small set of explained, actionable next steps).
-      return `Analyze this account in its full business context.
-
-ACCOUNT: ${entityName}
-- Industry: ${industryLabel(entityData.industry as string | number | null | undefined) || 'Not specified'}
-- Revenue: ${entityData.annualrevenue ? `$${Number(entityData.annualrevenue).toLocaleString()}` : 'Not specified'}
-
-PUBLIC INTELLIGENCE (objective facts collected in Marketing Insight):
-${marketingInsight || 'No marketing insight has been collected yet.'}
-
-PIPELINE — open opportunities:
-${oppList}
-
-RECENT ACTIVITIES:
-${actList}
-
-CONTACTS: ${contacts?.length || 0}
-
-Interpret the public intelligence in light of this account's own pipeline and activities — turn the facts into specific selling guidance, never a restatement.`;
+      return renderPrompt('entityInsight.account', {
+        entityName,
+        industry: industryLabel(entityData.industry as string | number | null | undefined) || 'Not specified',
+        revenue: entityData.annualrevenue ? `$${Number(entityData.annualrevenue).toLocaleString()}` : 'Not specified',
+        marketingInsight: marketingInsight || 'No marketing insight has been collected yet.',
+        opportunityList: oppList,
+        activityList: actList,
+        contactCount: contacts?.length || 0,
+      });
     }
     
     case 'opportunity': {
-      const stageLabel = (entityData.stage as string) || 'Not specified';
-      const trendLabel = (entityData.confidenceTrend as string) || 'Not specified';
-      
-      return `Analyze this sales opportunity and provide actionable insights.
-
-OPPORTUNITY: ${entityName}
-- Amount: ${entityData.totalamount ? `$${Number(entityData.totalamount).toLocaleString()}` : 'Not specified'}
-- Stage: ${stageLabel}
-- Confidence Trend: ${trendLabel}
-- Close Date: ${entityData.expectedclosedate || 'Not specified'}
-
-IMPORTANT: Respond with plain Markdown text directly. Do NOT wrap your response in markdown code blocks. Just write the content directly.
-
-Structure your response as:
-
-### Summary
-A brief summary (2-3 sentences) of the deal status and likelihood to close.
-
-### Action Items
-3-4 specific action items to advance this opportunity.
-
-${ACTION_ITEMS_FORMAT}
-
-Focus on deal acceleration and risk mitigation.`;
+      return renderPrompt('entityInsight.opportunity', {
+        entityName,
+        amount: entityData.totalamount ? `$${Number(entityData.totalamount).toLocaleString()}` : 'Not specified',
+        stage: (entityData.stage as string) || 'Not specified',
+        confidenceTrend: (entityData.confidenceTrend as string) || 'Not specified',
+        closeDate: (entityData.expectedclosedate as string) || 'Not specified',
+        actionItemsFormat,
+      });
     }
     
     case 'contact': {
-      return `Analyze this sales contact and provide relationship insights.
-
-CONTACT: ${entityName}
-- Title: ${entityData.title || 'Not specified'}
-- Email: ${entityData.emailaddress1 || 'Not specified'}
-
-IMPORTANT: Respond with plain Markdown text directly. Do NOT wrap your response in markdown code blocks. Just write the content directly.
-
-Structure your response as:
-
-### Summary
-A brief summary (2-3 sentences) of this contact's role and importance.
-
-### Action Items
-3-4 specific action items for engaging with this stakeholder.
-
-${ACTION_ITEMS_FORMAT}
-
-Focus on relationship building and influence mapping.`;
+      return renderPrompt('entityInsight.contact', {
+        entityName,
+        title: (entityData.title as string) || 'Not specified',
+        email: (entityData.emailaddress1 as string) || 'Not specified',
+        actionItemsFormat,
+      });
     }
     
     case 'activity': {
-      const typeLabel = (entityData.type as string) || 'Not specified';
-      const statusLabel = (entityData.status as string) || (entityData.draftStatus as string) || 'Not specified';
       const account = relatedData?.account as { name?: string; industry?: string | number | null } | undefined;
       const opp = relatedData?.opportunity as { name?: string; stage?: string; confidence?: number; amount?: number; closeDate?: string } | undefined;
       const oppLine = opp?.name
@@ -178,20 +130,19 @@ Focus on relationship building and influence mapping.`;
           + (opp.closeDate ? `, expected close ${String(opp.closeDate).slice(0, 10)}` : '')
         : '- Related opportunity: none linked';
       // Context only — the generateEntityInsight skill owns the output structure.
-      return `Analyze this sales activity in its business context.
-
-ACTIVITY: ${entityName}
-- Type: ${typeLabel}
-- Status: ${statusLabel}
-- Scheduled: ${entityData.scheduleddate ? String(entityData.scheduleddate).slice(0, 10) : 'n/a'}
-- Notes / outcome: ${entityData.notes || 'No notes recorded'}
-
-ACCOUNT: ${account?.name || 'Not linked'}${account?.industry ? ` (${industryLabel(account.industry) || account.industry})` : ''}
-${oppLine}`;
+      return renderPrompt('entityInsight.activity', {
+        entityName,
+        type: (entityData.type as string) || 'Not specified',
+        status: (entityData.status as string) || (entityData.draftStatus as string) || 'Not specified',
+        scheduled: entityData.scheduleddate ? String(entityData.scheduleddate).slice(0, 10) : 'n/a',
+        notes: (entityData.notes as string) || 'No notes recorded',
+        accountLine: `${account?.name || 'Not linked'}${account?.industry ? ` (${industryLabel(account.industry) || account.industry})` : ''}`,
+        opportunityLine: oppLine,
+      });
     }
     
     default:
-      return `Analyze this ${entityType} and provide actionable sales insights with specific next steps. IMPORTANT: Respond with plain Markdown text directly. Do NOT wrap your response in markdown code blocks. Include a ### Summary section and a ### Action Items section formatted as one sequentially numbered Markdown list (one item per line).`;
+      return renderPrompt('entityInsight.generic', { entityType });
   }
 }
 

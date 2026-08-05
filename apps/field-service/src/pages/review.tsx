@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useWorkOrder } from '@/hooks/use-work-orders';
+import { useWorkspaceLayout } from '@/hooks/use-workspace-layout';
 import {
   useAnswers,
   useCustomerUpdates,
   useFormSchema,
-  useSubmitVisit,
+  usePrepareAcceptance,
   useVisitSummary,
   useWorkSession,
 } from '@/hooks/use-capture';
-import { assessCompleteness, confirmValue, setUserValue, type FieldValue, type FormValue } from '@/domain/form-schema';
+import { assessCompleteness, lockAiValue, setUserValue, type FieldValue, type FormValue } from '@/domain/form-schema';
 import { reviewSections, sectionsNeedingAttention } from '@/domain/review';
 import type { CustomerUpdateCandidate } from '@/domain/extraction';
 import { ReviewSectionCard } from '@/components/review-section';
@@ -22,6 +23,7 @@ const UPDATE_LABELS: Record<CustomerUpdateCandidate['field'], string> = {
 
 export function ReviewPage() {
   const { id = '' } = useParams();
+  const workspaceLayout = useWorkspaceLayout();
   const navigate = useNavigate();
 
   const { data: workOrder } = useWorkOrder(id);
@@ -34,7 +36,7 @@ export function ReviewPage() {
   const { data: proposedUpdates = [] } = useCustomerUpdates(sessionId);
   const summaryQuery = useVisitSummary(id, sessionId);
   const summary = summaryQuery.data;
-  const submitVisit = useSubmitVisit(id, sessionId);
+  const prepareAcceptance = usePrepareAcceptance(id, sessionId);
 
   const [answers, setAnswers] = useState<FieldValue[]>([]);
   const [openMap, setOpenMap] = useState<Record<string, boolean>>({});
@@ -64,9 +66,7 @@ export function ReviewPage() {
   const attention = sectionsNeedingAttention(reviews);
 
   const setValue = (name: string, value: FormValue) => setAnswers((current) => setUserValue(current, name, value));
-  const confirm = (name: string) => setAnswers((current) => confirmValue(current, name));
-  const confirmMany = (names: string[]) =>
-    setAnswers((current) => names.reduce((acc, name) => confirmValue(acc, name), current));
+  const lock = (name: string) => setAnswers((current) => lockAiValue(current, name));
 
   const jumpToAttention = () => {
     const target = attention[0];
@@ -76,22 +76,6 @@ export function ReviewPage() {
   };
 
   const acceptedUpdates = proposedUpdates.filter((_, index) => !rejected.has(index));
-
-  if (submitVisit.isSuccess) {
-    const submitted = submitVisit.variables.acceptedUpdates.length;
-    return (
-      <div className="app-shell mx-auto flex min-h-full max-w-2xl flex-col items-center justify-center gap-4 p-6 text-center">
-        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-2xl text-emerald-600">✓</div>
-        <p className="text-lg font-medium text-foreground">工单已提交</p>
-        <p className="text-sm text-muted-foreground">
-          {workOrder?.number} 已关闭{submitted > 0 ? `，并更新了 ${submitted} 条客户信息` : ''}。
-        </p>
-        <button type="button" onClick={() => navigate('/')} className="rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground">
-          返回工单列表
-        </button>
-      </div>
-    );
-  }
 
   const percent = Math.round((completeness?.ratio ?? 0) * 100);
 
@@ -120,8 +104,8 @@ export function ReviewPage() {
         </div>
       </header>
 
-      <div className="mx-auto flex max-w-2xl flex-col gap-3 p-4">
-        <section className="rounded-2xl bg-gradient-to-br from-primary to-accent p-4 text-primary-foreground shadow-sm">
+      <div className="review-workspace mx-auto flex max-w-2xl flex-col gap-3 p-4" data-workspace-layout={workspaceLayout}>
+        <section className="review-summary rounded-2xl bg-gradient-to-br from-primary to-accent p-4 text-primary-foreground shadow-sm">
           <div className="flex items-center justify-between">
             <h1 className="text-sm font-medium tracking-wide text-white/70">本次服务摘要</h1>
             {summaryQuery.isError && (
@@ -153,27 +137,35 @@ export function ReviewPage() {
           </p>
         </section>
 
-        {reviews.map((review) => (
-          <ReviewSectionCard
-            key={review.section.key}
-            review={review}
-            values={answers}
-            open={openMap[review.section.key] ?? review.defaultOpen}
-            onToggle={() =>
-              setOpenMap((current) => ({
-                ...current,
-                [review.section.key]: !(current[review.section.key] ?? review.defaultOpen),
-              }))
-            }
-            onChange={setValue}
-            onConfirm={confirm}
-            onConfirmSection={confirmMany}
-            context={{ workOrderId: id, customerName: workOrder?.customerName }}
-          />
-        ))}
+        <main className="review-form flex min-w-0 flex-col gap-3">
+          {attention.length === 0 && (
+            <section className="glass-card p-5 text-center shadow-sm">
+              <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500/12 text-emerald-600">✓</div>
+              <h2 className="mt-3 font-medium text-foreground">服务记录已完整</h2>
+              <p className="mt-1 text-sm text-muted-foreground">无需再次逐项核对问卷，可以进入客户验收。</p>
+            </section>
+          )}
+          {attention.map((review) => (
+            <ReviewSectionCard
+              key={review.section.key}
+              review={review}
+              values={answers}
+              open={openMap[review.section.key] ?? review.defaultOpen}
+              onToggle={() =>
+                setOpenMap((current) => ({
+                  ...current,
+                  [review.section.key]: !(current[review.section.key] ?? review.defaultOpen),
+                }))
+              }
+              onChange={setValue}
+              onLock={lock}
+              context={{ workOrderId: id, customerName: workOrder?.customerName }}
+            />
+          ))}
+        </main>
 
         {proposedUpdates.length > 0 && (
-          <section className="glass-card p-4 shadow-sm">
+          <section className="review-updates glass-card p-4 shadow-sm">
             <h2 className="font-medium text-foreground">客户档案更新</h2>
             <p className="mt-1 text-xs text-muted-foreground">这些内容会写回客户档案，供下次到访参考。</p>
             <ul className="mt-3 flex flex-col gap-2">
@@ -219,7 +211,7 @@ export function ReviewPage() {
           </section>
         )}
 
-        <div className="sticky bottom-0 -mx-4 bg-gradient-to-t from-background via-background to-transparent px-4 pb-4 pt-6">
+        <div className="review-submit sticky bottom-0 -mx-4 bg-gradient-to-t from-background via-background to-transparent px-4 pb-4 pt-6">
           {completeness && !completeness.submittable && (
             <p className="mb-2 text-center text-xs text-amber-700">
               还缺 {completeness.missingRequired.map((f) => f.label).join('、')}
@@ -227,13 +219,16 @@ export function ReviewPage() {
           )}
           <button
             type="button"
-            disabled={!completeness?.submittable || submitVisit.isPending || !sessionId}
-            onClick={() => submitVisit.mutate({ answers, acceptedUpdates })}
+            disabled={!completeness?.submittable || attention.length > 0 || prepareAcceptance.isPending || !sessionId}
+            onClick={async () => {
+              await prepareAcceptance.mutateAsync({ answers, acceptedUpdates });
+              navigate(`/work-orders/${id}/acceptance`);
+            }}
             className="w-full rounded-xl bg-primary py-3.5 text-sm font-medium text-primary-foreground shadow-lg shadow-black/10 transition-opacity disabled:opacity-40"
           >
-            {submitVisit.isPending ? '提交中…' : '确认提交'}
+            {prepareAcceptance.isPending ? '正在保存…' : '进入客户验收'}
           </button>
-          {submitVisit.isError && <p className="mt-2 text-center text-sm text-rose-600">提交失败，请重试。</p>}
+          {prepareAcceptance.isError && <p className="mt-2 text-center text-sm text-rose-600">保存失败，请重试。</p>}
         </div>
       </div>
     </div>

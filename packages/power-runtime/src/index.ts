@@ -14,3 +14,5 @@ export * from './dataverse/query';
 export * from './background-task';
 export * from './ai-cost';
 export * from './ai';
+export * from './prompt';
+export * from './speech';

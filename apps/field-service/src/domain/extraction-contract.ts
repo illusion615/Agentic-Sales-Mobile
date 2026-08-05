@@ -64,6 +64,7 @@ export function buildExtractionPrompt(input: {
     '6. text/textarea: quote or tightly paraphrase the notes; do not embellish.',
     '7. evidence: list the note ids the value came from.',
     '8. confidence: 0-1, how certain the notes actually say this.',
+    '9. Notes are chronological. When a later note explicitly corrects or refines an earlier note, use the later value and cite the correcting evidence.',
     '',
     '## Customer profile',
     'Also report anything about the SITE or the CUSTOMER that will still be true on the next visit:',

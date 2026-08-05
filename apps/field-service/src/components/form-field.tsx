@@ -43,34 +43,40 @@ export function FormFieldRow({
   field,
   entry,
   onChange,
-  onConfirm,
+  onLock,
   context,
 }: {
   field: FormField;
   entry: FieldValue | undefined;
   onChange: (name: string, value: FormValue) => void;
-  onConfirm: (name: string) => void;
+  onLock: (name: string) => void;
   context: FormContext;
 }) {
   const proposed = entry?.source === 'ai';
+  const aiLocked = entry?.source === 'ai-locked';
 
   return (
     <div className={`flex flex-col gap-1.5 ${proposed ? '-mx-2 rounded-lg bg-secondary px-2 py-2' : ''}`}>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm text-foreground/80">{field.label}</span>
-        {field.required && <span className="-ml-1 text-rose-500">*</span>}
+      <div className="flex items-start gap-2">
+        <span className="min-w-0 flex-1 text-sm text-foreground/80">
+          {field.label}
+          {field.required && <span className="ml-1 text-rose-500">*</span>}
+        </span>
 
         {proposed && (
-          // Accepting is one tap: review is mostly agreeing, and making the
-          // technician retype a correct value to own it would guarantee
-          // rubber-stamping instead.
           <button
             type="button"
-            onClick={() => onConfirm(field.name)}
-            className="rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground"
+            onClick={() => onLock(field.name)}
+            title="此内容由 AI 根据现场记录填写，仍会随新记录更新。点击锁定后 AI 不再修改。"
+            className="ml-auto shrink-0 rounded-full bg-primary px-2 py-0.5 text-[10px] leading-4 text-primary-foreground"
           >
-            ✓ 确认{entry?.confidence ? ` · 建议 ${Math.round(entry.confidence * 100)}%` : ''}
+            AI 填写 · 点击锁定
           </button>
+        )}
+        {aiLocked && (
+          <span title="此内容由 AI 填写，已锁定，后续 AI 不会修改。" className="ml-auto shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] leading-4 text-muted-foreground ring-1 ring-border">
+            AI 填写 · 已锁定
+          </span>
         )}
         {entry?.source === 'prefill' && (
           <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">自动带入</span>

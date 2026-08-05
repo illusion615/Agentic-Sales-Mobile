@@ -4,6 +4,7 @@ import { DashboardPage } from './pages/dashboard';
 import { WorkOrderDetailPage } from './pages/work-order-detail';
 import { CapturePage } from './pages/capture';
 import { ReviewPage } from './pages/review';
+import { AcceptancePage } from './pages/acceptance';
 import { CustomerDetailPage } from './pages/customer-detail';
 import { SettingsPage } from './pages/settings';
 
@@ -19,6 +20,7 @@ export function App() {
         <Route path="/work-orders/:id" element={<WorkOrderDetailPage />} />
         <Route path="/work-orders/:id/capture" element={<CapturePage />} />
         <Route path="/work-orders/:id/review" element={<ReviewPage />} />
+        <Route path="/work-orders/:id/acceptance" element={<AcceptancePage />} />
         <Route path="/customers/:id" element={<CustomerDetailPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<DashboardPage />} />

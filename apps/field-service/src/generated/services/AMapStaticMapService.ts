@@ -18,9 +18,9 @@ export class AMapStaticMapService {
    * Get static map image
    * Render one map image covering the requested view. Coordinates must be GCJ-02.
    */
-  public static async GetStaticMap(location: string, zoom: number, size: string, scale?: number, traffic?: number): Promise<IOperationResult<StaticMapResponse>> {
-    const params: { location: string, zoom: number, size: string, scale?: number, traffic?: number } = { location, zoom, size, scale, traffic };
-    const result = await AMapStaticMapService.client.executeAsync<{ location: string, zoom: number, size: string, scale?: number, traffic?: number }, StaticMapResponse>(
+  public static async GetStaticMap(key: string, location: string, zoom: number, size: string, scale?: number, traffic?: number): Promise<IOperationResult<StaticMapResponse>> {
+    const params: { key: string, location: string, zoom: number, size: string, scale?: number, traffic?: number } = { key, location, zoom, size, scale, traffic };
+    const result = await AMapStaticMapService.client.executeAsync<{ key: string, location: string, zoom: number, size: string, scale?: number, traffic?: number }, StaticMapResponse>(
       {
         connectorOperation: {
           tableName: AMapStaticMapService.dataSourceName,
@@ -35,9 +35,9 @@ export class AMapStaticMapService {
    * Get driving route
    * Road distance, traffic-aware duration and a simplified polyline between two GCJ-02 points.
    */
-  public static async GetDrivingRoute(origin: string, destination: string, strategy?: number): Promise<IOperationResult<DrivingRouteResponse>> {
-    const params: { origin: string, destination: string, strategy?: number } = { origin, destination, strategy };
-    const result = await AMapStaticMapService.client.executeAsync<{ origin: string, destination: string, strategy?: number }, DrivingRouteResponse>(
+  public static async GetDrivingRoute(key: string, origin: string, destination: string, strategy?: number): Promise<IOperationResult<DrivingRouteResponse>> {
+    const params: { key: string, origin: string, destination: string, strategy?: number } = { key, origin, destination, strategy };
+    const result = await AMapStaticMapService.client.executeAsync<{ key: string, origin: string, destination: string, strategy?: number }, DrivingRouteResponse>(
       {
         connectorOperation: {
           tableName: AMapStaticMapService.dataSourceName,

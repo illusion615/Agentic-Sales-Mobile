@@ -229,6 +229,20 @@ export function metresPerPixel(view: MapView): number {
   );
 }
 
+/** Centre a map so a requested ground distance occupies a predictable width. */
+export function viewAtScale(
+  center: GeoPoint,
+  scaleMetres: number,
+  scaleWidth = 80,
+): MapView {
+  const targetResolution = scaleMetres / scaleWidth;
+  const latitudeResolution = EQUATOR_METRES_PER_PIXEL * Math.cos((center.latitude * Math.PI) / 180);
+  return {
+    center,
+    zoom: clampZoom(Math.log2(latitudeResolution / targetResolution)),
+  };
+}
+
 const SCALE_STEPS_METRES = [
   10, 20, 50, 100, 200, 500, 1_000, 2_000, 5_000, 10_000, 20_000, 50_000, 100_000, 200_000, 500_000,
 ];

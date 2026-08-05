@@ -88,6 +88,7 @@ export function narrateTaskSync(input: TaskNarrationInput): TaskNarration {
 
 import { isFlowAvailable } from '@/services/power-automate-service';
 import { executeFunction } from '@/lib/function-executor';
+import { renderPrompt } from '@/prompts';
 
 const NARRATE_TIMEOUT_MS = 6000;
 
@@ -97,14 +98,13 @@ function buildPrompt(input: TaskNarrationInput): string {
     : input.prior
         .map((p, i) => `${i + 1}. ${p.label} → ${p.outcome}`)
         .join('\n');
-  return [
-    `Task progress: ${input.taskIndex} of ${input.total}`,
-    `Next task raw label: ${input.label}`,
-    `Skill function: ${input.fnName}`,
-    '',
-    'Prior task outcomes:',
-    priorBlock,
-  ].join('\n');
+  return renderPrompt('skill.narrateTaskRequest', {
+    taskIndex: input.taskIndex,
+    total: input.total,
+    label: input.label,
+    fnName: input.fnName,
+    priorOutcomes: priorBlock,
+  });
 }
 
 /**

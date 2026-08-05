@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AMapStaticMapService } from '@/generated/services/AMapStaticMapService';
+import { getAMapWebServiceKey } from '@/data/amap-config';
 import type { RoadTravel } from '@/domain/day-plan';
 import type { GeoPoint } from '@/domain/work-order';
 import { wgs84ToGcj02 } from '@/lib/geo-datum';
@@ -82,6 +83,15 @@ export function useDayRoute(stops: readonly GeoPoint[], enabled: boolean): DayRo
 
     void (async () => {
       let lastError: string | null = null;
+      let serviceKey: string;
+      try {
+        serviceKey = await getAMapWebServiceKey();
+      } catch (cause) {
+        if (cancelled) return;
+        setStatus('failed');
+        setError(cause instanceof Error ? cause.message : '读取地图服务配置失败');
+        return;
+      }
 
       for (let offset = 0; offset < missing.length; offset += MAX_CONCURRENT_REQUESTS) {
         const batch = missing.slice(offset, offset + MAX_CONCURRENT_REQUESTS);
@@ -91,6 +101,7 @@ export function useDayRoute(stops: readonly GeoPoint[], enabled: boolean): DayRo
             try {
               const result = await withTimeout(
                 AMapStaticMapService.GetDrivingRoute(
+                  serviceKey,
                   coordinate(wgs84ToGcj02(pair.from)),
                   coordinate(wgs84ToGcj02(pair.to)),
                   TRAFFIC_AWARE_STRATEGY,

@@ -20,7 +20,7 @@ import {
   type SlotDraft,
 } from '@/domain/scheduling';
 import type { WorkOrderSummary } from '@/domain/work-order';
-import { startRefusal } from '@/domain/work-order';
+import { isPaused, startRefusal } from '@/domain/work-order';
 import {
   useDataCapabilities,
   useRescheduleWorkOrder,
@@ -82,6 +82,7 @@ export function WorkOrderHeadline({ workOrder }: { workOrder: WorkOrderSummary }
         {workOrder.number} · {workOrder.incidentType ?? '未分类'} ·{' '}
         {formatRemaining(sla.minutesRemaining)}
       </p>
+      {isPaused(workOrder) && <span className="mt-1 inline-flex rounded-full bg-amber-500/12 px-2 py-0.5 text-[11px] text-amber-700">已挂起{workOrder.pauseReason ? ` · ${workOrder.pauseReason}` : ''}</span>}
     </div>
   );
 }
@@ -299,7 +300,7 @@ export function WorkOrderStartAction({
       }`}
     >
       <Play className="h-4 w-4" />
-      {refusal === 'already-underway' ? '继续服务' : '开始工单'}
+      {refusal === 'already-underway' ? '继续服务' : isPaused(workOrder) ? '恢复服务' : '开始工单'}
     </button>
   );
 }

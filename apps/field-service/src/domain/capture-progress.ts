@@ -40,7 +40,7 @@ export function captureProgress(
     return {
       stage: 'ready',
       percent,
-      headline: `${subject}的记录已齐全，可以提交了`,
+      headline: `${subject}的记录已齐全，可以完成服务并进入客户验收`,
       missing,
       submittable: true,
     };

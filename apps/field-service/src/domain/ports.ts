@@ -17,6 +17,7 @@
  *    must reject a call it has not declared support for.
  */
 import type { DateRange, TimeSlot, WorkOrderDetail, WorkOrderSummary } from './work-order';
+import type { AcceptanceRecord } from './acceptance';
 import type { CustomerProfile, ServiceHistoryEntry } from './customer';
 import type { Briefing, BriefingContext } from './briefing';
 import type { VisitSummary, VisitSummaryInput } from './visit-summary';
@@ -58,6 +59,9 @@ export interface WorkOrderRepository {
 
   /** Record that work has begun on site. */
   startWorkOrder(id: string, at: string): Promise<void>;
+
+  /** Release the active slot without closing the job or discarding its session. */
+  pauseWorkOrder(id: string, at: string, reason: string): Promise<void>;
 
   /** Close the job once its questionnaire has been submitted. */
   completeWorkOrder(id: string, at: string): Promise<void>;
@@ -107,6 +111,11 @@ export interface CaptureRepository {
   saveCustomerUpdates(sessionId: string, updates: readonly CustomerUpdateCandidate[]): Promise<void>;
   getCustomerUpdates(sessionId: string): Promise<CustomerUpdateCandidate[]>;
   submitSession(sessionId: string, at: string): Promise<void>;
+}
+
+export interface AcceptanceRepository {
+  getOrCreate(workOrderId: string, templateId: string): Promise<AcceptanceRecord>;
+  save(record: AcceptanceRecord): Promise<void>;
 }
 
 /**

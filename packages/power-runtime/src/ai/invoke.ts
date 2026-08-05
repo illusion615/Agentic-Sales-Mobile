@@ -28,6 +28,8 @@ export interface AiInvokeResult {
   content?: string;
   error?: string;
   latencyMs?: number;
+  /** Correlates this call with its billed AI Event row. */
+  traceId?: string;
 }
 
 /** What the injected Dataverse call returns. Mirrors the SDK's operation result. */
@@ -40,6 +42,8 @@ export interface PromptExecution {
 export interface AiInvokeMeta {
   /** Ledger label for the call site. Defaults to the response format. */
   label?: string;
+  /** Which catalogued prompt drove the call, recorded in the trace marker. */
+  promptKey?: string;
   /** Marks the call as standalone work rather than part of a user turn. */
   detached?: boolean;
   /** Called after a successful standalone call, to record its cost row. */
@@ -47,6 +51,10 @@ export interface AiInvokeMeta {
 }
 
 export interface AiInvokerConfig {
+  /** Stable product/project id used to aggregate costs across sibling apps. */
+  projectId?: string;
+  /** Stable application id written into every trace marker. */
+  appId?: string;
   /** Which Custom API operation to call right now. */
   resolveOpName: () => string;
   /** Invokes the Custom API by operation name. */
@@ -111,7 +119,7 @@ export function createAiInvoker(config: AiInvokerConfig): AiInvoker {
     // The trace GUID sits at char 0 so it survives the AI Event prompt
     // truncation, giving an exact 1:1 join from ledger row to billed event.
     const traceId = newTraceId();
-    const text = `${formatTracePrefix(traceId)}${request.messages.map((m) => `${m.role}: ${m.content}`).join('\n')}`;
+    const text = `${formatTracePrefix(traceId, meta?.promptKey, config.appId, config.projectId)}${request.messages.map((m) => `${m.role}: ${m.content}`).join('\n')}`;
 
     const ledger = (ok: boolean, responseChars: number) =>
       recordAiCall(
@@ -141,6 +149,7 @@ export function createAiInvoker(config: AiInvokerConfig): AiInvoker {
           success: false,
           error: result.error?.message ?? 'AI Builder predict failed',
           latencyMs: Date.now() - startedAt,
+          traceId,
         };
       }
 
@@ -156,13 +165,14 @@ export function createAiInvoker(config: AiInvokerConfig): AiInvoker {
 
       ledger(true, raw.length);
       if (meta?.detached) meta.onStandalone?.(traceId);
-      return { success: true, content, latencyMs: Date.now() - startedAt };
+      return { success: true, content, latencyMs: Date.now() - startedAt, traceId };
     } catch (error: unknown) {
       ledger(false, 0);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error invoking AI Builder',
         latencyMs: Date.now() - startedAt,
+        traceId,
       };
     }
   };

@@ -10,6 +10,7 @@ import { getCopilotConfig, saveCopilotConfig } from '@/services/copilot-service'
 import { getContext } from '@microsoft/power-apps/app';
 import { MicrosoftCopilotStudioService } from '@/generated/services/MicrosoftCopilotStudioService';
 import { registerHandlers, type FunctionHandler } from './handler-registry';
+import { renderPrompt } from '@/prompts';
 import { localeBcp47, outputLanguageDirective, type Locale } from '@/lib/i18n';
 
 const queryCopilotStudio: FunctionHandler = async (args, ctx) => {
@@ -179,23 +180,41 @@ const suggestPlan: FunctionHandler = async (args, ctx) => {
   const isZh = (ctx.locale || 'en') === 'zh-Hans';
   const firstDate = windowDates[0];
   const lastDate = windowDates[windowDates.length - 1];
-  const systemPrompt = `You are a senior sales coach. Today is ${isoDay(today)} (${weekdayName(isoDay(today))}). Plan tasks for the rep across the window ${firstDate} to ${lastDate}.\n\nScheduling requirements (important):\n- Generate up to ${maxTasks} specific, actionable tasks and **spread them across different dates** in the window — do NOT pile everything on one day.\n- Date assignment is based on: (1) opportunity urgency — sooner expectedclosedate, larger amount, lower confidence, or named blocker → schedule earlier; (2) schedule load — prefer days with fewer booked activities to avoid conflicts.\n- The current per-day load is in [Schedule load] below. Avoid days that are already busy.\n- Each task's notes MUST include one sentence explaining **why that date** (tying it to deal progress / urgency / an open slot), e.g. "Peking Union tender closes 6/12 and Wed is light, so the negotiation meeting is set for Tue".\n\nPriority: urgent opportunity follow-ups > long-overdue client revisits > high-value pipeline progression > routine maintenance${focus ? `\n- Focus area: ${focus}` : ''}\n\nReturn strictly: {"suggestions":[{"title":"...","type":"visit|call|meeting|email|other","accountName":"...","scheduledDate":"YYYY-MM-DD","notes":"business note that includes the scheduling rationale"}]}\n\nAll fields required. scheduledDate MUST fall within ${firstDate}..${lastDate}. notes MUST include the scheduling rationale. Return only JSON, no markdown.\n\n${outputLanguageDirective((ctx.locale || 'en-US') as Locale)}`;
+  const planVariables = {
+    today: isoDay(today),
+    todayWeekday: weekdayName(isoDay(today)),
+    firstDate,
+    lastDate,
+    maxTasks,
+    focusLine: focus ? `\n- Focus area: ${focus}` : '',
+    outputLanguage: outputLanguageDirective((ctx.locale || 'en-US') as Locale),
+  };
+  const systemPrompt = renderPrompt('plan.suggestPlan', planVariables);
 
-  const dataPayload = `Pipeline (${activeOpps.length} active opportunities):\n${JSON.stringify(activeOpps.map((o) => ({
-    name: o.name1, account: o.account?.name1, amount: o.totalamount,
-    stage: o.stage, confidence: o.confidence, closeDate: o.expectedclosedate,
-    blocker: o.blocker, lastAction: o.lastaction,
-  })), null, 0).slice(0, 2000)}\n\n[Schedule load] existing activities per day in the window (avoid busy days):\n${scheduleLoadStr}\n\nExisting activities (${firstDate}..${lastDate}):\n${JSON.stringify(existingActivities.map((a) => ({
-    title: a.title, type: a.type, account: a.account?.name1, date: a.scheduleddate,
-  })), null, 0).slice(0, 1000)}\n\nAccounts needing contact:\n${JSON.stringify(accountsNeedingContact.map((a) => ({
-    name: a.name1, industry: a.industry,
-  })), null, 0).slice(0, 800)}\n\nRecent conversation:\n${recentHistory.slice(0, 500)}`;
+  const dataPayload = renderPrompt('plan.suggestPlanData', {
+    opportunityCount: activeOpps.length,
+    pipeline: JSON.stringify(activeOpps.map((o) => ({
+      name: o.name1, account: o.account?.name1, amount: o.totalamount,
+      stage: o.stage, confidence: o.confidence, closeDate: o.expectedclosedate,
+      blocker: o.blocker, lastAction: o.lastaction,
+    })), null, 0).slice(0, 2000),
+    scheduleLoad: scheduleLoadStr,
+    firstDate,
+    lastDate,
+    existingActivities: JSON.stringify(existingActivities.map((a) => ({
+      title: a.title, type: a.type, account: a.account?.name1, date: a.scheduleddate,
+    })), null, 0).slice(0, 1000),
+    accountsNeedingContact: JSON.stringify(accountsNeedingContact.map((a) => ({
+      name: a.name1, industry: a.industry,
+    })), null, 0).slice(0, 800),
+    recentConversation: recentHistory.slice(0, 500),
+  });
 
   const { invokeFlowForLLM } = await import('@/services/power-automate-service');
   const llmResp = await invokeFlowForLLM({
     messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: dataPayload }],
     responseFormat: 'text',
-  }, { label: 'Suggest plan' });
+  }, { label: 'Suggest plan', prompt: { key: 'plan.suggestPlan' } });
 
   if (!llmResp.success || !llmResp.content) return { success: false, error: llmResp.error || 'LLM failed to generate plan' };
 

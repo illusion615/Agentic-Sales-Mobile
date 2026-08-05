@@ -1,7 +1,7 @@
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useActiveWorkOrder, useBriefing, useStartWorkOrder, useWorkOrderBriefing } from '@/hooks/use-work-orders';
 import { assessSla } from '@/domain/scheduling';
-import { startRefusal } from '@/domain/work-order';
+import { isPaused, startRefusal } from '@/domain/work-order';
 import { navigationUrl } from '@/lib/navigation';
 
 function formatDate(iso: string): string {
@@ -51,7 +51,7 @@ export function WorkOrderDetailPage() {
             className="rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-40"
             disabled={startWorkOrder.isPending || blockedByOther}
           >
-            {refusal === 'already-underway' ? '继续服务' : '开始服务'}
+            {refusal === 'already-underway' ? '继续服务' : isPaused(workOrder) ? '恢复服务' : '开始服务'}
           </button>
           <a
             className="rounded-lg bg-card px-3 py-1.5 text-sm text-foreground ring-1 ring-border"

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { testFlowConnection, invokeFlowForLLM } from '@/services/power-automate-service';
+import { renderPrompt } from '@/prompts';
 import zhHans from '@/locales/zh-Hans.json';
 import enUS from '@/locales/en-US.json';
 import deDE from '@/locales/de-DE.json';
@@ -974,14 +975,14 @@ export async function generateVoiceSummary(
     return { success: false, error: 'LLM not configured or disabled' };
   }
   
-  const basePrompt = customSystemPrompt || 'You are an assistant that summarizes content into brief voice announcements. Use concise, natural spoken language, summarizing key information in no more than 3 sentences.';
+  const basePrompt = customSystemPrompt || renderPrompt('voice.summaryBase');
   const systemPrompt = `${basePrompt}\n\n${outputLanguageDirective(locale)}`;
   
   // When a custom system prompt is provided, pass content directly as user message
   // (don't wrap in "voice announcement" framing which conflicts with JSON/analysis prompts)
   const userPrompt = customSystemPrompt
     ? content
-    : `Please summarize the following content into a brief voice announcement:\n\n${content}`;
+    : renderPrompt('voice.summaryRequest', { content });
 
   // Power Automate uses SDK connector — no endpoint needed
   if (config.provider === 'power-automate') {

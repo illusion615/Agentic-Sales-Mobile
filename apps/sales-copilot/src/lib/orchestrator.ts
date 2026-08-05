@@ -26,6 +26,7 @@ import {
 } from './frame';
 import { selectSkillsForIntents, formatSkillsForPrompt } from './skills-selector';
 import { invokeFlowForLLM } from '@/services/power-automate-service';
+import { renderPrompt } from '@/prompts';
 import {
   DagPlanSchema,
   SingleIntentSchema,
@@ -133,11 +134,8 @@ function describeBoundEntities(frame: FrameResult): string {
 function buildOrchestratorPrompt(
   frame: FrameResult,
   skeleton: SkeletonStep[],
-  skillsText: string,
-  locale: 'zh-Hans' | 'en'
-): string {
-  const heading = `You are the execution planner for a sales assistant. The Frame stage has already split the user's message into intents and given each one a salesObject / cognitiveTask / temporal / summary / relatesTo. Your only job is to fill in step.arguments for each intent and assemble the DAG. Do not reclassify, merge, or split intents.`;
-
+  skillsText: string
+): { text: string; variables: Record<string, string> } {
   const skeletonLines = skeleton.map((s) => {
     const intent = s.intent;
     const deps = s.dependsOn?.length ? `, dependsOn=${JSON.stringify(s.dependsOn)}` : '';
@@ -148,59 +146,16 @@ function buildOrchestratorPrompt(
   // Anchor all relative-date reasoning to the real current date. Without this
   // the LLM has no idea what "today" is and fabricates dates (often years off).
   const now = new Date();
-  const todayIso = now.toISOString().split('T')[0];
-  const weekday = now.toLocaleDateString('en-US', { weekday: 'long' });
 
-  return `${heading}
+  const variables = {
+    todayIso: now.toISOString().split('T')[0],
+    weekday: now.toLocaleDateString('en-US', { weekday: 'long' }),
+    skeleton: skeletonLines,
+    skills: skillsText,
+    boundEntities: describeBoundEntities(frame),
+  };
 
-# Current date
-Today is ${todayIso} (${weekday}). ALWAYS resolve relative dates against this:
-"today"=${todayIso}; "yesterday"=the day before; "tomorrow"=the day after;
-"this/next week" relative to ${todayIso}. NEVER invent a year — every date you
-output must be in the same year as today unless the user explicitly says otherwise.
-
-# Fidelity (CRITICAL — data integrity)
-- Keep the user's OWN wording for proper nouns (account names, contact names, departments/科室, job titles, products). Do NOT swap in a different or similar-sounding term (e.g. 设备科 must never become 检验科). The user's shorthand/abbreviation is fine — copy it as-is; matching to real records happens later.
-- Extract ONLY what the user actually stated. NEVER invent purposes, agendas, background, amounts, dates, or any detail the user did not give. Leave an optional field empty rather than fabricating a plausible-sounding value.
-
-# Composite operations (merge / deduplicate / reconcile / compare-then-change)
-Some requests are NOT a single update — they must READ records, decide what to change, and CONFIRM before writing. Signals: "合并 / merge", "去重 / deduplicate", "重复 / duplicate", "reconcile", "对比这些再改/删".
-For such an intent, emit a proposeChanges step INSTEAD of a plain update/delete:
-  { "seq": <n>, "function": "proposeChanges", "arguments": { "goal": "<the user's request, verbatim>" } }
-proposeChanges reads the in-scope records, proposes the exact update/delete operations, and asks the user to confirm — nothing is written until they do.
-It needs the records in scope: if a prior step already queried/compared them, place proposeChanges AFTER it (higher seq, dependsOn that step's outputRef). If NO prior step fetched them, ADD a query step BEFORE it (e.g. queryActivities with the right filter) and give proposeChanges the higher seq. For this case you MAY output MORE steps than the skeleton.
-
-# Skeleton (preserve one-to-one, EXCEPT composite operations above)
-${skeletonLines}
-
-# Available skills
-${skillsText}
-${describeBoundEntities(frame)}
-
-# Output rules
-- Output ONE JSON object with shape: { "steps": [ { "seq", "outputRef"?, "dependsOn"?, "function", "arguments", "usePageContext"? }, ... ] }
-- Steps array length normally equals the skeleton length, and each step's seq / outputRef / dependsOn matches the skeleton. EXCEPTION: composite operations (see "# Composite operations") may add a query and/or a proposeChanges step beyond the skeleton.
-- "function" should normally equal the suggestedFunction. Override only if the suggested skill is missing from the available skills list.
-- "arguments" must obey the parameter schema of the chosen skill.
-- For queryCopilotStudio / externalKnowledgeQuery: "query" is REQUIRED — use the intent summary as the query text.
-- For draftFeedback: preserve the user's own language and facts. Set feedbackType="bug" for broken/incorrect behavior and "enhancement" for a requested improvement. Title and description are REQUIRED. Include expectedOutcome and reproductionSteps only when stated or directly inferable from the reported expected-vs-actual behavior; never invent steps.
-- For Activity steps: temporal=past → temporalMode="completed"; temporal=future → temporalMode="planned".
-- For draftActivity/updateActivity: when the user mentions a date or relative day ("today", "yesterday", "next Tuesday", "明天"), set scheduledDate to the resolved YYYY-MM-DD using the Current date above. For a past activity with no explicit date ("visited the customer", "called them"), default scheduledDate to today (${todayIso}). Omit scheduledDate only when truly unknown.
-- For draftActivity: "type" is REQUIRED. Infer from context: 拜访/visit/went to/现场 → "visit", 电话/call/phoned/rang → "call", 会议/meeting/met with/讨论会 → "meeting", 邮件/email/sent mail → "email", otherwise → "meeting".
-- For draftActivity/updateActivity: "title" is REQUIRED and must be NON-EMPTY, specific, and meaningful — include key info (account name, topic, and/or product), e.g. "Royal London Hospital - BeneVision N22 Demo", "Cedars-Sinai pricing follow-up". NEVER leave title blank, and never use a generic title like "Customer Visit", "Phone Call", or "Meeting". When several activity steps exist (multi-step plans), EVERY step must carry its own specific title.
-- For queryActivities: always set date filters. "today" → dateRange="today" OR scheduledDate=${todayIso}. "this week" → dateRange="7days" OR dateFrom/dateTo. "completed today" → dateRange="today" + status="completed". "pending"/"待办"/"to-do" → status="open" (open IS the actionable pending state; NEVER use draft/confirmed).
-- For queryOpportunities: "active/pipeline" → stage != won/lost. "at risk" → minConfidence=0 maxConfidence=49.
-
-# Page context data reuse
-- Check the [Page context] section below. If the page already has the data needed for a step (e.g., the user is on the Activities page viewing this week and the step needs this week's activities), set "usePageContext": true and omit query arguments. The executor will use the page data directly.
-- If the page data does NOT cover the step's needs (e.g., step needs next week's data but page shows this week), set "usePageContext": false (or omit it) and provide proper query arguments.
-- "usePageContext": true is only valid for query functions (queryActivities, queryOpportunities, queryAccounts, queryContacts), never for draft/update/delete functions.
-
-- Use page-bound entity ids directly (no need to re-ask).
-- When a step depends on another (dependsOn includes "$intent_N"), reference the upstream output via "$intent_N.id" or "$intent_N.name" inside arguments.
-- Amount conversion: 200k/200K → 200000, 50万 → 500000, 1.5M → 1500000.
-- If the entire plan reduces to a single non-DAG step (one intent, no deps, suitable for a single-intent shape), you may output { "function": ..., "arguments": ... } instead. Otherwise always emit the DAG shape.
-- Output JSON only, no prose, no markdown.`;
+  return { text: renderPrompt('orchestrator.plan', variables), variables };
 }
 
 function buildUserBlock(
@@ -312,7 +267,7 @@ export async function runIntentPipeline(ctx: FrameRunContext): Promise<PipelineR
   }
 
   // 3. Orchestrator (LLM call for argument filling — all intents, single or multi)
-  const systemPrompt = buildOrchestratorPrompt(frame, skeleton, skillsText, locale);
+  const { text: systemPrompt, variables: planVariables } = buildOrchestratorPrompt(frame, skeleton, skillsText);
   const userPrompt = buildUserBlock(ctx.userMessage, frame, ctx.pageContext, ctx.conversationHistory, ctx.conversationStateText);
   // Exact text invokeFlowForLLM serialises and sends — captured for copy in the
   // Frame Inspector so the Orchestrator prompt can be tested offline.
@@ -333,7 +288,7 @@ export async function runIntentPipeline(ctx: FrameRunContext): Promise<PipelineR
       { role: 'user', content: userPrompt },
     ],
     responseFormat: 'text',
-  }, { label: 'Orchestrator' });
+  }, { label: 'Orchestrator', prompt: { key: 'orchestrator.plan' } });
   let plan = planResp.success && planResp.content
     ? parseOrchestratorOutput(planResp.content, skeleton)
     : null;
@@ -354,7 +309,7 @@ export async function runIntentPipeline(ctx: FrameRunContext): Promise<PipelineR
         { role: 'user', content: userPrompt },
       ],
       responseFormat: 'text',
-    }, { label: 'Orchestrator · retry' });
+    }, { label: 'Orchestrator · retry', prompt: { key: 'orchestrator.plan' } });
     if (planResp.success && planResp.content) {
       plan = parseOrchestratorOutput(planResp.content, skeleton);
     }

@@ -16,6 +16,7 @@ import { useCreateBusinessInsight, useBusinessInsightList, useDeleteBusinessInsi
 import { useWatchedBackgroundTasks, useUpdateBackgroundTask } from '@/generated/hooks/use-background-task';
 import { taskDeepLink } from '@/lib/background-tasks';
 import { useLocale } from '@/lib/i18n';
+import { renderPrompt } from '@/prompts';
 import { t, getGreeting, getChatFontClass, getThinkingDotStyle, getAutoPlayAgentResponse, getSelectedVoice, getAzureVoiceForLocale, getVoiceEngine, findMatchingSystemVoice, getVoiceSummaryEnabled, generateVoiceSummary, getAgentFramework, getHomeHeaderWidget, speechLang, localeBcp47, type Locale, type ThinkingDotStyle, type HomeHeaderWidget } from '@/lib/i18n';
 import { splitIntoSegments } from '@/lib/speech';
 import { useSpeechPlayer, type SpeechTrack } from '@/hooks/use-speech-player';
@@ -1327,28 +1328,21 @@ export default function HomeDashboard() {
       
       if (agentFramework === 'local-agent') {
         // Use local agent with BYOM to generate insights directly
-        const systemPrompt = `You are a sales assistant that analyzes sales data and generates actionable business insights.
+        const systemPrompt = renderPrompt('home.insightBriefing', {
+          agendaCount: kpiData.agendaItems.length,
+          agendaDetails: todayAgendaDetails || 'No agenda items',
+          wonThousands: (kpiData.quarterlyWonAmount / 1000).toFixed(0),
+          targetThousands: (kpiData.quarterlyTarget / 1000).toFixed(0),
+          progressPercent: qProgress,
+          atRiskCount: kpiData.clientsAtRisk,
+          atRiskDetails: atRiskClientsDetails || 'No at-risk clients',
+          clientsTouched: kpiData.clientsTouchedThisWeek,
+          totalClients: kpiData.totalClients,
+          activitiesThisWeek: kpiData.activitiesThisWeek,
+          weeklyTarget: kpiData.weeklyTarget,
+        });
 
-[MOST CRITICAL RULE - MUST STRICTLY FOLLOW]
-- ONLY use client names, opportunity names, and activity names that are EXPLICITLY listed in the data below
-- ABSOLUTELY FORBIDDEN to fabricate, invent, or make up any names not present in the data
-- If a data category shows "No data" or empty, do NOT generate insights about it
-- If at-risk clients count is 0, do NOT mention any at-risk clients
-
-=== Today's Agenda (${kpiData.agendaItems.length} items) ===
-${todayAgendaDetails || 'No agenda items'}
-
-=== Quarterly Performance ===
-Won $${(kpiData.quarterlyWonAmount / 1000).toFixed(0)}K / Target $${(kpiData.quarterlyTarget / 1000).toFixed(0)}K (${qProgress}% complete)
-
-=== At-Risk Clients (${kpiData.clientsAtRisk} need attention; criterion: no contact for 30+ days or no recorded contact) ===
-${atRiskClientsDetails || 'No at-risk clients'}
-
-=== Other Metrics ===
-- Client coverage: ${kpiData.clientsTouchedThisWeek}/${kpiData.totalClients} clients contacted this week
-- Activity progress: ${kpiData.activitiesThisWeek}/${kpiData.weeklyTarget}`;
-        
-        const userPrompt = 'Give me today\'s business insight briefing, including: 1) Top priority items to address; 2) Key opportunities to follow up; 3) At-risk clients to proactively contact. Be specific with client and opportunity names.';
+        const userPrompt = renderPrompt('home.insightRequest');
         
         // Update status for generating response
         setInsightRefreshStatus(t('generatingInsights', locale));
@@ -1372,52 +1366,22 @@ ${atRiskClientsDetails || 'No at-risk clients'}
       // Step 1: Generate insight bullet points for cards
       // Generate insights with rationale in JSON format
       // Build raw data string directly for insight generation (avoid LLM fabrication)
-      const rawDataForInsights = `=== Today's Agenda (${kpiData.agendaItems.length} items) ===
-${todayAgendaDetails || 'No agenda items'}
+      const rawDataForInsights = renderPrompt('home.insightData', {
+        agendaCount: kpiData.agendaItems.length,
+        agendaDetails: todayAgendaDetails || 'No agenda items',
+        wonThousands: (kpiData.quarterlyWonAmount / 1000).toFixed(0),
+        targetThousands: (kpiData.quarterlyTarget / 1000).toFixed(0),
+        progressPercent: qProgress,
+        atRiskCount: kpiData.clientsAtRisk,
+        atRiskDetails: atRiskClientsDetails || 'No at-risk clients',
+        closingThisWeek: kpiData.closingThisWeek,
+        clientsTouched: kpiData.clientsTouchedThisWeek,
+        totalClients: kpiData.totalClients,
+        activitiesThisWeek: kpiData.activitiesThisWeek,
+        weeklyTarget: kpiData.weeklyTarget,
+      });
 
-=== Quarterly Performance ===
-Won $${(kpiData.quarterlyWonAmount / 1000).toFixed(0)}K / Target $${(kpiData.quarterlyTarget / 1000).toFixed(0)}K (${qProgress}% complete)
-
-=== At-Risk Clients (${kpiData.clientsAtRisk} need attention; criterion: no contact for 30+ days or no recorded contact) ===
-${atRiskClientsDetails || 'No at-risk clients'}
-
-=== Other Metrics ===
-- Closing this week: ${kpiData.closingThisWeek} opportunities
-- Client coverage: ${kpiData.clientsTouchedThisWeek}/${kpiData.totalClients} clients contacted this week
-- Activity progress: ${kpiData.activitiesThisWeek}/${kpiData.weeklyTarget}`;
-
-      const insightSystemPrompt = `You are a Senior Sales Coach, not a data-summarizing machine. Based on the following business data, generate 5-6 coaching-grade insights.
-
-[ROLE - CORE]
-- Your value is "diagnosis + prescription", not "summary + restatement"
-- Every insight must answer three questions: What → Why (root cause) → How (concrete action)
-- NEVER write empty phrases like "client is at risk", "needs attention", or "recommend follow-up" — you MUST state what the risk actually is, where it comes from, and the first concrete step to take
-
-[DATA INTEGRITY - MUST STRICTLY FOLLOW]
-- ONLY use client names, opportunity names, activity names, and numbers EXPLICITLY listed in the "Business Data" below
-- ABSOLUTELY FORBIDDEN to fabricate any name or number not present in the data
-- At-risk client data is annotated with the reason (e.g. "no contact for X days") — you MUST cite this specific reason in the rationale
-- If a data category is empty (shows "No data" or 0), do NOT generate insights about it
-
-Each insight must include:
-1. insight: A one-line, specific statement of the problem or opportunity (max 12 words) — concrete, not vague
-2. rationale: Coaching-grade analysis (80-150 words) that MUST include:
-  - [Root cause] Use the data to explain WHY — e.g. for an at-risk client, state "no contact for X days, past the 30-day warning line"; for performance, state the exact gap amount and percentage
-   - [Impact] What happens if this is left unaddressed (churn, missed closing window, target gap, etc.)
-   - [Action] 1-2 concrete steps the rep can take TODAY (call / email / schedule a visit / what to prepare), naming the specific client or opportunity
-3. type: Insight type (followup/closing/risk/revisit/performance/opportunity/client/activity)
-
-[BAD EXAMPLE - DO NOT write like this]
-- ✗ "Rush University and others are at risk and need attention" (doesn't say what the risk is, why, or what to do)
-[GOOD EXAMPLE - write like this]
-- ✓ "Rush University has had no contact for 35 days, past the 30-day warning line — the relationship is at risk. Send a value-led re-engagement email today, and book a 15-minute call this week to check whether their procurement plan has shifted."
-
-Return JSON array format:
-[
-  {"insight": "Insight point", "rationale": "Root cause + impact + concrete action", "type": "type"}
-]
-
-Return only the JSON array, no other text.`;
+      const insightSystemPrompt = renderPrompt('home.insightCoaching');
       
       // Pass raw data directly to insight generation instead of agentResponse.
       // NOTE: use 'text' (NOT 'json'): this platform's AI Builder JSON output mode
@@ -1471,29 +1435,13 @@ Return only the JSON array, no other text.`;
       // Build the insight list as a string first
       const insightListText = insightLines.map((line: string, i: number) => (i + 1) + '. ' + line).join('\n');
       
-      const briefTranscriptPromptEn = `You are a professional sales assistant delivering today's business briefing. Based on the business insights below, generate a complete, fluent, natural voice briefing script.
-
-Requirements:
-1. Start with a friendly, professional greeting then get straight to the point
-2. Cover each insight with natural conversational transitions
-3. Mention specific client names, opportunity names, amounts, and other key details
-4. Give clear action recommendations for each insight
-5. End with a brief, motivating call to action
-6. Keep the entire briefing to about 1-2 minutes when read aloud
-7. Do not use markdown formatting, return plain text only
-8. [IMPORTANT] Separate each insight point with a blank line to create natural paragraphs for pauses during reading
-9. [IMPORTANT] End each paragraph with a period, leave blank lines between paragraphs
-
-Business insights:
-${insightListText}
-
-Original business data summary:
-${agentResponse}`;
-      
-      const briefTranscriptPrompt = briefTranscriptPromptEn;
+      const briefTranscriptPrompt = renderPrompt('home.briefTranscript', {
+        insightList: insightListText,
+        dataSummary: agentResponse,
+      });
       
       const briefTranscriptResult = await generateVoiceSummary(
-        'Generate today\'s business briefing voice script',
+        renderPrompt('home.briefTranscriptRequest'),
         locale,
         briefTranscriptPrompt,
       );

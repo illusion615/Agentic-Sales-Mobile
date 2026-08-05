@@ -61,8 +61,8 @@ export interface FormSchema {
 
 export type FormValue = string | string[] | number | boolean | null;
 
-/** Where an answer came from. A proposal must never look like a confirmation. */
-export type ValueSource = 'ai' | 'user' | 'prefill';
+/** Where an answer came from, including AI content explicitly locked against updates. */
+export type ValueSource = 'ai' | 'ai-locked' | 'user' | 'prefill';
 
 export interface FieldValue {
   name: string;
@@ -159,11 +159,12 @@ export function setUserValue(
 }
 
 /**
- * Accept a proposal as it stands. The value does not change; who stands behind
- * it does, which is the whole point of review.
+ * Lock AI-written content as it stands. The value and provenance remain, while
+ * later extraction is prevented from updating this field.
  */
-export function confirmValue(values: readonly FieldValue[], name: string): FieldValue[] {
+export function lockAiValue(values: readonly FieldValue[], name: string): FieldValue[] {
   const entry = values.find((v) => v.name === name);
   if (!entry) return [...values];
-  return [...values.filter((v) => v.name !== name), { name, value: entry.value, source: 'user' }];
+  if (entry.source !== 'ai') return [...values];
+  return [...values.filter((v) => v.name !== name), { ...entry, source: 'ai-locked' }];
 }

@@ -12,6 +12,7 @@ import {
   unproject,
   zoomAround,
   zoomView,
+  viewAtScale,
   type MapView,
   type ViewportSize,
 } from '@/lib/map-projection';
@@ -76,6 +77,13 @@ describe('zoomView', () => {
   it('clamps to the supported range instead of running off the scale', () => {
     expect(zoomView({ center: SHENZHEN, zoom: MAX_ZOOM }, 3).zoom).toBe(MAX_ZOOM);
     expect(zoomView({ center: SHENZHEN, zoom: MIN_ZOOM }, -3).zoom).toBe(MIN_ZOOM);
+  });
+});
+
+describe('viewAtScale', () => {
+  it('chooses a zoom whose scale bar reads 5 km at the selected location', () => {
+    const view = viewAtScale(SHENZHEN, 5_000);
+    expect(scaleBar(view, 96).metres).toBe(5_000);
   });
 });
 

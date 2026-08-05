@@ -57,12 +57,13 @@ export async function executeFunction(
   // ---- Fallback: generic LLM-backed skill handler ----
   try {
     const skillDef = availableFunctions.find((f) => f.name === functionName);
-    if (skillDef?.llmBacked && skillDef.promptTemplate) {
+    if (skillDef?.llmBacked && skillDef.promptKey) {
       // Prompts are authored in ENGLISH only; the output-language directive pins the
       // reply to the user's selected locale (zh/en/de/fr/es).
       const { outputLanguageDirective } = await import('@/lib/i18n');
+      const { renderPrompt } = await import('@/prompts');
       const locale = (context.locale || 'en-US') as Locale;
-      const systemPrompt = `${skillDef.promptTemplate}\n\n${outputLanguageDirective(locale)}`;
+      const systemPrompt = `${renderPrompt(skillDef.promptKey)}\n\n${outputLanguageDirective(locale)}`;
       const userContent = args.data as string || args.visitData as string || JSON.stringify(args);
 
           // Append extra context if provided (e.g. existingOpportunities for analyzeOpportunity)
@@ -90,6 +91,7 @@ export async function executeFunction(
           }, {
             label: `Skill: ${functionName}`,
             standaloneOperation: context.standaloneAiOperation,
+            prompt: { key: skillDef.promptKey },
           });
 
           if (!llmResp.success || !llmResp.content) {

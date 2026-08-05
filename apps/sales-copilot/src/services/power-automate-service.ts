@@ -20,6 +20,7 @@ import { createAiInvoker, type AiInvokeResult } from '@agentic/power-runtime';
 import { dataSourcesInfo } from '../../.power/schemas/appschemas/dataSourcesInfo';
 import { getTextPromptOpName } from './prompt-resolver';
 import { recordStandaloneAiOperation } from '@/lib/ai-cost-log';
+import { SALES_APP_ID, type SalesPromptKey } from '@/prompts';
 import { Msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75cService as TextPromptService } from '@/generated/services/Msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75cService';
 
 export type FlowLLMResponse = AiInvokeResult;
@@ -41,6 +42,8 @@ export function isFlowAvailable(): boolean {
 }
 
 const invoke = createAiInvoker({
+  projectId: 'agentic-crm',
+  appId: SALES_APP_ID,
   resolveOpName: getTextPromptOpName,
   execute: (opName, text) =>
     getClient(dataSourcesInfo).executeAsync<{ prompt_20text: string }, Record<string, unknown>>({
@@ -59,16 +62,23 @@ const invoke = createAiInvoker({
 /**
  * Invoke AI Builder custom prompt directly via Dataverse Custom API.
  */
-export function invokeFlowForLLM(
+export async function invokeFlowForLLM(
   request: {
     messages: Array<{ role: string; content: string }>;
     responseFormat?: 'text' | 'json' | 'dag' | 'json-generic';
   },
-  meta?: { label?: string; standaloneOperation?: StandaloneAiOperation },
+  meta?: {
+    label?: string;
+    standaloneOperation?: StandaloneAiOperation;
+    /** Declares which catalogued prompt drove this call for platform-log attribution. */
+    prompt?: { key: SalesPromptKey };
+  },
 ): Promise<FlowLLMResponse> {
   const standalone = meta?.standaloneOperation;
   return invoke(request, {
     label: meta?.label,
+    // Named in the trace marker so the platform's AI Event log is self-describing.
+    promptKey: meta?.prompt?.key,
     detached: !!standalone,
     onStandalone: (traceId) => {
       if (standalone) recordStandaloneAiOperation({ ...standalone, traceId });

@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { AppearanceSettings } from '@agentic/app-shell/react';
 import { BasemapDiagnostics } from '@/components/basemap-diagnostics';
+import { SpeechInputSettings } from '@/components/speech-input-settings';
 
 export function SettingsPage() {
   return (
@@ -16,6 +17,8 @@ export function SettingsPage() {
 
       <main className="mx-auto flex max-w-2xl flex-col gap-5 p-4 pb-12">
         <AppearanceSettings />
+
+        <SpeechInputSettings />
 
         <BasemapDiagnostics />
 

@@ -13,6 +13,18 @@ export function useStartWorkOrder(id: string) {
   });
 }
 
+export function usePauseWorkOrder(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (reason: string) => workOrderRepository.pauseWorkOrder(id, new Date().toISOString(), reason),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['work-order', id] });
+      queryClient.invalidateQueries({ queryKey: ['work-order-briefing', id] });
+      queryClient.invalidateQueries({ queryKey: ['work-orders'] });
+    },
+  });
+}
+
 /**
  * Move an appointment. Only offer this where `capabilities.selfScheduling` is
  * true; a dispatch-governed backend rejects the call by design.

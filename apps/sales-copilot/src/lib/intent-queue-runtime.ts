@@ -17,6 +17,7 @@
  */
 
 import { executeFunction } from './function-executor';
+import { renderPrompt } from '@/prompts';
 import {
   advanceCursor,
   buildEffectiveArgs,
@@ -1011,7 +1012,13 @@ async function renderAnalysis(
     try {
       const res = await executeFunction(
         'analyzeResults',
-        { data: `User request: ${goal}\n\nFetched records (JSON):\n${recordsText}${finalHop ? '\n\n(Final step: you MUST return an {"answer"} grounded in the records above now — do NOT request a follow-up.)' : ''}` },
+        {
+          data: renderPrompt('skill.analyzeResultsRequest', {
+            goal,
+            records: recordsText,
+            finalHopNote: finalHop ? renderPrompt('skill.analyzeResultsFinalHop') : '',
+          }),
+        },
         { locale: deps.locale },
       );
       if (res.success && res.data && typeof res.data === 'object') {

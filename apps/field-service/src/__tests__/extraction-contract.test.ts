@@ -75,6 +75,11 @@ describe('buildExtractionPrompt', () => {
     const prompt = buildExtractionPrompt({ workOrder, schema, evidence });
     expect(prompt).toContain('[ev-1] 电导率报警 E-12');
   });
+
+  it('tells the model that a later correction supersedes earlier notes', () => {
+    const prompt = buildExtractionPrompt({ workOrder, schema, evidence });
+    expect(prompt).toContain('later note explicitly corrects or refines an earlier note');
+  });
 });
 
 describe('parseExtractionResponse', () => {

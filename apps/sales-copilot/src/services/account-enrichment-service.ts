@@ -17,6 +17,7 @@ import { jsonrepair } from 'jsonrepair';
 import { z } from 'zod';
 import { getCopilotConfig } from './copilot-service';
 import { outputLanguageDirective, type Locale } from '@/lib/i18n';
+import { renderPrompt } from '@/prompts';
 import { industryLabel } from '@/lib/industry';
 import type { Account } from '@/generated/models/account-model';
 
@@ -185,14 +186,10 @@ export async function triggerAccountEnrichment(
     outputLanguage: locale,
   };
 
-  const message = [
-    'Account enrichment request. Research this customer account and return ONLY the enrichment JSON object exactly as described in your instructions (no prose, no code block).',
-    '',
-    'Payload:',
-    JSON.stringify(payload),
-    '',
-    outputLanguageDirective(locale),
-  ].join('\n');
+  const message = renderPrompt('enrichment.accountRequest', {
+    payload: JSON.stringify(payload),
+    outputLanguage: outputLanguageDirective(locale),
+  });
 
   try {
     const result = await MicrosoftCopilotStudioService.ExecuteCopilotAsyncV2(

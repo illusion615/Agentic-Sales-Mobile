@@ -17,6 +17,14 @@
         "new_5famap_20static_20map_5f795669e27c19e6e2"
       ],
       "dataSets": {}
+    },
+    "d34f7ba8-6f9f-447b-8bc4-6552190f3565": {
+      "id": "/providers/Microsoft.PowerApps/apis/shared_new-5fsales-20copilot-20speech-5f795669e27c19e6e2",
+      "displayName": "Sales Copilot Speech",
+      "dataSources": [
+        "new_5fsales_20copilot_20speech_5f795669e27c19e6e2"
+      ],
+      "dataSets": {}
     }
   },
   "databaseReferences": {
@@ -30,6 +38,16 @@
         "agentlogs": {
           "entitySetName": "crf5c_agentlogs",
           "logicalName": "crf5c_agentlog",
+          "isHidden": false
+        },
+        "environmentvariabledefinitions": {
+          "entitySetName": "environmentvariabledefinitions",
+          "logicalName": "environmentvariabledefinition",
+          "isHidden": false
+        },
+        "environmentvariablevalues": {
+          "entitySetName": "environmentvariablevalues",
+          "logicalName": "environmentvariablevalue",
           "isHidden": false
         }
       },

@@ -1,2 +1,225 @@
 @import 'tailwindcss';
 @import '@agentic/app-shell/theme.css';
+
+@media (min-width: 1200px) {
+	.review-workspace {
+		display: grid;
+		max-width: 80rem;
+		grid-template-columns: minmax(20rem, 24rem) minmax(40rem, 52rem);
+		grid-template-rows: auto auto auto;
+		align-items: start;
+		justify-content: center;
+		gap: 1rem;
+	}
+
+	.review-summary {
+		grid-column: 1;
+		grid-row: 1;
+		position: sticky;
+		top: 5rem;
+	}
+
+	.review-form {
+		grid-column: 2;
+		grid-row: 1 / 3;
+	}
+
+	.review-updates {
+		grid-column: 1;
+		grid-row: 2;
+	}
+
+	.review-submit {
+		grid-column: 2;
+		grid-row: 3;
+		margin-inline: 0;
+	}
+
+	.dashboard-workspace {
+		display: grid;
+		grid-template-columns: minmax(24rem, 28rem) minmax(28rem, 1fr) minmax(28rem, 34rem);
+	}
+
+	.dashboard-list { grid-column: 1; }
+	.dashboard-map {
+		grid-column: 2;
+		isolation: isolate;
+		contain: paint;
+		overflow: hidden;
+	}
+	.dashboard-detail { grid-column: 3; }
+
+	.capture-workspace {
+		display: grid;
+		grid-template-columns: minmax(19rem, 22rem) minmax(38rem, 1fr) minmax(22rem, 26rem);
+		grid-template-rows: auto minmax(0, 1fr);
+	}
+
+	.capture-header {
+		grid-column: 2;
+		grid-row: 1;
+	}
+
+	.capture-header > div,
+	.capture-form > div,
+	.capture-copilot > div {
+		max-width: none;
+	}
+
+	.capture-context {
+		grid-column: 1;
+		grid-row: 1 / 3;
+		border-right: 1px solid var(--border);
+		background: color-mix(in srgb, var(--background) 92%, transparent);
+	}
+
+	.capture-context-panel > button {
+		position: sticky;
+		top: 0;
+		z-index: 1;
+		background: var(--card);
+	}
+
+	.capture-form {
+		grid-column: 2;
+		grid-row: 2;
+	}
+
+	.capture-copilot {
+		grid-column: 3;
+		grid-row: 1 / 3;
+		display: flex;
+		min-height: 0;
+		border-left: 1px solid var(--border);
+		border-top: 0;
+		box-shadow: none;
+	}
+
+	.capture-copilot > div {
+		display: flex;
+		min-height: 0;
+		width: 100%;
+		flex-direction: column;
+	}
+
+	.capture-copilot > div > div.grid {
+		min-height: 0;
+		flex: 1;
+		grid-template-rows: minmax(0, 1fr);
+	}
+
+	.capture-copilot > div > div.grid > div,
+	.capture-copilot > div > div.grid > div > div {
+		min-height: 0;
+		max-height: none;
+		height: 100%;
+	}
+}
+
+@media (min-width: 1200px) and (max-width: 1439px) {
+	.dashboard-workspace {
+		grid-template-columns: minmax(22rem, 26rem) minmax(0, 1fr);
+	}
+
+	.dashboard-list { grid-column: 1; }
+	.dashboard-map { grid-column: 2; }
+	.dashboard-detail {
+		grid-column: 2;
+		grid-row: 1;
+		z-index: 5;
+	}
+	.dashboard-detail.is-empty { display: none; }
+
+	.capture-workspace {
+		grid-template-columns: minmax(19rem, 21rem) minmax(0, 1fr);
+		grid-template-rows: auto minmax(0, 1fr) auto;
+	}
+
+	.capture-context { grid-column: 1; grid-row: 1 / 4; }
+	.capture-header { grid-column: 2; grid-row: 1; }
+	.capture-form { grid-column: 2; grid-row: 2; }
+	.capture-copilot {
+		grid-column: 2;
+		grid-row: 3;
+		display: block;
+		border-top: 1px solid var(--border);
+		border-left: 0;
+	}
+
+	.capture-copilot > div { display: block; }
+	.capture-copilot > div > div.grid { min-height: initial; flex: none; }
+	.capture-copilot > div > div.grid-rows-\[0fr\] { grid-template-rows: 0fr; }
+	.capture-copilot > div > div.grid-rows-\[1fr\] { grid-template-rows: 1fr; }
+	.capture-copilot > div > div.grid > div,
+	.capture-copilot > div > div.grid > div > div {
+		height: auto;
+		max-height: 38dvh;
+	}
+}
+
+@media (horizontal-viewport-segments: 2) {
+	.review-workspace {
+		display: grid;
+		max-width: none;
+		grid-template-columns: env(viewport-segment-width 0 0) env(viewport-segment-width 1 0);
+		column-gap: calc(env(viewport-segment-left 1 0) - env(viewport-segment-right 0 0));
+	}
+
+	.review-summary,
+	.review-updates { grid-column: 1; }
+	.review-form,
+	.review-submit { grid-column: 2; }
+
+	.dashboard-workspace {
+		display: grid;
+		grid-template-columns: env(viewport-segment-width 0 0) env(viewport-segment-width 1 0);
+		column-gap: calc(env(viewport-segment-left 1 0) - env(viewport-segment-right 0 0));
+	}
+
+	.dashboard-list { grid-column: 1; }
+	.dashboard-map { grid-column: 2; }
+	.dashboard-detail {
+		grid-column: 2;
+		grid-row: 1;
+		z-index: 5;
+	}
+
+	.dashboard-detail.is-empty { display: none; }
+
+	.capture-workspace {
+		display: grid;
+		grid-template-columns: env(viewport-segment-width 0 0) env(viewport-segment-width 1 0);
+		grid-template-rows: auto minmax(0, 1fr) auto;
+		column-gap: calc(env(viewport-segment-left 1 0) - env(viewport-segment-right 0 0));
+	}
+
+	.capture-context { grid-column: 1; grid-row: 1 / 4; }
+	.capture-header { grid-column: 2; grid-row: 1; }
+	.capture-form { grid-column: 2; grid-row: 2; }
+	.capture-copilot { grid-column: 2; grid-row: 3; }
+}
+
+@media (vertical-viewport-segments: 2) {
+	.dashboard-workspace {
+		display: grid;
+		grid-template-columns: minmax(20rem, 26rem) minmax(0, 1fr);
+		grid-template-rows: env(viewport-segment-height 0 0) env(viewport-segment-height 0 1);
+		row-gap: calc(env(viewport-segment-top 0 1) - env(viewport-segment-bottom 0 0));
+	}
+
+	.dashboard-list { grid-column: 1; grid-row: 1 / 3; }
+	.dashboard-map { grid-column: 2; grid-row: 1 / 3; }
+	.dashboard-detail { grid-column: 2; grid-row: 1 / 3; z-index: 5; }
+	.dashboard-detail.is-empty { display: none; }
+
+	.capture-workspace {
+		display: grid;
+		grid-template-columns: 1fr;
+		grid-template-rows: env(viewport-segment-height 0 0) auto minmax(0, 1fr) auto;
+	}
+
+	.capture-context { grid-column: 1; grid-row: 1; }
+	.capture-header { grid-column: 1; grid-row: 2; }
+	.capture-form { grid-column: 1; grid-row: 3; }
+	.capture-copilot { grid-column: 1; grid-row: 4; }
+}

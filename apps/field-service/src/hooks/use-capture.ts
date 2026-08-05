@@ -131,16 +131,18 @@ export function usePrefillOnce(
 }
 
 /**
- * Re-read the captured fragments and fill in whatever is still blank.
+ * Re-read the captured fragments and propose the latest supported answers.
  *
- * Runs on demand rather than on every capture: the technician stays in control
- * of when proposals appear, and nothing already entered is ever replaced.
+ * A new proposal may revise earlier unlocked AI content when later evidence
+ * corrects it. Technician-entered, locked, and prefilled values stay protected.
  */
 export function useRunExtraction(workOrderId: string, sessionId: string | undefined) {
   const queryClient = useQueryClient();
+  const [phase, setPhase] = useState<CaptureExtractionPhase>('idle');
 
-  return useMutation<ExtractionResult>({
+  const mutation = useMutation<ExtractionResult>({
     mutationFn: async () => {
+      setPhase('reading');
       const workOrder = await workOrderRepository.getWorkOrder(workOrderId);
       const [schema, evidence, answers] = await Promise.all([
         formSchemaRepository.getSchemaForWorkOrder(workOrder),
@@ -148,18 +150,32 @@ export function useRunExtraction(workOrderId: string, sessionId: string | undefi
         captureRepository.getAnswers(sessionId!),
       ]);
 
+      setPhase('extracting');
       const result = await fieldExtractor.extract({ workOrder, schema, evidence });
+      setPhase('writing');
       await captureRepository.saveAnswers(sessionId!, mergeCandidates(answers, result.fields));
       await captureRepository.saveCustomerUpdates(sessionId!, result.customerUpdates);
       return result;
     },
     onSuccess: () => {
+      setPhase('done');
       queryClient.invalidateQueries({ queryKey: ['answers', sessionId] });
       queryClient.invalidateQueries({ queryKey: ['customer-updates', sessionId] });
       queryClient.invalidateQueries({ queryKey: ['visit-summary', sessionId] });
     },
+    onError: () => setPhase('error'),
   });
+
+  return { ...mutation, phase };
 }
+
+export type CaptureExtractionPhase =
+  | 'idle'
+  | 'reading'
+  | 'extracting'
+  | 'writing'
+  | 'done'
+  | 'error';
 
 /**
  * The summary shown at the top of review.
@@ -212,6 +228,17 @@ export function useSubmitVisit(workOrderId: string, sessionId: string | undefine
       queryClient.invalidateQueries({ queryKey: ['work-orders'] });
       queryClient.invalidateQueries({ queryKey: ['work-order', workOrderId] });
       queryClient.invalidateQueries({ queryKey: ['session', workOrderId] });
+    },
+  });
+}
+
+/** Save the engineer's final review without closing the work order. */
+export function usePrepareAcceptance(workOrderId: string, sessionId: string | undefined) {
+  return useMutation({
+    mutationFn: async (input: { answers: FieldValue[]; acceptedUpdates: CustomerUpdateCandidate[] }) => {
+      const workOrder = await workOrderRepository.getWorkOrder(workOrderId);
+      await captureRepository.saveAnswers(sessionId!, input.answers);
+      await customerRepository.applyProfileUpdates(workOrder.customerId, input.acceptedUpdates);
     },
   });
 }

@@ -14,6 +14,7 @@ export type WorkOrderStatus =
   | 'scheduled'
   | 'travelling'
   | 'in-progress'
+  | 'paused'
   | 'completed'
   | 'cancelled';
 
@@ -50,6 +51,9 @@ export interface WorkOrderSummary {
   scheduledStart?: string;
   scheduledEnd?: string;
   estimatedDurationMinutes?: number;
+  /** Why and when field work was temporarily released for another assignment. */
+  pausedAt?: string;
+  pauseReason?: string;
 }
 
 export interface WorkOrderDetail extends WorkOrderSummary {
@@ -106,6 +110,10 @@ export function hasCoordinates<T extends { address: ServiceAddress }>(
  */
 export function isUnderway(workOrder: Pick<WorkOrderSummary, 'status'>): boolean {
   return workOrder.status === 'in-progress' || workOrder.status === 'travelling';
+}
+
+export function isPaused(workOrder: Pick<WorkOrderSummary, 'status'>): boolean {
+  return workOrder.status === 'paused';
 }
 
 /**

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseDesignerFormSchema } from '@/data/form-schema/designer-schema';
-import { confirmValue, type FieldValue, type FormSection } from '@/domain/form-schema';
+import { lockAiValue, type FieldValue, type FormSection } from '@/domain/form-schema';
 import { reviewSection, reviewSections, sectionsNeedingAttention } from '@/domain/review';
 import visitForm from '@/data/form-schema/visit-form.json';
 
@@ -23,11 +23,11 @@ describe('section review', () => {
     expect(review.headline).toBe('缺 1 项必填');
   });
 
-  it('asks for review once nothing is missing but values are unconfirmed', () => {
+  it('treats complete AI-written content as settled collaborative work', () => {
     const values: FieldValue[] = [{ name: SUMMARY, value: '下周提交报价', source: 'ai', confidence: 0.45 }];
     const review = reviewSection(sectionOf('服务反馈'), values);
-    expect(review.status).toBe('needs-review');
-    expect(review.headline).toBe('1 项待确认');
+    expect(review.status).toBe('settled');
+    expect(review.headline).toBe('已完成 1/3 项');
   });
 
   it('settles once a person stands behind the values', () => {
@@ -53,12 +53,12 @@ describe('section review', () => {
     expect(open).toEqual([]);
 
     const withProposal = reviewSections(schema, [{ name: SUMMARY, value: '完成', source: 'ai' }]);
-    expect(withProposal.filter((r) => r.defaultOpen).map((r) => r.section.title)).toEqual(['服务反馈']);
+    expect(withProposal.filter((r) => r.defaultOpen).map((r) => r.section.title)).toEqual([]);
   });
 
   it('lists what still needs attention in the order it appears', () => {
     const reviews = reviewSections(schema, [{ name: STAGE, value: '方案递交阶段', source: 'ai' }]);
-    expect(sectionsNeedingAttention(reviews).map((r) => r.section.title)).toEqual(['专业信息', '服务反馈']);
+    expect(sectionsNeedingAttention(reviews).map((r) => r.section.title)).toEqual(['服务反馈']);
   });
 });
 
@@ -89,16 +89,16 @@ describe('collapsed digest', () => {
   });
 });
 
-describe('confirming a proposal', () => {
-  it('keeps the value and transfers ownership to the technician', () => {
-    const confirmed = confirmValue(
+describe('locking AI-written content', () => {
+  it('keeps the value and AI provenance while preventing updates', () => {
+    const locked = lockAiValue(
       [{ name: STAGE, value: '方案递交阶段', source: 'ai', confidence: 0.8, evidenceIds: ['e1'] }],
       STAGE,
     );
-    expect(confirmed[0]).toEqual({ name: STAGE, value: '方案递交阶段', source: 'user' });
+    expect(locked[0]).toEqual({ name: STAGE, value: '方案递交阶段', source: 'ai-locked', confidence: 0.8, evidenceIds: ['e1'] });
   });
 
   it('is a no-op for a field that holds nothing', () => {
-    expect(confirmValue([], STAGE)).toEqual([]);
+    expect(lockAiValue([], STAGE)).toEqual([]);
   });
 });

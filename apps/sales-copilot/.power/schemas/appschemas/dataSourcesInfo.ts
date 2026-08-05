@@ -12,6 +12,13 @@ export const dataSourcesInfo = {
     "dataSourceType": "Dataverse",
     "apis": {}
   },
+  "activitymimeattachments": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "activitymimeattachmentid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
   "activityparties": {
     "tableId": "",
     "version": "",
@@ -19,31 +26,10 @@ export const dataSourcesInfo = {
     "dataSourceType": "Dataverse",
     "apis": {}
   },
-  "crf5c_agentlogs": {
+  "annotations": {
     "tableId": "",
     "version": "",
-    "primaryKey": "crf5c_agentlogid",
-    "dataSourceType": "Dataverse",
-    "apis": {}
-  },
-  "msdyn_aimodels": {
-    "tableId": "",
-    "version": "",
-    "primaryKey": "msdyn_aimodelid",
-    "dataSourceType": "Dataverse",
-    "apis": {}
-  },
-  "crf5c_aisummaries": {
-    "tableId": "",
-    "version": "",
-    "primaryKey": "crf5c_aisummaryid",
-    "dataSourceType": "Dataverse",
-    "apis": {}
-  },
-  "biz_appfeedbacks": {
-    "tableId": "",
-    "version": "",
-    "primaryKey": "biz_appfeedbackid",
+    "primaryKey": "annotationid",
     "dataSourceType": "Dataverse",
     "apis": {}
   },
@@ -54,10 +40,31 @@ export const dataSourcesInfo = {
     "dataSourceType": "Dataverse",
     "apis": {}
   },
-  "activitymimeattachments": {
+  "biz_appfeedbacks": {
     "tableId": "",
     "version": "",
-    "primaryKey": "activitymimeattachmentid",
+    "primaryKey": "biz_appfeedbackid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
+  "contacts": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "contactid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
+  "crf5c_agentlogs": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "crf5c_agentlogid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
+  "crf5c_aisummaries": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "crf5c_aisummaryid",
     "dataSourceType": "Dataverse",
     "apis": {}
   },
@@ -82,20 +89,6 @@ export const dataSourcesInfo = {
     "dataSourceType": "Dataverse",
     "apis": {}
   },
-  "skills": {
-    "tableId": "",
-    "version": "",
-    "primaryKey": "skillid",
-    "dataSourceType": "Dataverse",
-    "apis": {}
-  },
-  "contacts": {
-    "tableId": "",
-    "version": "",
-    "primaryKey": "contactid",
-    "dataSourceType": "Dataverse",
-    "apis": {}
-  },
   "crf5c_copilotconversations": {
     "tableId": "",
     "version": "",
@@ -103,10 +96,38 @@ export const dataSourcesInfo = {
     "dataSourceType": "Dataverse",
     "apis": {}
   },
-  "transactioncurrencies": {
+  "crf5c_opportunity1s": {
     "tableId": "",
     "version": "",
-    "primaryKey": "transactioncurrencyid",
+    "primaryKey": "crf5c_opportunity1id",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
+  "crf5c_products": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "crf5c_productid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
+  "crf5c_promptruns": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "crf5c_promptrunid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
+  "crf5c_prompttemplates": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "crf5c_prompttemplateid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
+  "crf5c_settings": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "crf5c_settingid",
     "dataSourceType": "Dataverse",
     "apis": {}
   },
@@ -128,154 +149,6 @@ export const dataSourcesInfo = {
     "tableId": "",
     "version": "",
     "primaryKey": "environmentvariablevalueid",
-    "dataSourceType": "Dataverse",
-    "apis": {}
-  },
-  "msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75c": {
-    "tableId": "",
-    "version": "",
-    "primaryKey": "",
-    "dataSourceType": "Dataverse",
-    "apis": {
-      "msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75c": {
-        "path": "/api/data/v9.2/msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75c",
-        "method": "POST",
-        "parameters": [
-          {
-            "name": "prompt_20text",
-            "in": "body",
-            "required": true,
-            "type": "string"
-          }
-        ],
-        "responseInfo": {
-          "200": {
-            "type": "object"
-          }
-        }
-      }
-    }
-  },
-  "msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323": {
-    "tableId": "",
-    "version": "",
-    "primaryKey": "",
-    "dataSourceType": "Dataverse",
-    "apis": {
-      "msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323": {
-        "path": "/api/data/v9.2/msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323",
-        "method": "POST",
-        "parameters": [
-          {
-            "name": "Text",
-            "in": "body",
-            "required": true,
-            "type": "string"
-          }
-        ],
-        "responseInfo": {
-          "200": {
-            "type": "object"
-          }
-        }
-      }
-    }
-  },
-  "msdyn_aibdptcustomprompt228202435537pmbd0d86826d054e2ba9efc694a371f6fb": {
-    "tableId": "",
-    "version": "",
-    "primaryKey": "",
-    "dataSourceType": "Dataverse",
-    "apis": {
-      "msdyn_aibdptcustomprompt228202435537pmbd0d86826d054e2ba9efc694a371f6fb": {
-        "path": "/api/data/v9.2/msdyn_aibdptcustomprompt228202435537pmbd0d86826d054e2ba9efc694a371f6fb",
-        "method": "POST",
-        "parameters": [
-          {
-            "name": "Text",
-            "in": "body",
-            "required": true,
-            "type": "string"
-          }
-        ],
-        "responseInfo": {
-          "200": {
-            "type": "object"
-          }
-        }
-      }
-    }
-  },
-  "msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7": {
-    "tableId": "",
-    "version": "",
-    "primaryKey": "",
-    "dataSourceType": "Dataverse",
-    "apis": {
-      "msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7": {
-        "path": "/api/data/v9.2/msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7",
-        "method": "POST",
-        "parameters": [
-          {
-            "name": "Special_20character",
-            "in": "body",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "Text",
-            "in": "body",
-            "required": true,
-            "type": "string"
-          }
-        ],
-        "responseInfo": {
-          "200": {
-            "type": "object"
-          }
-        }
-      }
-    }
-  },
-  "annotations": {
-    "tableId": "",
-    "version": "",
-    "primaryKey": "annotationid",
-    "dataSourceType": "Dataverse",
-    "apis": {}
-  },
-  "crf5c_opportunity1s": {
-    "tableId": "",
-    "version": "",
-    "primaryKey": "crf5c_opportunity1id",
-    "dataSourceType": "Dataverse",
-    "apis": {}
-  },
-  "phonecalls": {
-    "tableId": "",
-    "version": "",
-    "primaryKey": "activityid",
-    "dataSourceType": "Dataverse",
-    "apis": {}
-  },
-  "crf5c_products": {
-    "tableId": "",
-    "version": "",
-    "primaryKey": "crf5c_productid",
-    "dataSourceType": "Dataverse",
-    "apis": {}
-  },
-  "crf5c_settings": {
-    "tableId": "",
-    "version": "",
-    "primaryKey": "crf5c_settingid",
-    "dataSourceType": "Dataverse",
-    "apis": {}
-  },
-  "systemusers": {
-    "tableId": "",
-    "version": "",
-    "primaryKey": "systemuserid",
     "dataSourceType": "Dataverse",
     "apis": {}
   },
@@ -1208,6 +1081,119 @@ export const dataSourcesInfo = {
       }
     }
   },
+  "msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75c": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "",
+    "dataSourceType": "Dataverse",
+    "apis": {
+      "msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75c": {
+        "path": "/api/data/v9.2/msdyn_aibdptcustomprompt104e526adeab4292bf186b6180dfd75c",
+        "method": "POST",
+        "parameters": [
+          {
+            "name": "prompt_20text",
+            "in": "body",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responseInfo": {
+          "200": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  },
+  "msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "",
+    "dataSourceType": "Dataverse",
+    "apis": {
+      "msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323": {
+        "path": "/api/data/v9.2/msdyn_aibdptcustomprompt124202362324ambbd51cc43b914f54958cd773f856a323",
+        "method": "POST",
+        "parameters": [
+          {
+            "name": "Text",
+            "in": "body",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responseInfo": {
+          "200": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  },
+  "msdyn_aibdptcustomprompt228202435537pmbd0d86826d054e2ba9efc694a371f6fb": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "",
+    "dataSourceType": "Dataverse",
+    "apis": {
+      "msdyn_aibdptcustomprompt228202435537pmbd0d86826d054e2ba9efc694a371f6fb": {
+        "path": "/api/data/v9.2/msdyn_aibdptcustomprompt228202435537pmbd0d86826d054e2ba9efc694a371f6fb",
+        "method": "POST",
+        "parameters": [
+          {
+            "name": "Text",
+            "in": "body",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responseInfo": {
+          "200": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  },
+  "msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "",
+    "dataSourceType": "Dataverse",
+    "apis": {
+      "msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7": {
+        "path": "/api/data/v9.2/msdyn_aibdptcustomprompt228202450236pmfa03a8f2db2741658a366f471cb5b2b7",
+        "method": "POST",
+        "parameters": [
+          {
+            "name": "Special_20character",
+            "in": "body",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "Text",
+            "in": "body",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responseInfo": {
+          "200": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  },
+  "msdyn_aimodels": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "msdyn_aimodelid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
   "new_5fsales_20copilot_20speech_5f795669e27c19e6e2": {
     "tableId": "",
     "version": "",
@@ -1261,5 +1247,33 @@ export const dataSourcesInfo = {
         }
       }
     }
+  },
+  "phonecalls": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "activityid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
+  "skills": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "skillid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
+  "systemusers": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "systemuserid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
+  "transactioncurrencies": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "transactioncurrencyid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
   }
 };

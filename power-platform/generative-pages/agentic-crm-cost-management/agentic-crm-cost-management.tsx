@@ -20,6 +20,7 @@ import {
   Text,
   createTableColumn,
   makeStyles,
+  mergeClasses,
   shorthands,
   tokens,
   type TableColumnDefinition,
@@ -34,6 +35,8 @@ import {
   MoneyRegular,
   SearchRegular,
   SettingsRegular,
+  ChevronDownRegular,
+  ChevronRightRegular,
 } from "@fluentui/react-icons";
 import * as d3 from "d3";
 import type { GeneratedComponentProps, crf5c_agentlog, msdyn_aievent } from "./RuntimeTypes";
@@ -75,6 +78,19 @@ type CostRow = {
   operationType: string;
   operationIndex: number | null;
   allocationMethod: string;
+  traceIds: string[];
+};
+
+type CreditPair = { aiBuilder: number; copilot: number };
+type ScopeTotal = CreditPair & { calls: number };
+type ReconciliationState = {
+  loading: boolean;
+  error: string | null;
+  business: ScopeTotal;
+  projectBackground: ScopeTotal;
+  legacyTraced: ScopeTotal;
+  legacyProjectModel: ScopeTotal;
+  coverageStart: Date | null;
 };
 
 type PageState = {
@@ -328,6 +344,16 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground1,
     boxShadow: tokens.shadow4,
   },
+  kpiCardInteractive: {
+    cursor: "pointer",
+    ":hover": { backgroundColor: tokens.colorNeutralBackground1Hover },
+    ":focus-visible": {
+      outlineWidth: "2px",
+      outlineStyle: "solid",
+      outlineColor: tokens.colorStrokeFocus2,
+      outlineOffset: "2px",
+    },
+  },
   kpiIcon: {
     display: "flex",
     alignItems: "center",
@@ -354,6 +380,35 @@ const useStyles = makeStyles({
   },
   kpiHint: {
     color: tokens.colorNeutralForeground3,
+  },
+  reconciliationBand: {
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalM,
+    paddingTop: tokens.spacingVerticalL,
+    paddingRight: tokens.spacingHorizontalL,
+    paddingBottom: tokens.spacingVerticalL,
+    paddingLeft: tokens.spacingHorizontalL,
+    backgroundColor: tokens.colorNeutralBackground2,
+    ...shorthands.border("1px", "solid", tokens.colorNeutralStroke2),
+  },
+  reconciliationGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+    gap: tokens.spacingHorizontalL,
+    "@media (max-width: 1000px)": { gridTemplateColumns: "repeat(2, minmax(0, 1fr))" },
+    "@media (max-width: 600px)": { gridTemplateColumns: "1fr" },
+  },
+  reconciliationHeader: {
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalXXS,
+  },
+  reconciliationItem: {
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalXXS,
+    minWidth: 0,
   },
   combinedChartGrid: {
     display: "grid",
@@ -917,6 +972,7 @@ function normalizeRow(row: crf5c_agentlog): CostRow {
     operationType: toText(row.biz_operationtype, "(unassigned)"),
     operationIndex: toNullableNumber(row.biz_operationindex),
     allocationMethod: toText(row.biz_allocationmethod, "—"),
+    traceIds: parseTraceIds(row.biz_aieventtracelist) ?? [],
   };
 }
 
@@ -926,6 +982,12 @@ function meterValueForRow(row: CostRow, meter: CreditMeter, settings: CostSettin
   // Currency unifies both credit types into one additive monetary amount.
   if (row.aiBuilderCredits === null && row.copilotCredits === null) return null;
   return (row.aiBuilderCredits ?? 0) * settings.aiBuilderUnitCost + (row.copilotCredits ?? 0) * settings.copilotUnitCost;
+}
+
+function meterValueForScope(scope: CreditPair, meter: CreditMeter, settings: CostSettings): number {
+  if (meter === "copilot") return scope.copilot;
+  if (meter === "aiBuilder") return scope.aiBuilder;
+  return scope.aiBuilder * settings.aiBuilderUnitCost + scope.copilot * settings.copilotUnitCost;
 }
 
 function projectCreditMeter(rows: CostRow[], meter: CreditMeter, settings: CostSettings): CostRow[] {
@@ -1002,6 +1064,7 @@ async function queryCostRows(dataApi: GeneratedComponentProps["dataApi"], filter
       "biz_operationtype",
       "biz_operationindex",
       "biz_allocationmethod",
+      "biz_aieventtracelist",
     ],
     orderBy: "crf5c_timestamp desc",
     pageSize: 500,
@@ -1014,6 +1077,84 @@ async function queryCostRows(dataApi: GeneratedComponentProps["dataApi"], filter
     records.push(...result.rows);
   }
   return records.map(normalizeRow);
+}
+
+const PROJECT_ID = "agentic-crm";
+const LEGACY_PROJECT_APP_IDS = new Set(["sales-copilot", "field-service", "prompt-studio"]);
+const PROJECT_AI_MODEL_IDS = new Set(["104e526a-deab-4292-bf18-6b6180dfd75c"]);
+const APP_TRACE_RE = /\[\[trace:([0-9a-f-]{36})(?:\s+project:([A-Za-z0-9._-]+))?(?:\s+app:([A-Za-z0-9._-]+))?(?:\s+prompt:[A-Za-z0-9._-]+)?\]\]/i;
+
+const emptyScope = (): ScopeTotal => ({ calls: 0, aiBuilder: 0, copilot: 0 });
+
+function addEvent(scope: ScopeTotal, row: msdyn_aievent): void {
+  scope.calls += 1;
+  scope.aiBuilder += toNullableNumber(row.msdyn_creditconsumed) ?? 0;
+  scope.copilot += parseMessageConsumption(row.msdyn_eventdata).credits ?? 0;
+}
+
+async function queryCoverageStart(
+  dataApi: GeneratedComponentProps["dataApi"],
+): Promise<Date | null> {
+  const result = await dataApi.queryTable("crf5c_agentlog", {
+    select: ["crf5c_timestamp"],
+    orderBy: "crf5c_timestamp asc",
+    pageSize: 1,
+  });
+  return result.rows[0] ? toDate(result.rows[0].crf5c_timestamp) : null;
+}
+
+async function queryReconciliation(
+  dataApi: GeneratedComponentProps["dataApi"],
+  bounds: PeriodBounds,
+  costRows: CostRow[],
+): Promise<Omit<ReconciliationState, "loading" | "error" | "coverageStart">> {
+  const options = {
+    select: [
+      "msdyn_aieventid",
+      "msdyn_creditconsumed",
+      "msdyn_eventdata",
+      "msdyn_datainfo",
+      "_msdyn_aimodelid_value",
+    ],
+    orderBy: "createdon desc",
+    pageSize: 500,
+    ...(bounds.currentStart ? { filter: `createdon ge ${bounds.currentStart.toISOString()}` } : {}),
+  };
+  let result = await dataApi.queryTable("msdyn_aievent", options);
+  const events: msdyn_aievent[] = [...result.rows];
+  while (result.hasMoreRows && result.loadMoreRows) {
+    result = await result.loadMoreRows();
+    events.push(...result.rows);
+  }
+
+  const claimed = new Set(costRows.flatMap((row) => row.traceIds));
+  const business = emptyScope();
+  const projectBackground = emptyScope();
+  const legacyTraced = emptyScope();
+  const legacyProjectModel = emptyScope();
+
+  events.forEach((event) => {
+    const match = String(event.msdyn_datainfo ?? "").match(APP_TRACE_RE);
+    const traceId = match?.[1]?.toLowerCase() ?? "";
+    const projectId = match?.[2] ?? "";
+    const appId = match?.[3] ?? "";
+    const modelValue = String(event._msdyn_aimodelid_value ?? "").toLowerCase();
+    const modelId = modelValue.match(/\(([0-9a-f-]{36})\)$/)?.[1] ?? modelValue;
+    if (traceId && claimed.has(traceId)) addEvent(business, event);
+    else if (
+      projectId === PROJECT_ID ||
+      (!projectId && appId && LEGACY_PROJECT_APP_IDS.has(appId))
+    ) addEvent(projectBackground, event);
+    else if (traceId) addEvent(legacyTraced, event);
+    else if (PROJECT_AI_MODEL_IDS.has(modelId)) addEvent(legacyProjectModel, event);
+  });
+
+  return {
+    business,
+    projectBackground,
+    legacyTraced,
+    legacyProjectModel,
+  };
 }
 
 function emptyDetailState(): DetailState {
@@ -1467,14 +1608,31 @@ function KpiCard(props: {
   value: string;
   hint: string;
   badge?: { text: string; color: "informative" | "warning" | "danger" | "success" };
+  expanded?: boolean;
+  onToggle?: () => void;
 }) {
   const styles = useStyles();
   return (
-    <Card className={styles.kpiCard} aria-label={`${props.title}: ${props.value}`}>
+    <Card
+      className={mergeClasses(styles.kpiCard, props.onToggle && styles.kpiCardInteractive)}
+      aria-label={`${props.title}: ${props.value}`}
+      aria-expanded={props.onToggle ? props.expanded : undefined}
+      role={props.onToggle ? "button" : undefined}
+      tabIndex={props.onToggle ? 0 : undefined}
+      onClick={props.onToggle}
+      onKeyDown={props.onToggle ? (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          props.onToggle?.();
+        }
+      } : undefined}
+    >
       <CardHeader
         image={<span className={styles.kpiIcon} aria-hidden="true">{props.icon}</span>}
         header={<Text weight="semibold">{props.title}</Text>}
-        action={props.badge ? <Badge color={props.badge.color}>{props.badge.text}</Badge> : undefined}
+        action={props.onToggle
+          ? props.expanded ? <ChevronDownRegular /> : <ChevronRightRegular />
+          : props.badge ? <Badge color={props.badge.color}>{props.badge.text}</Badge> : undefined}
       />
       <div className={styles.kpiContent}>
         <Text className={styles.kpiValue}>{props.value}</Text>
@@ -2217,6 +2375,15 @@ const GeneratedComponent = (props: GeneratedComponentProps) => {
   const [range, setRange] = useState<RangeKey>("7d");
   const [refreshKey, setRefreshKey] = useState(0);
   const [pageState, setPageState] = useState<PageState>({ rows: [], previousRows: [], loading: true, error: null, lastRefreshed: null });
+  const [reconciliation, setReconciliation] = useState<ReconciliationState>({
+    loading: true,
+    error: null,
+    business: emptyScope(),
+    projectBackground: emptyScope(),
+    legacyTraced: emptyScope(),
+    legacyProjectModel: emptyScope(),
+    coverageStart: null,
+  });
   const [search, setSearch] = useState("");
   const [creditMeter, setCreditMeter] = useState<CreditMeter>("copilot");
   const [agentLogGroupBy, setAgentLogGroupBy] = useState<AgentLogGroupBy>("none");
@@ -2233,18 +2400,36 @@ const GeneratedComponent = (props: GeneratedComponentProps) => {
   const [aiBuilderCostDraft, setAiBuilderCostDraft] = useState(String(costSettings.aiBuilderUnitCost));
   const [copilotCostDraft, setCopilotCostDraft] = useState(String(costSettings.copilotUnitCost));
   const [exportNotice, setExportNotice] = useState<{ kind: "copied" | "manual"; count: number; text: string } | null>(null);
+  const [compositionOpen, setCompositionOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+    setReconciliation((current) => ({ ...current, loading: true, error: null }));
     (async () => {
       try {
         const bounds = getPeriodBounds(range);
-        const [rows, previousRows] = await Promise.all([
+        const [rows, previousRows, coverageStart] = await Promise.all([
           queryCostRows(props.dataApi, buildCurrentFilter(bounds)),
           bounds.days ? queryCostRows(props.dataApi, buildPreviousFilter(bounds)) : Promise.resolve([]),
+          queryCoverageStart(props.dataApi),
         ]);
         if (!cancelled) {
           setPageState({ rows, previousRows, loading: false, error: null, lastRefreshed: new Date() });
+        }
+        try {
+          const scopes = await queryReconciliation(props.dataApi, bounds, rows);
+          if (!cancelled) {
+            setReconciliation({ loading: false, error: null, coverageStart, ...scopes });
+          }
+        } catch (error) {
+          if (!cancelled) {
+            setReconciliation((current) => ({
+              ...current,
+              loading: false,
+              error: error instanceof Error ? error.message : "Unable to reconcile AI Event totals.",
+              coverageStart,
+            }));
+          }
         }
       } catch (error) {
         if (!cancelled) {
@@ -2255,6 +2440,7 @@ const GeneratedComponent = (props: GeneratedComponentProps) => {
             error: error instanceof Error ? error.message : "Unable to load Agent Log cost data.",
             lastRefreshed: null,
           });
+          setReconciliation((current) => ({ ...current, loading: false }));
         }
       }
     })();
@@ -2283,8 +2469,13 @@ const GeneratedComponent = (props: GeneratedComponentProps) => {
   );
   const meterNoun = creditMeterNoun(creditMeter);
   const totalCredits = useMemo(() => d3.sum(currentRows, (row) => row.credits || 0), [currentRows]);
+  const projectCredits = reconciliation.loading || reconciliation.error
+    ? null
+    : meterValueForScope(reconciliation.business, creditMeter, costSettings)
+      + meterValueForScope(reconciliation.projectBackground, creditMeter, costSettings)
+      + meterValueForScope(reconciliation.legacyTraced, creditMeter, costSettings)
+      + meterValueForScope(reconciliation.legacyProjectModel, creditMeter, costSettings);
   const measuredRows = useMemo(() => currentRows.filter((row) => row.credits !== null), [currentRows]);
-  const averageCredits = measuredRows.length > 0 ? totalCredits / measuredRows.length : null;
   const pendingCount = currentRows.length - measuredRows.length;
   const operationTotals = useMemo(() => aggregateOperations(currentRows), [currentRows]);
   const periodBounds = useMemo(() => getPeriodBounds(range), [range]);
@@ -2660,8 +2851,14 @@ const GeneratedComponent = (props: GeneratedComponentProps) => {
         ) : (
           <>
             <section className={styles.kpiGrid} aria-label="AI cost key performance indicators">
-              <KpiCard icon={<MoneyRegular />} title={`Total ${creditMeterLabel(creditMeter)}`} value={formatMeter(totalCredits)} hint={`${measuredRows.length} measured operations`} />
-              <KpiCard icon={<DataTrendingRegular />} title={`Average ${creditMeterLabel(creditMeter)} / operation`} value={averageCredits === null ? "—" : formatMeter(averageCredits)} hint="Selected meter only" />
+              <KpiCard
+                icon={<MoneyRegular />}
+                title={`Agentic CRM total ${creditMeterLabel(creditMeter)}`}
+                value={projectCredits === null ? "—" : formatMeter(projectCredits)}
+                hint={compositionOpen ? "Select to hide cost composition" : "Select to see cost composition"}
+                expanded={compositionOpen}
+                onToggle={() => setCompositionOpen((open) => !open)}
+              />
               <KpiCard
                 icon={<ClockRegular />}
                 title="Pending credit matches"
@@ -2671,6 +2868,52 @@ const GeneratedComponent = (props: GeneratedComponentProps) => {
               />
               <KpiCard icon={<CheckmarkCircleRegular />} title="Operation count" value={String(currentRows.length)} hint={`Selected period · ${range === "all" ? "all time" : range}`} />
             </section>
+
+            {compositionOpen && <section className={styles.reconciliationBand} aria-label="Agentic CRM cost composition">
+              <div className={styles.reconciliationHeader}>
+                <Text as="h2" size={500} weight="semibold">Agentic CRM cost composition</Text>
+                <Text size={200} className={styles.sectionSubtitle}>
+                  Project total = business operations + project background/governance + legacy project traces/model calls.
+                  {reconciliation.coverageStart
+                    ? ` Business-operation tracking is available since ${formatShortDate(reconciliation.coverageStart)}.`
+                    : ""}
+                </Text>
+              </div>
+              {reconciliation.loading ? (
+                <Spinner size="small" label="Reconciling AI Events" />
+              ) : reconciliation.error ? (
+                <MessageBar intent="warning">
+                  <MessageBarBody>{reconciliation.error}</MessageBarBody>
+                </MessageBar>
+              ) : (
+                <>
+                  <div className={styles.reconciliationGrid}>
+                    {[
+                      ["Business operations", reconciliation.business, "Exact trace matches represented by the Agent Log"],
+                      ["Project background", reconciliation.projectBackground, "Exact Sales Copilot / Field Service / Prompt Studio traces not attached to an operation"],
+                      ["Legacy traced", reconciliation.legacyTraced, "Older trace markers without an app id; shown separately, not assumed"],
+                      ["Legacy project model", reconciliation.legacyProjectModel, "Untraced calls to the project's SalesCopilotCorePrompt model"],
+                    ].map(([label, scope, hint]) => {
+                      const total = scope as ScopeTotal;
+                      return (
+                        <div key={String(label)} className={styles.reconciliationItem}>
+                          <Text size={200} weight="semibold">{String(label)}</Text>
+                          <Text size={600} weight="semibold">
+                            {formatMeter(meterValueForScope(total, creditMeter, costSettings))}
+                          </Text>
+                          <Text size={200} className={styles.sectionSubtitle}>
+                            {total.calls} AI Events · {String(hint)}
+                          </Text>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <Text size={200} className={styles.sectionSubtitle}>
+                    Agentic CRM project total: {projectCredits === null ? "—" : formatMeter(projectCredits)}
+                  </Text>
+                </>
+              )}
+            </section>}
 
             <Card className={styles.sectionCard} aria-label="Credit trend and operation cost share">
               <CardHeader header={<Text as="h2" size={500} weight="semibold">Credit overview and operation mix</Text>} description={<Text size={200} className={styles.sectionSubtitle}>{creditMeterLabel(creditMeter)} · daily trend and total-cost share use one consistent operation color legend</Text>} />

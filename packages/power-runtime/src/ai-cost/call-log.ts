@@ -157,7 +157,7 @@ export function summarizeAiCalls(calls: AiCallEntry[]): AiTurnConsumption {
  * `msdyn_datainfo.prompt_20text`). The marker sits at char 0 of the prompt so
  * it always survives the AI Event 4000-char truncation.
  */
-export const TRACE_MARKER_RE = /\[\[trace:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]\]/i;
+export const TRACE_MARKER_RE = /\[\[trace:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\s+project:([A-Za-z0-9._-]+))?(?:\s+app:([A-Za-z0-9._-]+))?(?:\s+prompt:([A-Za-z0-9._-]+))?\]\]/i;
 
 /** Generate a correlation GUID for one AI call. */
 export function newTraceId(): string {
@@ -172,13 +172,43 @@ export function newTraceId(): string {
  * The single line prepended to a prompt so the AI Event row (whose prompt text
  * starts at char 0 and is truncated at 4000) always carries the GUID → exact
  * 1:1 join to the log row. It reads as inert metadata; the model ignores it.
+ *
+ * Naming the prompt here is what lets the platform's own AI Event log answer
+ * "which prompt ran, when, at what cost" on its own — so the app does not write
+ * a second record of every call.
  */
-export function formatTracePrefix(traceId: string): string {
-  return `[[trace:${traceId}]] (internal correlation id — ignore this line)\n`;
+export function formatTracePrefix(
+  traceId: string,
+  promptKey?: string,
+  appId?: string,
+  projectId?: string,
+): string {
+  const project = projectId ? ` project:${projectId}` : '';
+  const app = appId ? ` app:${appId}` : '';
+  const key = promptKey ? ` prompt:${promptKey}` : '';
+  return `[[trace:${traceId}${project}${app}${key}]] (internal correlation id — ignore this line)\n`;
 }
 
 /** Extract the trace GUID from a stored prompt string (null if absent). */
 export function extractTraceId(promptText: string): string | null {
   const m = promptText.match(TRACE_MARKER_RE);
   return m ? m[1].toLowerCase() : null;
+}
+
+/** Which catalogued prompt produced the call, when the marker declares it. */
+export function extractPromptKey(promptText: string): string | null {
+  const m = promptText.match(TRACE_MARKER_RE);
+  return m && m[4] ? m[4] : null;
+}
+
+/** Which application produced the call, when the marker declares it. */
+export function extractAppId(promptText: string): string | null {
+  const m = promptText.match(TRACE_MARKER_RE);
+  return m && m[3] ? m[3] : null;
+}
+
+/** Which product/project owns the call, when the marker declares it. */
+export function extractProjectId(promptText: string): string | null {
+  const m = promptText.match(TRACE_MARKER_RE);
+  return m && m[2] ? m[2] : null;
 }

@@ -38,6 +38,7 @@ import {
   toScreen,
   zoomAround,
   zoomView,
+  viewAtScale,
   type MapView,
   type Pixel,
   type ViewportSize,
@@ -76,6 +77,8 @@ export interface WorkOrderMapProps {
   onToggleRoutePlan?: () => void;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
+  /** Explicit list-driven focus request; map-pin selection does not reset the view. */
+  focusRequest?: { key: string; point: GeoPoint } | null;
   /** Told when the basemap turns dark, so surrounding chrome can follow. */
   onDarkChange?: (dark: boolean) => void;
   fullBleed?: boolean;
@@ -103,6 +106,7 @@ export function WorkOrderMap({
   onToggleRoutePlan,
   selectedId,
   onSelect,
+  focusRequest,
   onDarkChange,
   fullBleed = false,
   controlsTopClassName = 'top-3',
@@ -208,6 +212,11 @@ export function WorkOrderMap({
     lastFitKey.current = fitKey;
     setView(fit(size));
   }, [fitKey, fit, size]);
+
+  useEffect(() => {
+    if (!focusRequest || size.width === 0 || size.height === 0) return;
+    setView(viewAtScale(toDatum(focusRequest.point, datum), 5_000));
+  }, [focusRequest?.key, datum, size.width, size.height]);
 
   const pointers = useRef(new Map<number, Pixel>());
   const pinchDistance = useRef<number | null>(null);

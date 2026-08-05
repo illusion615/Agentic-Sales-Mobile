@@ -44,18 +44,6 @@
       "produces": [
         "application/json"
       ],
-      "securityDefinitions": {
-        "api_key": {
-          "type": "apiKey",
-          "in": "query",
-          "name": "key"
-        }
-      },
-      "security": [
-        {
-          "api_key": []
-        }
-      ],
       "paths": {
         "/{connectionId}/staticmap": {
           "get": {
@@ -69,6 +57,15 @@
                 "required": true,
                 "x-ms-visibility": "internal",
                 "type": "string"
+              },
+              {
+                "name": "key",
+                "in": "query",
+                "required": true,
+                "type": "string",
+                "description": "AMap Web Service key supplied by administrator configuration",
+                "x-ms-summary": "Configured service key",
+                "x-ms-visibility": "internal"
               },
               {
                 "name": "location",
@@ -138,6 +135,15 @@
                 "required": true,
                 "x-ms-visibility": "internal",
                 "type": "string"
+              },
+              {
+                "name": "key",
+                "in": "query",
+                "required": true,
+                "type": "string",
+                "description": "AMap Web Service key supplied by administrator configuration",
+                "x-ms-summary": "Configured service key",
+                "x-ms-visibility": "internal"
               },
               {
                 "name": "origin",
@@ -267,8 +273,8 @@
       "actions"
     ],
     "apiDefinitions": {
-      "originalSwaggerUrl": "https://usa002004wus3ext.blob.core.windows.net/api-swagger-files/unitedstates-002/new-5famap-20static-20map-5f795669e27c19e6e2.json_original?skoid=e6898b49-53e1-4e33-bbf3-f68cbec72336&sktid=33e01921-4d64-4f8c-a055-5bdaffd5e33d&skt=2026-07-30T13%3A13%3A21Z&ske=2026-07-31T13%3A13%3A21Z&sks=b&skv=2025-01-05&sv=2025-01-05&spr=https&se=2026-07-31T11%3A37%3A01Z&sr=b&sp=r&sig=KLnIj7WPjNyT7VGsS%2Fixnf5uuVrOhS5hW1fyA5ryZfw%3D",
-      "modifiedSwaggerUrl": "https://usa002004wus3ext.blob.core.windows.net/api-swagger-files/unitedstates-002/new-5famap-20static-20map-5f795669e27c19e6e2.json?skoid=e6898b49-53e1-4e33-bbf3-f68cbec72336&sktid=33e01921-4d64-4f8c-a055-5bdaffd5e33d&skt=2026-07-30T13%3A13%3A21Z&ske=2026-07-31T13%3A13%3A21Z&sks=b&skv=2025-01-05&sv=2025-01-05&spr=https&se=2026-07-31T11%3A37%3A01Z&sr=b&sp=r&sig=MEKohfqthKXFf8Fz85k38Tz6VJKosZhmltUdytl4Mak%3D"
+      "originalSwaggerUrl": "https://usa002004wus3ext.blob.core.windows.net/api-swagger-files/unitedstates-002/new-5famap-20static-20map-5f795669e27c19e6e2.json_original?skoid=e6898b49-53e1-4e33-bbf3-f68cbec72336&sktid=33e01921-4d64-4f8c-a055-5bdaffd5e33d&skt=2026-08-01T11%3A13%3A26Z&ske=2026-08-02T11%3A13%3A26Z&sks=b&skv=2025-01-05&sv=2025-01-05&spr=https&se=2026-08-02T05%3A20%3A11Z&sr=b&sp=r&sig=YpBxEaFjbTAJjAkiuXySj%2BzStgB4zEnjDUG7baHhKZ4%3D",
+      "modifiedSwaggerUrl": "https://usa002004wus3ext.blob.core.windows.net/api-swagger-files/unitedstates-002/new-5famap-20static-20map-5f795669e27c19e6e2.json?skoid=e6898b49-53e1-4e33-bbf3-f68cbec72336&sktid=33e01921-4d64-4f8c-a055-5bdaffd5e33d&skt=2026-08-01T11%3A13%3A26Z&ske=2026-08-02T11%3A13%3A26Z&sks=b&skv=2025-01-05&sv=2025-01-05&spr=https&se=2026-08-02T05%3A20%3A11Z&sr=b&sp=r&sig=HSWYfBMgR356hysbjo6spf%2BxjygMVTZ%2FsWFlPKoB%2F0M%3D"
     },
     "policyTemplateInstances": [],
     "backendService": {
@@ -293,7 +299,7 @@
       "userPrincipalName": "wellszhang@D365DemoTSCE49940039.OnMicrosoft.com"
     },
     "createdTime": "2026-07-30T05:53:50.1958193Z",
-    "changedTime": "2026-07-31T10:26:06.8641876Z",
+    "changedTime": "2026-08-02T04:11:23.2614868Z",
     "environment": {
       "id": "/providers/Microsoft.PowerApps/environments/efcd2d46-3d9e-e31a-a9d8-5481ddae951c",
       "name": "efcd2d46-3d9e-e31a-a9d8-5481ddae951c"
@@ -301,7 +307,7 @@
     "tier": "Standard",
     "publisher": "Wells Zhang",
     "almMode": "Solution",
-    "scriptDefinitionUrl": "https://usa002004wus3ext.blob.core.windows.net/api-swagger-files/unitedstates-002/new-5famap-20static-20map-5f795669e27c19e6e2-script.json?skoid=e6898b49-53e1-4e33-bbf3-f68cbec72336&sktid=33e01921-4d64-4f8c-a055-5bdaffd5e33d&skt=2026-07-30T13%3A13%3A21Z&ske=2026-07-31T13%3A13%3A21Z&sks=b&skv=2025-01-05&sv=2025-01-05&spr=https&se=2026-07-31T11%3A37%3A01Z&sr=b&sp=r&sig=A2S0%2B2du9tUxp%2BONTiROEq00XKN6m5vTPtIbZXr7Plo%3D",
+    "scriptDefinitionUrl": "https://usa002004wus3ext.blob.core.windows.net/api-swagger-files/unitedstates-002/new-5famap-20static-20map-5f795669e27c19e6e2-script.json?skoid=e6898b49-53e1-4e33-bbf3-f68cbec72336&sktid=33e01921-4d64-4f8c-a055-5bdaffd5e33d&skt=2026-08-01T11%3A13%3A26Z&ske=2026-08-02T11%3A13%3A26Z&sks=b&skv=2025-01-05&sv=2025-01-05&spr=https&se=2026-08-02T05%3A20%3A11Z&sr=b&sp=r&sig=RQCPfDfsuIGRhg7fWmMmQJ2UFnZ6owSnzc1xn5nrV08%3D",
     "scriptOperations": [],
     "parameters": {},
     "rateLimit": 0,

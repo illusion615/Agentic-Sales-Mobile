@@ -17,6 +17,7 @@ import type { Locale } from '@/lib/i18n';
 import { LOCALE_META } from '@/lib/i18n';
 import type { SuggestionPill } from '@/lib/contextual-suggestions';
 import { invokeFlowForLLM } from '@/services/power-automate-service';
+import { renderPrompt } from '@/prompts';
 
 const isZh = (l: Locale) => l === 'zh-Hans';
 
@@ -45,22 +46,12 @@ function buildPrompt(opts: {
   const fnLine = opts.lastFunctionCalled
     ? `\nLast action performed: ${opts.lastFunctionCalled}`
     : '';
-  return [
-    'You are a CRM sales assistant. Based on the recent conversation, propose exactly 3 follow-up actions the user is most likely to want to do NEXT.',
-    '',
-    'Output rules (strict):',
-    '- Output ONLY 3 lines, nothing else.',
-    '- Each line format: <label> | <request>',
-    '- <label>: a short button caption, at most 4 words, no punctuation, no numbering.',
-    '- <request>: a complete first-person instruction that will be sent back to you when tapped.',
-    '- Make them specific to the conversation (reference the entities/topic just discussed).',
-    '- Do not repeat the user\'s last message verbatim.',
-    langRule,
-    '',
-    'Recent conversation:',
-    `User: ${clip(opts.lastUser, 240)}`,
-    `Assistant: ${clip(opts.lastAssistant, 700)}${fnLine}`,
-  ].join('\n');
+  return renderPrompt('suggestions.followup', {
+    languageRule: langRule,
+    lastUser: clip(opts.lastUser, 240),
+    lastAssistant: clip(opts.lastAssistant, 700),
+    lastAction: fnLine,
+  });
 }
 
 /** Parse `label | request` lines into pills. Tolerant of numbering/bullets. */

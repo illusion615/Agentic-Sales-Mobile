@@ -10,14 +10,6 @@
   "schemes": ["https"],
   "consumes": [],
   "produces": ["application/json"],
-  "securityDefinitions": {
-    "api_key": {
-      "type": "apiKey",
-      "in": "query",
-      "name": "key"
-    }
-  },
-  "security": [{ "api_key": [] }],
   "paths": {
     "/staticmap": {
       "get": {
@@ -25,6 +17,15 @@
         "summary": "Get static map image",
         "description": "Render one map image covering the requested view. Coordinates must be GCJ-02.",
         "parameters": [
+          {
+            "name": "key",
+            "in": "query",
+            "required": true,
+            "type": "string",
+            "description": "AMap Web Service key supplied by administrator configuration",
+            "x-ms-summary": "Configured service key",
+            "x-ms-visibility": "internal"
+          },
           {
             "name": "location",
             "in": "query",
@@ -85,6 +86,15 @@
         "summary": "Get driving route",
         "description": "Road distance, traffic-aware duration and a simplified polyline between two GCJ-02 points.",
         "parameters": [
+          {
+            "name": "key",
+            "in": "query",
+            "required": true,
+            "type": "string",
+            "description": "AMap Web Service key supplied by administrator configuration",
+            "x-ms-summary": "Configured service key",
+            "x-ms-visibility": "internal"
+          },
           {
             "name": "origin",
             "in": "query",

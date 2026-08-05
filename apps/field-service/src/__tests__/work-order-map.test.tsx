@@ -7,6 +7,9 @@ import type { WorkOrderSummary } from '@/domain/work-order';
 vi.mock('@/generated/services/AMapStaticMapService', () => ({
   AMapStaticMapService: { GetStaticMap: vi.fn(), GetDrivingRoute: vi.fn() },
 }));
+vi.mock('@/data/amap-config', () => ({
+  getAMapWebServiceKey: vi.fn().mockResolvedValue('test-key'),
+}));
 
 const VIEWPORT = { width: 400, height: 800 };
 
@@ -62,6 +65,13 @@ function renderMap(): { container: HTMLElement; root: Root; onSelect: ReturnType
 }
 
 describe('WorkOrderMap gestures', () => {
+  it('stays relative to its parent unless explicitly rendered full-bleed', () => {
+    const { container, root } = renderMap();
+    expect(container.firstElementChild?.className).toContain('relative');
+    expect(container.firstElementChild?.className).not.toContain('fixed');
+    act(() => root.unmount());
+  });
+
   it('renders a pin the technician can aim at', () => {
     const { container, root } = renderMap();
     expect(container.querySelector('button[aria-label*="WO-1001"]')).not.toBeNull();

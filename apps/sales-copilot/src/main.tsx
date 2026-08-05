@@ -4,12 +4,16 @@ import './index.css';
 import App from '@/app.tsx';
 import { configureAppearanceScope, initAppearance } from '@agentic/app-shell';
 import { refreshPromptResolution } from '@/services/prompt-resolver';
+import { applyCachedPromptOverrides, refreshPromptOverrides } from '@/services/prompt-store';
 import { queryClient } from '@/lib/query-client';
 import { restoreQueryCache, startQueryPersistence } from '@/lib/query-persist';
 
 // Apply the shared family appearance before React paints.
 configureAppearanceScope('sales-copilot', { migrateLegacy: true });
 initAppearance();
+
+// Last known prompt overrides, applied before anything can send a prompt.
+applyCachedPromptOverrides();
 
 // Build fingerprint — changes on every build
 const BUILD_ID = __BUILD_TIMESTAMP__;
@@ -47,3 +51,6 @@ void bootstrap();
 // Self-heals (one reload) if the AI model GUID differs from the build-time value;
 // no-op when the GUID is unchanged.
 void refreshPromptResolution();
+
+// Pick up prompt bodies edited in the admin app. Failure leaves the shipped ones.
+void refreshPromptOverrides();

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AMapStaticMapService } from '@/generated/services/AMapStaticMapService';
+import { getAMapWebServiceKey } from '@/data/amap-config';
 import type { MapView, ViewportSize } from '@/lib/map-projection';
 import { loadCachedBasemap, saveCachedBasemap } from '@/lib/basemap-cache';
 import {
@@ -75,6 +76,7 @@ export function useStaticBasemap(
     const timer = setTimeout(async () => {
       inFlight.current = key;
       try {
+        const serviceKey = await getAMapWebServiceKey();
         const fetched: Array<{
           request: StaticMapRequest;
           result: Awaited<ReturnType<typeof AMapStaticMapService.GetStaticMap>>;
@@ -86,6 +88,7 @@ export function useStaticBasemap(
             requests.slice(offset, offset + MAX_CONCURRENT_REQUESTS).map(async (request) => {
             const params = amapStaticParams(request);
             const result = await AMapStaticMapService.GetStaticMap(
+              serviceKey,
               params.location,
               params.zoom,
               params.size,

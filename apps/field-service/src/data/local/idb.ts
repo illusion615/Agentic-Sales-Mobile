@@ -16,8 +16,8 @@ const DB_NAME = 'fs-local';
  *
  * Adding a store means adding it here AND bumping the version.
  */
-const STORES = ['workorders', 'customers', 'sessions', 'evidence', 'formdefinitions'] as const;
-const DB_VERSION = 3;
+const STORES = ['workorders', 'customers', 'sessions', 'evidence', 'formdefinitions', 'acceptances'] as const;
+const DB_VERSION = 4;
 
 type StoreName = (typeof STORES)[number];
 

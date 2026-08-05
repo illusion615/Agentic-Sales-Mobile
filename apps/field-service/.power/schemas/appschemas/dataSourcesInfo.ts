@@ -19,6 +19,20 @@ export const dataSourcesInfo = {
     "dataSourceType": "Dataverse",
     "apis": {}
   },
+  "environmentvariabledefinitions": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "environmentvariabledefinitionid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
+  "environmentvariablevalues": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "environmentvariablevalueid",
+    "dataSourceType": "Dataverse",
+    "apis": {}
+  },
   "new_5famap_20static_20map_5f795669e27c19e6e2": {
     "tableId": "",
     "version": "",
@@ -32,6 +46,12 @@ export const dataSourcesInfo = {
           {
             "name": "connectionId",
             "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "key",
+            "in": "query",
             "required": true,
             "type": "string"
           },
@@ -86,6 +106,12 @@ export const dataSourcesInfo = {
             "type": "string"
           },
           {
+            "name": "key",
+            "in": "query",
+            "required": true,
+            "type": "string"
+          },
+          {
             "name": "origin",
             "in": "query",
             "required": true,
@@ -110,6 +136,60 @@ export const dataSourcesInfo = {
           },
           "default": {
             "type": "void"
+          }
+        }
+      }
+    }
+  },
+  "new_5fsales_20copilot_20speech_5f795669e27c19e6e2": {
+    "tableId": "",
+    "version": "",
+    "primaryKey": "",
+    "dataSourceType": "Connector",
+    "apis": {
+      "Synthesize": {
+        "path": "/{connectionId}/tts",
+        "method": "POST",
+        "parameters": [
+          {
+            "name": "connectionId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "type": "object"
+          }
+        ],
+        "responseInfo": {
+          "200": {
+            "type": "object"
+          }
+        }
+      },
+      "Transcribe": {
+        "path": "/{connectionId}/stt",
+        "method": "POST",
+        "parameters": [
+          {
+            "name": "connectionId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "type": "object"
+          }
+        ],
+        "responseInfo": {
+          "200": {
+            "type": "object"
           }
         }
       }

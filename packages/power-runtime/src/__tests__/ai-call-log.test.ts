@@ -3,6 +3,9 @@ import {
   aiCallsForTurn,
   beginAiTurn,
   clearAiCallLog,
+  extractAppId,
+  extractPromptKey,
+  extractProjectId,
   extractTraceId,
   formatTracePrefix,
   newTraceId,
@@ -67,6 +70,25 @@ describe('trace correlation', () => {
     const traceId = newTraceId();
     const match = formatTracePrefix(traceId).match(TRACE_MARKER_RE);
     expect(match?.[1].toLowerCase()).toBe(traceId.toLowerCase());
+  });
+
+  it('round-trips the catalogued prompt key in the marker', () => {
+    const traceId = newTraceId();
+    const prompt = formatTracePrefix(traceId, 'frame.classify', 'sales-copilot', 'agentic-crm') + 'system: prompt';
+
+    expect(extractTraceId(prompt)).toBe(traceId.toLowerCase());
+    expect(extractProjectId(prompt)).toBe('agentic-crm');
+    expect(extractAppId(prompt)).toBe('sales-copilot');
+    expect(extractPromptKey(prompt)).toBe('frame.classify');
+  });
+
+  it('keeps legacy markers valid when no prompt key is present', () => {
+    const traceId = newTraceId();
+    const prompt = formatTracePrefix(traceId) + 'system: prompt';
+
+    expect(extractPromptKey(prompt)).toBeNull();
+    expect(extractAppId(prompt)).toBeNull();
+    expect(extractProjectId(prompt)).toBeNull();
   });
 
   it('returns null when no marker is present', () => {

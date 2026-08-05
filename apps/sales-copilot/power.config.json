@@ -158,6 +158,16 @@
           "entitySetName": "crf5c_backgroundtasks",
           "logicalName": "crf5c_backgroundtask",
           "isHidden": false
+        },
+        "prompttemplates": {
+          "entitySetName": "crf5c_prompttemplates",
+          "logicalName": "crf5c_prompttemplate",
+          "isHidden": false
+        },
+        "promptruns": {
+          "entitySetName": "crf5c_promptruns",
+          "logicalName": "crf5c_promptrun",
+          "isHidden": false
         }
       },
       "version": "v9.0",

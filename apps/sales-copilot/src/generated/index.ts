@@ -23,6 +23,8 @@ export * as Crf5c_businessinsightsModel from './models/Crf5c_businessinsightsMod
 export * as Crf5c_copilotconversationsModel from './models/Crf5c_copilotconversationsModel';
 export * as Crf5c_opportunity1sModel from './models/Crf5c_opportunity1sModel';
 export * as Crf5c_productsModel from './models/Crf5c_productsModel';
+export * as Crf5c_promptrunsModel from './models/Crf5c_promptrunsModel';
+export * as Crf5c_prompttemplatesModel from './models/Crf5c_prompttemplatesModel';
 export * as Crf5c_settingsModel from './models/Crf5c_settingsModel';
 export * as EmailsModel from './models/EmailsModel';
 export * as EnvironmentvariabledefinitionsModel from './models/EnvironmentvariabledefinitionsModel';
@@ -73,6 +75,8 @@ export * from './services/Crf5c_businessinsightsService';
 export * from './services/Crf5c_copilotconversationsService';
 export * from './services/Crf5c_opportunity1sService';
 export * from './services/Crf5c_productsService';
+export * from './services/Crf5c_promptrunsService';
+export * from './services/Crf5c_prompttemplatesService';
 export * from './services/Crf5c_settingsService';
 export * from './services/EmailsService';
 export * from './services/EnvironmentvariabledefinitionsService';

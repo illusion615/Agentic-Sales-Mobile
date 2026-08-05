@@ -16,6 +16,7 @@
  */
 import type { IntentResult } from './copilot-agent-types';
 import type { AttachmentMeta } from './attachments';
+import { renderPrompt } from '@/prompts';
 
 /** Reserved arguments key carrying assigned attachment ids through the queue. */
 export const ATTACHMENT_IDS_KEY = '__attachmentIds';
@@ -72,13 +73,12 @@ async function llmAssign(
   const activityList = slots.map((s, i) => `${i}: ${s.label}`).join('\n');
   const fileList = attachments.map((a, i) => `${i}: ${a.name} (${a.type})`).join('\n');
 
-  const system = 'You are a sales assistant. In one message the user logged several activities and attached files. Using the message, activity titles, and file names, assign each file to its most relevant activity. Return JSON only.';
-  const user = [
-    `User message:\n${userMessage}`,
-    `Activities (index: label):\n${activityList}`,
-    `Files (index: name):\n${fileList}`,
-    'Return JSON: {"assignments":[{"file":<fileIndex>,"activity":<activityIndex>}, ...]} covering every file index exactly once.',
-  ].join('\n\n');
+  const system = renderPrompt('attachment.assign');
+  const user = renderPrompt('attachment.assignRequest', {
+    userMessage,
+    activityList,
+    fileList,
+  });
 
   const fallback = attachments.map(() => 0);
   try {

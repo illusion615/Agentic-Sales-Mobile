@@ -83,7 +83,21 @@ export function createLocalWorkOrderRepository(): WorkOrderRepository {
     },
 
     async startWorkOrder(id: string, at: string): Promise<void> {
-      await mutate(id, (w) => ({ ...w, status: 'in-progress', scheduledStart: w.scheduledStart ?? at }));
+      await ready();
+      const active = (await collection.all()).find((workOrder) =>
+        workOrder.id !== id && (workOrder.status === 'in-progress' || workOrder.status === 'travelling'),
+      );
+      if (active) throw new Error(`Work order ${active.number} is already active.`);
+      await mutate(id, (w) => ({ ...w, status: 'in-progress', scheduledStart: w.scheduledStart ?? at, pausedAt: undefined, pauseReason: undefined }));
+    },
+
+    async pauseWorkOrder(id: string, at: string, reason: string): Promise<void> {
+      await mutate(id, (w) => {
+        if (w.status !== 'in-progress' && w.status !== 'travelling') {
+          throw new Error('Only an active work order can be paused.');
+        }
+        return { ...w, status: 'paused', pausedAt: at, pauseReason: reason };
+      });
     },
 
     async completeWorkOrder(id: string): Promise<void> {
